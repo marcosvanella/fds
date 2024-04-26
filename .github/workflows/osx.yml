@@ -149,40 +149,38 @@ jobs:
 
       # install oneapi components from web installer based on
       # oneapi-ci/scripts/install_macos.sh
-    - name: prepare for cache restore
-      run: |
-        sudo mkdir -p /opt/intel
-        sudo chown $USER /opt/intel
-    - name: cache install oneapi
-      id: cache-install
-      uses: actions/cache@v4
-      with:
-        path: /opt/intel/oneapi
-        key: install-${{ env.MACOS_BASEKIT_URL }}-${{ env.MACOS_BASEKIT_COMPONENTS }}
-    - name: install oneapi mkl
-      if: steps.cache-install.outputs.cache-hit != 'true'
-      run: |
-        curl --output webimage_base.dmg --url "$MACOS_BASEKIT_URL" --retry 5 --retry-delay 5
-        hdiutil attach webimage_base.dmg
-        sudo /Volumes/"$(basename "$MACOS_BASEKIT_URL" .dmg)"/bootstrapper.app/Contents/MacOS/bootstrapper -s --action install --components="$MACOS_BASEKIT_COMPONENTS" --eula=accept --log-dir=.installer_exit_code=$?
-        hdiutil detach /Volumes/"$(basename "$MACOS_BASEKIT_URL" .dmg)" -quiet
-        exit $installer_exit_code
-    - name: install oneapi mklmpi wrapper
-      if: steps.cache-install.outputs.cache-hit != 'true'
-      run: |
-        source /opt/intel/oneapi/setvars.sh
-        cd ${MKLROOT}/interfaces/mklmpi/
-        sudo make libintel64
+#    - name: prepare for cache restore
+#      run: |
+#        sudo mkdir -p /opt/intel
+#        sudo chown $USER /opt/intel
+#    - name: cache install oneapi
+#      id: cache-install
+#      uses: actions/cache@v4
+#      with:
+#        path: /opt/intel/oneapi
+#        key: install-${{ env.MACOS_BASEKIT_URL }}-${{ env.MACOS_BASEKIT_COMPONENTS }}
+#    - name: install oneapi mkl
+#      if: steps.cache-install.outputs.cache-hit != 'true'
+#      run: |
+#        curl --output webimage_base.dmg --url "$MACOS_BASEKIT_URL" --retry 5 --retry-delay 5
+#        hdiutil attach webimage_base.dmg
+#        sudo /Volumes/"$(basename "$MACOS_BASEKIT_URL" .dmg)"/bootstrapper.app/Contents/MacOS/bootstrapper -s --action install --components="$MACOS_BASEKIT_COMPONENTS" --eula=accept --log-dir=.installer_exit_code=$?
+#        hdiutil detach /Volumes/"$(basename "$MACOS_BASEKIT_URL" .dmg)" -quiet
+#        exit $installer_exit_code
+#    - name: install oneapi mklmpi wrapper
+#      if: steps.cache-install.outputs.cache-hit != 'true'
+#      run: |
+#        source /opt/intel/oneapi/setvars.sh
+#        cd ${MKLROOT}/interfaces/mklmpi/
+#        sudo make libintel64
 
     - name: build fds debug
       run: |
-        source /opt/intel/oneapi/setvars.sh
         cd ./Build/ompi_gnu_osx_db
         sh ./make_fds.sh
         ./fds_ompi_gnu_osx_db
     - name: build fds release
       run: |
-        source /opt/intel/oneapi/setvars.sh
         cd ./Build/ompi_gnu_osx
         sh ./make_fds.sh
         ./fds_ompi_gnu_osx
