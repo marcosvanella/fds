@@ -44,14 +44,14 @@ for Grid_Size in Grid_Size_Vect:
             Up_X_CO2    = str(df.loc[irow,'Upper_X_CO2'])
             Up_X_CO     = str(df.loc[irow,'Upper_X_CO'])
             Up_X_H2O    = str(df.loc[irow,'Upper_X_H2O'])
-            Up_X_N2     = str(df.loc[irow,'Upper_X_H2O'])
+            Up_X_N2     = str(df.loc[irow,'Upper_X_N2'])
             Lo_Temp     = str(df.loc[irow,'Lower_Temperature_C'])
             Lo_X_Fuel   = str(df.loc[irow,'Lower_X_Fuel'])
             Lo_X_O2     = str(df.loc[irow,'Lower_X_O2'])
             Lo_X_CO2    = str(df.loc[irow,'Lower_X_CO2'])
             Lo_X_CO     = str(df.loc[irow,'Lower_X_CO'])
             Lo_X_H2O    = str(df.loc[irow,'Lower_X_H2O'])
-            Lo_X_N2     = str(df.loc[irow,'Lower_X_H2O'])
+            Lo_X_N2     = str(df.loc[irow,'Lower_X_N2'])
 
             # make the row for that file
             CHID = "NIST_Backdraft_" + Fuel + "_" + Fire_Size + "kW_" + Flow_Time + "s_" + Ignitor_Pos + '_' + Grid_Size
