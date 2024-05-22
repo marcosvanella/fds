@@ -13,7 +13,7 @@ close all
 clear all
 clc
 
-basedir='/Users/mnv/Documents/FIREMODELS_FORK/fds/Validation/NIST_Backdraft/FDS_Input_Files/scripts/'
+basedir='/Users/mnv/Documents/FIREMODELS_FORK/fds/Validation/NIST_Backdraft/FDS_Input_Files/'
 
 FFT =[210 240 270 300];
 TVEC={'TVAR','TMIN','TMAX'};
@@ -102,7 +102,7 @@ for ift=1:length(FFT)
     box on
     pause
 
-end
+end 
 
 return
 
