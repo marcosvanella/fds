@@ -1,0 +1,19 @@
+! Primitive stoich coeffs obtained from the .out file of the following case:
+! &HEAD CHID='methane_comb', TITLE='Check Methane combustion 2 eqn stoichiometry' /
+! &TIME T_END=1./
+! &MESH XB=0,1,0,1,0,1, IJK=10,10,10 /
+! &REAC FUEL='METHANE', SOOT_YIELD=0.001, N_SIMPLE_CHEMISTRY_REACTIONS=2 /
+! &TAIL/
+! Note we assume a very small amount of post flame soot yield for methane.
+&REAC ID='REAC1', FUEL='METHANE', PRIORITY=1
+      SPEC_ID_NU='METHANE','OXYGEN','WATER VAPOR','CARBON MONOXIDE','SOOT'
+      NU=-1,-1.333333,2,0.666667,0.333333, AUTO_IGNITION_TEMPERATURE=540., CRITICAL_FLAME_TEMPERATURE=1507.0 /
+
+&REAC ID='REAC2', FUEL='CARBON MONOXIDE', PRIORITY=2
+      SPEC_ID_NU='OXYGEN','CARBON DIOXIDE','CARBON MONOXIDE','SOOT'
+      NU=-0.082236,0.123436,-0.082401,-0.041035, AUTO_IGNITION_TEMPERATURE=540., CRITICAL_FLAME_TEMPERATURE=1507.0 /
+
+
+
+
+
