@@ -78,6 +78,12 @@ for ift=1:length(FFT)
         X_COV(iz) = X_CO;
         TMPV(iz)  = T;
     end
+    fprintf(fid_Tmin,'%s\n',"! Initialize the whole domain to dry air:");
+    fprintf(fid_Tmin,'%s\n',"&INIT XB=-1.54,3.03,-1.11,1.11,-1.00,3.84, MASS_FRACTION(1)=0.23, SPEC_ID(1)='OXYGEN' /");
+    fprintf(fid_Tmax,'%s\n',"! Initialize the whole domain to dry air:");
+    fprintf(fid_Tmax,'%s\n',"&INIT XB=-1.54,3.03,-1.11,1.11,-1.00,3.84, MASS_FRACTION(1)=0.23, SPEC_ID(1)='OXYGEN' /");
+    fprintf(fid_Tvar,'%s\n',"! Initialize the whole domain to dry air:");
+    fprintf(fid_Tvar,'%s\n',"&INIT XB=-1.54,3.03,-1.11,1.11,-1.00,3.84, MASS_FRACTION(1)=0.23, SPEC_ID(1)='OXYGEN' /");
     fclose(fid_Tmin); fclose(fid_Tmax); fclose(fid_Tvar);
     figure
    

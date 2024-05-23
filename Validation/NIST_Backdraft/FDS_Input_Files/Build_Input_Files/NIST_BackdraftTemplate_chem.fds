@@ -23,9 +23,6 @@
 ! Burner surface:
 &SURF ID='Burner',  COLOR='RED', TMP_FRONT=200. /
 
-! Initialize the whole domain to dry air:
-&INIT XB=-1.54,3.03,-1.11,1.11,-1.00,3.84, MASS_FRACTION(1)=0.23, SPEC_ID(1)='OXYGEN' /
-
 # We have 1 in of Ceramic fiber board + 3mm of ceramic insulator layer: Numbers from NIST TN 2183 and
 # https://www.thermaxxjackets.com/products/insulation-materials/ceramic/
 &MATL ID='CeramicFiber', EMISSIVITY=1., DENSITY=300., SPECIFIC_HEAT=1.13, CONDUCTIVITY=0.153 /
@@ -165,7 +162,7 @@
 &DEVC ID='H2O_6', XYZ=-1.11,0.0,0.22,   QUANTITY='VOLUME FRACTION', SPEC_ID='WATER VAPOR'/
 
 # Heat Flux Gauge, in the compartment floor, looking up:
-&DEVC ID='HFG', XYZ=-0.355,0.0,0.005, QUANTITY='GAUGE HEAT FLUX', IOR=3, PROP_ID='hfp'/
+&DEVC ID='HFG', XYZ=-0.35525,-0.00125,0.00125, QUANTITY='GAUGE HEAT FLUX', IOR=3, PROP_ID='hfp'/
 &PROP ID='hfp', GAUGE_TEMPERATURE=25., GAUGE_EMISSIVITY=0.9 /
 
 &DUMP DT_DEVC=0.2, SIG_FIGS=5 /
