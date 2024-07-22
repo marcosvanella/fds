@@ -916,7 +916,7 @@ USE HVAC_ROUTINES, ONLY : DUCT_MF
 USE PHYSICAL_FUNCTIONS, ONLY: GET_SPECIFIC_HEAT,GET_SPECIFIC_GAS_CONSTANT, GET_REALIZABLE_MF, Q_REF_FIT
 USE MATH_FUNCTIONS, ONLY : EVALUATE_RAMP, BOX_MULLER, INTERPOLATE1D_UNIFORM
 REAL(EB), INTENT(IN) :: T,DT
-REAL(EB) :: UN,DD,MFT,TSI,RSUM_F,MPUA_SUM,RHO_F_PREVIOUS,RN1,RN2,TWOMFT,Q_NEW(MAX_QDOTPP_REF)
+REAL(EB) :: UN,DD,MFT,TSI,RSUM_F,MPUA_SUM,RHO_F_PREVIOUS,RN1,RN2,MFT_UNIFORM,Q_NEW(MAX_QDOTPP_REF)
 REAL(EB) :: T_SCALE(MAX_QDOTPP_REF),QDOTPP_REF(MAX_QDOTPP_REF),QDOTPP_T(MAX_QDOTPP_REF), &
             QDOTPP,QDOTPP1,QDOTPP2,DT_SPYRO(MAX_QDOTPP_REF),CP,H_G,MW_RATIO
 REAL(EB) :: RVC,M_DOT_PPP_SINGLE,ZZ_GET(1:N_TRACKED_SPECIES),DENOM
@@ -1189,9 +1189,16 @@ METHOD_OF_MASS_TRANSFER: SELECT CASE(SPECIES_BC_INDEX)
       IF (SF%MASS_FLUX_VAR > TWO_EPSILON_EB) THEN
          ! generate pairs of standard Gaussian random variables
          CALL BOX_MULLER(RN1,RN2)
-         TWOMFT = 2._EB*MFT
+         MFT_UNIFORM = MFT
          MFT = MFT*(1._EB + RN1*SF%MASS_FLUX_VAR)
-         MFT = MAX(0._EB,MIN(TWOMFT,MFT))
+         MFT = MAX(0._EB,MIN(2._EB*MFT_UNIFORM,MFT))
+         ! rescale species boundary fluxes with variation
+         IF (MFT_UNIFORM>TWO_EPSILON_EB) THEN
+            DO N=1,N_TRACKED_SPECIES
+               B1%M_DOT_G_PP_ADJUST(N) = B1%M_DOT_G_PP_ADJUST(N) * MFT/MFT_UNIFORM
+               B1%M_DOT_G_PP_ACTUAL(N) = B1%M_DOT_G_PP_ACTUAL(N) * MFT/MFT_UNIFORM
+            ENDDO
+         ENDIF
       ENDIF
 
       ! Apply water suppression coefficient (EW) at a WALL cell
@@ -1679,7 +1686,7 @@ REAL(EB) :: RDT,DTMP,QDXKF,QDXKB,RR,RFACF,RFACB,RFACF2,RFACB2,Q_RAD_IN_B,RFLUX_U
             Q_WATER_F,Q_WATER_B,LAYER_DIVIDE,TMP_GAS_BACK,GEOM_FACTOR,DT_BC_SUB_OLD,&
             DEL_DOT_Q_SC,Q_DOT_G_PP,Q_DOT_G_PP_NET,Q_DOT_O2_PP,Q_DOT_O2_PP_NET,R_SURF,U_SURF,V_SURF,W_SURF,T_BC_SUB,DT_BC_SUB,&
             Q_NET_F,Q_NET_B,TMP_RATIO,KODXF,KODXB,H_S,T_NODE,C_S,H_NODE,VOL,T_BOIL_EFF,&
-            RADIUS,HTC_LIMIT,CP1,CP2,DENOM,SF_HTC_F,SF_HTC_B,DDSUM,THICKNESS
+            RADIUS,HTC_LIMIT,CP1,CP2,DENOM,SF_HTC_F,SF_HTC_B,DDSUM,THICKNESS,DT_FO
 REAL(EB), DIMENSION(N_TRACKED_SPECIES) :: M_DOT_G_PP_ADJUST,M_DOT_G_PP_ADJUST_NET,M_DOT_G_PP_ACTUAL,M_DOT_G_PP_ACTUAL_NET
 REAL(EB), DIMENSION(MAX_MATERIALS) :: M_DOT_S_PP,M_DOT_S_PP_NET
 REAL(EB), DIMENSION(MAX_LPC) :: Q_DOT_PART_S,M_DOT_PART_S
@@ -1920,6 +1927,35 @@ DT_BC_SUB = DT_BC
 B1%N_SUBSTEPS = 1
 ONE_D%DELTA_TMP = 0._EB
 
+! Compute initial thermal properties for Fo number calculation
+! CHECK_FO=F by default
+! CHECK_FO=T enforces near explicit time step accuracy (Forward-Euler would require 1/2 DT_FO)
+
+CHECK_FO_IF: IF (CHECK_FO) THEN
+   ONE_D%K_S = 0._EB
+   RHO_S   = 0._EB
+   ONE_D%RHO_C_S = 0._EB
+   POINT_LOOP0: DO I=1,NWP
+      VOLSUM = 0._EB
+      ITMP = MIN(I_MAX_TEMP-1,INT(ONE_D%TMP(I)))
+      MATERIAL_LOOP0: DO N=1,ONE_D%N_MATL
+         IF (ONE_D%MATL_COMP(N)%RHO(I)<=TWO_EPSILON_EB) CYCLE MATERIAL_LOOP0
+         ML  => MATERIAL(ONE_D%MATL_INDEX(N))
+         VOLSUM = VOLSUM + ONE_D%MATL_COMP(N)%RHO(I)/RHO_ADJUSTED(LAYER_INDEX(I),N)
+         ONE_D%K_S(I) = ONE_D%K_S(I) + ONE_D%MATL_COMP(N)%RHO(I)*ML%K_S(ITMP)/RHO_ADJUSTED(LAYER_INDEX(I),N)
+         ONE_D%RHO_C_S(I) = ONE_D%RHO_C_S(I) + ONE_D%MATL_COMP(N)%RHO(I)*ML%C_S(ITMP)
+         RHO_S(I) = RHO_S(I) + ONE_D%MATL_COMP(N)%RHO(I)
+      ENDDO MATERIAL_LOOP0
+      IF (SF%PACKING_RATIO(LAYER_INDEX(I))>0._EB) ONE_D%K_S(I) = ONE_D%K_S(I)*SF%PACKING_RATIO(LAYER_INDEX(I))
+
+      IF (VOLSUM > 0._EB) THEN
+         ONE_D%K_S(I) = ONE_D%K_S(I)/VOLSUM
+      ENDIF
+      IF (ONE_D%K_S(I)<=TWO_EPSILON_EB)      ONE_D%K_S(I)      = 10000._EB
+      IF (ONE_D%RHO_C_S(I)<=TWO_EPSILON_EB)  ONE_D%RHO_C_S(I)  = 0.001_EB
+   ENDDO POINT_LOOP0
+ENDIF CHECK_FO_IF
+
 SUB_TIMESTEP_LOOP: DO
 
    ! Compute grid for reacting nodes
@@ -1942,6 +1978,14 @@ SUB_TIMESTEP_LOOP: DO
       LAYER_INDEX(0:NWP+1) = SF%LAYER_INDEX(0:NWP+1)
       MF_FRAC(1:NWP)       = SF%MF_FRAC(1:NWP)
    ENDIF COMPUTE_GRID
+
+   ! Calculate minimum DT based on Fourier number, Fo
+
+   IF (CHECK_FO) THEN
+      DT_FO = MINVAL( DX_S(1:NWP)**2 * ONE_D%RHO_C_S(1:NWP) / ONE_D%K_S(1:NWP) )
+   ELSE
+      DT_FO = HUGE(1._EB)
+   ENDIF
 
    ! Compute convective heat flux at the surface
 
@@ -2042,7 +2086,7 @@ SUB_TIMESTEP_LOOP: DO
                HTCB = HEAT_TRANSFER_COEFFICIENT(NM,DTMP,SF_HTC_B,SF_BACK,CFACE_INDEX_IN=ONE_D%BACK_INDEX)
             B1_BACK%HEAT_TRANS_COEF = HTCB
             Q_RAD_IN_B  = B1_BACK%Q_RAD_IN
-            IF (N_LP_ARRAY_INDICES>0) Q_WATER_B = -SUM(B2_BACK%LP_CPUA(:)) + B1%Q_CONDENSE
+            IF (N_LP_ARRAY_INDICES>0 .AND. PRESENT(WALL_INDEX)) Q_WATER_B = -SUM(B2_BACK%LP_CPUA(:)) + B1%Q_CONDENSE
          ENDIF
          Q_CON_B = HTCB*DTMP
 
@@ -2080,8 +2124,10 @@ SUB_TIMESTEP_LOOP: DO
    ENDIF PYROLYSIS_PREDICTED_IF
 
    ! Add internal heat source specified by user
-
-   Q_S(1:NWP) = Q_S(1:NWP) + ONE_D%HEAT_SOURCE(LAYER_INDEX(1:NWP))
+   
+   DO I=1,NWP
+      Q_S(I) = Q_S(I) + ONE_D%HEAT_SOURCE(LAYER_INDEX(I))*EVALUATE_RAMP(T-T_BEGIN,ONE_D%RAMP_IHS_INDEX(LAYER_INDEX(I)))
+   ENDDO
 
    ! Add special convection term for Boundary Fuel Model
 
@@ -2164,7 +2210,7 @@ SUB_TIMESTEP_LOOP: DO
       TMP_RATIO = MAX(TWO_EPSILON_EB,MAXVAL(ABS(DELTA_TMP(1:NWP)))/SF%DELTA_TMP_MAX)
       DT_BC_SUB_OLD = DT_BC_SUB
       DT_BC_SUB = DT_BC/REAL(MIN(NINT(SF%TIME_STEP_FACTOR*WALL_INCREMENT),MAX(1,NINT(TMP_RATIO))),EB)
-      DT_BC_SUB = MIN( DT_BC-T_BC_SUB , DT_BC_SUB )
+      DT_BC_SUB = MIN( DT_BC-T_BC_SUB , DT_BC_SUB , DT_FO )
       IF (SF%PYROLYSIS_MODEL==PYROLYSIS_PREDICTED .AND. DT_BC_SUB_OLD/=DT_BC_SUB) CALL PERFORM_PYROLYSIS
    ENDIF
 
@@ -2429,7 +2475,7 @@ SUB_TIMESTEP_LOOP: DO
          ! Check that NWP_NEW has not exceeded the allocated space N_CELLS_MAX
 
          IF (NWP_NEW > ONE_D%N_CELLS_MAX) THEN
-            WRITE(MESSAGE,'(A,I5,A,A)') 'ERROR: N_CELLS_MAX should be at least ',NWP_NEW,' for surface ',TRIM(SF%ID)
+            WRITE(MESSAGE,'(A,I5,A,A)') 'ERROR(300): N_LAYER_CELLS_MAX should be at least ',NWP_NEW,' for ',TRIM(SF%ID)
             CALL SHUTDOWN(MESSAGE,PROCESS_0_ONLY=.FALSE.)
          ENDIF
 
@@ -2606,12 +2652,11 @@ SUB_TIMESTEP_LOOP: DO
       IF (B1%EMISSIVITY>=0._EB) E_FOUND = .TRUE.
       IF (ONE_D%K_S(I)<=TWO_EPSILON_EB)      ONE_D%K_S(I)      = 10000._EB
       IF (ONE_D%RHO_C_S(I)<=TWO_EPSILON_EB)  ONE_D%RHO_C_S(I)  = 0.001_EB
-
    ENDDO POINT_LOOP3
 
    IF (SF%EMISSIVITY_SPECIFIED) B1%EMISSIVITY = SF%EMISSIVITY
 
-   ! Calculate average K_S between at grid cell boundaries. Store result in K_S
+   ! Calculate average K_S at grid cell boundaries. Store result in K_S
 
    ONE_D%K_S(0)     = ONE_D%K_S(1)
    ONE_D%K_S(NWP+1) = ONE_D%K_S(NWP)
@@ -3134,6 +3179,15 @@ MATERIAL_LOOP: DO N=1,N_MATS  ! Loop over all materials in the cell (alpha subsc
                ! Get oxygen mass fraction
                ZZ_GET(1:N_TRACKED_SPECIES) = MAX(0._EB,ZZ(IIG,JJG,KKG,1:N_TRACKED_SPECIES))
                CALL GET_MASS_FRACTION(ZZ_GET,O2_INDEX,Y_O2)
+               !======== Mass transfer resistance to surface O2 concentration =============
+               IF (TEST_CHAR_MASS_TRANSFER_MODEL) THEN
+                  TMP_FILM = (TMP_F+TMP(IIG,JJG,KKG))/2._EB
+                  CALL GET_SPECIFIC_HEAT(ZZ_GET,CP_FILM,TMP_FILM)
+                  D_FILM = D_Z(MIN(I_MAX_TEMP,NINT(TMP_FILM)),O2_INDEX)
+                  H_MASS = B1%HEAT_TRANS_COEF/CP_FILM
+                  Y_O2 = Y_O2*(H_MASS/(H_MASS + D_FILM/ML%GAS_DIFFUSION_DEPTH(J)))
+               ENDIF
+               !===========================================================================
                ! Calculate oxygen volume fraction in the gas cell
                X_O2 = SPECIES(O2_INDEX)%RCON*Y_O2/RSUM(IIG,JJG,KKG)
                ! Calculate oxygen concentration inside the material, assuming decay function
@@ -3585,7 +3639,7 @@ ELSEIF (TGA_PARTICLE_INDEX>0) THEN
    ONE_D => BOUNDARY_ONE_D(LP%OD_INDEX)
    B1 => BOUNDARY_PROP1(LP%B1_INDEX)
 ELSE
-   WRITE(MESSAGE,'(A)') 'ERROR: No wall or particle to which to apply the TGA analysis'
+   WRITE(MESSAGE,'(3A)') 'ERROR(370): SURF ',TRIM(SF%ID),' No wall or particle for TGA_ANALYSIS.'
    CALL SHUTDOWN(MESSAGE) ; RETURN
 ENDIF
 

@@ -127,6 +127,7 @@ INTEGER, PARAMETER :: LEVELSET_STOP=7                  !< Flag for STATUS_STOP
 INTEGER, PARAMETER :: REALIZABILITY_STOP=8             !< Flag for STATUS_STOP
 INTEGER, PARAMETER :: VERSION_STOP=10                  !< Flag for STATUS_STOP
 INTEGER, PARAMETER :: ODE_STOP=11                      !< Flag for STATUS_STOP
+INTEGER, PARAMETER :: HEARTBEAT_STOP=12                !< Flag for STATUS_STOP
 
 INTEGER, PARAMETER :: SPHERE_DRAG=1                    !< Flag for LPC\%DRAG_LAW (LPC means LAGRANGIAN_PARTICLE_CLASS)
 INTEGER, PARAMETER :: CYLINDER_DRAG=2                  !< Flag for LPC\%DRAG_LAW
@@ -209,6 +210,7 @@ LOGICAL :: FREEZE_VELOCITY=.FALSE.          !< Hold velocity fixed, do not perfo
 LOGICAL :: BNDF_DEFAULT=.TRUE.              !< Output boundary output files
 LOGICAL :: SPATIAL_GRAVITY_VARIATION=.FALSE.!< Assume gravity varies as a function of the \f$ x \f$ coordinate
 LOGICAL :: CHECK_VN=.TRUE.                  !< Check the Von Neumann number
+LOGICAL :: CHECK_FO=.FALSE.                 !< Check the solid phase Fourier number
 LOGICAL :: SOLID_PARTICLES=.FALSE.          !< Indicates the existence of solid particles
 LOGICAL :: HVAC=.FALSE.                     !< Perform an HVAC calculation
 LOGICAL :: BAROCLINIC=.TRUE.                !< Include the baroclinic terms in the momentum equation
@@ -251,7 +253,7 @@ LOGICAL :: POSITIVE_ERROR_TEST=.FALSE.
 LOGICAL :: OBST_SHAPE_AREA_ADJUST=.FALSE.
 LOGICAL :: STORE_SPECIES_FLUX=.FALSE.
 LOGICAL :: STORE_PRESSURE_POISSON_RESIDUAL=.FALSE.
-LOGICAL :: CHAR_OXIDATION=.FALSE.
+LOGICAL :: OXIDATION_REACTION=.FALSE.
 LOGICAL :: PERIODIC_DOMAIN_X=.FALSE.                !< The domain is periodic \f$ x \f$
 LOGICAL :: PERIODIC_DOMAIN_Y=.FALSE.                !< The domain is periodic \f$ y \f$
 LOGICAL :: PERIODIC_DOMAIN_Z=.FALSE.                !< The domain is periodic \f$ z \f$
@@ -265,6 +267,7 @@ LOGICAL :: REACTING_THIN_OBSTRUCTIONS=.FALSE.       !< Thin obstructions that of
 LOGICAL :: SMOKE3D_16=.FALSE.                       !< Output 3D smoke values using 16 bit integers
 LOGICAL :: CHECK_BOUNDARY_ONE_D_ARRAYS=.FALSE.      !< Flag that indicates that ONE_D array dimensions need to be checked
 LOGICAL :: TENSOR_DIFFUSIVITY=.FALSE.               !< If true, use experimental tensor diffusivity model for spec and tmp
+LOGICAL :: TEST_CHAR_MASS_TRANSFER_MODEL=.FALSE.    !< Experimental flag to test mass transfer resistence in char model
 
 INTEGER, ALLOCATABLE, DIMENSION(:) :: CHANGE_TIME_STEP_INDEX      !< Flag to indicate if a mesh needs to change time step
 INTEGER, ALLOCATABLE, DIMENSION(:) :: SETUP_PRESSURE_ZONES_INDEX  !< Flag to indicate if a mesh needs to keep searching for ZONEs
@@ -442,6 +445,7 @@ REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: MU_RSQMW_Z
 !< MU_RSQMW_Z(I,J) Viscosity (m^2/s)  of lumped species J at temperature I (K) divided by SM%MW^0.5
 REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: D_Z          !< D_Z(I,J) Diffusivity (m^2/s) of lumped species J at temp I (K)
 REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: G_F_Z        !< CP_Z(I,J) Gibbs free energy (J/kg) of lumped species J at temp I (K)
+REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: S_Z          !< Entropy (J/K) of lumped species J at temp I (K)
 REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: H_SENS_Z     !< H_SENS(I,J) Sensible enthalpy (J/kg) of lumped species J at temp I (K)
 REAL(EB) :: DZZ_CLIP                                  !< Value for processing DZZ in combustion
 
@@ -733,9 +737,9 @@ REAL(EB) :: TGA_FINAL_TEMPERATURE=800._EB  !< Final Temperature (C) to use for s
 LOGICAL :: IBLANK_SMV=.TRUE.  !< Parameter passed to smokeview (in .smv file) to control generation of blockages
 
 ! External file control
-CHARACTER(250) :: EXTERNAL_FILENAME
-LOGICAL :: READ_EXTERNAL = .FALSE.
-INTEGER :: LU_EXTERNAL
+CHARACTER(250) :: EXTERNAL_FILENAME='null',EXTERNAL_HEARTBEAT_FILENAME='null'
+LOGICAL :: READ_EXTERNAL = .FALSE.,HEARTBEAT_FAIL=.TRUE.
+INTEGER :: LU_EXTERNAL,LU_EXTERNAL_HEARTBEAT,DT_EXTERNAL_HEARTBEAT=0
 REAL(EB) :: DT_EXTERNAL=0._EB, T_EXTERNAL
 REAL(EB), ALLOCATABLE, DIMENSION(:) :: EXTERNAL_RAMP
 LOGICAL(EB), ALLOCATABLE, DIMENSION(:) :: EXTERNAL_CTRL
@@ -852,11 +856,15 @@ CHARACTER(LABEL_LENGTH) :: RADCAL_SPECIES_ID(16)='NULL'
 END MODULE RADCONS
 
 !> \brief Variables for DVODE solver usage
-MODULE DVODECONS
+MODULE CHEMCONS
 USE PRECISION_PARAMETERS
 
 INTEGER, ALLOCATABLE, DIMENSION(:) :: YP2ZZ
-DOUBLE PRECISION :: ODE_MIN_ATOL=DBLE(-1._EB)
+REAL(EB)  :: ODE_MIN_ATOL= -1._EB
+LOGICAL  :: EQUIV_RATIO_CHECK = .TRUE.
+REAL(EB) :: MIN_EQUIV_RATIO=0.2_EB
+REAL(EB) :: MAX_EQUIV_RATIO=10._EB
 
-END MODULE DVODECONS
+
+END MODULE CHEMCONS
 
