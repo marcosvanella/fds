@@ -19,12 +19,74 @@ PRIVATE
 REAL(EB), ALLOCATABLE, DIMENSION(:) :: DZ_F0
 REAL(EB) :: RRTMP0,MOLPCM3,T_USED_CHEM
 DOUBLE PRECISION, ALLOCATABLE, DIMENSION(:) :: ATOL,RTOL
-LOGICAL :: CVODE_INIT=.FALSE.
-INTEGER :: I0,J0,K0,NM0
+LOGICAL :: COMBUSTION_INIT=.FALSE.
+!INTEGER :: I0,J0,K0, NM0
+
 
 PUBLIC COMBUSTION,COMBUSTION_BC,CONDENSATION_EVAPORATION,GET_FLAME_TEMPERATURE
 
 CONTAINS
+
+SUBROUTINE COMBUSTION_LOAD_BALANCED(T,DT)
+
+USE SOOT_ROUTINES, ONLY: SOOT_SURFACE_OXIDATION
+USE COMP_FUNCTIONS, ONLY: CURRENT_TIME
+INTEGER, INTENT(IN) :: NM
+REAL(EB), INTENT(IN) :: T,DT
+INTEGER :: ICC,JCC
+REAL(EB) :: TNOW
+
+TNOW=CURRENT_TIME()
+T_USED_CHEM = 0._EB ! Zero out time taken in chem.f90 for this call to COMBUSTION
+
+
+! Set CVODES options
+IF (.NOT. COMBUSTION_INIT) THEN
+   COMBUSTION_INIT = .TRUE.
+   ALLOCATE(ATOL(N_TRACKED_SPECIES))
+   ALLOCATE(RTOL(N_TRACKED_SPECIES))
+ENDIF
+
+Q     = 0._EB
+CHI_R = 0._EB
+
+IF (N_REACTIONS==0) RETURN
+
+IF (.NOT.ALL(REACTION%FAST_CHEMISTRY)) ALLOCATE(DZ_F0(N_REACTIONS))
+
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX  
+
+   CALL POINT_TO_MESH(NM)
+
+   IF (CC_IBM) THEN
+      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+         DO JCC=1,CUT_CELL(ICC)%NCELL
+            CUT_CELL(ICC)%Q(JCC)=0._EB
+         ENDDO
+      ENDDO
+   ENDIF
+
+ENDDO
+
+
+!Call combustion ODE solver
+CALL COMBUSTION_GENERAL_LOAD_BALANCED(T,DT)
+
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX  
+   CALL POINT_TO_MESH(NM)
+   ! Soot oxidation routine
+   IF (DEPOSITION .AND. SOOT_OXIDATION) CALL SOOT_SURFACE_OXIDATION(DT,NM)
+ENDDO
+   
+ENDDO
+
+IF (ALLOCATED(DZ_F0)) DEALLOCATE(DZ_F0)
+
+T_USED(10)=T_USED(10)+CURRENT_TIME()-TNOW-T_USED_CHEM !subract off CHEM time so FIRE time doesn't double count
+T_USED(16)=T_USED(16)+T_USED_CHEM
+
+END SUBROUTINE COMBUSTION_LOAD_BALANCED
+
 
 SUBROUTINE COMBUSTION(T,DT,NM)
 
@@ -41,8 +103,8 @@ T_USED_CHEM = 0._EB ! Zero out time taken in chem.f90 for this call to COMBUSTIO
 CALL POINT_TO_MESH(NM)
 
 ! Set CVODES options
-IF (.NOT. CVODE_INIT) THEN
-   CVODE_INIT = .TRUE.
+IF (.NOT. COMBUSTION_INIT) THEN
+   COMBUSTION_INIT = .TRUE.
    ALLOCATE(ATOL(N_TRACKED_SPECIES))
    ALLOCATE(RTOL(N_TRACKED_SPECIES))
 ENDIF
@@ -78,6 +140,241 @@ T_USED(16)=T_USED(16)+T_USED_CHEM
 END SUBROUTINE COMBUSTION
 
 
+SUBROUTINE COMBUSTION_GENERAL_LOAD_BALANCED(T,DT)
+
+! Generic combustion routine for multi-step reactions
+
+USE PHYSICAL_FUNCTIONS, ONLY: GET_SPECIFIC_GAS_CONSTANT,GET_MASS_FRACTION_ALL,GET_SPECIFIC_HEAT,GET_MOLECULAR_WEIGHT, &
+                              GET_SENSIBLE_ENTHALPY_Z,IS_REALIZABLE
+USE COMPLEX_GEOMETRY, ONLY : CC_CGSC, CC_GASPHASE
+USE CHEMCONS, ONLY: DO_CHEM_LOAD_BALANCE
+
+INTEGER :: I,J,K,NS,NR,N,CHEM_SUBIT_TMP, ICC, JCC, NCELL
+REAL(EB), INTENT(IN) :: T,DT
+INTEGER, INTENT(IN) :: NM
+REAL(EB) :: ZZ_GET(1:N_TRACKED_SPECIES),DZZ(1:N_TRACKED_SPECIES),CP,H_S_N,&
+            REAC_SOURCE_TERM_TMP(N_TRACKED_SPECIES),Q_REAC_TMP(N_REACTIONS),RSUM_LOC,VCELL,PRES
+LOGICAL :: Q_EXISTS
+TYPE (REACTION_TYPE), POINTER :: RN
+TYPE (SPECIES_MIXTURE_TYPE), POINTER :: SM
+LOGICAL :: IS_CHEM_ACTIVE, DO_RETURN
+
+Q_EXISTS =  .FALSE.
+
+
+
+!------
+!STEP1: Decide chemically active cells and cut-cells
+!------
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX  
+   CALL POINT_TO_MESH(NM)
+   ! Decide chemically active cells
+   DO K=1,KBAR
+      DO J=1,JBAR
+         ILOOP: DO I=1,IBAR
+            ZZ_GET = ZZ(I,J,K,1:N_TRACKED_SPECIES)
+            PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
+            CALL CHECK_CHEMICALLY_ACTIVE_STATE(ZZ_GET, PRES, TMP(I,J,K), I, J, K, IS_CHEM_ACTIVE)
+            IF (STOP_STATUS/=NO_STOP) RETURN
+            IF (.NOT. IS_CHEM_ACTIVE) CYCLE ILOOP
+            CHEM_ACTIVE(I,J,K) = IS_CHEM_ACTIVE
+         ENDDO ILOOP
+      ENDDO
+   ENDDO   
+     
+   IF (REAC_SOURCE_CHECK) THEN
+      REAC_SOURCE_TERM=0._EB
+      Q_REAC=0._EB
+      IF (CC_IBM) THEN
+         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+            DO JCC=1,CUT_CELL(ICC)%NCELL
+               CUT_CELL(ICC)%Q_REAC(:,JCC) = 0._EB
+            ENDDO
+         ENDDO
+      ENDIF
+   ENDIF
+
+   ! Decide chemically active cut-cells
+   CC_IBM_IF: IF (CC_IBM) THEN
+      ICC_LOOP : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+         I     = CUT_CELL(ICC)%IJK(IAXIS)
+         J     = CUT_CELL(ICC)%IJK(JAXIS)
+         K     = CUT_CELL(ICC)%IJK(KAXIS)
+
+         VCELL = DX(I)*DY(J)*DZ(K)
+         NCELL = CUT_CELL(ICC)%NCELL
+         JCC_LOOP : DO JCC=1,NCELL
+            ! Drop if cut-cell is very small compared to Cartesian cells:
+            IF ( ABS(CUT_CELL(ICC)%VOLUME(JCC)/VCELL) <  1.E-12_EB ) CYCLE JCC_LOOP
+            ZZ_GET = CUT_CELL(ICC)%ZZ(1:N_TRACKED_SPECIES,JCC)
+            PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
+            CALL CHECK_CHEMICALLY_ACTIVE_STATE(ZZ_GET, PRES, CUT_CELL(ICC)%TMP(JCC), I, J, K, IS_CHEM_ACTIVE)
+            IF (STOP_STATUS/=NO_STOP) RETURN
+            IF (.NOT. IS_CHEM_ACTIVE) CYCLE ILOOP
+            CUT_CELL(ICC)%CHEM_ACTIVE(JCC)    = IS_CHEM_ACTIVE
+         ENDDO
+      ENDDO      
+   ENDIF
+ ENDDO        
+
+         
+!------
+!STEP2: Solve chemistry by distributing the chemistry load accross all MPI processes for parallel runs. 
+!       For 1 MPI process (serial) distribution is not needed.
+!------
+IF(N_MPI_PROCESSES > 1 .AND. DO_CHEM_LOAD_BALANCE) THEN ! Distribute chemistry load accross all MPI processes
+
+   ! Distribution step 1: Create the send buffer
+   !---------------------------------------------
+   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX  
+      CALL POINT_TO_MESH(NM)
+      DO K=1,KBAR
+         DO J=1,JBAR
+            ILOOP: DO I=1,IBAR
+               IF(CHEM_ACTIVE(I,J,K)) THEN
+                  ZZ_GET = ZZ(I,J,K,1:N_TRACKED_SPECIES)
+                  PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
+
+                  DO NPROC=1, NPROC
+
+                  ENDDO
+
+               ENDIF
+            ENDDO !I 
+         ENDDO  !J   
+      ENDDO ! K     
+   
+   
+      CC_IBM_IF: IF (CC_IBM) THEN
+         ICC_LOOP : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+            I     = CUT_CELL(ICC)%IJK(IAXIS)
+            J     = CUT_CELL(ICC)%IJK(JAXIS)
+            K     = CUT_CELL(ICC)%IJK(KAXIS)
+
+            NCELL = CUT_CELL(ICC)%NCELL
+            JCC_LOOP : DO JCC=1,NCELL
+               IF (CUT_CELL(ICC)%CHEM_ACTIVE(JCC) ) THEN
+                  CUT_CELL(ICC)%CHI_R(JCC)    = 0._EB
+                  ZZ_GET = CUT_CELL(ICC)%ZZ(1:N_TRACKED_SPECIES,JCC)
+                  PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
+
+               ENDIF ! CEHM_ACTIVE
+            ENDDO !JCC 
+         ENDDO !ICC
+      ENDIF ! CC_IBM
+   ENDDO ! NM
+
+
+   ! Distribution step 2: Recieve
+   !---------------------------------------------
+
+   ! Distribution step 3: Do chemistry
+   !---------------------------------------------
+
+   ! Distribution step 4: Send back
+   !---------------------------------------------
+
+   ! Distribution step 5: Receive 
+   !---------------------------------------------
+
+   ! Distribution step 6: Set appropriate variables
+   !---------------------------------------------
+
+
+ELSE ! Serial mode
+   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX  
+      CALL POINT_TO_MESH(NM)
+      ! Call chemistry on chemically active cells
+      DO K=1,KBAR
+         DO J=1,JBAR
+            ILOOP: DO I=1,IBAR
+               IF(CHEM_ACTIVE(I,J,K)) THEN
+                  ZZ_GET = ZZ(I,J,K,1:N_TRACKED_SPECIES)
+                  PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
+                  DZZ = ZZ_GET ! store old ZZ for divergence term
+                  !***************************************************************************************
+                  ! Call combustion integration routine for Cartesian cell (I,J,K)
+                  CALL COMBUSTION_MODEL( T,DT,ZZ_GET,Q(I,J,K),MIX_TIME(I,J,K),CHI_R(I,J,K),&
+                                         CHEM_SUBIT_TMP,REAC_SOURCE_TERM_TMP,Q_REAC_TMP,&
+                                         TMP(I,J,K),RHO(I,J,K),PRES, MU(I,J,K),&
+                                         LES_FILTER_WIDTH(I,J,K),DX(I)*DY(J)*DZ(K),IIC=I,JJC=J,KKC=K )
+                  !***************************************************************************************
+
+                  IF (STOP_STATUS/=NO_STOP) RETURN
+                  IF (OUTPUT_CHEM_IT) CHEM_SUBIT(I,J,K) = CHEM_SUBIT_TMP
+                  CALL SET_SPECIES_SOURCE_TERM_CELL(I, J, K, ZZ_GET, DZZ, REAC_SOURCE_TERM_TMP, Q_REAC_TMP)
+
+               ENDIF !CHEM_ACTIVE
+            ENDDO !I 
+         ENDDO  !J   
+      ENDDO ! K
+
+      ! Call chemistry on chemically active cut-cells
+      CC_IBM_IF: IF (CC_IBM) THEN
+         ICC_LOOP : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+            I     = CUT_CELL(ICC)%IJK(IAXIS)
+            J     = CUT_CELL(ICC)%IJK(JAXIS)
+            K     = CUT_CELL(ICC)%IJK(KAXIS)
+
+            NCELL = CUT_CELL(ICC)%NCELL
+            JCC_LOOP : DO JCC=1,NCELL
+               IF (CUT_CELL(ICC)%CHEM_ACTIVE(JCC) ) THEN
+                  CUT_CELL(ICC)%CHI_R(JCC)    = 0._EB
+                  ZZ_GET = CUT_CELL(ICC)%ZZ(1:N_TRACKED_SPECIES,JCC)
+                  PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
+                  DZZ = ZZ_GET ! store old ZZ for divergence term
+                  !***************************************************************************************
+                  ! Call combustion integration routine for CUT_CELL(ICC)%XX(JCC)
+                  ! Note AUTO_IGNITION_TEMPERATURE here will apply to all cut-cells in Cartesian cell, currently 1.
+                  CALL COMBUSTION_MODEL( T,DT,ZZ_GET,CUT_CELL(ICC)%Q(JCC),CUT_CELL(ICC)%MIX_TIME(JCC),&
+                                         CUT_CELL(ICC)%CHI_R(JCC),&
+                                         CHEM_SUBIT_TMP,REAC_SOURCE_TERM_TMP,Q_REAC_TMP,&
+                                         CUT_CELL(ICC)%TMP(JCC),CUT_CELL(ICC)%RHO(JCC),PRES,MU(I,J,K),&
+                                         LES_FILTER_WIDTH(I,J,K),CUT_CELL(ICC)%VOLUME(JCC),IIC=I,JJC=J,KKC=K)
+                  !***************************************************************************************
+
+                  CALL SET_SPECIES_SOURCE_TERM_CUTCELL(ICC, JCC, ZZ_GET, DZZ, REAC_SOURCE_TERM_TMP, Q_REAC_TMP)
+
+               ENDIF ! CEHM_ACTIVE
+            ENDDO !JCC 
+         ENDDO !ICC
+      ENDIF ! CC_IBM
+   ENDDO !NM         
+ENDIF !DO_CHEM_LOAD_BALANCE
+
+
+! This volume refactoring is needed for RADIATION_FVM (CHI_R, Q) and plotting slices:
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX  
+      CALL POINT_TO_MESH(NM)
+      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+         I     = CUT_CELL(ICC)%IJK(IAXIS)
+         J     = CUT_CELL(ICC)%IJK(JAXIS)
+         K     = CUT_CELL(ICC)%IJK(KAXIS)
+
+         VCELL = DX(I)*DY(J)*DZ(K)
+
+         IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE ! Cycle in case Cartesian cell inside OBSTS.
+
+         NCELL = CUT_CELL(ICC)%NCELL
+         DO JCC=1,NCELL
+            Q(I,J,K) = Q(I,J,K)+CUT_CELL(ICC)%Q(JCC)*CUT_CELL(ICC)%VOLUME(JCC)
+            CHI_R(I,J,K) = CHI_R(I,J,K) + CUT_CELL(ICC)%CHI_R(JCC)*CUT_CELL(ICC)%Q(JCC)*CUT_CELL(ICC)%VOLUME(JCC)
+         ENDDO
+         IF(ABS(Q(I,J,K)) > TWO_EPSILON_EB) THEN
+            CHI_R(I,J,K) = CHI_R(I,J,K)/Q(I,J,K)
+         ELSE
+            CHI_R(I,J,K) = 0._EB
+            DO JCC=1,NCELL
+               CHI_R(I,J,K) = CHI_R(I,J,K) + CUT_CELL(ICC)%CHI_R(JCC)*CUT_CELL(ICC)%VOLUME(JCC)
+            ENDDO
+            CHI_R(I,J,K) = CHI_R(I,J,K)/VCELL
+         ENDIF
+         Q(I,J,K) = Q(I,J,K)/VCELL
+      ENDDO
+ENDDO
+
+END SUBROUTINE COMBUSTION_GENERAL_LOAD_BALANCED
+
 SUBROUTINE COMBUSTION_GENERAL(T,DT,NM)
 
 ! Generic combustion routine for multi-step reactions
@@ -85,12 +382,14 @@ SUBROUTINE COMBUSTION_GENERAL(T,DT,NM)
 USE PHYSICAL_FUNCTIONS, ONLY: GET_SPECIFIC_GAS_CONSTANT,GET_MASS_FRACTION_ALL,GET_SPECIFIC_HEAT,GET_MOLECULAR_WEIGHT, &
                               GET_SENSIBLE_ENTHALPY_Z,IS_REALIZABLE
 USE COMPLEX_GEOMETRY, ONLY : CC_CGSC, CC_GASPHASE
+USE CHEMCONS, ONLY: DO_CHEM_LOAD_BALANCE
+
 INTEGER :: I,J,K,NS,NR,N,CHEM_SUBIT_TMP, ICC, JCC, NCELL
 REAL(EB), INTENT(IN) :: T,DT
 INTEGER, INTENT(IN) :: NM
 REAL(EB) :: ZZ_GET(1:N_TRACKED_SPECIES),DZZ(1:N_TRACKED_SPECIES),CP,H_S_N,&
             REAC_SOURCE_TERM_TMP(N_TRACKED_SPECIES),Q_REAC_TMP(N_REACTIONS),RSUM_LOC,VCELL,PRES
-LOGICAL :: Q_EXISTS
+LOGICAL :: Q_EXISTS, REACTANTS_PRESENT
 TYPE (REACTION_TYPE), POINTER :: RN
 TYPE (SPECIES_MIXTURE_TYPE), POINTER :: SM
 LOGICAL :: DO_REACTION,REALIZABLE
@@ -130,13 +429,13 @@ DO K=1,KBAR
                RETURN
             ENDIF
          ENDIF
-         CALL CHECK_REACTION
+         CALL CHECK_REACTION (ZZ_GET, DO_REACTION)
          IF (.NOT.DO_REACTION) CYCLE ILOOP ! Check whether any reactions are possible.
          DZZ = ZZ_GET ! store old ZZ for divergence term
-         NM0 = NM
-         I0 = I
-         J0 = J
-         K0 = K
+         !NM0 = NM No need of this
+         !I0 = I
+         !J0 = J
+         !K0 = K
          !***************************************************************************************
          ! Call combustion integration routine for Cartesian cell (I,J,K)
          PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
@@ -208,7 +507,7 @@ CC_IBM_IF: IF (CC_IBM) THEN
                STOP_STATUS=REALIZABILITY_STOP
             ENDIF
          ENDIF
-         CALL CHECK_REACTION
+         CALL CHECK_REACTION (ZZ_GET, DO_REACTION)
          IF (.NOT.DO_REACTION) CYCLE ICC_LOOP ! Check whether any reactions are possible.
 
          DZZ = ZZ_GET ! store old ZZ for divergence term
@@ -284,15 +583,16 @@ CC_IBM_IF: IF (CC_IBM) THEN
    ENDDO
 ENDIF CC_IBM_IF
 
-CONTAINS
+END SUBROUTINE COMBUSTION_GENERAL
 
 
-SUBROUTINE CHECK_REACTION
-
+SUBROUTINE CHECK_REACTION (ZZ_GET, DO_REACTION)
+REAL(EB), INTENT(IN) :: ZZ_GET(1:N_TRACKED_SPECIES)
 ! Check whether any reactions are possible.
-
+LOGICAL, INTENT(INOUT) :: DO_REACTION
+TYPE (REACTION_TYPE), POINTER :: RN
+INTEGER :: NS
 LOGICAL :: REACTANTS_PRESENT
-
 DO_REACTION = .FALSE.
 REACTION_LOOP: DO NR=1,N_REACTIONS
    RN=>REACTION(NR)
@@ -309,7 +609,140 @@ ENDDO REACTION_LOOP
 
 END SUBROUTINE CHECK_REACTION
 
-END SUBROUTINE COMBUSTION_GENERAL
+
+SUBROUTINE CHECK_CHEMICALLY_ACTIVE_STATE (ZZ_GET, PRES, TMP, I, J , K, CHEM_ACTIVE)
+REAL(EB), INTENT(IN) :: ZZ_GET(1:N_TRACKED_SPECIES)
+REAL(EB), INTENT(IN) :: PRES, TMP
+INTEGER, INTENT(IN), OPTIONAL :: I, J, K
+LOGICAL, INTENT(INOUT) :: CHEM_ACTIVE
+
+CHEM_ACTIVE = .TRUE.
+
+IF (CELL(CELL_INDEX(I,J,K))%SOLID) THEN
+   CHEM_ACTIVE = .FALSE.
+   RETURN
+ENDIF
+
+IF (CC_IBM) THEN
+   IF (CCVAR(I,J,K,CC_CGSC) /= CC_GASPHASE) HEN
+   CHEM_ACTIVE = .FALSE.
+   RETURN
+ENDIF
+
+IF (.NOT.ALL(REACTION%FAST_CHEMISTRY) .AND. TMP < FINITE_RATE_MIN_TEMP) THEN
+   CHEM_ACTIVE = .FALSE.
+   RETURN
+ENDIF   
+
+IF (CHECK_REALIZABILITY) THEN
+   REALIZABLE=IS_REALIZABLE(ZZ_GET)
+   IF (.NOT.REALIZABLE) THEN
+      WRITE(LU_ERR,*) I,J,K
+      WRITE(LU_ERR,*) ZZ_GET
+      WRITE(LU_ERR,*) SUM(ZZ_GET)
+      WRITE(LU_ERR,*) 'ERROR: Unrealizable mass fractions input to COMBUSTION_MODEL'
+      STOP_STATUS=REALIZABILITY_STOP
+      RETURN
+   ENDIF
+ENDIF
+
+CALL CHECK_REACTION (ZZ_GET, DO_REACTION)
+IF (.NOT.DO_REACTION) THEN
+   CHEM_ACTIVE = .FALSE.
+   RETURN
+ENDIF
+
+! Will add equivalence ratio check for CVODE later. ! CPaul
+
+
+END SUBROUTINE CHECK_CHEMICALLY_ACTIVE_STATE
+
+
+SUBROUTINE SET_SPECIES_SOURCE_TERM_CELL(I, J, K, ZZ_NEW, ZZ_OLD, REAC_SOURCE_TERM_TMP )
+
+REAL(EB), INTENT(INOUT) :: ZZ_NEW(N_TRACKED_SPECIES), ZZ_OLD(N_TRACKED_SPECIES)
+REAL(EB), INTENT(IN) :: REAC_SOURCE_TERM_TMP(N_TRACKED_SPECIES), Q_REAC_TMP(N_REACTIONS) 
+INTEGER, INTENT(IN) :: I, J, K
+REAL(EB) :: DZZ(1:N_TRACKED_SPECIES)
+REAL(EB) :: RSUM_LOC, CP, H_S_N
+LOGICAL :: Q_EXISTS
+TYPE (SPECIES_MIXTURE_TYPE), POINTER :: SM
+INTEGER :: N
+
+IF (REAC_SOURCE_CHECK) THEN ! Store special diagnostic quantities
+   REAC_SOURCE_TERM(I,J,K,:) = REAC_SOURCE_TERM_TMP
+   Q_REAC(I,J,K,:) = Q_REAC_TMP
+ENDIF
+IF (CHECK_REALIZABILITY) THEN
+   REALIZABLE=IS_REALIZABLE(ZZ_GET)
+   IF (.NOT.REALIZABLE) THEN
+      WRITE(LU_ERR,*) ZZ_GET,SUM(ZZ_GET)
+      WRITE(LU_ERR,*) 'ERROR: Unrealizable mass fractions after COMBUSTION_MODEL'
+      STOP_STATUS=REALIZABILITY_STOP
+      RETURN
+   ENDIF
+ENDIF
+DZZ = ZZ_NEW - ZZ_OLD
+! Update RSUM and ZZ
+DZZ_IF: IF ( ANY(ABS(DZZ) > DZZ_CLIP) ) THEN
+   IF (ABS(Q(I,J,K)) > TWO_EPSILON_EB) Q_EXISTS = .TRUE.
+   ! Divergence term
+   CALL GET_SPECIFIC_HEAT(ZZ_GET,CP,TMP(I,J,K))
+   CALL GET_SPECIFIC_GAS_CONSTANT(ZZ_GET,RSUM_LOC)
+   DO N=1,N_TRACKED_SPECIES
+      SM => SPECIES_MIXTURE(N)
+      CALL GET_SENSIBLE_ENTHALPY_Z(N,TMP(I,J,K),H_S_N)
+      D_SOURCE(I,J,K) = D_SOURCE(I,J,K) + ( SM%RCON/RSUM_LOC - H_S_N/(CP*TMP(I,J,K)) )*DZZ(N)/DT
+      M_DOT_PPP(I,J,K,N) = M_DOT_PPP(I,J,K,N) + RHO(I,J,K)*DZZ(N)/DT
+   ENDDO
+ENDIF DZZ_IF
+
+END SUBROUTINE SET_SPECIES_SOURCE_TERM_CELL
+
+
+SUBROUTINE SET_SPECIES_SOURCE_TERM_CUTCELL(ICC, JCC ZZ_NEW, ZZ_OLD, REAC_SOURCE_TERM_TMP )
+
+REAL(EB), INTENT(INOUT) :: ZZ_NEW(N_TRACKED_SPECIES), ZZ_OLD(N_TRACKED_SPECIES)
+REAL(EB), INTENT(IN) :: REAC_SOURCE_TERM_TMP(N_TRACKED_SPECIES), Q_REAC_TMP(N_REACTIONS) 
+INTEGER, INTENT(IN) :: ICC, JCC
+REAL(EB) :: DZZ(1:N_TRACKED_SPECIES)
+REAL(EB) :: RSUM_LOC, CP, H_S_N
+LOGICAL :: Q_EXISTS
+TYPE (SPECIES_MIXTURE_TYPE), POINTER :: SM
+INTEGER :: N
+
+IF (REAC_SOURCE_CHECK) THEN ! Store special diagnostic quantities
+    CUT_CELL(ICC)%REAC_SOURCE_TERM(1:N_TRACKED_SPECIES,JCC)=REAC_SOURCE_TERM_TMP(1:N_TRACKED_SPECIES)
+    CUT_CELL(ICC)%Q_REAC(1:N_REACTIONS,JCC)=Q_REAC_TMP(1:N_REACTIONS)
+ENDIF
+
+IF (CHECK_REALIZABILITY) THEN
+   REALIZABLE=IS_REALIZABLE(ZZ_GET)
+   IF (.NOT.REALIZABLE) THEN
+      WRITE(LU_ERR,*) ZZ_GET,SUM(ZZ_GET)
+      WRITE(LU_ERR,*) 'ERROR: Unrealizable mass fractions after COMBUSTION_MODEL'
+      STOP_STATUS=REALIZABILITY_STOP
+   ENDIF
+ENDIF
+DZZ = ZZ_NEW - ZZ_OLD
+
+! Update RSUM and ZZ
+DZZ_IF2: IF ( ANY(ABS(DZZ) > DZZ_CLIP) ) THEN
+   IF (ABS(CUT_CELL(ICC)%Q(JCC)) > TWO_EPSILON_EB) Q_EXISTS = .TRUE.
+   ! Divergence term
+   CALL GET_SPECIFIC_HEAT(ZZ_GET,CP,CUT_CELL(ICC)%TMP(JCC))
+   CALL GET_SPECIFIC_GAS_CONSTANT(ZZ_GET,CUT_CELL(ICC)%RSUM(JCC))
+   DO N=1,N_TRACKED_SPECIES
+      SM => SPECIES_MIXTURE(N)
+      CALL GET_SENSIBLE_ENTHALPY_Z(N,CUT_CELL(ICC)%TMP(JCC),H_S_N)
+      CUT_CELL(ICC)%D_SOURCE(JCC) = CUT_CELL(ICC)%D_SOURCE(JCC) + &
+      ( SM%RCON/CUT_CELL(ICC)%RSUM(JCC) - H_S_N/(CP*CUT_CELL(ICC)%TMP(JCC)) )*DZZ(N)/DT
+      CUT_CELL(ICC)%M_DOT_PPP(N,JCC) = CUT_CELL(ICC)%M_DOT_PPP(N,JCC) + &
+      CUT_CELL(ICC)%RHO(JCC)*DZZ(N)/DT
+   ENDDO
+ENDIF DZZ_IF2
+
+END SUBROUTINE SET_SPECIES_SOURCE_TERM_CUTCELL
 
 
 SUBROUTINE COMBUSTION_MODEL(T,DT,ZZ_GET,Q_OUT,MIX_TIME_OUT,CHI_R_OUT,CHEM_SUBIT_OUT,REAC_SOURCE_TERM_OUT,Q_REAC_OUT,&

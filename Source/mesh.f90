@@ -51,12 +51,13 @@ TYPE MESH_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: D_SOURCE!< Source terms in the expression for the divergence
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: CSD2    !< \f$ C_s \Delta^2 \f$ in Smagorinsky turbulence expression
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: CHEM_SUBIT  !< Number of chemistry sub-iterations
+   LOGICAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: CHEM_ACTIVE     !< Whether a cell is chemically active, \f$ chem_active_{ijk} \f$ (T of F)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: MIX_TIME    !< Mixing-controlled combustion reaction time (s)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: STRAIN_RATE !< Strain rate \f$ |S|_{ijk} \f$ (1/s)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: D_Z_MAX     !< \f$ \max D_\alpha \f$
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: PP_RESIDUAL !< Pressure Poisson residual (debug)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: LES_FILTER_WIDTH !< Characteristic cell dimension (m)
-
+   
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:,:) :: ZZ               !< Lumped species, current time step, \f$ Z_{\alpha,ijk}^n \f$
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:,:) :: ZZS              !< Lumped species, next time step, \f$ Z_{\alpha,ijk}^* \f$
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:,:) :: REAC_SOURCE_TERM !< \f$ \dot{m}_{\alpha,ijk}''' \f$
@@ -341,7 +342,7 @@ IMPLICIT NONE (TYPE,EXTERNAL)
 REAL(EB), POINTER, DIMENSION(:,:,:) :: &
    U,V,W,US,VS,WS,DDDT,D,DS,H,HS,KRES,FVX,FVY,FVZ,FVX_B,FVY_B,FVZ_B,FVX_D,FVY_D,FVZ_D,RHO,RHOS, &
    MU,MU_DNS,TMP,Q,KAPPA_GAS,CHI_R,QR,QR_W,UII,RSUM,D_SOURCE, &
-   CSD2,MTR,MSR,WEM,MIX_TIME,CHEM_SUBIT,STRAIN_RATE,D_Z_MAX,PP_RESIDUAL,LES_FILTER_WIDTH
+   CSD2,MTR,MSR,WEM,MIX_TIME,CHEM_SUBIT,CHEM_ACTIVE,STRAIN_RATE,D_Z_MAX,PP_RESIDUAL,LES_FILTER_WIDTH
 REAL(EB), POINTER, DIMENSION(:,:,:,:) :: ZZ,ZZS,REAC_SOURCE_TERM,DEL_RHO_D_DEL_Z,FX,FY,FZ, &
                                          SCALAR_WORK1,SCALAR_WORK2,SCALAR_WORK3,SCALAR_WORK4, &
                                          Q_REAC,AVG_DROP_DEN,AVG_DROP_TMP,AVG_DROP_RAD,AVG_DROP_AREA,M_DOT_PPP, &
@@ -498,6 +499,7 @@ RHO=>M%RHO
 RHOS=>M%RHOS
 TMP=>M%TMP
 CHEM_SUBIT=>M%CHEM_SUBIT
+CHEM_ACTIVE=>M%CHEM_ACTIVE
 MU=>M%MU
 MU_DNS=>M%MU_DNS
 D_Z_MAX=>M%D_Z_MAX

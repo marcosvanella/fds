@@ -1359,11 +1359,13 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::         D_SOURCE !< Cut-cells divergence source terms.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::            CHI_R !< Cut-cells radiative fraction.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::         MIX_TIME !< Cut-cells species mixing time.
+   LOGICAL(EB), ALLOCATABLE, DIMENSION(:)   ::     CHEM_ACTIVE  !< Cut-cells mass source term.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::           Q_REAC !< Cut-cells volumetric heat source due to reaction.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    :: REAC_SOURCE_TERM !< Cut-cells species source term. (1:N_TOTAL_SCALARS,1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::               ZZ !< Corrector cut-cells mass fractions.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::              ZZS !< Predictor cut-cells mass fractions.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::        M_DOT_PPP !< Cut-cells mass source term.
+
 
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::             UNKH !< Cut-cells unknown number for pressure H. (1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             KRES !< Cut-cells turbulent kinetic energy.
