@@ -112,6 +112,23 @@ for ift=1:length(FFT)
 
 end 
 
+Z_LO     =ZVEC(1);   Z_HI     =ZVEC(end);
+X_FV_LO  =X_FV(1);   X_FV_HI  =X_FV(end); 
+X_O2V_LO =X_O2V(1);  X_O2V_HI =X_O2V(end); 
+X_CO2V_LO=X_CO2V(1); X_CO2V_HI=X_CO2V(end); 
+X_COV_LO =X_COV(1);  X_COV_HI =X_COV(end); 
+X_H2OV_LO=X_H2OV(1); X_H2OV_HI=X_H2OV(end); 
+T_LO     =TMPV(1);   T_HI     =TMPV(end);
+
+disp(['FFT= ' num2str(FFT) ' s & $X_\mathrm{C_3H_8}$ & $X_\mathrm{O_2}$ & $X_\mathrm{CO_2}$ & $X_\mathrm{CO}$ & $X_\mathrm{H_2O}$ & Temperature $^o$C \\'])
+disp(['Floor & ' num2str(X_FV_LO,'%5.4f') ' & ' num2str(X_O2V_LO,'%5.4f') ' & ' ...
+    num2str(X_CO2V_LO,'%5.4f') ' & ' num2str(X_COV_LO,'%5.4f') ' & ' num2str(X_H2OV_LO,'%5.4f') ' & ' ...
+    num2str(T_LO,'%5.2f') ' \\' ])
+disp(['Ceiling & ' num2str(X_FV_HI,'%5.4f') ' & ' num2str(X_O2V_HI,'%5.4f') ' & ' ...
+    num2str(X_CO2V_HI,'%5.4f') ' & ' num2str(X_COV_HI,'%5.4f') ' & ' num2str(X_H2OV_HI,'%5.4f') ' & ' ...
+    num2str(T_HI,'%5.2f') ' \\' ])
+
+return
 
 % Cases with min and max X_F for 300sec FFT:
 FFT =[300];
