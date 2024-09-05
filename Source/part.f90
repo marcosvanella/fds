@@ -1440,7 +1440,7 @@ IF (IN%ID/='null') THEN
 
    DO ND=1,N_DEVC
       DV => DEVICE(ND)
-      IF (IN%ID==DV%INIT_ID .AND. IP==DV%POINT) THEN
+      IF ((IN%ID==DV%INIT_ID .AND. IP==DV%POINT) .OR. DV%LP_TAG==PARTICLE_TAG) THEN
          IF (DV%LP_TAG>0 .AND. DV%LP_TAG/=PARTICLE_TAG) THEN
             WRITE(MESSAGE,'(A,A,A)') 'ERROR: INIT_ID on DEVC ',TRIM(DV%ID),' cannot have more than one particle'
             CALL SHUTDOWN(MESSAGE,PROCESS_0_ONLY=.FALSE.)
@@ -1461,7 +1461,7 @@ IF (IN%ID/='null') THEN
 
    DO ND=1,N_PROF
       PF => PROFILE(ND)
-      IF (IN%ID==PF%INIT_ID) THEN
+      IF (IN%ID==PF%INIT_ID .OR. PF%LP_TAG==PARTICLE_TAG) THEN
          IF (PF%LP_TAG>0 .AND. PF%LP_TAG/=PARTICLE_TAG) THEN
             WRITE(MESSAGE,'(A,A,A)') 'ERROR: INIT_ID on PROF ',TRIM(PF%ID),' cannot have more than one particle'
             CALL SHUTDOWN(MESSAGE,PROCESS_0_ONLY=.FALSE.)
@@ -1565,7 +1565,10 @@ B1 => MESHES(NM)%BOUNDARY_PROP1(LP%B1_INDEX)
 
 IF (LPC%SOLID_PARTICLE) THEN
 
-   IF (LPC%SURF_INDEX==TGA_SURF_INDEX) TGA_PARTICLE_INDEX = NLP
+   IF (LPC%SURF_INDEX==TGA_SURF_INDEX) THEN
+      TGA_PARTICLE_INDEX = NLP
+      TGA_MESH_INDEX = NM
+   ENDIF
 
    LP%MASS = 0._EB
    SCALE_FACTOR = 1._EB
@@ -2516,12 +2519,15 @@ REAL(EB) :: UBAR,VBAR,WBAR,UREL,VREL,WREL,QREL,RHO_G,TMP_G,MU_FILM, &
             WE_G,T_BU_BAG,T_BU_STRIP,MPOM,SFAC,BREAKUP_RADIUS(0:NDC),&
             DD,DD_X,DD_Y,DD_Z,DW_X,DW_Y,DW_Z,K_TERM(3),Y_TERM(3),C_DRAG,A_DRAG,&
             GX_LOC,GY_LOC,GZ_LOC,DRAG_MAX(3)=0._EB,K_SGS,U_P,KN,M_DOT,&
-            EMBER_DENSITY,EMBER_VOLUME,ACCEL_X,ACCEL_Y,ACCEL_Z,&
-            LP_FORCE,FACE_VOLS(2,2,2),VEL_G_INT(3),VOL_WGT(2,2,2)
+            EMBER_DENSITY,EMBER_VOLUME=0._EB,ACCEL_X,ACCEL_Y,ACCEL_Z,&
+            LP_FORCE,FACE_VOLS(2,2,2),VEL_G_INT(3),VOL_WGT(2,2,2),&
+            EMBER_PACKING_RATIO,LOCAL_PACKING_RATIO,LPC_GEOM_FACTOR
 REAL(EB) :: WGT(2,2,2,3)
 REAL(EB), POINTER, DIMENSION(:,:,:) :: FV_D=>NULL(),VEL_G=>NULL()
 REAL(EB), SAVE :: BETA
-INTEGER :: IIX,JJY,KKZ,IL,JL,KL,AXIS
+INTEGER :: IIX,JJY,KKZ,IL,JL,KL,AXIS,N_LPC2
+LOGICAL :: STUCK=.FALSE.
+TYPE(LAGRANGIAN_PARTICLE_CLASS_TYPE), POINTER :: LPC2
 
 ! Save current values of particle velocity components
 
@@ -2635,6 +2641,49 @@ IF (LPC%TURBULENT_DISPERSION) THEN
    UBAR = UBAR + U_P*DW_X
    VBAR = VBAR + U_P*DW_Y
    WBAR = WBAR + U_P*DW_Z
+ENDIF
+
+IF (LPC%EMBER_PARTICLE) THEN
+   SELECT CASE(SF%GEOMETRY)
+      CASE(SURF_CARTESIAN)
+         EMBER_VOLUME = SF%LENGTH * SF%WIDTH * 2._EB*R_D
+      CASE(SURF_CYLINDRICAL)
+         EMBER_VOLUME = SF%LENGTH * PI*R_D**2
+      CASE(SURF_SPHERICAL)
+         EMBER_VOLUME = FOTHPI * R_D**3
+   END SELECT
+
+   ! experimental ember snag model
+   IF (LP%EMBER .AND. LPC%EMBER_SNAG_FACTOR>0._EB) THEN
+      STUCK=.FALSE.
+      ! constrain max packing ratio to 1
+      EMBER_PACKING_RATIO = MIN(1._EB, EMBER_VOLUME * LP%PWT * LP%RVC)
+      LOCAL_PACKING_RATIO = 0._EB
+      LPC2_LOOP: DO N_LPC2=1,N_LAGRANGIAN_CLASSES
+         LPC2 => LAGRANGIAN_PARTICLE_CLASS(N_LPC2)
+         IF (LPC2%ARRAY_INDEX == LPC%ARRAY_INDEX) CYCLE LPC2_LOOP
+         IF (AVG_DROP_RAD(IIG_OLD,JJG_OLD,KKG_OLD,LPC2%ARRAY_INDEX)<TWO_EPSILON_EB) CYCLE LPC2_LOOP
+         SELECT CASE(SURFACE(LPC2%SURF_INDEX)%GEOMETRY)
+            CASE(SURF_CARTESIAN)
+               LPC_GEOM_FACTOR = 1._EB
+            CASE(SURF_CYLINDRICAL)
+               LPC_GEOM_FACTOR = 0.5_EB*PI
+            CASE(SURF_SPHERICAL)
+               LPC_GEOM_FACTOR = FOTH
+         END SELECT
+         LOCAL_PACKING_RATIO = LOCAL_PACKING_RATIO + AVG_DROP_AREA(IIG_OLD,JJG_OLD,KKG_OLD,LPC2%ARRAY_INDEX)*&
+                  AVG_DROP_RAD(IIG_OLD,JJG_OLD,KKG_OLD,LPC2%ARRAY_INDEX)*LPC_GEOM_FACTOR
+      ENDDO LPC2_LOOP
+      LOCAL_PACKING_RATIO = MIN(1._EB, LOCAL_PACKING_RATIO)
+      CALL RANDOM_NUMBER(RN)
+      IF (LOCAL_PACKING_RATIO>TWO_EPSILON_EB .AND. &
+         RN<(LOCAL_PACKING_RATIO*EMBER_PACKING_RATIO)**LPC%EMBER_SNAG_FACTOR) THEN
+         STUCK=.TRUE.
+         LP%U = 0._EB
+         LP%V = 0._EB
+         LP%W = 0._EB
+      ENDIF
+   ENDIF
 ENDIF
 
 ! Calculate the particle drag coefficient
@@ -2757,14 +2806,6 @@ ENDIF
 ! Experimental ember generation model
 
 IF (LPC%EMBER_PARTICLE .AND. .NOT.LP%EMBER) THEN
-   SELECT CASE(SF%GEOMETRY)
-      CASE(SURF_CARTESIAN)
-         EMBER_VOLUME = SF%LENGTH * SF%WIDTH * 2._EB*R_D
-      CASE(SURF_CYLINDRICAL)
-         EMBER_VOLUME = SF%LENGTH * PI*R_D**2
-      CASE(SURF_SPHERICAL)
-         EMBER_VOLUME = FOTHPI * R_D**3
-   END SELECT
    EMBER_DENSITY = 0._EB
    IF (EMBER_VOLUME>TWO_EPSILON_EB) EMBER_DENSITY = LP%MASS/EMBER_VOLUME
    IF ( EMBER_DENSITY < LPC%EMBER_DENSITY_THRESHOLD .AND. &
@@ -2779,7 +2820,7 @@ ENDIF
 
 ! Move the particles unless they are STATIC
 
-PARTICLE_NON_STATIC_IF: IF (.NOT.LPC%STATIC .OR. LP%EMBER) THEN ! Move airborne, non-stationary particles
+PARTICLE_NON_STATIC_IF: IF (.NOT.LPC%STATIC .OR. (LP%EMBER .AND. .NOT.STUCK)) THEN ! Move airborne, non-stationary particles
 
    ! Compute gravity components
 
@@ -3371,7 +3412,7 @@ INTEGER :: ARRAY_CASE !< Heat transfer conditions 1=gas only, 2=isothermal wall 
 INTEGER(1), ALLOCATABLE, DIMENSION(:) :: PART_WARNING !< Tracks WARNING messages
 !< 1 = Particle in gas only, 2 = Particle on constant temperature surface, 3 = Particle on thermally thick surface
 CHARACTER(MESSAGE_LENGTH) :: MESSAGE
-LOGICAL :: SF_FIXED
+LOGICAL :: SF_FIXED,SURFACE_DROPLETS
 TYPE (LAGRANGIAN_PARTICLE_TYPE), POINTER :: LP
 TYPE (LAGRANGIAN_PARTICLE_CLASS_TYPE), POINTER :: LPC
 TYPE(BOUNDARY_ONE_D_TYPE), POINTER :: ONE_D
@@ -3458,6 +3499,7 @@ ENDDO
 ! Loop over all types of evaporative species
 
 SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
+
    Z_INDEX_A(1) = Z_INDEX
    ! Initialize quantities common to the evaporation index
 
@@ -3484,6 +3526,8 @@ SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
 
    ! Loop through all PARTICLEs in the class and determine the depth of the liquid film on each surface cell
 
+   SURFACE_DROPLETS = .FALSE.
+
    FILM_SUMMING_LOOP: DO IP=1,NLP
       LP  => LAGRANGIAN_PARTICLE(IP)
       LPC => LAGRANGIAN_PARTICLE_CLASS(LP%CLASS_INDEX)
@@ -3501,24 +3545,29 @@ SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
       ELSE
          CYCLE FILM_SUMMING_LOOP
       ENDIF
-      B2%WORK2 = B2%WORK2 + LP%PWT*FOTHPI*LP%RADIUS**3/B1%AREA  ! Depth of liquid film
-      B2%WORK3 = B2%WORK3 + LP%PWT*PI*(CR2*LP%RADIUS)**2        ! Droplet/surface contact area
+      B2%WORK2 = B2%WORK2 + LP%PWT*FOTHPI*LP%RADIUS**3/B1%AREA  ! WORK2 stores the depth of liquid film
+      B2%WORK3 = B2%WORK3 + LP%PWT*PI*(CR2*LP%RADIUS)**2        ! WORK3 stores total droplet/surface contact area
+      SURFACE_DROPLETS = .TRUE.
    ENDDO FILM_SUMMING_LOOP
 
    ! If the total droplet/surface contact area is less than the wall cell area, do not assume a film layer.
 
-   DO IW = 1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
-      WC => WALL(IW)
-      B1 => BOUNDARY_PROP1(WC%B1_INDEX)
-      B2 => BOUNDARY_PROP2(WC%B2_INDEX)
-      IF (B2%WORK3<B1%AREA) B2%WORK2 = 0._EB
-   ENDDO
-   DO ICF = INTERNAL_CFACE_CELLS_LB+1,INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS
-      CFA => CFACE(ICF)
-      B1 => BOUNDARY_PROP1(CFA%B1_INDEX)
-      B2 => BOUNDARY_PROP2(CFA%B2_INDEX)
-      IF (B2%WORK3<B1%AREA) B2%WORK2 = 0._EB
-   ENDDO
+   IF (SURFACE_DROPLETS) THEN
+      DO IW = 1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
+         WC => WALL(IW)
+         B1 => BOUNDARY_PROP1(WC%B1_INDEX)
+         B2 => BOUNDARY_PROP2(WC%B2_INDEX)
+         IF (B2%WORK3<B1%AREA) B2%WORK2 = 0._EB
+         B2%WORK3 = 0._EB  ! WORK3 now represents the sum of absorbed radiation at the WALL cell
+      ENDDO
+      DO ICF = INTERNAL_CFACE_CELLS_LB+1,INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS
+         CFA => CFACE(ICF)
+         B1 => BOUNDARY_PROP1(CFA%B1_INDEX)
+         B2 => BOUNDARY_PROP2(CFA%B2_INDEX)
+         IF (B2%WORK3<B1%AREA) B2%WORK2 = 0._EB
+         B2%WORK3 = 0._EB  ! WORK3 represents the sum of absorbed radiation at the CFACE
+      ENDDO
+   ENDIF
 
    ! Loop through all PARTICLEs within the class and determine mass/energy transfer
 
@@ -3636,7 +3685,8 @@ SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
                ELSE
                   A_DROP = PI*(CR2*LP%RADIUS)**2          ! If no assumed film layer, use the droplet/surface contact area directly
                ENDIF
-               Q_DOT_RAD = MIN(A_DROP,B1%AREA/LP%PWT)*B1%Q_RAD_IN
+               Q_DOT_RAD = MIN(A_DROP,B1%AREA/WGT)*B1%Q_RAD_IN
+               B2%WORK3 = B2%WORK3 + Q_DOT_RAD*WGT
                TMP_WALL = MAX(TMPMIN,B2%WORK1)
             ELSE SOLID_OR_GAS_PHASE_1
                VEL = SQRT((U2-LP%U)**2+(V2-LP%V)**2+(W2-LP%W)**2)
@@ -4087,12 +4137,26 @@ SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
          B2%LP_TEMP(LPC%ARRAY_INDEX) = B2%LP_TEMP(LPC%ARRAY_INDEX) + A_DROP*0.5_EB*(TMP_DROP+TMP_DROP_NEW)
          B2%LP_CPUA(LPC%ARRAY_INDEX) = B2%LP_CPUA(LPC%ARRAY_INDEX) + &
                                        (1._EB-LPC%RUNNING_AVERAGE_FACTOR_WALL)*WGT*Q_CON_WALL/(B1%AREA*DT)
-         IF (RADIATION) &
-         B1%Q_RAD_IN = MAX(0._EB,(B1%AREA*DT*B1%Q_RAD_IN-WGT*DT*Q_DOT_RAD*B1%Q_RAD_IN / &
-                           (B1%Q_RAD_IN+B1%Q_RAD_OUT+TWO_EPSILON_EB))/(B1%AREA*DT))
       ENDIF
 
    ENDDO PARTICLE_LOOP
+
+   ! Subtract off the incoming radiation absorbed by all surface droplets of this type on each wall cell (B2%WORK3).
+
+   IF (SURFACE_DROPLETS) THEN
+      DO IW = 1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
+         WC => WALL(IW)
+         B1 => BOUNDARY_PROP1(WC%B1_INDEX)
+         B2 => BOUNDARY_PROP2(WC%B2_INDEX)
+         B1%Q_RAD_IN = MAX(0._EB,(B1%AREA*B1%Q_RAD_IN-B2%WORK3)/(B1%AREA))
+      ENDDO
+      DO ICF = INTERNAL_CFACE_CELLS_LB+1,INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS
+         CFA => CFACE(ICF)
+         B1 => BOUNDARY_PROP1(CFA%B1_INDEX)
+         B2 => BOUNDARY_PROP2(CFA%B2_INDEX)
+         B1%Q_RAD_IN = MAX(0._EB,(B1%AREA*B1%Q_RAD_IN-B2%WORK3)/(B1%AREA))
+      ENDDO
+   ENDIF
 
 ENDDO SPECIES_LOOP
 
