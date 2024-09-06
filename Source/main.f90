@@ -999,6 +999,7 @@ MAIN_LOOP: DO
    IF (FLUSH_FILE_BUFFERS) THEN
       IF (T>=FLSH_CLOCK(FLSH_COUNTER(1))) THEN
          IF (MY_RANK==0) CALL FLUSH_GLOBAL_BUFFERS
+         CALL MPI_BARRIER(MPI_COMM_WORLD,IERR)  ! Force all processes to sync up before dumping buffers
          DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             CALL FLUSH_LOCAL_BUFFERS(NM)
          ENDDO
@@ -1024,6 +1025,8 @@ MAIN_LOOP: DO
    CALL STOP_CHECK(1)  ! The argument 1 means that FDS will end unless there is logic associated with the STOP_STATUS
 
    ! Stop the run normally
+
+   IF (MY_RANK==0 .AND. VERBOSE) CALL VERBOSE_PRINTOUT('End of time step')
 
    IF (T>=T_END .AND. ICYC>0) EXIT MAIN_LOOP
 
