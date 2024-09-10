@@ -4999,6 +4999,14 @@ You can also simulate a spark ignition using the following lines of input:
 \end{lstlisting}
 In this case, methane and air will not combust unless the grid cell temperature exceeds 540~$^\circ$C. However, within the grid cell containing the specified point {\ct XYZ}, a ``spark'' is generated at 10~s which effectively causes the AIT to go to 0~K and ignition of fuel and air is allowed, assuming a suitable amount of fuel and air is present.
 
+\subsection{Local Quenching (AIT per ZONE)}
+\label{info:ait_per_zone}
+
+There may be special circumstances where you would like to specify that a localized region of the domain cannot support combustion.  In this case, you may use the {\ct AIT\_EXCLUSION\_ZONE} construct to specify a locally high value of the ignition temperature threshold, which will prevent combustion in this region.  For example,
+\begin{lstlisting}
+&REAC ..., AIT_EXCLUSION_ZONE(1:6,1)=..., AIT_EXCLUSION_ZONE_TEMPERATURE(1)=1000.
+           AIT_EXCLUSION_ZONE(1:6,2)=..., AIT_EXCLUSION_ZONE_TEMPERATURE(2)=3000./
+\end{lstlisting}
 
 \newpage
 
@@ -8998,6 +9006,8 @@ This indicates that the temperature shall be 60~$^\circ$C instead of the ambient
       TEMPERATURE=60. /
 \end{lstlisting}
 
+You can also specify a {\ct RAMP\_TMP\_Z} vertical profile. The corresponding {\ct RAMP} lines should use the parameter {\ct Z} for the height $z$ (m) and {\ct F} for the value of the temperature ($^\circ$C).
+
 \section{Heat Release Rate Per Unit Volume}
 \label{info:init_hrrpuv}
 
@@ -9012,8 +9022,6 @@ indicates that the region bounded by {\ct XB} shall generate 1000~kW/m$^3$, 25~\
 &INIT XB=0.0,0.1,0.0,0.025,0.0,0.1, HRRPUV=1000., RAMP_Q='q1' /
 \end{lstlisting}
 ramps the heat source up from 0 to 1000~kW/m$^3$ linearly over 60 seconds.
-
-
 
 \section{Velocity Field}
 \label{info:velo_restart}
@@ -9030,6 +9038,16 @@ FDS uses a predefined random seed for the random number generator which ensures 
 
 For certain types of diagnostic tests, it is useful to turn off the velocity field and exercise some other aspect of the model, like radiation or particle transport. To do this, set {\ct FREEZE\_VELOCITY=T} on the {\ct MISC} line.
 
+\subsection{One-Dimensional Velocity Component Fields}
+\label{info:ramp_velocity_1d}
+
+For diagnostic or verification purpuses it may be useful to initialize velocity components with 1D fields.  This can be used in combination with {\ct FREEZE\_VELOCITY=T}, for example, to control precisely the amount of drag a particle sees, and so on.  The linear fields are specified with the {\ct RAMP} functionality and the ramp is identified using {\ct RAMP\_UX}, for example, on {\ct MISC} to specify variation of the $u$ component of velocity in the $x$ direction.  Other velocity components and directions are specified similarly (see Table \ref{tbl:MISC}).
+\begin{lstlisting}
+&MISC FREEZE_VELOCITY=T, RAMP_UX='u1'/
+&RAMP ID='u1', X= 0, F=0 /
+&RAMP ID='u1', X= 2, F=4 /
+&RAMP ID='u1', X= 4, F=16/
+\end{lstlisting}
 
 \section{Nonuniform Initial Fields: Velocity, Temperature, Species}
 \label{info:CSVF}
@@ -12260,6 +12278,7 @@ Keyword             & Type     & Description                      & Units       
 {\ct RAMP\_MF\_Z}                 & Character         & Section~\ref{info:init_species}               &                &               \\ \hline
 {\ct RAMP\_PART}                  & Character         & Section~\ref{info:initial_droplets}           &                &               \\ \hline
 {\ct RAMP\_Q}                     & Character         & Section~\ref{info:init_hrrpuv}                &                &               \\ \hline
+{\ct RAMP\_TMP\_Z}                & Character         & Section~\ref{info:init_temperature}           &                &               \\ \hline
 {\ct RAMP\_VF\_Z}                 & Character         & Section~\ref{info:init_species}               &                &               \\ \hline
 {\ct SHAPE}                       & Character         & Section~\ref{info:initial_droplets}           &                & {\ct 'BLOCK'} \\ \hline
 {\ct SPEC\_ID(N)}                 & Character Array   & Section~\ref{info:init_species}               &                &               \\ \hline
@@ -12483,6 +12502,15 @@ Keyword             & Type     & Description                      & Units       
 {\ct RAMP\_GX}                                      & Character    & Section~\ref{info:GVEC}                 &            &                   \\ \hline
 {\ct RAMP\_GY}                                      & Character    & Section~\ref{info:GVEC}                 &            &                   \\ \hline
 {\ct RAMP\_GZ}                                      & Character    & Section~\ref{info:GVEC}                 &            &                   \\ \hline
+{\ct RAMP\_UX}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_UY}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_UZ}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_VX}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_VY}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_VZ}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_WX}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_WY}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
+{\ct RAMP\_WZ}                                      & Character    & Section~\ref{info:ramp_velocity_1d}     &            &                   \\ \hline
 {\ct RESTART}                                       & Logical      & Section~\ref{info:restart}              &            & {\ct F}           \\ \hline
 {\ct RESTART\_CHID}                                 & Character    & Section~\ref{info:restart}              &            & {\ct CHID}        \\ \hline
 {\ct RND\_SEED}                                     & Integer      & Section~\ref{info:restart}              &            &                   \\ \hline
@@ -13013,6 +13041,7 @@ Keyword             & Type     & Description                      & Units       
 {\ct AIT\_EXCLUSION\_ZONE(6,:)}           & Real Array     & Section~\ref{info:ignition}                  & m                 &                   \\ \hline
 {\ct AIT\_EXCLUSION\_ZONE\_CTRL\_ID(:)}   & Char.~Array    & Section~\ref{info:ignition}                  &                   & {\ct 'null'}      \\ \hline
 {\ct AIT\_EXCLUSION\_ZONE\_DEVC\_ID(:)}   & Char.~Array    & Section~\ref{info:ignition}                  &                   & {\ct 'null'}      \\ \hline
+{\ct AIT\_EXCLUSION\_ZONE\_TEMPERATURE}   & Real           & Section~\ref{info:ait_per_zone}              & $^\circ$C         &                   \\ \hline
 {\ct AUTO\_IGNITION\_TEMPERATURE}         & Real           & Section~\ref{info:ignition}                  & $^\circ$C         & -273 $^\circ$C    \\ \hline
 {\ct CHECK\_ATOM\_BALANCE}                & Logical        & Section~\ref{info:REAC_Diagnostics}          &                   & {\ct T}           \\ \hline
 {\ct CO\_YIELD}                           & Real           & Section~\ref{info:simple_chemistry}          & kg/kg             & 0                 \\ \hline
