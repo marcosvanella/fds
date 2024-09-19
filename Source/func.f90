@@ -4343,6 +4343,78 @@ ENDDO
 
 END SUBROUTINE RANDOM_WIND_FLUCTUATIONS
 
+
+
+!> \brief sort an integer array and return the indices
+!> \param ARR Input unsorted array
+!> \param IDX Output array of indices
+!> \param LOW Lower index in ARR from where sorting starts
+!> \param HIGH HIGHER index in ARR where sorting ends
+!> \param ORDER 1-Large to small, 2-Small to Large
+RECURSIVE SUBROUTINE QUICKSORT(ARR, IDX, LOW, HIGH, ORDER)
+   INTEGER, INTENT(IN) :: LOW, HIGH, ORDER
+   INTEGER, INTENT(IN) :: ARR(:)
+   INTEGER, INTENT(OUT) :: IDX(:)
+
+   INTEGER :: PIVOT_IDX
+
+   IF (LOW < HIGH) THEN
+      ! PARTITION THE ARRAY AND GET THE PIVOT INDEX
+      CALL PARTITION(ARR, IDX, LOW, HIGH, PIVOT_IDX, ORDER)
+      ! RECURSIVELY SORT THE LEFT AND RIGHT SUBARRAYS
+      CALL QUICKSORT(ARR, IDX, LOW, PIVOT_IDX - 1, ORDER)
+      CALL QUICKSORT(ARR, IDX, PIVOT_IDX + 1, HIGH, ORDER)
+   END IF
+END SUBROUTINE QUICKSORT
+
+!> \brief partition subroutine for quicksort, divide the array in two part.
+SUBROUTINE PARTITION(ARR, IDX, LOW, HIGH, PIVOT_IDX, ORDER)
+   INTEGER, INTENT(IN) :: LOW, HIGH, ORDER
+   INTEGER, INTENT(IN) :: ARR(:)
+   INTEGER, INTENT(INOUT) :: IDX(:)
+   INTEGER, INTENT(OUT) :: PIVOT_IDX
+
+   INTEGER :: I, J, TEMP
+   INTEGER :: PIVOT_VALUE
+   LOGICAL :: DOSWAP = .FALSE.
+
+   ! CHOOSE THE PIVOT ELEMENT (WE CHOOSE THE LAST ELEMENT HERE)
+   PIVOT_VALUE = ARR(IDX(HIGH))
+   I = LOW - 1
+
+   DO J = LOW, HIGH - 1
+      DOSWAP = .FALSE.
+      IF (ORDER == 1) THEN ! Large to Small
+         IF (ARR(IDX(J)) >= PIVOT_VALUE) DOSWAP = .TRUE.
+      ELSE
+         IF (ARR(IDX(J)) <= PIVOT_VALUE) DOSWAP = .TRUE.
+      ENDIF
+      IF (DOSWAP) THEN
+          I = I + 1
+          ! SWAP INDICES I AND J
+          TEMP = IDX(I)
+          IDX(I) = IDX(J)
+          IDX(J) = TEMP
+      END IF
+   END DO
+
+   ! SWAP INDICES I+1 AND HIGH (PLACE PIVOT IN CORRECT POSITION)
+   TEMP = IDX(I + 1)
+   IDX(I + 1) = IDX(HIGH)
+   IDX(HIGH) = TEMP
+
+   ! RETURN THE PIVOT INDEX
+   PIVOT_IDX = I + 1
+END SUBROUTINE PARTITION
+
+
+
+
+
+
+
+
+
 END MODULE MATH_FUNCTIONS
 
 
