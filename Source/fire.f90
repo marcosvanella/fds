@@ -29,7 +29,7 @@ INTEGER, ALLOCATABLE, DIMENSION(:) :: NCELLS_TO_SEND_ARRAY, NCELLS_TO_RECV_ARRAY
                                       INTEGERS_TEST_ARRAY, NEW_INDEX, REV_NEW_INDEX, CHEM_SEQ_ARR, &
                                       NCHEM_ACTIVE_CELLS_RANK_WISE
 INTEGER, ALLOCATABLE, DIMENSION(:,:) :: NCELLS_TO_SEND_ARRAY_ALGO2, NCELLS_TO_RECV_ARRAY_ALGO2
-INTEGER, ALLOCATABLE, DIMENSION(:) :: SORTED_RANK_INDX, SORTED_RANK_INDX_MAP, SORTED_DIFF_FROM_AVG 
+INTEGER, ALLOCATABLE, DIMENSION(:) :: SORTED_RANK_INDX, SORTED_RANK_INDX_MAP, SORTED_DIFF_FROM_AVG, IS_HANDLED_BY_CURR_PROC
 INTEGER :: AVG_PIVOT_INDX, TOT_CELLS_TO_SEND, TOT_RANK_TO_COMM
 
 INTEGER :: NVAR_TO_SEND
@@ -880,7 +880,7 @@ END SUBROUTINE DISTRIBUTE_CELLS_ACCROSS_MPI_PROCESSES
 SUBROUTINE DISTRIBUTE_CELLS_ACCROSS_MPI_PROCESSES_ALGO2(NRECEIVE_CELLS)
 USE MATH_FUNCTIONS, ONLY: QUICKSORT
 INTEGER, INTENT(OUT) :: NRECEIVE_CELLS
-INTEGER :: I, J , K, NM, ICC, JCC, INDX, NEWINDX, RANK_TO,IERR, NP
+INTEGER :: I, J , K, NM, ICC, JCC, INDX, SEQ, RANK_TO,IERR, NP
 INTEGER :: CELLS_PER_SORTED_RANK(N_MPI_PROCESSES), REM, SUM_PREV_SORTED_RANKS
 INTEGER :: PREVSUM, CURSUM, STILL_TO_FILL, STILL_TO_RECEIVE
 INTEGER :: PROC_CELLS_TO_SEND, TOT_CELLS_TO_RECEIVE, PROC_CELLS_TO_RECEIVE, TAG
@@ -894,7 +894,7 @@ TNOW = CURRENT_TIME()
 IF (.NOT. ALLOCATED(SORTED_RANK_INDX)) ALLOCATE(SORTED_RANK_INDX(N_MPI_PROCESSES))
 IF (.NOT. ALLOCATED(SORTED_RANK_INDX_MAP)) ALLOCATE(SORTED_RANK_INDX_MAP(N_MPI_PROCESSES))
 IF (.NOT. ALLOCATED(SORTED_DIFF_FROM_AVG)) ALLOCATE(SORTED_DIFF_FROM_AVG(N_MPI_PROCESSES))
-IF (.NOT. ALLOCATED(NCELLS_TO_SEND_ARRAY_ALGO2)) ALLOCATE(NCELLS_TO_SEND_ARRAY_ALGO2(N_MPI_PROCESSES,3)); 
+IF (.NOT. ALLOCATED(NCELLS_TO_SEND_ARRAY_ALGO2)) ALLOCATE(NCELLS_TO_SEND_ARRAY_ALGO2(N_MPI_PROCESSES,4));
 IF (.NOT. ALLOCATED(NCELLS_TO_RECV_ARRAY_ALGO2)) ALLOCATE(NCELLS_TO_RECV_ARRAY_ALGO2(N_MPI_PROCESSES,3)); 
 SORTED_RANK_INDX = 0
 SORTED_RANK_INDX_MAP = 0
@@ -961,6 +961,10 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN
          ENDIF
       ENDIF
    ENDDO
+   ! Assign self
+   TOT_RANK_TO_COMM = TOT_RANK_TO_COMM +1
+   NCELLS_TO_SEND_ARRAY_ALGO2(TOT_RANK_TO_COMM,1) = MY_RANK
+   NCELLS_TO_SEND_ARRAY_ALGO2(TOT_RANK_TO_COMM,2) = CELLS_PER_SORTED_RANK(SORTED_RANK_INDX_MAP(MY_RANK+1))
 
    DO NP =1, TOT_RANK_TO_COMM
       IF (NP ==1) THEN
@@ -973,7 +977,9 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN
    ! Now prepare the Send buffer data and send. Note RANK_TO here is 1-based i.e. 1 to N_MPI_PROCESS
    ALLOCATE(REALS_TO_SEND_ARRAY(NVAR_TO_SEND,TOT_CELLS_TO_SEND)); REALS_TO_SEND_ARRAY=0._EB
    ALLOCATE(REALS_TO_RECV_ARRAY(NVAR_TO_SEND,CELLS_PER_SORTED_RANK(SORTED_RANK_INDX_MAP(MY_RANK+1)))); REALS_TO_RECV_ARRAY=0._EB
-   INDX = 0 ! Store the sequence
+   ALLOCATE(IS_HANDLED_BY_CURR_PROC(NCELLS_TO_SEND_ARRAY_ALGO2(TOT_RANK_TO_COMM,3))); IS_HANDLED_BY_CURR_PROC = 0
+   ALLOCATE(CHEM_SEQ_ARR(NCELLS_TO_SEND_ARRAY_ALGO2(TOT_RANK_TO_COMM,3))); CHEM_SEQ_ARR = 0
+   SEQ = 0 ! Store the sequence
    RANK_TO = 0
    DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       CALL POINT_TO_MESH(NM)
@@ -983,15 +989,36 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN
                IF(CHEM_ACTIVE(I,J,K)) THEN
                   ZZ_GET = ZZ(I,J,K,1:N_TRACKED_SPECIES)
                   PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
-                  INDX = INDX+1
-                  IF (INDX <= TOT_CELLS_TO_SEND) THEN
-                     DO NP =1, TOT_RANK_TO_COMM
-                        IF (INDX <= NCELLS_TO_SEND_ARRAY_ALGO2(NP,3)) THEN
-                           RANK_TO = NCELLS_TO_SEND_ARRAY_ALGO2(NP,1)
-                           EXIT
-                        ENDIF
-                     ENDDO
-                     ! Reals to send:
+                  SEQ = SEQ+1
+                  RANK_TO = RANK_TO +1
+                  DO NP =1, TOT_RANK_TO_COMM
+                     IF (RANK_TO > TOT_RANK_TO_COMM) RANK_TO = 1
+                     IF (NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)+1 <=  NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,2)) THEN
+                        EXIT
+                     ELSE
+                        RANK_TO = RANK_TO +1
+                     ENDIF
+                  ENDDO
+                  NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4) = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4) + 1
+
+                  IF (RANK_TO == TOT_RANK_TO_COMM) THEN ! My process NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,1) == MY_RANK
+                     IS_HANDLED_BY_CURR_PROC(SEQ) = 1
+                     INDX = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)
+                     CHEM_SEQ_ARR(SEQ) = INDX
+                     REALS_TO_RECV_ARRAY(1:N_TRACKED_SPECIES,INDX) = ZZ_GET
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+1,INDX) = TMP(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+2,INDX) = RHO(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+3,INDX) = PRES
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+4,INDX) = MU(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+5,INDX) = LES_FILTER_WIDTH(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+6,INDX) = DX(I)*DY(J)*DZ(K)
+                  ELSE
+                     IF (RANK_TO == 1) THEN
+                        INDX = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)
+                     ELSE
+                        INDX = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO-1,3) + NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)
+                     ENDIF
+                     CHEM_SEQ_ARR(SEQ) = INDX
                      REALS_TO_SEND_ARRAY(1:N_TRACKED_SPECIES,INDX) = ZZ_GET
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+1,INDX) = TMP(I,J,K)
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+2,INDX) = RHO(I,J,K)
@@ -999,35 +1026,47 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+4,INDX) = MU(I,J,K)
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+5,INDX) = LES_FILTER_WIDTH(I,J,K)
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+6,INDX) = DX(I)*DY(J)*DZ(K)
-                  ELSE ! The cells which will be solved by self
-                     NEWINDX = INDX-TOT_CELLS_TO_SEND
-                     REALS_TO_RECV_ARRAY(1:N_TRACKED_SPECIES,NEWINDX) = ZZ_GET
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+1,NEWINDX) = TMP(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+2,NEWINDX) = RHO(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+3,NEWINDX) = PRES
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+4,NEWINDX) = MU(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+5,NEWINDX) = LES_FILTER_WIDTH(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+6,NEWINDX) = DX(I)*DY(J)*DZ(K)
                   ENDIF
-               ENDIF
-            ENDDO
-         ENDDO
-      ENDDO
+               ENDIF ! CHEM_ACTIVE
+            ENDDO !I
+         ENDDO !J
+      ENDDO !K
       IF (CC_IBM) THEN
          DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
             CC => CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
             DO JCC=1,CC%NCELL
                IF (CUT_CELL(ICC)%CHEM_ACTIVE(JCC) ) THEN
-                  INDX = INDX+1
                   ZZ_GET = CC%ZZ(1:N_TRACKED_SPECIES,JCC)
                   PRES = PBAR(K,PRESSURE_ZONE(I,J,K)) + RHO(I,J,K)*(H(I,J,K)-KRES(I,J,K))
-                  IF (INDX <= TOT_CELLS_TO_SEND) THEN
-                     DO NP =1, TOT_RANK_TO_COMM
-                        IF (INDX <= NCELLS_TO_SEND_ARRAY_ALGO2(NP,3)) THEN
-                           RANK_TO = NCELLS_TO_SEND_ARRAY_ALGO2(NP,1)
-                           EXIT
-                        ENDIF
-                     ENDDO
+                  SEQ = SEQ+1
+                  RANK_TO = RANK_TO +1
+                  DO NP =1, TOT_RANK_TO_COMM
+                     IF (RANK_TO > TOT_RANK_TO_COMM) RANK_TO = 1
+                     IF (NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)+1 <=  NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,2)) THEN
+                        EXIT
+                     ELSE
+                        RANK_TO = RANK_TO +1
+                     ENDIF
+                  ENDDO
+                  NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4) = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4) + 1
+
+                  IF (RANK_TO == TOT_RANK_TO_COMM) THEN ! My process NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,1) == MY_RANK
+                     IS_HANDLED_BY_CURR_PROC(SEQ) = 1
+                     INDX = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)
+                     REALS_TO_RECV_ARRAY(1:N_TRACKED_SPECIES,INDX) = ZZ_GET
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+1,INDX) = TMP(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+2,INDX) = RHO(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+3,INDX) = PRES
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+4,INDX) = MU(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+5,INDX) = LES_FILTER_WIDTH(I,J,K)
+                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+6,INDX) = DX(I)*DY(J)*DZ(K)
+                  ELSE
+                     IF (RANK_TO == 1) THEN
+                        INDX = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)
+                     ELSE
+                        INDX = NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO-1,3) + NCELLS_TO_SEND_ARRAY_ALGO2(RANK_TO,4)
+                     ENDIF
+                     CHEM_SEQ_ARR(SEQ) = INDX
                      ! Reals to send:
                      REALS_TO_SEND_ARRAY(1:N_TRACKED_SPECIES,INDX) = ZZ_GET
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+1,INDX) = CC%TMP(JCC)
@@ -1036,28 +1075,19 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+4,INDX) = MU(I,J,K)
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+5,INDX) = LES_FILTER_WIDTH(I,J,K)
                      REALS_TO_SEND_ARRAY(N_TRACKED_SPECIES+6,INDX) = CC%VOLUME(JCC)
-                  ELSE ! The cells which will be solved by self
-                     NEWINDX = INDX-TOT_CELLS_TO_SEND
-                     REALS_TO_RECV_ARRAY(1:N_TRACKED_SPECIES,NEWINDX) = ZZ_GET
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+1,NEWINDX) = TMP(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+2,NEWINDX) = RHO(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+3,NEWINDX) = PRES
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+4,NEWINDX) = MU(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+5,NEWINDX) = LES_FILTER_WIDTH(I,J,K)
-                     REALS_TO_RECV_ARRAY(N_TRACKED_SPECIES+6,NEWINDX) = DX(I)*DY(J)*DZ(K)
                   ENDIF
-               ENDIF
-            ENDDO
-         ENDDO
+               ENDIF ! CHEM_ACTIVE
+            ENDDO !JCC
+         ENDDO ! ICC
       ENDIF
    ENDDO
 
-   NRECEIVE_CELLS = NEWINDX
+   NRECEIVE_CELLS = NCELLS_TO_SEND_ARRAY_ALGO2(TOT_RANK_TO_COMM,2)
 
    ! Now send
    ALLOCATE(REQ0(TOT_RANK_TO_COMM))
    N_REQ0 = 0
-   DO NP =1, TOT_RANK_TO_COMM
+   DO NP =1, TOT_RANK_TO_COMM-1 ! The last one is self
       N_REQ0 = N_REQ0 + 1;
       IF (NP ==1) THEN
          STARTLOC = 1
@@ -1212,7 +1242,7 @@ END SUBROUTINE GATHER_CELLS_FROM_MPI_PROCESSES
 
 SUBROUTINE GATHER_CELLS_FROM_MPI_PROCESSES_ALGO2(DT)
 REAL(EB), INTENT(IN) :: DT
-INTEGER :: I, J , K, NM, ICC, JCC, INDX, NEWINDX, IERR, NP
+INTEGER :: I, J , K, NM, ICC, JCC, INDX, SEQ, IERR, NP
 INTEGER :: CHEM_SUBIT_TMP, TAG
 REAL(EB) :: ZZ_GET(1:N_TRACKED_SPECIES),DZZ(1:N_TRACKED_SPECIES), &
             REAC_SOURCE_TERM_TMP(N_TRACKED_SPECIES),Q_REAC_TMP(N_REACTIONS)
@@ -1229,7 +1259,7 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN ! Recieve the chemist
    ALLOCATE(RESULTS_TO_RECV_ARRAY(NVAR_TO_RECEIVE,TOT_CELLS_TO_SEND)); RESULTS_TO_RECV_ARRAY=0._EB
    ALLOCATE(REQ0(TOT_RANK_TO_COMM))
    N_REQ0 = 0
-   DO NP =1, TOT_RANK_TO_COMM
+   DO NP =1, TOT_RANK_TO_COMM-1 ! For sender it includes self.
       N_REQ0 = N_REQ0 + 1;
       IF (NP ==1) THEN
          STARTLOC = 1
@@ -1264,7 +1294,7 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN ! Populate correct va
    !---------------------------------------------
    REAC_SOURCE_TERM_TMP = 0._EB
    Q_REAC_TMP           = 0._EB
-   INDX = 0
+   SEQ = 0
    DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       CALL POINT_TO_MESH(NM)
       ! Call chemistry on chemically active cells
@@ -1272,23 +1302,24 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN ! Populate correct va
          DO J=1,JBAR
             DO I=1,IBAR
                IF(CHEM_ACTIVE(I,J,K)) THEN
-                  INDX=INDX+1
-                  IF (INDX <= TOT_CELLS_TO_SEND) THEN
+                  SEQ=SEQ+1
+                  IF (IS_HANDLED_BY_CURR_PROC(SEQ) == 1) THEN ! Handled by current proc
+                     INDX = CHEM_SEQ_ARR(SEQ)
+                     DZZ                  = ZZ(I,J,K,1:N_TRACKED_SPECIES)
+                     ZZ_GET               = RESULTS_TO_SEND_ARRAY(1:N_TRACKED_SPECIES,INDX)
+                     Q(I,J,K)             = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+1,INDX)
+                     MIX_TIME(I,J,K)      = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+2,INDX)
+                     CHI_R(I,J,K)         = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+3,INDX)
+                     CHEM_SUBIT_TMP       = INT(RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+4,INDX))
+                     IF (OUTPUT_CHEM_IT) CHEM_SUBIT(I,J,K) = CHEM_SUBIT_TMP
+                  ELSE
+                     INDX = CHEM_SEQ_ARR(SEQ)
                      DZZ                  = ZZ(I,J,K,1:N_TRACKED_SPECIES)
                      ZZ_GET               = RESULTS_TO_RECV_ARRAY(1:N_TRACKED_SPECIES,INDX)
                      Q(I,J,K)             = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+1,INDX)
                      MIX_TIME(I,J,K)      = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+2,INDX)
                      CHI_R(I,J,K)         = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+3,INDX)
                      CHEM_SUBIT_TMP       = INT(RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+4,INDX))
-                     IF (OUTPUT_CHEM_IT) CHEM_SUBIT(I,J,K) = CHEM_SUBIT_TMP
-                  ELSE ! The cells solved by self
-                     NEWINDX = INDX-TOT_CELLS_TO_SEND
-                     DZZ                  = ZZ(I,J,K,1:N_TRACKED_SPECIES)
-                     ZZ_GET               = RESULTS_TO_SEND_ARRAY(1:N_TRACKED_SPECIES,NEWINDX)
-                     Q(I,J,K)             = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+1,NEWINDX)
-                     MIX_TIME(I,J,K)      = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+2,NEWINDX)
-                     CHI_R(I,J,K)         = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+3,NEWINDX)
-                     CHEM_SUBIT_TMP       = INT(RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+4,NEWINDX))
                      IF (OUTPUT_CHEM_IT) CHEM_SUBIT(I,J,K) = CHEM_SUBIT_TMP
                   ENDIF
                   CALL SET_SPECIES_SOURCE_TERM_CELL(DT, I, J, K, ZZ_GET, DZZ, REAC_SOURCE_TERM_TMP, Q_REAC_TMP)
@@ -1303,31 +1334,32 @@ IF (SORTED_RANK_INDX_MAP(MY_RANK+1) < AVG_PIVOT_INDX) THEN ! Populate correct va
             CC => CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
             DO JCC=1,CC%NCELL
                IF (CC%CHEM_ACTIVE(JCC) ) THEN
-                  INDX=INDX+1
-                  IF (INDX <= TOT_CELLS_TO_SEND) THEN
-                     DZZ                  = CC%ZZ(1:N_TRACKED_SPECIES,JCC)
-                     ZZ_GET               = RESULTS_TO_RECV_ARRAY(1:N_TRACKED_SPECIES,INDX);
-                     CC%Q(JCC)            = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+1,INDX)
-                     CC%MIX_TIME(JCC)     = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+2,INDX)
-                     CC%CHI_R(JCC)        = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+3,INDX)
-                     CHEM_SUBIT_TMP       = INT(RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+4,INDX))
-                  ELSE ! The cells solved by self
-                     NEWINDX = INDX-TOT_CELLS_TO_SEND
+                  SEQ=SEQ+1
+                  IF (IS_HANDLED_BY_CURR_PROC(SEQ) == 1) THEN ! Handled by current proc
+                     INDX = CHEM_SEQ_ARR(SEQ)
                      DZZ                  = CC%ZZ(1:N_TRACKED_SPECIES,JCC)
                      ZZ_GET               = RESULTS_TO_SEND_ARRAY(1:N_TRACKED_SPECIES,INDX);
                      CC%Q(JCC)            = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+1,INDX)
                      CC%MIX_TIME(JCC)     = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+2,INDX)
                      CC%CHI_R(JCC)        = RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+3,INDX)
                      CHEM_SUBIT_TMP       = INT(RESULTS_TO_SEND_ARRAY(N_TRACKED_SPECIES+4,INDX))
-                  ENDIF
+                  ELSE
+                     INDX = CHEM_SEQ_ARR(SEQ)
+                     DZZ                  = CC%ZZ(1:N_TRACKED_SPECIES,JCC)
+                     ZZ_GET               = RESULTS_TO_RECV_ARRAY(1:N_TRACKED_SPECIES,INDX);
+                     CC%Q(JCC)            = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+1,INDX)
+                     CC%MIX_TIME(JCC)     = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+2,INDX)
+                     CC%CHI_R(JCC)        = RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+3,INDX)
+                     CHEM_SUBIT_TMP       = INT(RESULTS_TO_RECV_ARRAY(N_TRACKED_SPECIES+4,INDX))
+                  ENDIF  
                   CALL SET_SPECIES_SOURCE_TERM_CUTCELL(DT, ICC, JCC, ZZ_GET, DZZ, REAC_SOURCE_TERM_TMP, Q_REAC_TMP)
-               ENDIF ! CEHM_ACTIVE
+               ENDIF ! CHEM_ACTIVE
             ENDDO !JCC
          ENDDO !ICC
       ENDIF
    ENDDO
 
-   DEALLOCATE(RESULTS_TO_RECV_ARRAY)
+   DEALLOCATE(RESULTS_TO_RECV_ARRAY, CHEM_SEQ_ARR, IS_HANDLED_BY_CURR_PROC)
 ENDIF
 
 IF (ALLOCATED(RESULTS_TO_SEND_ARRAY)) DEALLOCATE(RESULTS_TO_SEND_ARRAY)
