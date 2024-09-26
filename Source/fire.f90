@@ -294,6 +294,7 @@ ELSE DO_CHEM_LOAD_BALANCE_IF
       MESH_LOOP_SERIAL : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          CALL POINT_TO_MESH(NM)
          ! Call chemistry on chemically active cells
+         !$OMP DO PRIVATE(I, J, K, ZZ_GET, PRES, DZZ, STOP_STATUS, CHEM_SUBIT_TMP, REAC_SOURCE_TERM_TMP, Q_REAC_TMP) SCHEDULE(GUIDED)
          DO K=1,KBAR
             DO J=1,JBAR
                DO I=1,IBAR
@@ -316,9 +317,10 @@ ELSE DO_CHEM_LOAD_BALANCE_IF
                ENDDO !I
             ENDDO  !J
          ENDDO ! K
-
+         !$OMP END DO
          ! Call chemistry on chemically active cut-cells
          IF (CC_IBM) THEN
+            !$OMP DO PRIVATE(ICC, JCC, CC, ZZ_GET, PRES, DZZ, STOP_STATUS, CHEM_SUBIT_TMP, REAC_SOURCE_TERM_TMP, Q_REAC_TMP) SCHEDULE(GUIDED)
             DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
                CC => CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
                DO JCC=1,CC%NCELL
@@ -340,6 +342,7 @@ ELSE DO_CHEM_LOAD_BALANCE_IF
                   ENDIF ! CEHM_ACTIVE
                ENDDO !JCC
             ENDDO !ICC
+            !$OMP END DO
          ENDIF
       ENDDO  MESH_LOOP_SERIAL
    ENDIF !NCHEM_ACTIVE_CELLS >0
@@ -1732,7 +1735,9 @@ WHERE(CC<0._EB) CC=0._EB
 #ifdef WITH_SUNDIALS
 TNOW2 = CURRENT_TIME()
 CALL  CVODE_SERIAL(CC,TMP_IN,PRES_IN, TCUR,TEND, GLOBAL_ODE_REL_ERROR, ATOL)
+!$OMP CRITICAL
 T_CHEM_ODE = T_CHEM_ODE+CURRENT_TIME()-TNOW2
+!$OMP END CRITICAL
 ! Avoid unused build error
 XXX = 1._EB
 #else
