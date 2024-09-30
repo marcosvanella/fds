@@ -293,8 +293,10 @@ ELSE DO_CHEM_LOAD_BALANCE_IF
       ! Serial chemistry:
       MESH_LOOP_SERIAL : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          CALL POINT_TO_MESH(NM)
+         !$OMP PARALLEL
          ! Call chemistry on chemically active cells
-         !$OMP DO PRIVATE(I, J, K, ZZ_GET, PRES, DZZ, STOP_STATUS, CHEM_SUBIT_TMP, REAC_SOURCE_TERM_TMP, Q_REAC_TMP) SCHEDULE(GUIDED)
+         !$OMP DO PRIVATE(ZZ_GET, PRES, DZZ, STOP_STATUS, CHEM_SUBIT_TMP, REAC_SOURCE_TERM_TMP, Q_REAC_TMP, INDX) &
+         !$OMP SCHEDULE(DYNAMIC)
          DO K=1,KBAR
             DO J=1,JBAR
                DO I=1,IBAR
@@ -310,7 +312,7 @@ ELSE DO_CHEM_LOAD_BALANCE_IF
                                             LES_FILTER_WIDTH(I,J,K),DX(I)*DY(J)*DZ(K),IIC=I,JJC=J,KKC=K )
                      !***************************************************************************************
 
-                     IF (STOP_STATUS/=NO_STOP) RETURN
+                     !IF (STOP_STATUS/=NO_STOP) RETURN
                      IF (OUTPUT_CHEM_IT) CHEM_SUBIT(I,J,K) = CHEM_SUBIT_TMP
                      CALL SET_SPECIES_SOURCE_TERM_CELL(DT, I, J, K, ZZ_GET, DZZ, REAC_SOURCE_TERM_TMP, Q_REAC_TMP)
                   ENDIF !CHEM_ACTIVE
@@ -320,7 +322,8 @@ ELSE DO_CHEM_LOAD_BALANCE_IF
          !$OMP END DO
          ! Call chemistry on chemically active cut-cells
          IF (CC_IBM) THEN
-            !$OMP DO PRIVATE(ICC, JCC, CC, ZZ_GET, PRES, DZZ, STOP_STATUS, CHEM_SUBIT_TMP, REAC_SOURCE_TERM_TMP, Q_REAC_TMP) SCHEDULE(GUIDED)
+            !$OMP DO PRIVATE(JCC,I, J, K,  CC, ZZ_GET, PRES, DZZ, STOP_STATUS, CHEM_SUBIT_TMP, REAC_SOURCE_TERM_TMP, Q_REAC_TMP) &
+            !$OMP SCHEDULE(DYNAMIC)
             DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
                CC => CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
                DO JCC=1,CC%NCELL
@@ -344,6 +347,7 @@ ELSE DO_CHEM_LOAD_BALANCE_IF
             ENDDO !ICC
             !$OMP END DO
          ENDIF
+         !$OMP END PARALLEL
       ENDDO  MESH_LOOP_SERIAL
    ENDIF !NCHEM_ACTIVE_CELLS >0
 ENDIF DO_CHEM_LOAD_BALANCE_IF
