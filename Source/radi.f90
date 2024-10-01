@@ -2788,8 +2788,8 @@ USE MIEV
 USE RADCAL_CALC
 USE WSGG_ARRAYS
 REAL(EB) :: THETAUP,THETALOW,PHIUP,PHILOW,F_THETA,PLANCK_C2,KSI,LT,RCRHO,YY,YY2,BBF,AP0,AMEAN,RADIANCE,TRANSMISSIVITY,X_N2,&
-            THETA,PHI
-INTEGER  :: N,I,J,K,IPC,IZERO,NN,NI,II,JJ,IIM,JJM,IBND,NS,NS2,NRA,NSB,RADCAL_TEMP(16)=0,RCT_SKIP=-1,OR_IN,I1,I2,IO
+            THETA,PHI,DLO
+INTEGER  :: N,I,J,K,IPC,IZERO,NN,NI,II,JJ,IIM,JJM,IBND,NS,NS2,NRA,NSB,RADCAL_TEMP(16)=0,RCT_SKIP=-1,IO
 TYPE (LAGRANGIAN_PARTICLE_CLASS_TYPE), POINTER :: LPC
 REAL(EB), ALLOCATABLE, DIMENSION(:) :: COSINE_ARRAY
 TYPE (RAD_FILE_TYPE), POINTER :: RF
@@ -3389,44 +3389,28 @@ DO IPC=1,N_LAGRANGIAN_CLASSES
 ENDDO
 
 ! Determine angle factors for Lagrangian particles with ORIENTATION
+! COSINE_ARRAY holds the cosines of the angles formed by the orientation vector and the radiation directions.
+! DLO is the integral of the orientation vector dotted with the directional solid angle of the radiation directions.
+! VIEW_ANGLE_FACTOR is the reduction of the radiation due to a view angle less than 180, like a narrow field of view radiometer.
 
 IF (SOLID_PARTICLES) THEN
-   PARTICLE_CLASS_LOOP: DO IPC=1,N_LAGRANGIAN_CLASSES
-      LPC => LAGRANGIAN_PARTICLE_CLASS(IPC)
-      IF (LPC%N_ORIENTATION==0) CYCLE PARTICLE_CLASS_LOOP
-      I1 = LPC%ORIENTATION_INDEX
-      I2 = LPC%ORIENTATION_INDEX+LPC%N_ORIENTATION-1
-      ALLOCATE(COSINE_ARRAY(I1:I2))
-      ANGLE_LOOP: DO N=1,NRA
-         ORIENTATION_LOOP: DO OR_IN=I1,I2
-            COSINE_ARRAY(OR_IN) = ORIENTATION_VECTOR(1,OR_IN)*DLX(N) + &
-                                  ORIENTATION_VECTOR(2,OR_IN)*DLY(N) + &
-                                  ORIENTATION_VECTOR(3,OR_IN)*DLZ(N)
-         ENDDO ORIENTATION_LOOP
-      ENDDO ANGLE_LOOP
-      DEALLOCATE(COSINE_ARRAY)
-   ENDDO PARTICLE_CLASS_LOOP
-
    ALLOCATE(COSINE_ARRAY(1:NRA))
    ALLOCATE(NEAREST_RADIATION_ANGLE(N_ORIENTATION_VECTOR))
-   ALLOCATE(VIEW_ANGLE_AREA(N_ORIENTATION_VECTOR))
-   VIEW_ANGLE_AREA = 0._EB
+   ALLOCATE(VIEW_ANGLE_FACTOR(N_ORIENTATION_VECTOR))
+   VIEW_ANGLE_FACTOR = 0._EB
    DO IO=1,N_ORIENTATION_VECTOR
+      DLO = 0._EB
       DO N=1,NRA
-         COSINE_ARRAY(N) = ORIENTATION_VECTOR(1,IO)*DLX(N) + &
-                           ORIENTATION_VECTOR(2,IO)*DLY(N) + &
-                           ORIENTATION_VECTOR(3,IO)*DLZ(N)
-         IF (-(ORIENTATION_VECTOR(1,IO)*DLANG(1,N) + &
-               ORIENTATION_VECTOR(2,IO)*DLANG(2,N) + &
-               ORIENTATION_VECTOR(3,IO)*DLANG(3,N)) > ORIENTATION_VIEW_ANGLE(IO)) &
-            VIEW_ANGLE_AREA(IO) = VIEW_ANGLE_AREA(IO) - COSINE_ARRAY(N)
+         COSINE_ARRAY(N) = ORIENTATION_VECTOR(1,IO)*DLANG(1,N) + &
+                           ORIENTATION_VECTOR(2,IO)*DLANG(2,N) + &
+                           ORIENTATION_VECTOR(3,IO)*DLANG(3,N)
+         IF (-COSINE_ARRAY(N) > COS_HALF_VIEW_ANGLE(IO)) &
+            DLO = DLO - (ORIENTATION_VECTOR(1,IO)*DLX(N) + ORIENTATION_VECTOR(2,IO)*DLY(N) + ORIENTATION_VECTOR(3,IO)*DLZ(N))
       ENDDO
       NEAREST_RADIATION_ANGLE(IO) = MINLOC(COSINE_ARRAY,DIM=1)
-      VIEW_ANGLE_AREA(IO) = PI/VIEW_ANGLE_AREA(IO)
+      VIEW_ANGLE_FACTOR(IO) = PI/DLO
    ENDDO
-
    DEALLOCATE(COSINE_ARRAY)
-
 ENDIF
 
 ! Allocate array needed by angle-specific RADF output files
@@ -3483,7 +3467,7 @@ USE COMPLEX_GEOMETRY, ONLY : CC_CGSC,CC_SOLID
 USE PHYSICAL_FUNCTIONS, ONLY : GET_VOLUME_FRACTION, GET_MASS_FRACTION
 REAL(EB) :: RAP, AX, AXU, AXD, AY, AYU, AYD, AZ, AZU, AZD, VC, RU, RD, RP, AFD, &
             ILXU, ILYU, ILZU, QVAL, BBF, BBFA, NCSDROP, RSA_RAT,EFLUX,SOOT_MASS_FRACTION, &
-            AIU_SUM,A_SUM,VOL,VC1,AY1,AZ1,COS_DL,AILFU, &
+            AIU_SUM,A_SUM,VOL,VC1,AY1,AZ1,DLO,COS_DLO,AILFU, &
             RAD_Q_SUM_PARTIAL,KFST4_SUM_PARTIAL,ALPHA_CC
 
 INTEGER  :: N,NN,IIG,JJG,KKG,I,J,K,IW,ICF,II,JJ,KK,IOR,IC,IWUP,IWDOWN, &
@@ -3567,7 +3551,7 @@ IF (INIT_HRRPUV .AND. RAD_ITER>1) CALL ADD_VOLUMETRIC_HEAT_SOURCE(2)
 
 IF (WIDE_BAND_MODEL .OR. WSGG_MODEL) THEN
    QR = 0._EB
-   IF (NLP>0 .AND. N_LP_ARRAY_INDICES>0) QR_W = 0._EB
+   IF (N_LP_ARRAY_INDICES>0 .AND. PARTICLES_EXISTED) QR_W = 0._EB
 ENDIF
 
 ! Zero out radiation flux to wall, particles, facets if the intensity is to be updated
@@ -3624,7 +3608,7 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
 
    ! Generate water absorption and scattering coefficients
 
-   IF_PARTICLES_INCLUDED: IF (NLP>0 .AND. N_LP_ARRAY_INDICES>0) THEN
+   IF_PARTICLES_INCLUDED: IF (N_LP_ARRAY_INDICES>0) THEN
 
       IF (NUMBER_SPECTRAL_BANDS==1) THEN
          BBF = 1._EB
@@ -3639,27 +3623,28 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
       ELSE
          BBF = BLACKBODY_FRACTION(WL_LOW(IBND),WL_HIGH(IBND),RADTMP)
       ENDIF
-
-      PC_LOOP: DO N=1,N_LAGRANGIAN_CLASSES
-         LPC => LAGRANGIAN_PARTICLE_CLASS(N)
-         IF (.NOT.LPC%LIQUID_DROPLET) CYCLE PC_LOOP
-         ARRAY_INDEX = LPC%ARRAY_INDEX
-         IF (ARRAY_INDEX==0) CYCLE PC_LOOP
-         DO K=1,KBAR
-            DO J=1,JBAR
-               DO I=1,IBAR
-                  IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-                  IF (ABS(AVG_DROP_AREA(I,J,K,ARRAY_INDEX))<TWO_EPSILON_EB) CYCLE
-                  NCSDROP = AVG_DROP_AREA(I,J,K,ARRAY_INDEX)
-                  CALL INTERPOLATE1D(LPC%R50,LPC%WQABS(:,IBND),AVG_DROP_RAD(I,J,K,ARRAY_INDEX),QVAL)
-                  KAPPA_PART(I,J,K) = KAPPA_PART(I,J,K) + NCSDROP*QVAL
-                  KFST4_PART(I,J,K) = KFST4_PART(I,J,K)+ BBF*NCSDROP*QVAL*FOUR_SIGMA*AVG_DROP_TMP(I,J,K,ARRAY_INDEX)**4
-                  CALL INTERPOLATE1D(LPC%R50,LPC%WQSCA(:,IBND),AVG_DROP_RAD(I,J,K,ARRAY_INDEX),QVAL)
-                  SCAEFF(I,J,K) = SCAEFF(I,J,K) + NCSDROP*QVAL
+      IF (LIQUID_DROPLETS .AND. PARTICLES_EXISTED) THEN
+         PC_LOOP: DO N=1,N_LAGRANGIAN_CLASSES
+            LPC => LAGRANGIAN_PARTICLE_CLASS(N)
+            IF (.NOT.LPC%LIQUID_DROPLET) CYCLE PC_LOOP
+            ARRAY_INDEX = LPC%ARRAY_INDEX
+            IF (ARRAY_INDEX==0) CYCLE PC_LOOP
+            DO K=1,KBAR
+               DO J=1,JBAR
+                  DO I=1,IBAR
+                     IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+                     IF (ABS(AVG_DROP_AREA(I,J,K,ARRAY_INDEX))<TWO_EPSILON_EB) CYCLE
+                     NCSDROP = AVG_DROP_AREA(I,J,K,ARRAY_INDEX)
+                     CALL INTERPOLATE1D(LPC%R50,LPC%WQABS(:,IBND),AVG_DROP_RAD(I,J,K,ARRAY_INDEX),QVAL)
+                     KAPPA_PART(I,J,K) = KAPPA_PART(I,J,K) + NCSDROP*QVAL
+                     KFST4_PART(I,J,K) = KFST4_PART(I,J,K)+ BBF*NCSDROP*QVAL*FOUR_SIGMA*AVG_DROP_TMP(I,J,K,ARRAY_INDEX)**4
+                     CALL INTERPOLATE1D(LPC%R50,LPC%WQSCA(:,IBND),AVG_DROP_RAD(I,J,K,ARRAY_INDEX),QVAL)
+                     SCAEFF(I,J,K) = SCAEFF(I,J,K) + NCSDROP*QVAL
+                  ENDDO
                ENDDO
             ENDDO
-         ENDDO
-      ENDDO PC_LOOP
+         ENDDO PC_LOOP
+      ENDIF
 
    ENDIF IF_PARTICLES_INCLUDED
 
@@ -4402,15 +4387,17 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                ENDDO OTHER_WALL_LOOP
             ENDDO INTERPOLATION_LOOP
 
-            ! Compute projected intensity on particles
+            ! Compute projected intensity on particles with a specified ORIENTATION
 
-            IF (SOLID_PARTICLES) THEN
+            IF (ORIENTED_PARTICLES) THEN
                PARTICLE_RADIATION_LOOP: DO IP=1,NLP
                   LP => LAGRANGIAN_PARTICLE(IP)
                   LPC => LAGRANGIAN_PARTICLE_CLASS(LP%CLASS_INDEX)
+                  IF (LPC%N_ORIENTATION==0) CYCLE PARTICLE_RADIATION_LOOP
                   BC => BOUNDARY_COORD(LP%BC_INDEX)
-                  IF (LP%INITIALIZATION_INDEX > 0) THEN
-                     IN => INITIALIZATION(LP%INITIALIZATION_INDEX)
+                  TEMP_ORIENTATION(1:3) = ORIENTATION_VECTOR(1:3,LP%ORIENTATION_INDEX)
+                  IF (LP%INIT_INDEX > 0) THEN
+                     IN => INITIALIZATION(LP%INIT_INDEX)
                      IF (ANY(IN%ORIENTATION_RAMP_INDEX > 0)) THEN
                         TEMP_ORIENTATION(1) = EVALUATE_RAMP(T,IN%ORIENTATION_RAMP_INDEX(1))
                         TEMP_ORIENTATION(2) = EVALUATE_RAMP(T,IN%ORIENTATION_RAMP_INDEX(2))
@@ -4418,44 +4405,21 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                         TEMP_ORIENTATION = TEMP_ORIENTATION / &
                                            (SQRT(TEMP_ORIENTATION(1)**2+TEMP_ORIENTATION(2)**2+TEMP_ORIENTATION(3)**2) &
                                            +TWO_EPSILON_EB)
-                        COS_DL = -DOT_PRODUCT(TEMP_ORIENTATION(1:3),DLANG(1:3,N))
-                        IF (COS_DL>ORIENTATION_VIEW_ANGLE(LP%ORIENTATION_INDEX)) THEN
-                           COS_DL = -(TEMP_ORIENTATION(1)*DLX(N) + &
-                                      TEMP_ORIENTATION(2)*DLY(N) + &
-                                      TEMP_ORIENTATION(3)*DLZ(N))
-                           BR => BOUNDARY_RADIA(LP%BR_INDEX)
-                           IF (LPC%MASSLESS_TARGET) THEN
-                              BR%BAND(IBND)%ILW(N) = COS_DL * IL(BC%IIG,BC%JJG,BC%KKG) * VIEW_ANGLE_AREA(LP%ORIENTATION_INDEX)
-                              IF (N==NEAREST_RADIATION_ANGLE(LP%ORIENTATION_INDEX)) &
-                                 BR%IL(IBND) = IL(BC%IIG,BC%JJG,BC%KKG)
-                           ELSE
-                              ! IL_UP does not account for the absorption of radiation within the cell occupied by the particle
-                              BR%BAND(IBND)%ILW(N) = COS_DL * IL_UP(BC%IIG,BC%JJG,BC%KKG) * VIEW_ANGLE_AREA(LP%ORIENTATION_INDEX)
-                           ENDIF
-                        ENDIF
-                        CYCLE PARTICLE_RADIATION_LOOP
                      ENDIF
                   ENDIF
-                  SELECT CASE(LPC%N_ORIENTATION)
-                     CASE(0)
-                        CYCLE PARTICLE_RADIATION_LOOP
-                     CASE(1)
-                        COS_DL = -DOT_PRODUCT(ORIENTATION_VECTOR(1:3,LP%ORIENTATION_INDEX),DLANG(1:3,N))
-                        IF (COS_DL>ORIENTATION_VIEW_ANGLE(LP%ORIENTATION_INDEX)) THEN
-                           COS_DL = -(ORIENTATION_VECTOR(1,LP%ORIENTATION_INDEX)*DLX(N) + &
-                                      ORIENTATION_VECTOR(2,LP%ORIENTATION_INDEX)*DLY(N) + &
-                                      ORIENTATION_VECTOR(3,LP%ORIENTATION_INDEX)*DLZ(N))
-                           BR => BOUNDARY_RADIA(LP%BR_INDEX)
-                           IF (LPC%MASSLESS_TARGET) THEN
-                              BR%BAND(IBND)%ILW(N) = COS_DL * IL(BC%IIG,BC%JJG,BC%KKG) * VIEW_ANGLE_AREA(LP%ORIENTATION_INDEX)
-                              IF (N==NEAREST_RADIATION_ANGLE(LP%ORIENTATION_INDEX)) &
-                                 BR%IL(IBND) = IL(BC%IIG,BC%JJG,BC%KKG)
-                           ELSE
-                              ! IL_UP does not account for the absorption of radiation within the cell occupied by the particle
-                              BR%BAND(IBND)%ILW(N) = COS_DL * IL_UP(BC%IIG,BC%JJG,BC%KKG) * VIEW_ANGLE_AREA(LP%ORIENTATION_INDEX)
-                           ENDIF
-                        ENDIF
-                  END SELECT
+                  COS_DLO = -DOT_PRODUCT(TEMP_ORIENTATION(1:3),DLANG(1:3,N))
+                  IF (COS_DLO > COS_HALF_VIEW_ANGLE(LP%ORIENTATION_INDEX)) THEN
+                     DLO = -(TEMP_ORIENTATION(1)*DLX(N) + TEMP_ORIENTATION(2)*DLY(N) + TEMP_ORIENTATION(3)*DLZ(N))
+                     BR => BOUNDARY_RADIA(LP%BR_INDEX)
+                     IF (LPC%MASSLESS_TARGET) THEN
+                        BR%BAND(IBND)%ILW(N) = DLO * IL(BC%IIG,BC%JJG,BC%KKG) * VIEW_ANGLE_FACTOR(LP%ORIENTATION_INDEX)
+                        IF (N==NEAREST_RADIATION_ANGLE(LP%ORIENTATION_INDEX)) &
+                           BR%IL(IBND) = IL(BC%IIG,BC%JJG,BC%KKG)
+                     ELSE
+                        ! IL_UP does not account for the absorption of radiation within the cell occupied by the particle
+                        BR%BAND(IBND)%ILW(N) = DLO * IL_UP(BC%IIG,BC%JJG,BC%KKG) * VIEW_ANGLE_FACTOR(LP%ORIENTATION_INDEX)
+                     ENDIF
+                  ENDIF
                ENDDO PARTICLE_RADIATION_LOOP
             ENDIF
 
@@ -4519,9 +4483,7 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
 
    IF (WIDE_BAND_MODEL .OR. WSGG_MODEL) THEN
       QR = QR + KAPPA_GAS*UIID(:,:,:,IBND)-KFST4_GAS
-      IF (NLP>0 .AND. N_LP_ARRAY_INDICES>0) THEN
-         QR_W = QR_W + KAPPA_PART*UIID(:,:,:,IBND) - KFST4_PART
-      ENDIF
+      IF (N_LP_ARRAY_INDICES>0 .AND. PARTICLES_EXISTED) QR_W = QR_W + KAPPA_PART*UIID(:,:,:,IBND) - KFST4_PART
    ENDIF
 
 ENDDO BAND_LOOP
@@ -4550,7 +4512,7 @@ ENDIF
 
 IF (.NOT. (WIDE_BAND_MODEL .OR. WSGG_MODEL)) THEN
    QR = KAPPA_GAS*UII - KFST4_GAS
-   IF (NLP>0 .AND. N_LP_ARRAY_INDICES>0) QR_W = QR_W + KAPPA_PART*UII - KFST4_PART
+   IF (N_LP_ARRAY_INDICES>0) QR_W = QR_W + KAPPA_PART*UII - KFST4_PART
 ENDIF
 
 ! Calculate the incoming radiative flux onto the solid particles
