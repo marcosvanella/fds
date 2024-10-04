@@ -1215,7 +1215,7 @@ TOTAL_OR_PER_CELL: IF (IN%N_PARTICLES > 0) THEN
       LP%DX = DX(II)
       LP%DY = DY(JJ)
       LP%DZ = DZ(KK)
-      LP%INITIALIZATION_INDEX = INIT_INDEX
+      LP%INIT_INDEX = INIT_INDEX
 
       ! Initialize particle properties
 
@@ -1399,7 +1399,6 @@ IF (N_INSERT>0) THEN
          LP%PWT = LP%PWT*PWT0
       ENDIF
       IF (ANY(IN%PATH_RAMP_INDEX>0)) LP%PATH_PARTICLE=.TRUE.
-      LP%INIT_INDEX = INIT_INDEX
    ENDDO
 
 ENDIF
@@ -3552,18 +3551,21 @@ REAL(EB) :: TNOW
 TNOW=CURRENT_TIME()
 CALL POINT_TO_MESH(NM)
 
-IF (MESHES(NM)%NLP==0) THEN
-   IF (N_LP_ARRAY_INDICES > 0) CALL PARTICLE_RUNNING_AVERAGES
+IF (NLP > 0) PARTICLES_EXISTED = .TRUE.
+
+IF (.NOT. PARTICLES_EXISTED .OR. ((.NOT. LIQUID_DROPLETS) .AND. (.NOT. SOLID_PARTICLES))) THEN
+   ! No particles ever existed in the mesh or only MASSLESS defined, then there is nothing to do.
    T_USED(8)=T_USED(8)+CURRENT_TIME()-TNOW
-   RETURN
-ELSE
-   ALLOCATE(PART_WARNING(NLP))
-   PART_WARNING(NLP)=0
+   RETURN   
 ENDIF
 
-! Working arrays
+IF (LIQUID_DROPLETS) THEN
 
-IF (N_LP_ARRAY_INDICES>0) THEN
+   ALLOCATE(PART_WARNING(NLP))
+   PART_WARNING=0
+
+   ! Working arrays
+
    MVAP_TOT => WORK7
    MVAP_TOT = 0._EB
    DO IW = 1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
@@ -3578,19 +3580,18 @@ IF (N_LP_ARRAY_INDICES>0) THEN
       B2 => BOUNDARY_PROP2(CFA%B2_INDEX)
       B2%WORK1 = B1%TMP_F
    ENDDO
-ENDIF
-
-IF (ANY(LAGRANGIAN_PARTICLE_CLASS(:)%LIQUID_DROPLET)) THEN
+   
    RHO_INTERIM => WORK1 ; RHO_INTERIM = RHO
    TMP_INTERIM => WORK2 ; TMP_INTERIM = TMP
    ZZ_INTERIM  => SCALAR_WORK1 ; ZZ_INTERIM = ZZ
+
 ENDIF
 
 ! Keep a running average of surface mass and cooling
 
 DO N_LPC=1,N_LAGRANGIAN_CLASSES
    LPC => LAGRANGIAN_PARTICLE_CLASS(N_LPC)
-   IF (LPC%ARRAY_INDEX>0) THEN
+   IF (LPC%ARRAY_INDEX > 0) THEN
       IF (LPC%LIQUID_DROPLET) THEN
          DO IW = 1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
             WC => WALL(IW)
@@ -3617,6 +3618,14 @@ DO N_LPC=1,N_LAGRANGIAN_CLASSES
       ENDDO
    ENDIF
 ENDDO
+
+IF (.NOT. LIQUID_DROPLETS .AND. SOLID_PARTICLES) THEN
+   ! If only solid particles, then no evaporation. Just update averages and remove burned away particles.
+   CALL PARTICLE_RUNNING_AVERAGES
+   CALL REMOVE_PARTICLES(T,NM)
+   T_USED(8)=T_USED(8)+CURRENT_TIME()-TNOW
+   RETURN
+ENDIF
 
 ! Loop over all types of evaporative species
 
@@ -4156,7 +4165,16 @@ SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
                CALL GET_TEMPERATURE(TMP_G_NEW,H_NEW/M_GAS_NEW,ZZ_GET2)
                IF (TMP_G_NEW < 0._EB) THEN
                   DT_SUBSTEP = DT_SUBSTEP * 0.5_EB
-                  CYCLE TIME_ITERATION_LOOP
+                  IF (DT_SUBSTEP <= 0.00001_EB*DT) THEN
+                     DT_SUBSTEP = DT_SUBSTEP * 2.0_EB
+                     TMP_G_NEW = 1._EB
+                     IF (.NOT. BTEST(PART_WARNING(IP),3)) THEN
+                        WRITE(LU_ERR,'(A,I0,A,I0,A,I0)') 'WARNING TMP_G_N < 0. Mesh: ',NM,'Particle: ',IP,' Tag: ',LP%TAG
+                        PART_WARNING(IP) = IBSET(PART_WARNING(IP),3)
+                     ENDIF
+                  ELSE
+                     CYCLE TIME_ITERATION_LOOP
+                  ENDIF
                ENDIF
 
                ! Limit gas temperature change
@@ -4165,9 +4183,9 @@ SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
                   DT_SUBSTEP = DT_SUBSTEP * 0.5_EB
                   IF (DT_SUBSTEP <= 0.00001_EB*DT) THEN
                      DT_SUBSTEP = DT_SUBSTEP * 2.0_EB
-                     IF (.NOT. BTEST(PART_WARNING(IP),3)) THEN
-                        WRITE(LU_ERR,'(A,I0,A,I0,A,I0)') 'WARNING Delta TMP_G.Mesh: ',NM,'Particle: ',IP,' Tag: ',LP%TAG
-                        PART_WARNING(IP) = IBSET(PART_WARNING(IP),3)
+                     IF (.NOT. BTEST(PART_WARNING(IP),4)) THEN
+                        WRITE(LU_ERR,'(A,I0,A,I0,A,I0)') 'WARNING Delta TMP_G. Mesh: ',NM,'Particle: ',IP,' Tag: ',LP%TAG
+                        PART_WARNING(IP) = IBSET(PART_WARNING(IP),4)
                      ENDIF
                   ELSE
                      CYCLE TIME_ITERATION_LOOP
@@ -4181,9 +4199,9 @@ SPECIES_LOOP: DO Z_INDEX = 1,N_TRACKED_SPECIES
                   DT_SUBSTEP = DT_SUBSTEP * 0.5_EB
                   IF (DT_SUBSTEP <= 0.00001_EB*DT) THEN
                      DT_SUBSTEP = DT_SUBSTEP * 2.0_EB
-                     IF (.NOT. BTEST(PART_WARNING(IP),4)) THEN
-                        WRITE(LU_ERR,'(A,I0,A,I0,A,I0)') 'WARNING TMP_G_N < TMP_D_N.Mesh: ',NM,'Particle: ',IP,' Tag: ',LP%TAG
-                        PART_WARNING(IP) = IBSET(PART_WARNING(IP),4)
+                     IF (.NOT. BTEST(PART_WARNING(IP),5)) THEN
+                        WRITE(LU_ERR,'(A,I0,A,I0,A,I0)') 'WARNING TMP_G_N < TMP_D_N. Mesh: ',NM,'Particle: ',IP,' Tag: ',LP%TAG
+                        PART_WARNING(IP) = IBSET(PART_WARNING(IP),5)
                      ENDIF
                   ELSE
                      CYCLE TIME_ITERATION_LOOP
@@ -4286,7 +4304,7 @@ DEALLOCATE(PART_WARNING)
 
 ! Sum up various quantities used in running averages
 
-IF (N_LP_ARRAY_INDICES > 0) CALL PARTICLE_RUNNING_AVERAGES
+CALL PARTICLE_RUNNING_AVERAGES
 
 ! Remove PARTICLEs that have completely evaporated
 
