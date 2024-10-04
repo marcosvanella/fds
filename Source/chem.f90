@@ -784,23 +784,22 @@ LOGICAL :: FOUND_NULL
 INTEGER :: J
 
 
-! Print Message
-FOUND_NULL = .FALSE. 
-TEMP_STRING = '' 
-J = 1
-DO WHILE (.NOT. FOUND_NULL)
-    IF (MESSAGE(J) == C_NULL_CHAR) THEN
-        FOUND_NULL = .TRUE.
-    ELSE
-        TEMP_STRING(J:J) = MESSAGE(J)
-        J = J + 1
-    END IF
-END DO
-WRITE(LU_ERR,*) 'CVODE MESSAGE : ', TRIM(TEMP_STRING)
-
-
 IF (DEBUG) THEN
    WRITE(LU_ERR,*) '  CVODE CODE   : ', ERR_CODE
+
+   ! Print Message
+   FOUND_NULL = .FALSE.
+   TEMP_STRING = ''
+   J = 1
+   DO WHILE (.NOT. FOUND_NULL)
+       IF (MESSAGE(J) == C_NULL_CHAR) THEN
+           FOUND_NULL = .TRUE.
+       ELSE
+           TEMP_STRING(J:J) = MESSAGE(J)
+           J = J + 1
+       END IF
+   END DO
+   WRITE(LU_ERR,*) 'CVODE MESSAGE : ', TRIM(TEMP_STRING)
 
    ! Print MOD_NAME
    FOUND_NULL = .FALSE.
