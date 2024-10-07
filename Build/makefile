@@ -153,6 +153,7 @@ radi.o: FFLAGS += $(FOPENMPFLAGS)
 wall.o: FFLAGS += $(FOPENMPFLAGS)
 main.o: FFLAGS += $(FOPENMPFLAGS)
 fire.o: FFLAGS += $(FOPENMPFLAGS)
+chem.o: FFLAGS += $(FOPENMPFLAGS)
 
 divg.obj: FFLAGS += $(FOPENMPFLAGS)
 func.obj: FFLAGS += $(FOPENMPFLAGS)
@@ -164,6 +165,7 @@ radi.obj: FFLAGS += $(FOPENMPFLAGS)
 wall.obj: FFLAGS += $(FOPENMPFLAGS)
 main.obj: FFLAGS += $(FOPENMPFLAGS)
 fire.obj: FFLAGS += $(FOPENMPFLAGS)
+chem.obj: FFLAGS += $(FOPENMPFLAGS)
 
 # Windows Intel Fortran Compiler and Intel MPI
 #*** Note: the script, Build\Scripts\setup_intel_compilers.bat, must be run before running make with this target
