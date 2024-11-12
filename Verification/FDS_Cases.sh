@@ -1,6 +1,9 @@
 #!/bin/bash
 
 $QFDS -p 4 -d Adaptive_Mesh_Refinement random_meshes.fds
+# $QFDS -p 2 -d Adaptive_Mesh_Refinement ns2d_16_emb_1to1_refinement.fds
+# $QFDS -p 2 -d Adaptive_Mesh_Refinement ns2d_16_emb_1to2_refinement.fds
+# $QFDS -p 13 -d Adaptive_Mesh_Refinement ns2d_16_int_1to2_refinement.fds
 
 $QFDS -d Aerosols aerosol_agglomeration.fds
 $QFDS -d Aerosols aerosol_agglomeration_2.fds
@@ -48,6 +51,13 @@ $QFDS -d Chemistry ign_delay_Ethylene_TianfengLu_T1100K_Phi1p0.fds
 $QFDS -d Chemistry ign_delay_Propane_USC_T1100K_Phi1p0.fds
 $QFDS -d Chemistry ign_delay_Propane_Z66_T1100K_Phi1p0.fds
 $QFDS -d Chemistry ign_delay_nHeptane_Chalmers_T1100K_Phi1p0.fds
+
+$QFDS -p 24 -d Chemistry load_bal_methane_smooke_serial.fds
+$QFDS -p 24 -d Chemistry load_bal_methane_smooke_parallel.fds
+$QFDS -p 6  -d Chemistry load_bal_propane_2step_arrhenius_serial.fds
+$QFDS -p 6  -d Chemistry load_bal_propane_2step_arrhenius_parallel.fds
+$QFDS -p 6  -d Chemistry load_bal_methane_2step_fast_serial.fds
+$QFDS -p 6  -d Chemistry load_bal_methane_2step_fast_parallel.fds
 
 $QFDS -d Complex_Geometry geom_channel.fds
 $QFDS -d Complex_Geometry geom_channel2.fds
@@ -156,6 +166,7 @@ $QFDS -d Controls hrr_freeze.fds
 $QFDS -d Controls rms_cov_corr.fds
 $QFDS -d Controls rms_example.fds
 $QFDS -d Controls special_time_ramps.fds
+$QFDS -p 4 -d Controls spreading_fire.fds
 
 $QFDS -d Detectors aspiration_detector.fds
 $QFDS -p 8 -d Detectors beam_detector.fds
@@ -377,11 +388,16 @@ $QFDS -d Pressure_Effects obst_coarse_fine_interface.fds
 
 $QFDS -d Pressure_Solver dancing_eddies_1mesh.fds
 $QFDS -d Pressure_Solver opening_ulmat.fds
+$QFDS -p 5 -d Pressure_Solver dancing_eddies_embed.fds
+$QFDS -p 4 -d Pressure_Solver dancing_eddies_ulmat.fds
+$QFDS -p 4 -d Pressure_Solver dancing_eddies_ulmat_hypre.fds
 $QFDS -p 4 -d Pressure_Solver dancing_eddies_uglmat.fds
 $QFDS -p 4 -d Pressure_Solver dancing_eddies_tight.fds
 $QFDS -p 4 -d Pressure_Solver dancing_eddies_tight_no_precon.fds
 $QFDS -p 4 -d Pressure_Solver dancing_eddies_default.fds
 $QFDS -p 8 -d Pressure_Solver duct_flow.fds
+$QFDS -p 8 -d Pressure_Solver duct_flow_ulmat.fds
+$QFDS -p 8 -d Pressure_Solver duct_flow_ulmat_hypre.fds
 $QFDS -p 8 -d Pressure_Solver duct_flow_uglmat.fds
 $QFDS -p 5 -d Pressure_Solver hallways.fds
 $QFDS -p 8 -d Pressure_Solver tunnel_demo.fds
@@ -393,6 +409,7 @@ $QFDS -p 8 -d Pressure_Solver pressure_iteration3d_uglmat.fds
 $QFDS -p 16 -d Pressure_Solver random_obstructions_fft.fds
 $QFDS -p 4 -d Pressure_Solver stairwell.fds
 $QFDS -p 2 -d Pressure_Solver ulmat_2zone.fds
+$QFDS -p 4 -d Pressure_Solver obst_activation_default.fds
 $QFDS -p 4 -d Pressure_Solver obst_activation_ulmat.fds
 
 $QFDS -d Pyrolysis cable_11_insulation_mcc.fds
@@ -818,6 +835,16 @@ $QFDS -d WUI Needle_TGA_E.fds
 $QFDS -d WUI Needle_TGA_F.fds
 $QFDS -d WUI Needle_TGA_G.fds
 $QFDS -d WUI Needle_TGA_H.fds
+$QFDS -d WUI part_drag_prof_ux.fds
+$QFDS -d WUI part_drag_prof_uy.fds
+$QFDS -d WUI part_drag_prof_uz.fds
+$QFDS -d WUI part_drag_prof_vx.fds
+$QFDS -d WUI part_drag_prof_vy.fds
+$QFDS -d WUI part_drag_prof_vz.fds
+$QFDS -d WUI part_drag_prof_wx.fds
+$QFDS -d WUI part_drag_prof_wy.fds
+$QFDS -d WUI part_drag_prof_wz.fds
+$QFDS -d WUI part_drag_stretched.fds
 $QFDS -d WUI pine_needles.fds
 $QFDS -d WUI radiation_gas-veg_consistency_gas.fds
 $QFDS -d WUI radiation_gas-veg_consistency_veg.fds
