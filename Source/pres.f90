@@ -3118,7 +3118,11 @@ INTEGER :: CGSC=IS_CGSC, UNKH=IS_UNKH, NCVARS=IS_NCVARS
 ! Define CC pointers:
 TYPE(CC_CUTCELL_TYPE), POINTER :: CC
 
-! Pardiso or Sparse cluster solver message level:
+
+! Pardiso or Sparse cluster solver IPARM and message level:
+#ifdef WITH_MKL
+INTEGER, ALLOCATABLE :: IPARM( : )
+#endif
 INTEGER, SAVE :: MSGLVL = 0  ! 0 no messages, 1 print statistical information
 
 ! Factor to drop DY in cylindrical axisymmetric coordinates.
