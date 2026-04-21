@@ -5608,22 +5608,13 @@ SUBROUTINE EXCHANGE_CC_NOADVANCE_INFO
 
 ! -------------------------- GET_CELL_LINK_INFO -----------------------------------
 
-SUBROUTINE GET_CELL_LINK_INFO(NM)
-
-! Small cell linking subroutine in the mesh. Builds linking information for cutcell ICC,JCC:
-! CUT_CELL(ICC)%IJK_LINK(1:KAXIS+2,JCC) of cell linked to, and CUT_CELL(ICC)%LINK_LEV(JCC) level within link tree.
+SUBROUTINE CC_GRID_RESET_LINK_STATE_AND_TAG_SLIVERS(NM)
 
 INTEGER, INTENT(IN) :: NM
 
-! Local Variables:
-INTEGER :: ICC,JCC,ICC2,JCC2,JCC_LNK,I,J,K,I_LNK,J_LNK,K_LNK,IFC,IFC2,IFACE,IFACE2,IFACE3,IBOD,IWSEL,VAL_UNKZ,&
-           LINK_ITER,INGH,JNGH,KNGH,X1AXIS,ILH,INRM(1:3),DUM,LNK_LEV,ULINK_COUNT,LINK_LEV_UP,AX_MIN,AX_OTHERS(2)
-REAL(EB):: AREA,AF,NRML(IAXIS:KAXIS),VAL_CVOL,CCVOL_THRES, XYZCELL(IAXIS:KAXIS,LOW_IND:HIGH_IND),&
-           MINMAX_XYZ_CC(IAXIS:KAXIS,LOW_IND:HIGH_IND),CELL_DELTA(IAXIS:KAXIS)
-LOGICAL :: QUITLINK_FLG,CRTCELL_FLG,MASK(IAXIS:KAXIS),BLOCK_SLIM_IF,SOLID_FACES
-CHARACTER(MESSAGE_LENGTH) :: UNLINKED_FILE
-INTEGER, SAVE :: LU_UNLNK
-LOGICAL, SAVE :: UNLINKED_1ST_CALL=.TRUE.
+INTEGER :: ICC,JCC,I,J,K,DUM,AX_MIN,AX_OTHERS(2)
+REAL(EB) :: XYZCELL(IAXIS:KAXIS,LOW_IND:HIGH_IND),MINMAX_XYZ_CC(IAXIS:KAXIS,LOW_IND:HIGH_IND),CELL_DELTA(IAXIS:KAXIS)
+LOGICAL :: BLOCK_SLIM_IF,SOLID_FACES
 TYPE (MESH_TYPE), POINTER :: M
 TYPE (CC_CUTCELL_TYPE), POINTER :: CC
 
@@ -5632,17 +5623,20 @@ M => MESHES(NM)
 ! Initialize UNKZ, used here to define if cell has been noted in linking hierarchy. Assume CCVAR has been allocated:
 M%CCVAR(:,:,:,CC_UNKZ) = CC_UNDEFINED
 DO ICC=1,M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH
-   CC => M%CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS)
+   CC => M%CUT_CELL(ICC)
+   I = CC%IJK(IAXIS)
+   J = CC%IJK(JAXIS)
+   K = CC%IJK(KAXIS)
    ! Test for sliver trapped cells blocking:
-   XYZCELL(IAXIS,LOW_IND) = XFACE(I-1); XYZCELL(IAXIS,HIGH_IND) = XFACE(I);
-   XYZCELL(JAXIS,LOW_IND) = YFACE(J-1); XYZCELL(JAXIS,HIGH_IND) = YFACE(J);
-   XYZCELL(KAXIS,LOW_IND) = ZFACE(K-1); XYZCELL(KAXIS,HIGH_IND) = ZFACE(K);
+   XYZCELL(IAXIS,LOW_IND) = XFACE(I-1); XYZCELL(IAXIS,HIGH_IND) = XFACE(I)
+   XYZCELL(JAXIS,LOW_IND) = YFACE(J-1); XYZCELL(JAXIS,HIGH_IND) = YFACE(J)
+   XYZCELL(KAXIS,LOW_IND) = ZFACE(K-1); XYZCELL(KAXIS,HIGH_IND) = ZFACE(K)
    MINMAX_XYZ_CC(IAXIS:KAXIS,LOW_IND) =  HUGE(EB)
    MINMAX_XYZ_CC(IAXIS:KAXIS,HIGH_IND)= -HUGE(EB)
    DO JCC=1,CC%NCELL
       ! Get cut-cell bounding box:
       CALL CUT_CELL_BOUNDING_BOX(NM,ICC,JCC,XYZCELL,MINMAX_XYZ_CC)
-      ! Perform Tests:
+      ! Perform tests:
       DO DUM=IAXIS,KAXIS
          CELL_DELTA(DUM) = ABS(MINMAX_XYZ_CC(DUM,HIGH_IND)-MINMAX_XYZ_CC(DUM,LOW_IND))
       ENDDO
@@ -5653,7 +5647,6 @@ DO ICC=1,M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH
       CASE(JAXIS); AX_OTHERS(1:2) = (/ IAXIS, KAXIS /); SOLID_FACES = ALL(M%FCVAR(I,J-1:J,K,CC_FGSC,JAXIS)==CC_SOLID)
       CASE(KAXIS); AX_OTHERS(1:2) = (/ IAXIS, JAXIS /); SOLID_FACES = ALL(M%FCVAR(I,J,K-1:K,CC_FGSC,KAXIS)==CC_SOLID)
       END SELECT
-      ! Perform Test:
       BLOCK_SLIM_IF = (CELL_DELTA(AX_MIN)<10._EB*MIN_LENGTH_FACTOR*CELL_DELTA(AX_OTHERS(1))) .AND. &
                       (CELL_DELTA(AX_MIN)<10._EB*MIN_LENGTH_FACTOR*CELL_DELTA(AX_OTHERS(2)))
       IF(BLOCK_SLIM_IF .AND. SOLID_FACES) CC%NOADVANCE(JCC) = BLOCKED_SMALL_CELL
@@ -5664,22 +5657,34 @@ DO ICC=1,M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH
    ENDDO
 ENDDO
 
+END SUBROUTINE CC_GRID_RESET_LINK_STATE_AND_TAG_SLIVERS
+
+SUBROUTINE CC_GRID_SEED_LINK_UNKZ(NM)
+
+INTEGER, INTENT(IN) :: NM
+
+INTEGER :: ICC,JCC,I,J,K,INGH,JNGH,KNGH
+REAL(EB) :: CCVOL_THRES
+TYPE (MESH_TYPE), POINTER :: M
+
+M => MESHES(NM)
+
 ! Loop on Cartesian cells, number unknowns for cells type CC_CUTCFE and surrounding CC_GASPHASE:
 DO K=0,M%KBP1
    DO J=0,M%JBP1
       DO I=0,M%IBP1
-         IF (  M%CCVAR(I,J,K,CC_CGSC) /= CC_CUTCFE ) CYCLE
-         ! First Add the Cut-Cell
-         ICC  = M%CCVAR(I,J,K,CC_IDCC)
-         IF (ICC <= M%N_CUTCELL_MESH .AND. .NOT. M%CELL(M%CELL_INDEX(I,J,K))%SOLID ) THEN ! Don't number GC cut-cells,
-                                                                                     ! or cutcells inside an OBST.
+         IF (M%CCVAR(I,J,K,CC_CGSC) /= CC_CUTCFE) CYCLE
+         ! First add the cut-cell
+         ICC = M%CCVAR(I,J,K,CC_IDCC)
+         IF (ICC <= M%N_CUTCELL_MESH .AND. .NOT. M%CELL(M%CELL_INDEX(I,J,K))%SOLID) THEN ! Don't number GC cut-cells,
+                                                                                           ! or cutcells inside an OBST.
             CCVOL_THRES = CCVOL_LINK * (M%DX(I)*M%DY(J)*M%DZ(K))
             DO JCC=1,M%CUT_CELL(ICC)%NCELL
-               IF ( M%CUT_CELL(ICC)%NOADVANCE(JCC)>0 ) CYCLE
-               IF ( M%CUT_CELL(ICC)%VOLUME(JCC) > CCVOL_THRES) M%CUT_CELL(ICC)%UNKZ(JCC) = 1
+               IF (M%CUT_CELL(ICC)%NOADVANCE(JCC)>0) CYCLE
+               IF (M%CUT_CELL(ICC)%VOLUME(JCC) > CCVOL_THRES) M%CUT_CELL(ICC)%UNKZ(JCC) = 1
             ENDDO
          ENDIF
-         ! Run over Neighbors: Case 27 cells. Only Internal cells for the mesh in the stencil (I-1:I+1,J-1:J+1,K-1:K+1)
+         ! Run over neighbors: case 27 cells. Only internal cells for the mesh in the stencil (I-1:I+1,J-1:J+1,K-1:K+1)
          ! around Cartesian cell I,J,K of type CC_CUTCFE:
          DO KNGH=K-1,K+1
             IF ( (KNGH < 1) .OR. (KNGH > M%KBAR) ) CYCLE
@@ -5694,10 +5699,67 @@ DO K=0,M%KBP1
                ENDDO
             ENDDO
          ENDDO
-
       ENDDO
    ENDDO
 ENDDO
+
+END SUBROUTINE CC_GRID_SEED_LINK_UNKZ
+
+SUBROUTINE GET_ICC2_JCC2(NM,ICC,IFACE,INXT,JNXT,KNXT,ICC2,JCC2)
+
+INTEGER, INTENT(IN) :: NM,ICC,IFACE,INXT,JNXT,KNXT
+INTEGER, INTENT(OUT):: ICC2, JCC2
+
+INTEGER :: IFC, IFACE2
+TYPE (MESH_TYPE), POINTER :: M
+TYPE(CC_CUTCELL_TYPE), POINTER :: CC2
+
+M => MESHES(NM)
+
+ICC2 = 0
+JCC2 = 0
+ICC2=M%CCVAR(INXT,JNXT,KNXT,CC_IDCC)
+IF (ICC2<=0) RETURN
+CC2 => M%CUT_CELL(ICC2)
+DO JCC2=1,CC2%NCELL
+   ! Loop faces and test:
+   DO IFC=1,CC2%CCELEM(1,JCC2)
+      IFACE2 = CC2%CCELEM(IFC+1,JCC2)
+      ! If face type in face_list is not CC_FTYPE_RCGAS, drop:
+      IF(CC2%FACE_LIST(1,IFACE2) /= CC_FTYPE_RCGAS) CYCLE
+      ! Does X1AXIS match and LOWHIGH are different?
+      IF(CC2%FACE_LIST(3,IFACE2) /= M%CUT_CELL(ICC)%FACE_LIST(3,IFACE)) CYCLE ! X1AXIS is different.
+      IF(ABS(CC2%FACE_LIST(2,IFACE2)  - M%CUT_CELL(ICC)%FACE_LIST(2,IFACE)) < 1) CYCLE ! Same LOWHIGH.
+      ! Found the cut-cell ICC2,JCC2 on the other side of IFACE for cut-cell ICC,JCC.
+      RETURN
+   ENDDO
+ENDDO
+JCC2=0
+RETURN
+END SUBROUTINE GET_ICC2_JCC2
+
+SUBROUTINE GET_CELL_LINK_INFO(NM)
+
+! Small cell linking subroutine in the mesh. Builds linking information for cutcell ICC,JCC:
+! CUT_CELL(ICC)%IJK_LINK(1:KAXIS+2,JCC) of cell linked to, and CUT_CELL(ICC)%LINK_LEV(JCC) level within link tree.
+
+INTEGER, INTENT(IN) :: NM
+
+! Local Variables:
+INTEGER :: ICC,JCC,ICC2,JCC2,JCC_LNK,I,J,K,I_LNK,J_LNK,K_LNK,IFC,IFC2,IFACE,IFACE2,IFACE3,IBOD,IWSEL,VAL_UNKZ,&
+           LINK_ITER,X1AXIS,ILH,INRM(1:3),DUM,LNK_LEV,ULINK_COUNT,LINK_LEV_UP
+REAL(EB):: AREA,AF,NRML(IAXIS:KAXIS),VAL_CVOL,CCVOL_THRES
+LOGICAL :: QUITLINK_FLG,CRTCELL_FLG,MASK(IAXIS:KAXIS)
+CHARACTER(MESSAGE_LENGTH) :: UNLINKED_FILE
+INTEGER, SAVE :: LU_UNLNK
+LOGICAL, SAVE :: UNLINKED_1ST_CALL=.TRUE.
+TYPE (MESH_TYPE), POINTER :: M
+TYPE (CC_CUTCELL_TYPE), POINTER :: CC
+
+M => MESHES(NM)
+
+CALL CC_GRID_RESET_LINK_STATE_AND_TAG_SLIVERS(NM)
+CALL CC_GRID_SEED_LINK_UNKZ(NM)
 
 ! Now link small cells to surrounding cells in the mesh:
 ! NOTE: This scheme links two unknowns local to the mesh, therefore parallel consistency is not maintained.
@@ -5876,7 +5938,7 @@ LINK_LOOP : DO ! Cut-cell linking loop for small cells. -> Algo defined by CCVOL
                      SELECT CASE(X1AXIS)
                      CASE(IAXIS)
                         IF(M%CCVAR(I+ILH,J,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                           CALL GET_ICC2_JCC2(ICC,IFACE,I+ILH,J,K,ICC2,JCC2)
+                           CALL GET_ICC2_JCC2(NM,ICC,IFACE,I+ILH,J,K,ICC2,JCC2)
                            IF(ANY((/ICC2,JCC2/)==0))CYCLE IFC_LOOP_3; IF(M%CUT_CELL(ICC2)%UNKZ(JCC2)<1)CYCLE IFC_LOOP_3
                            IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_3
                            I_LNK = I+ILH; J_LNK = J; K_LNK = K; JCC_LNK = JCC2
@@ -5885,7 +5947,7 @@ LINK_LOOP : DO ! Cut-cell linking loop for small cells. -> Algo defined by CCVOL
                         ENDIF
                      CASE(JAXIS)
                         IF(M%CCVAR(I,J+ILH,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                           CALL GET_ICC2_JCC2(ICC,IFACE,I,J+ILH,K,ICC2,JCC2)
+                           CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J+ILH,K,ICC2,JCC2)
                            IF(ANY((/ICC2,JCC2/)==0))CYCLE IFC_LOOP_3; IF(M%CUT_CELL(ICC2)%UNKZ(JCC2)<1)CYCLE IFC_LOOP_3
                            IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_3
                            I_LNK = I; J_LNK = J+ILH; K_LNK = K; JCC_LNK = JCC2
@@ -5894,7 +5956,7 @@ LINK_LOOP : DO ! Cut-cell linking loop for small cells. -> Algo defined by CCVOL
                         ENDIF
                      CASE(KAXIS)
                         IF(M%CCVAR(I,J,K+ILH,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                           CALL GET_ICC2_JCC2(ICC,IFACE,I,J,K+ILH,ICC2,JCC2)
+                           CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J,K+ILH,ICC2,JCC2)
                            IF(ANY((/ICC2,JCC2/)==0))CYCLE IFC_LOOP_3; IF(M%CUT_CELL(ICC2)%UNKZ(JCC2)<1)CYCLE IFC_LOOP_3
                            IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_3
                            I_LNK = I; J_LNK = J; K_LNK = K+ILH; JCC_LNK = JCC2
@@ -5949,7 +6011,7 @@ LINK_LOOP : DO ! Cut-cell linking loop for small cells. -> Algo defined by CCVOL
                SELECT CASE(X1AXIS)
                CASE(IAXIS)
                   IF(M%CCVAR(I+ILH,J,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                     CALL GET_ICC2_JCC2(ICC,IFACE,I+ILH,J,K,ICC2,JCC2)
+                     CALL GET_ICC2_JCC2(NM,ICC,IFACE,I+ILH,J,K,ICC2,JCC2)
                      IF(ANY((/ ICC2, JCC2 /) == 0)) CYCLE IFC_LOOP_4
                      IF(M%CUT_CELL(ICC2)%VOLUME(JCC2)<VAL_CVOL .OR. M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_4
                      IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_4
@@ -5959,7 +6021,7 @@ LINK_LOOP : DO ! Cut-cell linking loop for small cells. -> Algo defined by CCVOL
                   ENDIF
                CASE(JAXIS)
                   IF(M%CCVAR(I,J+ILH,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                     CALL GET_ICC2_JCC2(ICC,IFACE,I,J+ILH,K,ICC2,JCC2)
+                     CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J+ILH,K,ICC2,JCC2)
                      IF(ANY((/ ICC2, JCC2 /) == 0)) CYCLE IFC_LOOP_4
                      IF(M%CUT_CELL(ICC2)%VOLUME(JCC2)<VAL_CVOL .OR. M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_4
                      IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_4
@@ -5969,7 +6031,7 @@ LINK_LOOP : DO ! Cut-cell linking loop for small cells. -> Algo defined by CCVOL
                   ENDIF
                CASE(KAXIS)
                   IF(M%CCVAR(I,J,K+ILH,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                     CALL GET_ICC2_JCC2(ICC,IFACE,I,J,K+ILH,ICC2,JCC2)
+                     CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J,K+ILH,ICC2,JCC2)
                      IF(ANY((/ ICC2, JCC2 /) == 0)) CYCLE IFC_LOOP_4
                      IF(M%CUT_CELL(ICC2)%VOLUME(JCC2)<VAL_CVOL .OR. M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_4
                      IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_4
@@ -6136,34 +6198,6 @@ DO ICC=1,M%N_CUTCELL_MESH
 ENDDO
 
 RETURN
-
-CONTAINS
-
-SUBROUTINE GET_ICC2_JCC2(ICC,IFACE,INXT,JNXT,KNXT,ICC2,JCC2)
-INTEGER, INTENT(IN) :: ICC,IFACE,INXT,JNXT,KNXT
-INTEGER, INTENT(OUT):: ICC2, JCC2
-
-INTEGER :: IFC, IFACE2
-TYPE(CC_CUTCELL_TYPE), POINTER :: CC2
-ICC2=M%CCVAR(INXT,JNXT,KNXT,CC_IDCC); IF (ICC2<=0) RETURN
-CC2 => M%CUT_CELL(ICC2)
-DO JCC2=1,CC2%NCELL
-   ! Loop faces and test:
-   DO IFC=1,CC2%CCELEM(1,JCC2)
-      IFACE2 = CC2%CCELEM(IFC+1,JCC2)
-      ! If face type in face_list is not CC_FTYPE_RCGAS, drop:
-      IF(CC2%FACE_LIST(1,IFACE2) /= CC_FTYPE_RCGAS) CYCLE
-      ! Does X1AXIS match and LOWHIGH are different?
-      IF(    CC2%FACE_LIST(3,IFACE2) /= M%CUT_CELL(ICC)%FACE_LIST(3,IFACE)) CYCLE ! X1AXIS is different.
-      IF(ABS(CC2%FACE_LIST(2,IFACE2)  - M%CUT_CELL(ICC)%FACE_LIST(2,IFACE)) < 1) CYCLE ! Same LOWHIGH.
-      ! Found the cut-cell ICC2,JCC2 on the other side of IFACE for cut-cell ICC,JCC.
-      RETURN
-   ENDDO
-ENDDO
-JCC2=0
-RETURN
-END SUBROUTINE GET_ICC2_JCC2
-
 
 END SUBROUTINE GET_CELL_LINK_INFO
 
