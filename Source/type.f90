@@ -1538,8 +1538,10 @@ TYPE CC_FACE_TYPE
    ! --- provenance back to legacy faces ---
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: FTYPE       !< (1:N) legacy source kind CC_FTYPE_RCGAS/CFGAS/CFINB/RGGAS.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IRC     !< (1:N) source RC_FACE index for RCGAS; set in GET_GASPHASE_REGRCFACES_DATA.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IREG    !< (1:N) source CC_REGFACE_*_Z index for RGGAS; set in GET_GASPHASE_REGRCFACES_DATA.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_ICF     !< (1:N) source CUT_FACE index for cut-face-based faces, else 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_JCF     !< (1:N) source CUT_FACE polygon for cut-face-based faces, else 0.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IWC         !< (1:N) owner-side WALL index of a wall-bearing face, else 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: X1AXIS      !< (1:N) axis (IAXIS:KAXIS) for Cartesian-aligned faces, else 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK_FACE    !< (IAXIS:KAXIS,1:N) Cartesian face locator for axis faces.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: NBR_IJK     !< (IAXIS:KAXIS,1:N) outside Cartesian cell for FV/structured coupling.
@@ -1603,6 +1605,7 @@ TYPE CC_REGFACEZ_TYPE
    LOGICAL                               ::    DO_HI_IND=.FALSE. !< Defines if fluxes are to be assigned in high side cell.
    INTEGER,  DIMENSION(MAX_DIM)          ::                  IJK !< Location indexes [ I J K ] of X,Y,Z REG face.
    INTEGER                               ::                IWC=0 !< WALL CELL index (if present) in location of REG Face.
+   INTEGER                               ::                 FC=0 !< FV FACE index; 0 if not in FACE inventory.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) ::               NOMICF !< OMESH face info for mesh boundary REG face.
    REAL(EB)                              ::         FN_H_S=0._EB !< Stores components FX_H_S, FY_H_S, FZ_H_S as needed.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::              RHOZZ_U !< Stores computed FX(I,J,K,N)*UU(I,J,K), etc. as needed.
