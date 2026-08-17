@@ -28161,7 +28161,9 @@ IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_SAME_MESH) THEN
 ENDIF
 
 ! Identity: one CV per GCELL; legacy cut/CCVAR owns the numbered IDs.
+! N_MEMBER=0 rows are agglomeration children and must not copy a host UNKH.
 DO ICV=1,FV%CV%N
+   IF (FV%CV%N_MEMBER(ICV) < 1) CYCLE
    IF (FV%CV%CELL_TYPE(ICV) == CC_GCELL_CUT) THEN
       ICC = FV%CV%ICC(ICV); JCC = FV%CV%JCC(ICV)
       FV%CV%UNKH(ICV) = MFV%CUT_CELL(ICC)%UNKH(JCC)

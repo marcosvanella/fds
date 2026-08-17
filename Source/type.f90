@@ -1412,7 +1412,7 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::           XYZCEN !< Cut-cell centroid locations. (IAXIS:KAXIS,1:NCELL)
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::             UNKZ !< Cut-cells unknown number for scalars.
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::               IG !< (1:NCELL) FV GCELL index; 0 if not in GCELL inventory.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)      ::              ICV !< (1:NCELL) owner FV CV index on this mesh; 0 if none/remote.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)      ::              ICV !< (1:NCELL) solver-active owner FV CV on this mesh; 0 if inactive/remote.
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::        NOADVANCE !< Array to define if cut-cell should be blocked. (1:NCELL)
    INTEGER,  ALLOCATABLE, DIMENSION(:,:)    ::     BODTRI_DONOR !< Donor body/triangle for blocked-cell generated inboundary faces. (1:2,1:NCELL)
    INTEGER                                  ::       N_NOMICC=0 !< Number of entries in NOMICC
@@ -1501,7 +1501,7 @@ TYPE CC_CV_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: GCELL_TO_CV    !< (1:NGCELL) owner CV index containing each local GCELL.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_NM    !< (1:N) mesh number that owns the CV row.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_GCELL !< (1:N) identity owner/member GCELL index.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: N_MEMBER    !< (1:N) number of GCELL members in the CV.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: N_MEMBER    !< (1:N) GCELL members; 0 = agglomeration child, skip in CELL_TYPE loops.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_NM   !< (1:2,1:N) diagnostic pairwise member mesh numbers.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_GCELL !< (1:2,1:N) diagnostic pairwise member GCELL indices.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CELL_TYPE   !< (1:N) identity source type, CC_GCELL_CUT or CC_GCELL_REG.

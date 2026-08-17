@@ -8676,13 +8676,14 @@ IF (DO_AGGLOMERATE_CVS) THEN
       IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
       RETURN
    ENDIF
-   IF (GET_CUTCELLS_VERBOSE) THEN
-      CALL CC_GRID_VALIDATE_CV_CONSERVATION
-      IF (STOP_STATUS==SETUP_STOP) THEN
-         CLOSE(LU_SETCC)
-         RETURN
-      ENDIF
-   ENDIF
+ENDIF
+
+! Always. Identity decks used to skip this (it lived inside the agglomeration
+! + verbose gate), so the piece-to-row invariant was never checked on those cases.
+CALL CC_GRID_VALIDATE_CV_CONSERVATION
+IF (STOP_STATUS==SETUP_STOP) THEN
+   IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
+   RETURN
 ENDIF
 
 ! Phase 6: build the finite-volume FACE topology on the frozen CV map (external + intra-CV faces).
@@ -18437,28 +18438,40 @@ END SUBROUTINE CC_GRID_BUILD_IDENTITY_CVS
 
 SUBROUTINE CC_GRID_VALIDATE_CV_CONSERVATION
 ! Post-agglomeration guardrail. Verify the GCELL/CV maps are conservative and form a clean partition.
-! The invariants below are checked across the whole domain, not per mesh:
+! A–D are checked across the whole domain; E is checked per mesh and then reduced:
 !   A. Volume conservation : sum of active-CV volumes == sum of all GCELL volumes.
 !   B. Membership partition : sum of active-CV member counts == total GCELL count (every GCELL belongs to exactly one CV).
 !   C. Per-CV member volume : each locally-resolvable active CV volume == sum of its member GCELL volumes.
 !   D. GCELL vs cut mesh    : cut-GCELL count/volume == the active cut pieces they were built from
 !                             (OBST-hosted pieces are excluded from both sides, as in legacy numbering).
+!   E. Piece-to-row map     : every in-mesh cut piece has a unique identity home that round-trips
+!                             to the same (ICC,JCC); FV%CV%N == GCELL%N (no extra rows).
+!                             A missing home is a hard error (blocked pieces are purged, not tagged).
 ! Detailed results are written only in verbose mode; failures always go to LU_ERR.
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: NM,IG,ICV,ICC,JCC,IERR,MEMBER,MEM_NM,MEM_IG,MAX_GCELL_LOCAL,MAX_GCELL,OWN_NM,OWN_CV
 INTEGER :: N_GCELL,N_MEMBER_SUM,N_CV_ACTIVE,N_CV_INACTIVE,N_CUT_GCELL,N_NOTBLOCKED,N_CV_VOL_MISMATCH
 INTEGER :: N_MEMBER_BAD,N_MAP_BAD
+INTEGER :: IROW,N_PIECE,N_IDENT_M,N_APPENDED_M,N_INACTIVE_M
+INTEGER :: N_MISSING_M,N_SHARED_M,N_BAD_RT_M
+INTEGER :: N_ROW_MISSING,N_ROW_SHARED,N_ROW_BAD_RT,N_ROW_COUNT_BAD
+INTEGER :: N_PIECE_SUM,N_IDENT_SUM,N_APPENDED_SUM,N_INACTIVE_SUM
+INTEGER :: HOST_I,HOST_J,HOST_K,HOST_ICELL,NOADV
+LOGICAL :: HOST_OOB,HOST_SOLID
 REAL(EB) :: VOL_GCELL,VOL_CV,VOL_CUT_GCELL,VOL_NOTBLOCKED,MEMBER_VOL,VOL_TOL,REL_A,REL_D
-INTEGER :: IBUF(9)
+INTEGER :: IBUF(17)
 REAL(EB) :: RBUF(4)
 INTEGER, ALLOCATABLE, DIMENSION(:,:) :: MEMBER_COUNT,MEMBER_OWNER_NM,MEMBER_OWNER_CV
 INTEGER, ALLOCATABLE, DIMENSION(:,:,:) :: CV_KEY
+INTEGER, ALLOCATABLE, DIMENSION(:) :: ROW_USED
 REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: GCELL_VOLUME_GLOBAL
-LOGICAL :: PASS_A,PASS_B,PASS_C,PASS_D,ALL_PASS
+LOGICAL :: PASS_A,PASS_B,PASS_C,PASS_D,PASS_E,ALL_PASS
 REAL(EB), PARAMETER :: CC_CV_CONSERVE_REL_TOL = 1.E-9_EB
 
 N_GCELL = 0; N_MEMBER_SUM = 0; N_CV_ACTIVE = 0; N_CV_INACTIVE = 0
 N_CUT_GCELL = 0; N_NOTBLOCKED = 0; N_CV_VOL_MISMATCH = 0; N_MEMBER_BAD = 0; N_MAP_BAD = 0
+N_ROW_MISSING = 0; N_ROW_SHARED = 0; N_ROW_BAD_RT = 0; N_ROW_COUNT_BAD = 0
+N_PIECE_SUM = 0; N_IDENT_SUM = 0; N_APPENDED_SUM = 0; N_INACTIVE_SUM = 0
 VOL_GCELL = 0._EB; VOL_CV = 0._EB; VOL_CUT_GCELL = 0._EB; VOL_NOTBLOCKED = 0._EB
 
 MAX_GCELL_LOCAL = 1
@@ -18573,14 +18586,103 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 ENDDO
 DEALLOCATE(GCELL_VOLUME_GLOBAL,MEMBER_COUNT,MEMBER_OWNER_NM,MEMBER_OWNER_CV,CV_KEY)
 
-IBUF = (/ N_GCELL,N_MEMBER_SUM,N_CV_ACTIVE,N_CV_INACTIVE,N_CUT_GCELL,N_NOTBLOCKED,N_CV_VOL_MISMATCH,N_MEMBER_BAD,N_MAP_BAD /)
+! E. Per-mesh piece-to-row map: every in-mesh piece has a unique identity home that round-trips.
+IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A)') ' SET_CVS_3D : CV conservation/consistency validation'
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   N_PIECE = 0; N_INACTIVE_M = 0; N_IDENT_M = 0; N_APPENDED_M = 0
+   N_MISSING_M = 0; N_SHARED_M = 0; N_BAD_RT_M = 0
+   IF (ALLOCATED(M%FV%GCELL%CELL_TYPE)) N_IDENT_M = M%FV%GCELL%N
+   IF (ALLOCATED(M%FV%CV%N_MEMBER)) THEN
+      N_APPENDED_M = M%FV%CV%N - N_IDENT_M
+      IF (M%FV%CV%N >= 1) THEN
+         ALLOCATE(ROW_USED(1:M%FV%CV%N)); ROW_USED = 0
+      ENDIF
+   ENDIF
+   IF (ALLOCATED(M%CUT_CELL)) THEN
+      DO ICC=1,M%N_CUTCELL_MESH
+         DO JCC=1,M%CUT_CELL(ICC)%NCELL
+            N_PIECE = N_PIECE + 1
+            IF (.NOT.CC_GRID_CUT_PIECE_IS_ACTIVE(NM,ICC,JCC)) N_INACTIVE_M = N_INACTIVE_M + 1
+            IROW = 0
+            IF (ALLOCATED(M%CUT_CELL(ICC)%ICV)) IROW = M%CUT_CELL(ICC)%ICV(JCC)
+            ! ICV is the identity home when it still round-trips. After agglomeration
+            ! SYNC retargets ICV to the owner (0 if remote); IG is the identity home.
+            IF (IROW<1 .OR. .NOT.ALLOCATED(ROW_USED) .OR. IROW>M%FV%CV%N) THEN
+               IROW = 0
+            ELSEIF (M%FV%CV%ICC(IROW)/=ICC .OR. M%FV%CV%JCC(IROW)/=JCC) THEN
+               IROW = 0
+            ENDIF
+            IF (IROW<1 .AND. ALLOCATED(M%CUT_CELL(ICC)%IG) .AND. ALLOCATED(M%FV%CV%ICC)) THEN
+               IG = M%CUT_CELL(ICC)%IG(JCC)
+               IF (IG>=1 .AND. IG<=M%FV%CV%N) THEN
+                  IF (M%FV%CV%ICC(IG)==ICC .AND. M%FV%CV%JCC(IG)==JCC) IROW = IG
+               ENDIF
+            ENDIF
+            IF (IROW<1) THEN
+               N_MISSING_M = N_MISSING_M + 1
+               HOST_I = M%CUT_CELL(ICC)%IJK(IAXIS)
+               HOST_J = M%CUT_CELL(ICC)%IJK(JAXIS)
+               HOST_K = M%CUT_CELL(ICC)%IJK(KAXIS)
+               NOADV = M%CUT_CELL(ICC)%NOADVANCE(JCC)
+               HOST_OOB = HOST_I<1 .OR. HOST_I>M%IBAR .OR. HOST_J<1 .OR. HOST_J>M%JBAR .OR. &
+                          HOST_K<1 .OR. HOST_K>M%KBAR
+               HOST_SOLID = .FALSE.
+               IF (.NOT.HOST_OOB) THEN
+                  HOST_ICELL = M%CELL_INDEX(HOST_I,HOST_J,HOST_K)
+                  IF (HOST_ICELL>0) HOST_SOLID = M%CELL(HOST_ICELL)%SOLID
+               ENDIF
+               IF (N_MISSING_M==1) WRITE(LU_ERR,'(A,I0,A,I0,A,I0,A,I0,A,L1,A,L1)') &
+                  'ERROR: SET_CVS_3D in-mesh cut piece has no CV row: mesh ',NM, &
+                  ', ICC=',ICC,', JCC=',JCC, &
+                  ', NOADVANCE=',NOADV, &
+                  ', host IJK out of range=',HOST_OOB, &
+                  ', host CELL%SOLID=',HOST_SOLID
+               STOP_STATUS=SETUP_STOP
+               CYCLE
+            ENDIF
+            IF (ROW_USED(IROW) > 0) N_SHARED_M = N_SHARED_M + 1
+            ROW_USED(IROW) = ROW_USED(IROW) + 1
+            IF (M%FV%CV%ICC(IROW)/=ICC .OR. M%FV%CV%JCC(IROW)/=JCC) N_BAD_RT_M = N_BAD_RT_M + 1
+         ENDDO
+      ENDDO
+   ENDIF
+   IF (ALLOCATED(ROW_USED)) DEALLOCATE(ROW_USED)
+   IF (N_APPENDED_M /= 0) N_ROW_COUNT_BAD = N_ROW_COUNT_BAD + 1
+   IF (.NOT.ALLOCATED(M%FV%CV%N_MEMBER) .AND. N_PIECE>0) N_ROW_COUNT_BAD = N_ROW_COUNT_BAD + 1
+   N_ROW_MISSING = N_ROW_MISSING + N_MISSING_M
+   N_ROW_SHARED = N_ROW_SHARED + N_SHARED_M
+   N_ROW_BAD_RT = N_ROW_BAD_RT + N_BAD_RT_M
+   N_PIECE_SUM = N_PIECE_SUM + N_PIECE
+   N_IDENT_SUM = N_IDENT_SUM + N_IDENT_M
+   N_APPENDED_SUM = N_APPENDED_SUM + N_APPENDED_M
+   N_INACTIVE_SUM = N_INACTIVE_SUM + N_INACTIVE_M
+   IF (N_MISSING_M>0 .OR. N_SHARED_M>0 .OR. N_BAD_RT_M>0 .OR. N_APPENDED_M/=0) THEN
+      WRITE(LU_ERR,'(A,I5,7(A,I10))') ' SET_CVS_3D : CV piece-to-row map NM=',NM, &
+         ' n_piece=',N_PIECE,' n_ident=',N_IDENT_M,' n_appended=',N_APPENDED_M, &
+         ' n_inactive=',N_INACTIVE_M,' missing=',N_MISSING_M,' shared=',N_SHARED_M, &
+         ' bad_rt=',N_BAD_RT_M
+   ENDIF
+   IF (GET_CUTCELLS_VERBOSE) THEN
+      WRITE(LU_SETCC,'(A,I5,7(A,I10))') '   E mesh NM=',NM, &
+         ' n_piece=',N_PIECE,' n_ident=',N_IDENT_M,' n_appended=',N_APPENDED_M, &
+         ' n_inactive=',N_INACTIVE_M,' missing=',N_MISSING_M,' shared=',N_SHARED_M, &
+         ' bad_rt=',N_BAD_RT_M
+   ENDIF
+ENDDO
+
+IBUF = (/ N_GCELL,N_MEMBER_SUM,N_CV_ACTIVE,N_CV_INACTIVE,N_CUT_GCELL,N_NOTBLOCKED,N_CV_VOL_MISMATCH,N_MEMBER_BAD,N_MAP_BAD, &
+          N_ROW_MISSING,N_ROW_SHARED,N_ROW_BAD_RT,N_ROW_COUNT_BAD, &
+          N_PIECE_SUM,N_IDENT_SUM,N_APPENDED_SUM,N_INACTIVE_SUM /)
 RBUF = (/ VOL_GCELL,VOL_CV,VOL_CUT_GCELL,VOL_NOTBLOCKED /)
 IF (N_MPI_PROCESSES > 1) THEN
-   CALL MPI_ALLREDUCE(MPI_IN_PLACE,IBUF(1),9,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,IERR)
+   CALL MPI_ALLREDUCE(MPI_IN_PLACE,IBUF(1),17,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,IERR)
    CALL MPI_ALLREDUCE(MPI_IN_PLACE,RBUF(1),4,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
 ENDIF
 N_GCELL=IBUF(1); N_MEMBER_SUM=IBUF(2); N_CV_ACTIVE=IBUF(3); N_CV_INACTIVE=IBUF(4)
 N_CUT_GCELL=IBUF(5); N_NOTBLOCKED=IBUF(6); N_CV_VOL_MISMATCH=IBUF(7); N_MEMBER_BAD=IBUF(8); N_MAP_BAD=IBUF(9)
+N_ROW_MISSING=IBUF(10); N_ROW_SHARED=IBUF(11); N_ROW_BAD_RT=IBUF(12); N_ROW_COUNT_BAD=IBUF(13)
+N_PIECE_SUM=IBUF(14); N_IDENT_SUM=IBUF(15); N_APPENDED_SUM=IBUF(16); N_INACTIVE_SUM=IBUF(17)
 VOL_GCELL=RBUF(1); VOL_CV=RBUF(2); VOL_CUT_GCELL=RBUF(3); VOL_NOTBLOCKED=RBUF(4)
 
 REL_A = ABS(VOL_CV-VOL_GCELL)/MAX(ABS(VOL_GCELL),TWO_EPSILON_EB)
@@ -18590,10 +18692,10 @@ PASS_B = (N_MEMBER_SUM == N_GCELL) .AND. (N_CV_ACTIVE+N_CV_INACTIVE == N_GCELL) 
          (N_MEMBER_BAD == 0) .AND. (N_MAP_BAD == 0)
 PASS_C = (N_CV_VOL_MISMATCH == 0)
 PASS_D = (N_CUT_GCELL == N_NOTBLOCKED) .AND. (REL_D <= CC_CV_CONSERVE_REL_TOL)
-ALL_PASS = PASS_A .AND. PASS_B .AND. PASS_C .AND. PASS_D
+PASS_E = (N_ROW_MISSING==0) .AND. (N_ROW_SHARED==0) .AND. (N_ROW_BAD_RT==0) .AND. (N_ROW_COUNT_BAD==0)
+ALL_PASS = PASS_A .AND. PASS_B .AND. PASS_C .AND. PASS_D .AND. PASS_E
 
 IF (GET_CUTCELLS_VERBOSE) THEN
-   WRITE(LU_SETCC,'(A)') ' SET_CVS_3D : CV conservation/consistency validation'
    WRITE(LU_SETCC,'(A,3I10)') '   GCELLs, active CVs, inactive CVs (absorbed children) =',N_GCELL,N_CV_ACTIVE,N_CV_INACTIVE
    WRITE(LU_SETCC,'(A,L2,A,ES13.6,A,ES13.6,A,ES10.3,A)') '   A volume conservation pass=',PASS_A, &
       '  (sum_CV=',VOL_CV,' sum_GCELL=',VOL_GCELL,' rel_err=',REL_A,')'
@@ -18603,6 +18705,10 @@ IF (GET_CUTCELLS_VERBOSE) THEN
       '  (mismatches=',N_CV_VOL_MISMATCH,')'
    WRITE(LU_SETCC,'(A,L2,A,I10,A,I10,A,ES10.3,A)') '   D gcell-vs-cut-mesh pass=',PASS_D, &
       '  (cut_gcells=',N_CUT_GCELL,' notblocked_pieces=',N_NOTBLOCKED,' rel_err=',REL_D,')'
+   WRITE(LU_SETCC,'(A,L2,8(A,I10),A)') '   E piece-to-row map pass=',PASS_E, &
+      '  (n_piece=',N_PIECE_SUM,' n_ident=',N_IDENT_SUM,' n_appended=',N_APPENDED_SUM, &
+      ' n_inactive=',N_INACTIVE_SUM,' missing=',N_ROW_MISSING,' shared=',N_ROW_SHARED, &
+      ' bad_rt=',N_ROW_BAD_RT,' count_bad=',N_ROW_COUNT_BAD,')'
    IF (ALL_PASS) THEN
       WRITE(LU_SETCC,'(A)') '   CV conservation/consistency validation: PASS'
    ELSE
@@ -18612,11 +18718,11 @@ IF (GET_CUTCELLS_VERBOSE) THEN
 ENDIF
 
 IF (MY_RANK==0) THEN
-   IF (ALL_PASS .AND. GET_CUTCELLS_VERBOSE) THEN
+   IF (ALL_PASS) THEN
       WRITE(LU_ERR,'(A)') ' SET_CVS_3D : CV conservation/consistency validation PASS'
-   ELSEIF (.NOT.ALL_PASS) THEN
-      WRITE(LU_ERR,'(A,4(A,L1))') ' SET_CVS_3D : CV conservation/consistency validation FAIL', &
-         '  A=',PASS_A,' B=',PASS_B,' C=',PASS_C,' D=',PASS_D
+   ELSE
+      WRITE(LU_ERR,'(A,5(A,L1))') ' SET_CVS_3D : CV conservation/consistency validation FAIL', &
+         '  A=',PASS_A,' B=',PASS_B,' C=',PASS_C,' D=',PASS_D,' E=',PASS_E
    ENDIF
 ENDIF
 IF (.NOT.ALL_PASS) STOP_STATUS=SETUP_STOP
