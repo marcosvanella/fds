@@ -8577,10 +8577,13 @@ IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
    ENDIF
 ENDIF
 
-! Solver identity scope consumes the one-GCELL/one-CV map built in Phase 4. Higher scopes and
-! setup-only topology studies consume the agglomerated map built in Phase 5.
-DO_AGGLOMERATE_CVS = .NOT.(CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE <= CC_CV_SCOPE_IDENTITY)
-USE_LEGACY_SCOPE0_SETUP = CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE <= CC_CV_SCOPE_IDENTITY
+! Construction is unconditional. The legacy-blocking freeze follows the scope:
+! scope 0 uses the frozen legacy blocking path, higher scopes use CVS-neutral
+! blocking. Agglomeration is requested by CC_USE_SET_CVS_3D and is skipped when
+! the identity solver needs the one-CV-per-GCELL map.
+DO_AGGLOMERATE_CVS      = .NOT.(CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE <= CC_CV_SCOPE_IDENTITY) &
+                          .AND. CC_USE_SET_CVS_3D
+USE_LEGACY_SCOPE0_SETUP =       CC_CV_SOLVER_SCOPE <= CC_CV_SCOPE_IDENTITY
 
 ! Phase 1 now reuses the shared raw cut-cell build path.
 CALL CC_GRID_BUILD_RAW_CUTCELLS(ISTR,IEND,JSTR,JEND,KSTR,KEND,CC_COMPUTE_MESH,GEOM_ZMAX_AUX, &
@@ -17449,7 +17452,8 @@ DO NM=1,NMESHES
    ENDDO
 ENDDO
 N_PROP_GLOBAL = N_PROP
-IF (CC_CV_ENABLE_CROSS_MESH_LINKING .AND. N_MPI_PROCESSES > 1) &
+! Every rank must take part so the early return below is a collective decision.
+IF (N_MPI_PROCESSES > 1) &
    CALL MPI_ALLREDUCE(N_PROP,N_PROP_GLOBAL,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,IERR)
 IF (N_PROP_GLOBAL < 1) RETURN
 
@@ -17650,16 +17654,16 @@ N_LOCAL_MASTER=IBUF(4)
 N_REMOTE_MASTER=IBUF(5)
 N_MISSING_LOCAL_MASTER=IBUF(6)
 N_MISSING_REMOTE_MASTER=IBUF(7)
-IF (N_MISSING_MASTER>0 .OR. N_OWNER_PAIR/=N_PROP .OR. N_CHILD_INACTIVE/=N_PROP) THEN
+IF (N_MISSING_MASTER>0 .OR. N_OWNER_PAIR/=N_PROP_GLOBAL .OR. N_CHILD_INACTIVE/=N_PROP_GLOBAL) THEN
    IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,4I10)') &
       '   Phase 5 ownership reconciliation FAIL proposals/owners/children/missing =', &
-      N_PROP,N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER
+      N_PROP_GLOBAL,N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER
    IF (MY_RANK==0) WRITE(LU_ERR,'(A,4I10)') &
       'ERROR: SET_CVS_3D cross-rank CV ownership reconciliation failed: proposals/owners/children/missing =', &
-      N_PROP,N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER
+      N_PROP_GLOBAL,N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER
    STOP_STATUS=SETUP_STOP
 ELSE
-   IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,I10)') '   Phase 5 ownership reconciliation PASS proposals =',N_PROP
+   IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,I10)') '   Phase 5 ownership reconciliation PASS proposals =',N_PROP_GLOBAL
 ENDIF
 IF (GET_CUTCELLS_VERBOSE) FLUSH(LU_SETCC)
 

@@ -1061,6 +1061,14 @@ TYPE OMESH_TYPE
          REAL_RECV_PKG11,REAL_RECV_PKG112,REAL_RECV_PKG12,REAL_RECV_PKG13
    INTEGER, ALLOCATABLE, DIMENSION(:) :: ICC_UNKZ_CT_S, ICC_UNKZ_CC_S, ICC_UNKZ_CT_R, ICC_UNKZ_CC_R,&
                                          ICF_UFFB_CF_S, ICF_UFFB_CF_R
+   LOGICAL, ALLOCATABLE, DIMENSION(:) :: ICC_UNKZ_CC_R_MASK  !< Replica ICC membership in ICC_UNKZ_CC_R
+   ! PKG11 receive halo: one SoA row per received gas polyhedron (NICC_R(2)).
+   ! Filled in addition to replica CUT_CELL writes; row identity matches the PKG11 unpack walk.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: CCHALO_ICC, CCHALO_JCC !< Row -> replica (ICC,JCC), filled at setup.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: CCHALO_ROW0            !< Replica ICC -> first halo row; 0 = no rows.
+   REAL(EB), ALLOCATABLE, DIMENSION(:) :: CCHALO_VOLUME         !< Replica cut-cell volume, filled at setup.
+   REAL(EB), ALLOCATABLE, DIMENSION(:) :: CCHALO_RHO, CCHALO_RHOS, CCHALO_TMP, CCHALO_RSUM, CCHALO_D, CCHALO_DS
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: CCHALO_ZZ, CCHALO_ZZS !< (1:N_TOTAL_SCALARS,1:NICC_R(2)), same order as FV%CV%ZZ.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: UNKZ_CT_S, UNKZ_CC_S, UNKZ_CT_R, UNKZ_CC_R
    INTEGER, ALLOCATABLE, DIMENSION(:,:,:) :: MUNKH,GSCH,EWC_TYPE
 
