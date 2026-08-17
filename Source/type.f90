@@ -1444,7 +1444,6 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             RTRM !< Cut-cells 1/(rho*c_p*T).
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::            R_H_G !< Cut-cells 1/(c_p*T)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::            RHO_0 !< Cut-cells background density.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             WVEL !< Cut-cells centroid vertical velocity.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::          DDDTVOL !< Cut-cells dD/dT * vol.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::        DELTA_RHO !< Cut-cells density change used in check mass density.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::     DELTA_RHO_ZZ !< Cut-cells species density change used in check mass density.
@@ -1517,7 +1516,7 @@ TYPE CC_CV_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: XBAR_CV     !< (IAXIS:KAXIS,1:N) true volume centroid.
    ! Runtime cell-centered scalar/thermodynamic state. At identity scope these arrays are synchronized
    ! with the legacy Cartesian/CUT_CELL containers at the boundary of kernels that have not migrated yet.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: RHO, RHOS, TMP, RSUM, RTRM, R_H_G, RHO_0
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: RHO, RHOS, TMP, RSUM, RTRM, R_H_G, RHO_0, WVEL
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: H, HS, KRES
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: D, DS, DVOL, DVOL_PR, DDDTVOL
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: Q, QR, CHI_R, MIX_TIME, D_SOURCE
