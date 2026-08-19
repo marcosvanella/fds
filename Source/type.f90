@@ -1425,7 +1425,6 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                D !< Corrector cut-cells thermodynamic divg. (1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::               DS !< Predictor cut-cells thermodynamic divg.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             DVOL !< Cut-cells thermodynamic divg*vol.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::          DVOL_PR !< Predictor cut-cell thermodynamic divg*vol.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                Q !< Cut-cells volumetric heat source. (1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::               QR !< Cut-cells volumetric radiative heat source.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::         D_SOURCE !< Cut-cells divergence source terms.
@@ -1527,6 +1526,8 @@ TYPE CC_CV_TYPE
    ! CV -> FACE incidence (CSR): faces bounding CV ICV are FACE_LIST(FACE_PTR(ICV):FACE_PTR(ICV+1)-1).
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: FACE_PTR    !< (1:N+1) CSR offsets into FACE_LIST.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: FACE_LIST   !< (1:sum incident faces) FACE indices bounding each CV.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: MEMBER_PTR   !< (1:N+1) CSR start offsets into MEMBER_LIST.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: MEMBER_LIST  !< Local GCELL members of each CV, ascending within a CV.
 END TYPE CC_CV_TYPE
 
 !> \brief Mesh-owned finite-volume FACE storage in SoA form.
