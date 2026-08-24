@@ -3458,7 +3458,10 @@ IPZ_LOOP : DO IPZ=0,N_ZONE_GLOBMAT
 
    ! Main Mesh Loop:
    MESH_LOOP_1 : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-      IF (ZSL%NUNKH_LOCAL==0) CYCLE
+      ! A zero-row rank can still own a mesh whose cells deposit into FV_L2_FH_REMOTE
+      ! via ADD_FV_L2_PRESSURE_RHS. L2 must enter GET_FH so those deposits happen.
+      ! Non-L2 has no remote buffer, so the skip stays.
+      IF (ZSL%NUNKH_LOCAL==0 .AND. .NOT.(CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH)) CYCLE
       CALL POINT_TO_MESH(NM)
       ! Build FH(:):
       CALL GET_FH_FROM_PRHS_AND_BCS(NM,DT,CYL_FCT,UNKH,ZSL%NUNKH_LOCAL,IPZ,ZSL%F_H)

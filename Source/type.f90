@@ -1489,6 +1489,8 @@ TYPE CC_GCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MAX_THETA !< (1:N) selected merge non-orthogonality metric.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MAX_SKEW  !< (1:N) selected merge skew metric.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MIN_DFDIAM !< (1:N) selected merge normalized face-distance metric.
+   LOGICAL, ALLOCATABLE, DIMENSION(:) :: ABSORBED !< (1:N) child already absorbed; setup-only occupancy.
+   LOGICAL, ALLOCATABLE, DIMENSION(:) :: CLAIMED  !< (1:N) CV root claimed this proposal round; setup-only occupancy.
 END TYPE CC_GCELL_TYPE
 
 !> \brief Mesh-owned CV storage in SoA form.
@@ -1500,8 +1502,8 @@ TYPE CC_CV_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_NM    !< (1:N) mesh number that owns the CV row.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_GCELL !< (1:N) identity owner/member GCELL index.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: N_MEMBER    !< (1:N) GCELL members; 0 = agglomeration child, skip in CELL_TYPE loops.
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_NM   !< (1:2,1:N) diagnostic pairwise member mesh numbers.
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_GCELL !< (1:2,1:N) diagnostic pairwise member GCELL indices.
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_NM   !< (1:MAX_MEMBERS,1:N) diagnostic member mesh numbers; MAX_MEMBERS = max(2, max members-per-CV).
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_GCELL !< (1:MAX_MEMBERS,1:N) diagnostic member GCELL indices.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CELL_TYPE   !< (1:N) identity source type, CC_GCELL_CUT or CC_GCELL_REG.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK         !< (IAXIS:KAXIS,1:N) identity host Cartesian cell indices.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: ICC         !< (1:N) identity source CUT_CELL index, 0 for regular.
