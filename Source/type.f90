@@ -1430,8 +1430,6 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::         D_SOURCE !< Cut-cells divergence source terms.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::            CHI_R !< Cut-cells radiative fraction.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::         MIX_TIME !< Cut-cells species mixing time.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::           Q_REAC !< Cut-cells volumetric heat source due to reaction.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    :: REAC_SOURCE_TERM !< Cut-cells species source term. (1:N_TOTAL_SCALARS,1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::               ZZ !< Corrector cut-cells mass fractions.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::              ZZS !< Predictor cut-cells mass fractions.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::        M_DOT_PPP !< Cut-cells mass source term.
@@ -1521,6 +1519,7 @@ TYPE CC_CV_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: H, HS, KRES
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: D, DS, DVOL, DVOL_PR, DDDTVOL
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: Q, QR, CHI_R, MIX_TIME, D_SOURCE
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: Q_REAC !< (1:N_REACTIONS,1:N) per-reaction HRRPUV.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: ZZ, ZZS
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: M_DOT_PPP
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: DEL_RHO_D_DEL_Z_VOL
