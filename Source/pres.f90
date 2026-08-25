@@ -1492,7 +1492,7 @@ END SUBROUTINE GET_ULMAT_ACTIVE_ROWS
 SUBROUTINE ULMAT_SOLVE_ZONE(NM,IPZ)
 
 USE COMPLEX_GEOMETRY, ONLY : CC_IDCC,CC_IDRC
-USE CC_SCALARS, ONLY : GET_FN_DIVERGENCE_CUTCELL,GET_H_GUARD_CUTCELL,GET_FV_FH,GET_FV_HP
+USE CC_SCALARS, ONLY : GET_FN_DIVERGENCE_CUTCELL,GET_H_GUARD_CUTCELL,GET_FV_FH,GET_FV_HP,GET_FV_CV_DDDTVOL
 USE TYPES, ONLY: CC_FV_TYPE
 #ifdef WITH_HYPRE
 USE HYPRE_INTERFACE
@@ -1504,7 +1504,7 @@ INTEGER, INTENT(IN) :: NM, IPZ
 INTEGER :: NRHS,MAXFCT,MNUM,ERROR,I,J,K,ICC,JCC,IIG,JJG,KKG,IOR,IW,IROW,NCELL,ICFACE,IFACE,JFACE,ICVL,ICV, &
            ILH,JLH,KLH,IRC,GAUGE_ROW,N_ACTIVE
 REAL(EB):: SUM_FH(1:2),MEAN_FH,SUM_XH(1:2),MEAN_XH,SUM_GAUGE(2),SHIFT_H,DIV_FN_VOL,DIV_FN,IDX,AF,VAL,BCV,DHDN, &
-           VOL,RHO_CC,KRES_CC
+           VOL,RHO_CC,KRES_CC,DDDT_INT
 LOGICAL, ALLOCATABLE :: ACTIVE_ROW(:)
 TYPE(ZONE_MESH_TYPE), POINTER :: ZM
 TYPE(CC_FV_TYPE), POINTER :: FV
@@ -1550,7 +1550,8 @@ ELSE
             DIV_FN_VOL = DIV_FN*CUT_CELL(ICC)%VOLUME(JCC)
             ! Add to F_H:
             IROW = CUT_CELL(ICC)%UNKH(JCC)
-            ZM%F_H(IROW) = ZM%F_H(IROW) - (CUT_CELL(ICC)%DDDTVOL(JCC) + DIV_FN_VOL)
+            CALL GET_FV_CV_DDDTVOL(NM,ICC,JCC,DDDT_INT)
+            ZM%F_H(IROW) = ZM%F_H(IROW) - (DDDT_INT*CUT_CELL(ICC)%VOLUME(JCC) + DIV_FN_VOL)
          ENDDO
       ELSE
          DIV_FN_VOL = 0._EB
@@ -1560,7 +1561,8 @@ ELSE
          ENDDO
          ! Add to F_H:
          IROW = CUT_CELL(ICC)%UNKH(1)
-         ZM%F_H(IROW) = ZM%F_H(IROW) - (CUT_CELL(ICC)%DDDTVOL(1) + DIV_FN_VOL)
+         CALL GET_FV_CV_DDDTVOL(NM,ICC,1,DDDT_INT)
+         ZM%F_H(IROW) = ZM%F_H(IROW) - (DDDT_INT*SUM(CUT_CELL(ICC)%VOLUME(1:NCELL)) + DIV_FN_VOL)
       ENDIF
    ENDDO
 ENDIF
@@ -1809,7 +1811,8 @@ IF (ZM%MTYPE==SYMM_INDEFINITE) THEN
                   RHO_CC = CUT_CELL(ICC)%RHOS(JCC)
                ENDIF
                VOL = CUT_CELL(ICC)%VOLUME(JCC)
-               KRES_CC = CUT_CELL(ICC)%KRES(JCC)
+               ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+               IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
                SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZM%X_H(CUT_CELL(ICC)%UNKH(JCC)))
                SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
             ENDDO
@@ -1821,7 +1824,8 @@ IF (ZM%MTYPE==SYMM_INDEFINITE) THEN
                   RHO_CC = CUT_CELL(ICC)%RHOS(JCC)
                ENDIF
                VOL = CUT_CELL(ICC)%VOLUME(JCC)
-               KRES_CC = CUT_CELL(ICC)%KRES(JCC)
+               ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+               IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
                SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZM%X_H(CUT_CELL(ICC)%UNKH(1)))
                SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
             ENDDO
@@ -3402,6 +3406,7 @@ USE COMP_FUNCTIONS, ONLY: CURRENT_TIME
 USE CC_SCALARS, ONLY : GET_CUTCELL_HP,GET_PRES_CFACE_BCS,GET_FH_FROM_PRHS_AND_BCS, &
                        BEGIN_FV_L2_PRESSURE_RHS,END_FV_L2_PRESSURE_RHS, &
                        GATHER_FV_L2_PRESSURE_SOLUTION,GET_FV_L2_PRESSURE_VALUE
+USE TYPES, ONLY: CC_FV_TYPE
 USE MPI_F08
 #ifdef WITH_HYPRE
 USE HYPRE_INTERFACE
@@ -3414,10 +3419,11 @@ INTEGER :: MAXFCT, MNUM, NRHS, ERROR
 #ifdef WITH_MKL
 INTEGER :: PERM(1), PHASE
 #endif
-INTEGER :: NM, IW, IIG, JJG, KKG, IOR, IROW, I, J, K, ICC, JCC
+INTEGER :: NM, IW, IIG, JJG, KKG, IOR, IROW, I, J, K, ICC, JCC, ICV
 TYPE (WALL_TYPE), POINTER :: WC
 TYPE (EXTERNAL_WALL_TYPE), POINTER :: EWC
 TYPE (BOUNDARY_COORD_TYPE), POINTER :: BC
+TYPE(CC_FV_TYPE), POINTER :: FV
 REAL(EB), POINTER, DIMENSION(:,:,:)   :: HP,RHOP
 REAL(EB) :: SUM_FH(2), SUM_XH(2), SUM_GAUGE(2), MEAN_FH, MEAN_XH, SHIFT_H, VOL, RHO_CC, KRES_CC,HVAL
 INTEGER :: IERR
@@ -3572,37 +3578,57 @@ IF (ERROR /= 0 .AND. MY_RANK==0) WRITE(LU_ERR,*) 'GLMAT_SOLVER: The following ER
                   ENDDO
                ENDDO
             ENDDO
-            DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-               I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
-               IF (ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-               IF(ONE_UNKH_PER_CUTCELL) THEN
-                  DO JCC=1,CUT_CELL(ICC)%NCELL
-                     IF (PREDICTOR) THEN
-                        RHO_CC = CUT_CELL(ICC)%RHO(JCC)
-                     ELSE
-                        RHO_CC = CUT_CELL(ICC)%RHOS(JCC)
-                     ENDIF
-                     IROW = CUT_CELL(ICC)%UNKH(JCC) - ZSL%UNKH_IND(NM_START)
-                     VOL = CUT_CELL(ICC)%VOLUME(JCC)
-                     KRES_CC = CUT_CELL(ICC)%KRES(JCC)
-                     SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
-                     SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
-                  ENDDO
-               ELSE
-                  IROW = CUT_CELL(ICC)%UNKH(1) - ZSL%UNKH_IND(NM_START)
-                  DO JCC=1,CUT_CELL(ICC)%NCELL
-                     IF (PREDICTOR) THEN
-                        RHO_CC = CUT_CELL(ICC)%RHO(JCC)
-                     ELSE
-                        RHO_CC = CUT_CELL(ICC)%RHOS(JCC)
-                     ENDIF
-                     VOL = CUT_CELL(ICC)%VOLUME(JCC)
-                     KRES_CC = CUT_CELL(ICC)%KRES(JCC)
-                     SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
-                     SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
-                  ENDDO
-               ENDIF
-            ENDDO
+            FV => MESHES(NM)%FV
+            IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
+               DO ICV=1,FV%CV%N
+                  IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%ICC(ICV)<1) CYCLE
+                  I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
+                  IROW=FV%CV%UNKH(ICV)-ZSL%UNKH_IND(NM_START)
+                  IF (IROW<=0 .OR. ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
+                  IF (PREDICTOR) THEN
+                     RHO_CC=FV%CV%RHO(ICV)
+                  ELSE
+                     RHO_CC=FV%CV%RHOS(ICV)
+                  ENDIF
+                  VOL=FV%CV%VOLUME(ICV); KRES_CC=FV%CV%KRES(ICV)
+                  SUM_GAUGE(1)=SUM_GAUGE(1)+VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
+                  SUM_GAUGE(2)=SUM_GAUGE(2)+VOL*RHO_CC
+               ENDDO
+            ELSE
+               DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+                  I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
+                  IF (ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
+                  IF(ONE_UNKH_PER_CUTCELL) THEN
+                     DO JCC=1,CUT_CELL(ICC)%NCELL
+                        IF (PREDICTOR) THEN
+                           RHO_CC = CUT_CELL(ICC)%RHO(JCC)
+                        ELSE
+                           RHO_CC = CUT_CELL(ICC)%RHOS(JCC)
+                        ENDIF
+                        IROW = CUT_CELL(ICC)%UNKH(JCC) - ZSL%UNKH_IND(NM_START)
+                        VOL = CUT_CELL(ICC)%VOLUME(JCC)
+                        ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+                        IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
+                        SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
+                        SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
+                     ENDDO
+                  ELSE
+                     IROW = CUT_CELL(ICC)%UNKH(1) - ZSL%UNKH_IND(NM_START)
+                     DO JCC=1,CUT_CELL(ICC)%NCELL
+                        IF (PREDICTOR) THEN
+                           RHO_CC = CUT_CELL(ICC)%RHO(JCC)
+                        ELSE
+                           RHO_CC = CUT_CELL(ICC)%RHOS(JCC)
+                        ENDIF
+                        VOL = CUT_CELL(ICC)%VOLUME(JCC)
+                        ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+                        IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
+                        SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
+                        SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
+                     ENDDO
+                  ENDIF
+               ENDDO
+            ENDIF
          ENDDO
          IF (N_MPI_PROCESSES>1) CALL MPI_ALLREDUCE(MPI_IN_PLACE,SUM_GAUGE(1),2,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
          SHIFT_H = SUM_GAUGE(1)/(SUM_GAUGE(2)+TWENTY_EPSILON_EB)
