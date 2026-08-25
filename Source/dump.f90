@@ -8743,7 +8743,7 @@ CC_IBM_IF: IF (CC_IBM) THEN
             D_CC    = CV%D(ICV)
             RSUM_CC = CV%RSUM(ICV)
             Q_CC    = CV%Q(ICV)
-            MIX_CC  = CV%MIX_TIME(ICV)
+            MIX_CC  = CV%MIX_TIME(CUT_CELL(ICC)%IG(JCC))
             QR_CC   = CV%QR(ICV)
             IF (Z_INDEX > 0) THEN
                Y_SPECIES = CV%ZZ(Z_INDEX,ICV)
@@ -8768,7 +8768,7 @@ CC_IBM_IF: IF (CC_IBM) THEN
             D_CC    = CUT_CELL(ICC)%D(JCC)
             RSUM_CC = CUT_CELL(ICC)%RSUM(JCC)
             Q_CC    = CUT_CELL(ICC)%Q(JCC)
-            MIX_CC  = CUT_CELL(ICC)%MIX_TIME(JCC)
+            MIX_CC  = CV%MIX_TIME(CUT_CELL(ICC)%IG(JCC))
             QR_CC   = CUT_CELL(ICC)%QR(JCC)
             IF (Z_INDEX > 0) THEN
                Y_SPECIES = CUT_CELL(ICC)%ZZ(Z_INDEX,JCC)
