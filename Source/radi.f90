@@ -3397,7 +3397,7 @@ DO I=1,NRT
       ENDDO
    ENDDO
 ENDDO
- 
+
 
 END SUBROUTINE CALCULATE_FVM_ANGLES
 
@@ -4999,7 +4999,7 @@ DO N=1,N_INIT
                      IF (ICV>0) THEN
                         CV%Q(ICV)=CV%Q(ICV)+TIME_RAMP_FACTOR*IN%HRRPUV
                      ELSEIF (.NOT.(CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY)) THEN
-                        CUT_CELL(ICC)%Q(JCC)=CUT_CELL(ICC)%Q(JCC)+TIME_RAMP_FACTOR*IN%HRRPUV
+                        CV%Q(CUT_CELL(ICC)%IG(JCC))=CV%Q(CUT_CELL(ICC)%IG(JCC))+TIME_RAMP_FACTOR*IN%HRRPUV
                      ENDIF
                   ENDDO
                ENDIF

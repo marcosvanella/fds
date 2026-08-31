@@ -7425,7 +7425,7 @@ REAL(EB) :: H_TC,TMP_TC,RE_D,NUSSELT,VEL,K_G,MU_G,COSTHETA,FAC,&
             RHO_CC,TMP_CC,H_CC,HS_CC,D_CC,RSUM_CC,Q_CC,MIX_CC,QR_CC,FN_CF,VEL_CF
 REAL(EB), PARAMETER :: C_DIMARZO=2.23E5_EB
 INTEGER :: N,I,J,K,NN,IL,III,JJJ,KKK,IP,JP,KP,FED_ACTIVITY,IP1,JP1,KP1,IM1,JM1,KM1,IIM1,JJM1,KKM1,NR,NS,RAM,&
-           ICC,JCC,ICV,NCELL,AXIS,ICF,NFACE,JCF,JCC_LO,JCC_HI,PDPA_FORMULA,IC,IF_
+           ICC,JCC,ICV,IG,NCELL,AXIS,ICF,NFACE,JCF,JCC_LO,JCC_HI,PDPA_FORMULA,IC,IF_
 REAL(FB) :: RN
 REAL(EB), PARAMETER :: EPS=1.E-10_EB
 REAL :: CPUTIME
@@ -8798,9 +8798,16 @@ CC_IBM_IF: IF (CC_IBM) THEN
             HS_CC   = CUT_CELL(ICC)%HS(JCC)
             D_CC    = CUT_CELL(ICC)%D(JCC)
             RSUM_CC = CUT_CELL(ICC)%RSUM(JCC)
-            Q_CC    = CUT_CELL(ICC)%Q(JCC)
-            MIX_CC  = CV%MIX_TIME(CUT_CELL(ICC)%IG(JCC))
-            QR_CC   = CUT_CELL(ICC)%QR(JCC)
+            IG = CUT_CELL(ICC)%IG(JCC)
+            IF (IG>=1) THEN
+               Q_CC    = CV%Q(IG)
+               MIX_CC  = CV%MIX_TIME(IG)
+               QR_CC   = CV%QR(IG)
+            ELSE
+               Q_CC    = 0._EB
+               MIX_CC  = 0._EB
+               QR_CC   = 0._EB
+            ENDIF
             IF (Z_INDEX > 0) THEN
                Y_SPECIES = CUT_CELL(ICC)%ZZ(Z_INDEX,JCC)
                RCON = SPECIES_MIXTURE(Z_INDEX)%RCON

@@ -8297,12 +8297,8 @@ CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%TMP              ,TO=CUT_CELL_TO%TMP)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%D                ,TO=CUT_CELL_TO%D)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%DS               ,TO=CUT_CELL_TO%DS)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%DVOL             ,TO=CUT_CELL_TO%DVOL)
-CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%Q                ,TO=CUT_CELL_TO%Q)
-CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%QR               ,TO=CUT_CELL_TO%QR)
-CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%D_SOURCE         ,TO=CUT_CELL_TO%D_SOURCE)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%ZZ               ,TO=CUT_CELL_TO%ZZ)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%ZZS              ,TO=CUT_CELL_TO%ZZS)
-CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%M_DOT_PPP        ,TO=CUT_CELL_TO%M_DOT_PPP)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%UNKH             ,TO=CUT_CELL_TO%UNKH)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%UNKZ             ,TO=CUT_CELL_TO%UNKZ)
 CALL MOVE_ALLOC(FROM=CUT_CELL_FROM%IG               ,TO=CUT_CELL_TO%IG)
@@ -8481,8 +8477,6 @@ ALLOCATE(MESHES(NM)%CUT_CELL(ICC)%RHO(1:NCELL),      &
          MESHES(NM)%CUT_CELL(ICC)%RHOS(1:NCELL),     MESHES(NM)%CUT_CELL(ICC)%RSUM(1:NCELL),      &
          MESHES(NM)%CUT_CELL(ICC)%TMP(1:NCELL),      MESHES(NM)%CUT_CELL(ICC)%D(1:NCELL),         &
          MESHES(NM)%CUT_CELL(ICC)%DVOL(1:NCELL),                                                 &
-         MESHES(NM)%CUT_CELL(ICC)%Q(1:NCELL),                                                     &
-         MESHES(NM)%CUT_CELL(ICC)%QR(1:NCELL),       MESHES(NM)%CUT_CELL(ICC)%D_SOURCE(1:NCELL),  &
          MESHES(NM)%CUT_CELL(ICC)%DS(1:NCELL),        &
          MESHES(NM)%CUT_CELL(ICC)%H(1:NCELL),         &
          MESHES(NM)%CUT_CELL(ICC)%HS(1:NCELL))
@@ -8494,18 +8488,13 @@ MESHES(NM)%CUT_CELL(ICC)%TMP      = 0._EB
 MESHES(NM)%CUT_CELL(ICC)%D        = 0._EB
 MESHES(NM)%CUT_CELL(ICC)%DS       = 0._EB
 MESHES(NM)%CUT_CELL(ICC)%DVOL     = 0._EB
-MESHES(NM)%CUT_CELL(ICC)%Q        = 0._EB
-MESHES(NM)%CUT_CELL(ICC)%QR       = 0._EB
-MESHES(NM)%CUT_CELL(ICC)%D_SOURCE = 0._EB
 MESHES(NM)%CUT_CELL(ICC)%H        = 0._EB
 MESHES(NM)%CUT_CELL(ICC)%HS       = 0._EB
 
 ALLOCATE(MESHES(NM)%CUT_CELL(ICC)%ZZ(1:N_TOTAL_SCALARS,1:NCELL),  &
-         MESHES(NM)%CUT_CELL(ICC)%ZZS(1:N_TOTAL_SCALARS,1:NCELL), &
-         MESHES(NM)%CUT_CELL(ICC)%M_DOT_PPP(1:N_TOTAL_SCALARS,1:NCELL))
+         MESHES(NM)%CUT_CELL(ICC)%ZZS(1:N_TOTAL_SCALARS,1:NCELL))
 MESHES(NM)%CUT_CELL(ICC)%ZZ               = 0._EB
 MESHES(NM)%CUT_CELL(ICC)%ZZS              = 0._EB
-MESHES(NM)%CUT_CELL(ICC)%M_DOT_PPP        = 0._EB
 
 ALLOCATE(MESHES(NM)%CUT_CELL(ICC)%UNKH(1:NCELL)); MESHES(NM)%CUT_CELL(ICC)%UNKH = CC_UNDEFINED
 ALLOCATE(MESHES(NM)%CUT_CELL(ICC)%INT_IJK(IAXIS:KAXIS,(NCELL+1)*DELTA_INT))
@@ -19185,9 +19174,12 @@ SUBROUTINE CC_GRID_VALIDATE_CV_CONSERVATION
 !                             contain remote members). A CSR-vs-MEMBER_* disagreement also fails C.
 !   D. GCELL vs cut mesh    : cut-GCELL count/volume == the active cut pieces they were built from
 !                             (OBST-hosted pieces are excluded from both sides, as in legacy numbering).
-!   E. Piece-to-row map     : every in-mesh cut piece has a unique identity home that round-trips
-!                             to the same (ICC,JCC); FV%CV%N == GCELL%N (no extra rows).
-!                             A missing home is a hard error (blocked pieces are purged, not tagged).
+!   E. Piece-to-row map     : every active in-mesh cut piece has a unique identity home that
+!                             round-trips to the same (ICC,JCC); FV%CV%N == GCELL%N (no extra rows).
+!                             Inactive pieces (NOADVANCE, OOB host, or SOLID host) are counted in
+!                             n_inactive and skipped; they have no CV row by construction (same rule
+!                             as CC_GRID_BUILD_GCELLS and legacy UNKZ/UNKH). A missing home on an
+!                             active piece is a hard error.
 !   F. Local membership CSR : O(N_GCELL+N_CV) positional replay of the ascending IG scan
 !                             against each CSR slice. n_disagree counts positional mismatches
 !                             (overflow / wrong IG / unconsumed slot), not disagreeing CVs.
@@ -19353,7 +19345,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 ENDDO
 DEALLOCATE(GCELL_VOLUME_GLOBAL,MEMBER_COUNT,MEMBER_OWNER_NM,MEMBER_OWNER_CV,CV_KEY)
 
-! E. Per-mesh piece-to-row map: every in-mesh piece has a unique identity home that round-trips.
+! E. Per-mesh piece-to-row map: every active in-mesh piece has a unique identity home that round-trips.
 IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A)') ' SET_CVS_3D : CV conservation/consistency validation'
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    M => MESHES(NM)
@@ -19370,7 +19362,10 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       DO ICC=1,M%N_CUTCELL_MESH
          DO JCC=1,M%CUT_CELL(ICC)%NCELL
             N_PIECE = N_PIECE + 1
-            IF (.NOT.CC_GRID_CUT_PIECE_IS_ACTIVE(NM,ICC,JCC)) N_INACTIVE_M = N_INACTIVE_M + 1
+            IF (.NOT.CC_GRID_CUT_PIECE_IS_ACTIVE(NM,ICC,JCC)) THEN
+               N_INACTIVE_M = N_INACTIVE_M + 1
+               CYCLE
+            ENDIF
             IROW = 0
             IF (ALLOCATED(M%CUT_CELL(ICC)%ICV)) IROW = M%CUT_CELL(ICC)%ICV(JCC)
             ! ICV is the identity home when it still round-trips. After agglomeration
@@ -19400,7 +19395,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   IF (HOST_ICELL>0) HOST_SOLID = M%CELL(HOST_ICELL)%SOLID
                ENDIF
                IF (N_MISSING_M==1) WRITE(LU_ERR,'(A,I0,A,I0,A,I0,A,I0,A,L1,A,L1)') &
-                  'ERROR: SET_CVS_3D in-mesh cut piece has no CV row: mesh ',NM, &
+                  'ERROR: SET_CVS_3D active in-mesh cut piece has no CV row: mesh ',NM, &
                   ', ICC=',ICC,', JCC=',JCC, &
                   ', NOADVANCE=',NOADV, &
                   ', host IJK out of range=',HOST_OOB, &

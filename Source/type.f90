@@ -1425,12 +1425,8 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                D !< Corrector cut-cells thermodynamic divg. (1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::               DS !< Predictor cut-cells thermodynamic divg.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             DVOL !< Cut-cells thermodynamic divg*vol.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                Q !< Cut-cells volumetric heat source. (1:NCELL)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::               QR !< Cut-cells volumetric radiative heat source.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::         D_SOURCE !< Cut-cells divergence source terms.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::               ZZ !< Corrector cut-cells mass fractions.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::              ZZS !< Predictor cut-cells mass fractions.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::        M_DOT_PPP !< Cut-cells mass source term.
 
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::             UNKH !< Cut-cells unknown number for pressure H. (1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                H !< Cut-cells predictor pressure values.
