@@ -8796,14 +8796,15 @@ CC_IBM_IF: IF (CC_IBM) THEN
             TMP_CC  = CUT_CELL(ICC)%TMP(JCC)
             H_CC    = CUT_CELL(ICC)%H(JCC)
             HS_CC   = CUT_CELL(ICC)%HS(JCC)
-            D_CC    = CUT_CELL(ICC)%D(JCC)
             RSUM_CC = CUT_CELL(ICC)%RSUM(JCC)
             IG = CUT_CELL(ICC)%IG(JCC)
             IF (IG>=1) THEN
+               D_CC    = CV%D(IG)
                Q_CC    = CV%Q(IG)
                MIX_CC  = CV%MIX_TIME(IG)
                QR_CC   = CV%QR(IG)
             ELSE
+               D_CC    = 0._EB
                Q_CC    = 0._EB
                MIX_CC  = 0._EB
                QR_CC   = 0._EB

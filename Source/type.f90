@@ -1422,9 +1422,6 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             RHOS !< Predictor cut-cell densities.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             RSUM !< Cut-cells RSUM container. (1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::              TMP !< Cut-cells temperatures. (1:NCELL)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                D !< Corrector cut-cells thermodynamic divg. (1:NCELL)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::               DS !< Predictor cut-cells thermodynamic divg.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             DVOL !< Cut-cells thermodynamic divg*vol.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::               ZZ !< Corrector cut-cells mass fractions.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::              ZZS !< Predictor cut-cells mass fractions.
 
