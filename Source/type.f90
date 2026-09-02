@@ -1447,6 +1447,11 @@ END TYPE CC_CUTCELL_TYPE
 
 TYPE CC_GCELL_TYPE
    INTEGER :: N = 0
+   INTEGER :: N_CUT = 0
+   INTEGER :: N_REG = 0
+   INTEGER :: N_CUT_GHOST = 0
+   INTEGER :: N_REG_GHOST = 0
+   INTEGER :: N_INT = 0
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CELL_TYPE !< (1:N) CC_GCELL_CUT or CC_GCELL_REG.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LAYER     !< (1:N) face-neighbor distance from cut region; cut GCELLs are 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK       !< (IAXIS:KAXIS,1:N) host Cartesian cell indices.
