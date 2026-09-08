@@ -18369,7 +18369,8 @@ END FUNCTION CC_GRID_GET_GCELL_INDEX_FROM_PIECE
 
 SUBROUTINE CC_GRID_SYNC_CUT_CELL_FV_INDEXES(NM)
 ! Refresh CUT_CELL(ICC)%ICV(JCC) from GCELL_TO_CV after identity or agglomeration.
-! ICV is nonzero only when the owning CV lives on this mesh (matches GET_FV_CV_FOR_CUTCELL).
+! ICV is nonzero when the mapped CV lives on this mesh: in-mesh owner, or a guard
+! storage row. Matches GET_FV_CV_FOR_CUTCELL.
 
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
@@ -18380,11 +18381,10 @@ CHARACTER(MESSAGE_LENGTH) :: MESSAGE
 M => MESHES(NM)
 IF (.NOT.ALLOCATED(M%FV%CV%GCELL_TO_CV)) RETURN
 
-! At identity scope every unblocked piece owns a CV on its own mesh, so consumers may rely on ICV>0
-! rather than skipping silently. Blocked pieces are given no GCELL by the GCELL build and stay zero.
+! Identity: unblocked in-mesh pieces must have ICV>0. Blocked / OOB / NOADVANCE stay 0.
 REQUIRE_ON_MESH_CV = CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY
 
-DO ICC=1,M%N_CUTCELL_MESH
+DO ICC=1,M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH
    IF (.NOT.ALLOCATED(M%CUT_CELL(ICC)%IG)) THEN
       ALLOCATE(M%CUT_CELL(ICC)%IG(1:M%CUT_CELL(ICC)%NCELL),M%CUT_CELL(ICC)%ICV(1:M%CUT_CELL(ICC)%NCELL))
       M%CUT_CELL(ICC)%IG = 0
@@ -18396,7 +18396,7 @@ DO ICC=1,M%N_CUTCELL_MESH
       IF (IG >= 1 .AND. IG <= M%FV%GCELL%N) THEN
          IF (M%FV%CV%GCELL_TO_CV_NM(IG) == NM) M%CUT_CELL(ICC)%ICV(JCC) = M%FV%CV%GCELL_TO_CV(IG)
       ENDIF
-      IF (REQUIRE_ON_MESH_CV .AND. CC_GRID_CUT_PIECE_IS_ACTIVE(NM,ICC,JCC)) THEN
+      IF (REQUIRE_ON_MESH_CV .AND. ICC<=M%N_CUTCELL_MESH .AND. CC_GRID_CUT_PIECE_IS_ACTIVE(NM,ICC,JCC)) THEN
          IF (M%CUT_CELL(ICC)%ICV(JCC) < 1) THEN
             WRITE(MESSAGE,'(A,I0,A,I0,A,I0,A)') 'ERROR: CC_IBM: mesh ',NM,', cut cell ',ICC,', piece ',JCC, &
                   ' is unblocked but owns no control volume.'
@@ -19235,9 +19235,10 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       M%FV%CV%MEMBER_NM(1:MAX_MEMBERS,ICV) = 0
       M%FV%CV%MEMBER_GCELL(1:MAX_MEMBERS,ICV) = 0
       IF (ICV > N_INT) THEN
-         ! Tail slots are ghost GCELLs, not local CVs.
-         M%FV%CV%GCELL_TO_CV_NM(ICV) = 0
-         M%FV%CV%GCELL_TO_CV(ICV) = 0
+         ! Tail rows are local storage CVs (restriction dest / dump / INIT);
+         ! they are not in-mesh partition members.
+         M%FV%CV%GCELL_TO_CV_NM(ICV) = NM
+         M%FV%CV%GCELL_TO_CV(ICV) = ICV
          M%FV%CV%OWNER_NM(ICV) = 0
          M%FV%CV%OWNER_GCELL(ICV) = 0
          M%FV%CV%N_MEMBER(ICV) = 0
@@ -19825,7 +19826,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                OC = M%FV%CV%GCELL_TO_CV(IG)
                NC = 0
                NBR_CV_NM = 0
-               IF (IG_N >= 1 .AND. IG_N <= N_INT) THEN
+               IF (IG_N >= 1) THEN
                   NC = M%FV%CV%GCELL_TO_CV(IG_N)
                   NBR_CV_NM = M%FV%CV%GCELL_TO_CV_NM(IG_N)
                ENDIF
@@ -20229,7 +20230,9 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    M => MESHES(NM)
    IF (.NOT.ALLOCATED(M%FV%FACE%OWNER_CV)) CYCLE
    DO IF_=1,M%FV%FACE%N
-      IF (M%FV%FACE%NBR_CV(IF_) > 0) CYCLE
+      IF (M%FV%FACE%NBR_CV(IF_) > 0) THEN
+         IF (.NOT.(M%FV%FACE%NBR_CV_NM(IF_)==NM .AND. M%FV%CV%N_MEMBER(M%FV%FACE%NBR_CV(IF_))==0)) CYCLE
+      ENDIF
       IF (M%FV%FACE%KIND(IF_) == CC_FACE_KIND_WALL) CYCLE
       IF (M%FV%FACE%KIND(IF_) == CC_FACE_KIND_COUPLING) CYCLE
       N_LOCAL = N_LOCAL + 1
@@ -20258,7 +20261,9 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    M => MESHES(NM)
    IF (.NOT.ALLOCATED(M%FV%FACE%OWNER_CV)) CYCLE
    DO IF_=1,M%FV%FACE%N
-      IF (M%FV%FACE%NBR_CV(IF_) > 0) CYCLE
+      IF (M%FV%FACE%NBR_CV(IF_) > 0) THEN
+         IF (.NOT.(M%FV%FACE%NBR_CV_NM(IF_)==NM .AND. M%FV%CV%N_MEMBER(M%FV%FACE%NBR_CV(IF_))==0)) CYCLE
+      ENDIF
       IF (M%FV%FACE%KIND(IF_) == CC_FACE_KIND_WALL) CYCLE
       IF (M%FV%FACE%KIND(IF_) == CC_FACE_KIND_COUPLING) CYCLE
       ILOC = ILOC + 1
@@ -20287,7 +20292,9 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    M => MESHES(NM)
    IF (.NOT.ALLOCATED(M%FV%FACE%OWNER_CV)) CYCLE
    DO IF_=1,M%FV%FACE%N
-      IF (M%FV%FACE%NBR_CV(IF_) > 0) CYCLE
+      IF (M%FV%FACE%NBR_CV(IF_) > 0) THEN
+         IF (.NOT.(M%FV%FACE%NBR_CV_NM(IF_)==NM .AND. M%FV%CV%N_MEMBER(M%FV%FACE%NBR_CV(IF_))==0)) CYCLE
+      ENDIF
       IF (M%FV%FACE%KIND(IF_) == CC_FACE_KIND_WALL) CYCLE
       IF (M%FV%FACE%KIND(IF_) == CC_FACE_KIND_COUPLING) CYCLE
       AREA = M%FV%FACE%AREA(IF_)
@@ -20404,12 +20411,18 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          ENDIF
       ENDIF
       IF (M%FV%FACE%NBR_CV_NM(IF_) == NM .AND. NC >= 1 .AND. NC <= M%FV%CV%N) THEN
-         M%FV%FACE%NBR_REF_KIND(IF_) = CC_FACE_REF_CV_CENTER
-         M%FV%FACE%XN_FACE_REF(IAXIS:KAXIS,IF_) = M%FV%CV%XCV(IAXIS:KAXIS,NC)
+         IF (M%FV%CV%N_MEMBER(NC) > 0) THEN
+            M%FV%FACE%NBR_REF_KIND(IF_) = CC_FACE_REF_CV_CENTER
+            M%FV%FACE%XN_FACE_REF(IAXIS:KAXIS,IF_) = M%FV%CV%XCV(IAXIS:KAXIS,NC)
+         ENDIF
       ENDIF
 
-      IF (NC < 1 .AND. M%FV%FACE%KIND(IF_)/=CC_FACE_KIND_COUPLING) CYCLE
-      IF (NC >= 1 .AND. M%FV%FACE%NBR_CV_NM(IF_) /= NM) CYCLE
+      ! Remote NBR is the other mesh's index. Then NC is local or missing.
+      IF (NC>=1 .AND. M%FV%FACE%NBR_CV_NM(IF_)/=NM) CYCLE
+      IF (M%FV%FACE%KIND(IF_)/=CC_FACE_KIND_COUPLING) THEN
+         IF (NC<1) CYCLE
+         IF (M%FV%CV%N_MEMBER(NC)==0) CYCLE
+      ENDIF
       DV(IAXIS:KAXIS) = M%FV%FACE%XN_FACE_REF(IAXIS:KAXIS,IF_) - M%FV%FACE%X_FACE_REF(IAXIS:KAXIS,IF_)
       DN = ABS(DOT_PRODUCT(DV(IAXIS:KAXIS),M%FV%FACE%NVEC(IAXIS:KAXIS,IF_)))
       IF (DN <= TWO_EPSILON_EB) DN = NORM2(DV(IAXIS:KAXIS))
@@ -20621,7 +20634,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             N_FACE_COUPLING=N_FACE_COUPLING+1
             OG=M%FV%FACE%OWNER_GCELL(IF_)
             NG=M%FV%FACE%NBR_GCELL(IF_)
-            IF (NC>=1 .OR. OCNM/=NM .OR. OC<1 .OR. OC>NCV .OR. OG<1 .OR. OG>N_INT) THEN
+            IF (NG<1 .OR. NC/=NG .OR. NCNM/=NM .OR. OCNM/=NM .OR. OC<1 .OR. OC>NCV .OR. OG<1 .OR. OG>N_INT) THEN
                N_ROLE_BAD=N_ROLE_BAD+1
             ELSEIF (M%FV%GCELL%LAYER(OG)/=CC_FV_GCELL_HALO_LAYERS .OR. &
                     .NOT.CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,M%FV%FACE%NBR_IJK(IAXIS:KAXIS,IF_))) THEN
@@ -20631,7 +20644,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             ELSEIF (M%FV%GCELL%CELL_TYPE(NG)/=CC_GCELL_REG .OR. &
                     ANY(M%FV%GCELL%IJK(IAXIS:KAXIS,NG)/=M%FV%FACE%NBR_IJK(IAXIS:KAXIS,IF_)) .OR. &
                     M%FV%CV%N_MEMBER(NG)/=0 .OR. M%FV%CV%OWNER_NM(NG)/=0 .OR. &
-                    M%FV%CV%GCELL_TO_CV(NG)/=0 .OR. M%FV%CV%GCELL_TO_CV_NM(NG)/=0) THEN
+                    M%FV%CV%GCELL_TO_CV(NG)/=NG .OR. M%FV%CV%GCELL_TO_CV_NM(NG)/=NM) THEN
                N_ROLE_BAD=N_ROLE_BAD+1
             ELSEIF (CC_FV_GCELL_HALO_LAYERS>0) THEN
                I=M%FV%GCELL%IJK(IAXIS,OG); J=M%FV%GCELL%IJK(JAXIS,OG); K=M%FV%GCELL%IJK(KAXIS,OG)
