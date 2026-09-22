@@ -2313,9 +2313,9 @@ MESH_LOOP: DO NM=1,NMESHES
    ENDDO
 
    ! Create EXTERIOR_PATCHes with which Smokeview colors, textures, or contours exterior mesh boundaries.
-   ! We want to avoid drawing VENTs on exterior surfaces such that the bit planes overlap. Thus, some VENTs are to be drawn 
-   ! slightly offset from the plane of the surface on which they are attached. 
-   ! The exterior surface of the domain are covered with EXTERIOR_PATCHES or "dummy" vents because they are not explicitly 
+   ! We want to avoid drawing VENTs on exterior surfaces such that the bit planes overlap. Thus, some VENTs are to be drawn
+   ! slightly offset from the plane of the surface on which they are attached.
+   ! The exterior surface of the domain are covered with EXTERIOR_PATCHES or "dummy" vents because they are not explicitly
    ! specified in the input file, but Smokeview needs to draw them as such.
    ! VENT_INDICES provides a code for each exterior cell. -1 means that nothing is to be drawn there. 0 means the default surface
    ! type. A positive number indicates the index of the VENT that is to be drawn flush with the wall, assuming that there is no
@@ -2362,7 +2362,7 @@ MESH_LOOP: DO NM=1,NMESHES
 
    ENDDO OBST_LOOP
 
-   ! Loop over VENTs and do not draw vents for MIRRORs, OPEN, or INTERPOLATED. 
+   ! Loop over VENTs and do not draw vents for MIRRORs, OPEN, or INTERPOLATED.
 
    VENT_LOOP: DO N=1,M%N_VENT
 
@@ -7419,7 +7419,7 @@ USE TURBULENCE, ONLY: K_SGS_POPE
 USE RADCONS, ONLY: WL_LOW, WL_HIGH, RADTMP
 USE RAD, ONLY: BLACKBODY_FRACTION
 USE MANUFACTURED_SOLUTIONS, ONLY: UF_MMS,WF_MMS,VD2D_MMS_P_3,VD2D_MMS_H_3
-USE CC_SCALARS, ONLY: CC_CUTCELL_VELOCITY,GET_FV_CV_FOR_CUTCELL
+USE CC_SCALARS, ONLY: CC_CUTCELL_VELOCITY
 
 REAL(EB), INTENT(IN) :: T,DT
 INTEGER, INTENT(IN) :: II,JJ,KK,IND,NM
@@ -7435,7 +7435,7 @@ REAL(EB) :: H_TC,TMP_TC,RE_D,NUSSELT,VEL,K_G,MU_G,COSTHETA,FAC,&
             RHO_CC,TMP_CC,H_CC,HS_CC,D_CC,RSUM_CC,Q_CC,MIX_CC,QR_CC,FN_CF,VEL_CF
 REAL(EB), PARAMETER :: C_DIMARZO=2.23E5_EB
 INTEGER :: N,I,J,K,NN,IL,III,JJJ,KKK,IP,JP,KP,FED_ACTIVITY,IP1,JP1,KP1,IM1,JM1,KM1,IIM1,JJM1,KKM1,NR,NS,RAM,&
-           ICC,JCC,ICV,IG,NCELL,AXIS,ICF,NFACE,JCF,JCC_LO,JCC_HI,PDPA_FORMULA,IC,IF_
+           ICC,JCC,ICV,IG,NOM,NCELL,AXIS,ICF,NFACE,JCF,JCC_LO,JCC_HI,PDPA_FORMULA,IC,IF_
 REAL(FB) :: RN
 REAL(EB), PARAMETER :: EPS=1.E-10_EB
 REAL :: CPUTIME
@@ -8188,7 +8188,7 @@ IND_SELECT: SELECT CASE(IND)
             IF (LAGRANGIAN_PARTICLE_CLASS(NN)%Y_INDEX==H2O_INDEX) THEN
                WATER_VOL_FRAC = WATER_VOL_FRAC + &
                   AVG_DROP_DEN(I,J,K,LAGRANGIAN_PARTICLE_CLASS(NN)%ARRAY_INDEX)/LAGRANGIAN_PARTICLE_CLASS(NN)%DENSITY
-               WATER_TEMP = WATER_TEMP + & 
+               WATER_TEMP = WATER_TEMP + &
                   AVG_DROP_DEN(I,J,K,LAGRANGIAN_PARTICLE_CLASS(NN)%ARRAY_INDEX)/LAGRANGIAN_PARTICLE_CLASS(NN)%DENSITY * &
                   AVG_DROP_TMP(I,J,K,LAGRANGIAN_PARTICLE_CLASS(NN)%ARRAY_INDEX)
             ENDIF
@@ -8769,66 +8769,88 @@ CC_IBM_IF: IF (CC_IBM) THEN
          JCC_HI = NCELL
       ENDIF
       CC_LOOP: DO JCC=JCC_LO,JCC_HI
-         ICV=0
-         IF (USE_FV_STATE) CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
+         IG  = CUT_CELL(ICC)%IG(JCC)
+         NOM = 0
+         ICV = 0
+         IF (IG>=1) THEN
+            NOM = FV%CV%GCELL_TO_CV_NM(IG)
+            ICV = FV%CV%GCELL_TO_CV(IG)
+         ENDIF
          ! Get species mass fraction if necessary
          Y_H2O     = 0._EB
          R_Y_H2O   = 0._EB
          Y_SPECIES = 1._EB
-         IF (ICV>0) THEN
-            VOL     = CV%VOLUME(ICV)
-            RHO_CC  = CV%RHO(ICV)
-            TMP_CC  = CV%TMP(ICV)
-            H_CC    = CV%H(ICV)
-            HS_CC   = CV%HS(ICV)
-            D_CC    = CV%D(ICV)
-            RSUM_CC = CV%RSUM(ICV)
-            Q_CC    = CV%Q(ICV)
-            MIX_CC  = CV%MIX_TIME(CUT_CELL(ICC)%IG(JCC))
-            QR_CC   = CV%QR(ICV)
+         ! VOL is the only owner-row quantity here. It comes from the owning CV
+         ! whenever that owner mesh is on this rank, including a same-rank
+         ! ghost-region owner. NOM==NM is the previous local read.
+         ! PROCESS(NOM)==MY_RANK is the FDS same-rank test; it is evaluated
+         ! only after NOM>=1. H, HS, Q, QR live on the local piece row IG and
+         ! are written on this rank for every active piece, so there is no
+         ! halo gap. D is still undecided: writers hit both the owner row and
+         ! the piece row depending on branch. MIX_TIME stays IG-keyed.
+         IF (ICV>=1 .AND. NOM>=1) THEN
+            IF (PROCESS(NOM)/=MY_RANK) THEN
+               ICV = 0
+               NOM = 0
+            ENDIF
+         ENDIF
+         IF (IG>=1) THEN
+            H_CC   = CV%H(IG)
+            HS_CC  = CV%HS(IG)
+            Q_CC   = CV%Q(IG)
+            MIX_CC = CV%MIX_TIME(IG)
+            QR_CC  = CV%QR(IG)
+            IF (ICV>=1 .AND. NOM>=1) THEN
+               VOL  = MESHES(NOM)%FV%CV%VOLUME(ICV)
+               D_CC = MESHES(NOM)%FV%CV%D(ICV)
+               IF (NOM/=NM) ICV = 0
+            ELSE
+               VOL  = CUT_CELL(ICC)%VOLUME(JCC)
+               D_CC = CV%D(IG)
+            ENDIF
+         ELSE
+            VOL     = CUT_CELL(ICC)%VOLUME(JCC)
+            H_CC    = CUT_CELL(ICC)%H(JCC)
+            HS_CC   = CUT_CELL(ICC)%HS(JCC)
+            D_CC    = 0._EB
+            Q_CC    = 0._EB
+            MIX_CC  = 0._EB
+            QR_CC   = 0._EB
+         ENDIF
+         ! Thermo on the piece row whenever the piece has a storage row; IG=0 SOLID-host
+         ! pieces have no CV row and inherit the Cartesian host state.
+         IF (IG>=1) THEN
+            RHO_CC  = CV%RHO(IG)
+            TMP_CC  = CV%TMP(IG)
+            RSUM_CC = CV%RSUM(IG)
             IF (Z_INDEX > 0) THEN
-               Y_SPECIES = CV%ZZ(Z_INDEX,ICV)
+               Y_SPECIES = CV%ZZ(Z_INDEX,IG)
                RCON = SPECIES_MIXTURE(Z_INDEX)%RCON
             ELSEIF (Y_INDEX > 0) THEN
-               ZZ_GET(1:N_TRACKED_SPECIES) = CV%ZZ(1:N_TRACKED_SPECIES,ICV)
+               ZZ_GET(1:N_TRACKED_SPECIES) = CV%ZZ(1:N_TRACKED_SPECIES,IG)
                RCON = SPECIES(Y_INDEX)%RCON
                CALL GET_MASS_FRACTION(ZZ_GET,Y_INDEX,Y_SPECIES)
             ENDIF
             IF (DRY .AND. H2O_INDEX > 0) THEN
-               ZZ_GET(1:N_TRACKED_SPECIES) = CV%ZZ(1:N_TRACKED_SPECIES,ICV)
+               ZZ_GET(1:N_TRACKED_SPECIES) = CV%ZZ(1:N_TRACKED_SPECIES,IG)
                CALL GET_MASS_FRACTION(ZZ_GET,H2O_INDEX,Y_H2O)
                R_Y_H2O = SPECIES(H2O_INDEX)%RCON * Y_H2O
                IF (Y_INDEX==H2O_INDEX) Y_SPECIES=0._EB
             ENDIF
          ELSE
-            VOL     = CUT_CELL(ICC)%VOLUME(JCC)
-            RHO_CC  = CUT_CELL(ICC)%RHO(JCC)
-            TMP_CC  = CUT_CELL(ICC)%TMP(JCC)
-            H_CC    = CUT_CELL(ICC)%H(JCC)
-            HS_CC   = CUT_CELL(ICC)%HS(JCC)
-            RSUM_CC = CUT_CELL(ICC)%RSUM(JCC)
-            IG = CUT_CELL(ICC)%IG(JCC)
-            IF (IG>=1) THEN
-               D_CC    = CV%D(IG)
-               Q_CC    = CV%Q(IG)
-               MIX_CC  = CV%MIX_TIME(IG)
-               QR_CC   = CV%QR(IG)
-            ELSE
-               D_CC    = 0._EB
-               Q_CC    = 0._EB
-               MIX_CC  = 0._EB
-               QR_CC   = 0._EB
-            ENDIF
+            RHO_CC  = RHO(II,JJ,KK)
+            TMP_CC  = TMP(II,JJ,KK)
+            RSUM_CC = RSUM(II,JJ,KK)
             IF (Z_INDEX > 0) THEN
-               Y_SPECIES = CUT_CELL(ICC)%ZZ(Z_INDEX,JCC)
+               Y_SPECIES = ZZ(II,JJ,KK,Z_INDEX)
                RCON = SPECIES_MIXTURE(Z_INDEX)%RCON
             ELSEIF (Y_INDEX > 0) THEN
-               ZZ_GET(1:N_TRACKED_SPECIES) = CUT_CELL(ICC)%ZZ(1:N_TRACKED_SPECIES,JCC)
+               ZZ_GET(1:N_TRACKED_SPECIES) = ZZ(II,JJ,KK,1:N_TRACKED_SPECIES)
                RCON = SPECIES(Y_INDEX)%RCON
                CALL GET_MASS_FRACTION(ZZ_GET,Y_INDEX,Y_SPECIES)
             ENDIF
             IF (DRY .AND. H2O_INDEX > 0) THEN
-               ZZ_GET(1:N_TRACKED_SPECIES) = CUT_CELL(ICC)%ZZ(1:N_TRACKED_SPECIES,JCC)
+               ZZ_GET(1:N_TRACKED_SPECIES) = ZZ(II,JJ,KK,1:N_TRACKED_SPECIES)
                CALL GET_MASS_FRACTION(ZZ_GET,H2O_INDEX,Y_H2O)
                R_Y_H2O = SPECIES(H2O_INDEX)%RCON * Y_H2O
                IF (Y_INDEX==H2O_INDEX) Y_SPECIES=0._EB
@@ -10518,6 +10540,7 @@ END SUBROUTINE DUMP_HVAC
 SUBROUTINE UPDATE_HRR(DT,NM)
 
 USE PHYSICAL_FUNCTIONS, ONLY : GET_SENSIBLE_ENTHALPY,GET_SENSIBLE_ENTHALPY_Z
+USE CC_SCALARS, ONLY: GET_CUTCELL_ZZP
 REAL(EB), INTENT(IN) :: DT
 REAL(EB) :: VC,AREA_F,U_N,ZZ_GET(1:N_TRACKED_SPECIES),H_S,H_S_ALPHA,H_S_J_ALPHA,ENTHALPY_SUM_OLD
 INTEGER, INTENT(IN) :: NM
@@ -10638,7 +10661,7 @@ CFACE_LOOP : DO ICF=INTERNAL_CFACE_CELLS_LB+1,INTERNAL_CFACE_CELLS_LB+N_INTERNAL
    IF (N_TRACKED_SPECIES > 1) THEN
       DO N=1,N_TRACKED_SPECIES
          CALL GET_SENSIBLE_ENTHALPY_Z(N,B1%TMP_F,H_S_ALPHA)
-         H_S_J_ALPHA = H_S_J_ALPHA + 2._EB*H_S_ALPHA*B1%RHO_D_F(N)*(CUT_CELL(ICC)%ZZ(N,JCC)-B1%ZZ_F(N))*B1%RDN
+         H_S_J_ALPHA = H_S_J_ALPHA + 2._EB*H_S_ALPHA*B1%RHO_D_F(N)*(GET_CUTCELL_ZZP(NM,ICC,JCC,N,1._EB)-B1%ZZ_F(N))*B1%RDN
       ENDDO
    ENDIF
    AREA_F = B1%AREA
@@ -10758,7 +10781,7 @@ USE CC_SCALARS, ONLY: GET_FV_CV_FOR_CUTCELL
 REAL(EB) :: VC,Y_MF_INT(1:N_SPECIES),ZZ_GET(1:N_TRACKED_SPECIES),MASS_INTEGRAL(0:N_SPECIES+N_TRACKED_SPECIES),RHO_CC
 REAL(EB), INTENT(IN) :: DT
 INTEGER, INTENT(IN) :: NM
-INTEGER :: I,J,K,ICC,JCC,NCELL,ICV
+INTEGER :: I,J,K,ICC,JCC,NCELL,ICV,IG
 TYPE(CC_FV_TYPE), POINTER :: FV
 TYPE(CC_CV_TYPE), POINTER :: CV
 
@@ -10784,14 +10807,18 @@ DO K=1,KBAR
                   ICV=0
                   IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
                      CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
+                  IG = CUT_CELL(ICC)%IG(JCC)
                   IF (ICV>0) THEN
                      VC = CV%VOLUME(ICV)
-                     RHO_CC = CV%RHO(ICV)
-                     ZZ_GET(1:N_TRACKED_SPECIES) = CV%ZZ(1:N_TRACKED_SPECIES,ICV)
                   ELSE
                      VC = CUT_CELL(ICC)%VOLUME(JCC)
-                     RHO_CC = CUT_CELL(ICC)%RHO(JCC)
-                     ZZ_GET(1:N_TRACKED_SPECIES) = CUT_CELL(ICC)%ZZ(1:N_TRACKED_SPECIES,JCC)
+                  ENDIF
+                  IF (IG>=1) THEN
+                     RHO_CC = CV%RHO(IG)
+                     ZZ_GET(1:N_TRACKED_SPECIES) = CV%ZZ(1:N_TRACKED_SPECIES,IG)
+                  ELSE
+                     RHO_CC = RHO(I,J,K)
+                     ZZ_GET(1:N_TRACKED_SPECIES) = ZZ(I,J,K,1:N_TRACKED_SPECIES)
                   ENDIF
                   MASS_INTEGRAL(0) = MASS_INTEGRAL(0) + VC*RHO_CC
                   CALL GET_MASS_FRACTION_ALL(ZZ_GET,Y_MF_INT)
@@ -11413,6 +11440,7 @@ END SUBROUTINE DUMP_SPEC
 SUBROUTINE DUMP_ROTCUBE_MMS(NM,FN_MMS,T)
 
 USE COMP_FUNCTIONS, ONLY: GET_FILE_NUMBER
+USE CC_SCALARS, ONLY: GET_CUTCELL_ZZP,GET_CUTCELL_RHOP
 
 INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(IN) :: T
@@ -11546,8 +11574,8 @@ IF (CC_IBM) THEN
       DO JCC=1,CUT_CELL(ICC)%NCELL
          WRITE(LU_MMS,'(I8,A,E22.15,A,E22.15,A,E22.15,A,E22.15,A,E22.15,A,E22.15)') &
          1,',',CUT_CELL(ICC)%XYZCEN(IAXIS,JCC),',',CUT_CELL(ICC)%XYZCEN(KAXIS,JCC),',',&
-         CUT_CELL(ICC)%VOLUME(JCC),',',CUT_CELL(ICC)%ZZ(2,JCC),',',CUT_CELL(ICC)%H(JCC),',',&
-         CUT_CELL(ICC)%RHO(JCC)*(CUT_CELL(ICC)%H(JCC)-KRES(I,J,K))
+         CUT_CELL(ICC)%VOLUME(JCC),',',GET_CUTCELL_ZZP(NM,ICC,JCC,2,1._EB),',',CUT_CELL(ICC)%H(JCC),',',&
+         GET_CUTCELL_RHOP(NM,ICC,JCC,1._EB)*(CUT_CELL(ICC)%H(JCC)-KRES(I,J,K))
       ENDDO
    ENDDO
 

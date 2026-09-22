@@ -1418,13 +1418,6 @@ TYPE CC_CUTCELL_TYPE
    INTEGER                                  ::       N_NOMICC=0 !< Number of entries in NOMICC
    INTEGER,  ALLOCATABLE, DIMENSION(:,:)    ::           NOMICC !< OMESH cut-cells array. (1:2,1:N_NOMICC)
 
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::              RHO !< Corrector cut-cell densities. (1:NCELL)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             RHOS !< Predictor cut-cell densities.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::             RSUM !< Cut-cells RSUM container. (1:NCELL)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::              TMP !< Cut-cells temperatures. (1:NCELL)
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::               ZZ !< Corrector cut-cells mass fractions.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::              ZZS !< Predictor cut-cells mass fractions.
-
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::             UNKH !< Cut-cells unknown number for pressure H. (1:NCELL)
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                H !< Cut-cells predictor pressure values.
    REAL(EB), ALLOCATABLE, DIMENSION(:)      ::               HS !< Cut-cells corrector pressure values.
