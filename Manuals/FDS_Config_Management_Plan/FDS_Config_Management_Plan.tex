@@ -4,7 +4,7 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %                                                                                                 %
-% The mathematical style of these documents is based on the following                                       %
+% The mathematical style of these documents is based on the following                             %
 %                                                                                                 %
 % A. Thompson and B.N. Taylor. The NIST Guide for the Use of the International System of Units.   %
 %    NIST Special Publication 881, 2008.                                                          %
@@ -494,7 +494,13 @@ Additionally, scripts in the FDS and Smokeview verification suites are used to g
 
 \subsection*{Stage 7: Generation of verification and validation plots and regression statistics}
 
-Scripts in the FDS verification and validation suites are used to generate plots, regression information, and timing statistics using the results from Stage~5. These plots, figures, and statistical information are used in the FDS User~\cite{FDS_Users_Guide} and Verification~\cite{FDS_Verification_Guide} Guides as well as the SMV User and Verification Guides.
+Scripts use the results from Stage~5 to generate plots, regression information, and timing statistics for the FDS User~\cite{FDS_Users_Guide}, Verification~\cite{FDS_Verification_Guide}, and Validation~\cite{FDS_Validation_Guide} Guides, as well as the Smokeview User and Verification Guides.
+
+The file \path{validation_scatterplot_output_baseline.csv} provides a version-controlled baseline for validation statistics. The script \path{validation_git_stats.py} compares each predicted quantity with this baseline and adds signed relative differences in model relative standard deviation, $\tilde{\sigma}_M$, and bias factor, $\delta$, to \path{validation_scatterplot_output.csv}.
+
+Changes greater than 10\,\% in magnitude produce an \texttt{Error} when $\tilde{\sigma}_M$ increases or $\delta$ moves farther from unity. Improvements exceeding the same threshold produce a \texttt{Warning}. Smaller changes are recorded without a threshold message.
+
+Small deviations from a baseline may occur with code changes. As model improvements reduce scatter and bring bias closer to unity, the baseline may be updated to reflect the improved statistics. These reviewed updates establish progressively tighter reference values for subsequent changes, encouraging development of the model physics toward tighter validation statistics over time. Version control preserves the history of these baseline changes.
 
 \subsection*{Stage 8: Compilation of FDS-SMV Guides}
 
@@ -545,12 +551,27 @@ In addition to the identified configuration items included in the FDS/Smokeview 
 
 NIST management approval is required prior to destruction of old or out-of-date records. Records are typically maintained for a minimum of 25 years.
 
+\section{Virus Scanning of Pull Requests}
+
+GitHub Actions use ClamAV to scan pull requests to FDS and participating developers' forks. These checks examine repository content and do not replace release-bundle scans. Security code and approved account IDs come from the receiving repository's trusted revision. When both the author and event sender are approved developers, scanning proceeds in the background, including after merging; other pull requests must pass scanning before admission to build checks.
+
+Disposable GitHub-hosted runners update signatures, test detection with EICAR, and scan the submitted and merge snapshots. Files are verified against Git's file list and hashes. Scanner jobs use read-only permissions, receive no project secrets, and never execute submitted code. Detections, errors, timeouts, and incomplete scans block outside contributions.
+
+Each receiving repository must require \texttt{FDS / PR admission} and \texttt{FDS / PR builds} through branch protection, require workflow approval for all outside collaborators, and require maintainer review of security changes. The separate \texttt{FDS / ClamAV scan} status reports scan results. External testing systems must enforce admission independently. A clean scan does not establish that code is benign; code review and isolated testing remain necessary.
+
 \section{Securing the FDS/Smokeview Installation Files}
 
 FDS and Smokeview installation files are built on NIST managed computers with access limited to only those associated with the FDS/Smokeview project. Each bundle file and the bundle itself is scanned for viruses and malware. The bundle is not made available if the scan identifies a suspicious signature. A SHA256 hash code is generated for each bundle file automatically by GitHub.
 
-
-
+To verify a download, find the SHA-256 digest for that exact file under \emph{Assets} on the official GitHub release page. In the download directory, run the appropriate command below, replacing \texttt{bundle-file} with the full filename:
+\begin{center}
+\begin{tabular}{ll}
+Windows (PowerShell) & \verb|Get-FileHash -Algorithm SHA256 "bundle-file"| \\
+macOS (Terminal) & \verb|shasum -a 256 "bundle-file"| \\
+Linux (Terminal) & \verb|sha256sum "bundle-file"| \\
+\end{tabular}
+\end{center}
+Compare all 64 hexadecimal digits, ignoring letter case and any \texttt{sha256:} prefix. A match confirms that the download is identical to the published GitHub asset; do not install the file if the digests differ.
 
 \section{Training}
 
