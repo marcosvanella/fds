@@ -4880,8 +4880,8 @@ INITIALIZE_CC_SCALARS_FORC_COND : IF (INITIALIZE_CC_SCALARS_FORC) THEN
          M3=>MESHES(NM)%OMESH(NOM)
          IF (M3%NICF_R(1)==0 .AND. M3%NLKF_R==0) CYCLE OTHER_MESH_LOOP_112
          SNODE = PROCESS(NOM)
-         ! Cut-face centered variables VEL/VELS, F, FB, ICG Hi-1,Hi:
-         ALLOCATE(M3%REAL_RECV_PKG112(M3%NICF_R(2) * 4 + M3%NLKF_R * 3))
+         ! Cut-face centered variables: FN or VEL/VELS plus VEL_LNK. Linked faces follow, 3 reals each.
+         ALLOCATE(M3%REAL_RECV_PKG112(M3%NICF_R(2) * 2 + M3%NLKF_R * 3))
          IF (RNODE/=SNODE) THEN
             N_REQ112 = N_REQ112 + 1
             CALL MPI_RECV_INIT(M3%REAL_RECV_PKG112(1),SIZE(M3%REAL_RECV_PKG112),MPI_DOUBLE_PRECISION, &
@@ -4945,7 +4945,7 @@ INITIALIZE_CC_SCALARS_FORC_COND : IF (INITIALIZE_CC_SCALARS_FORC) THEN
          SNODE = PROCESS(NOM)
          ! Initialize persistent send requests
          IF ((M3%NICF_S(1)>0 .OR. M3%NLKF_S>0) .AND. RNODE/=SNODE) THEN
-            ALLOCATE(M3%REAL_SEND_PKG112(M3%NICF_S(2) * 4 + M3%NLKF_S * 3))
+            ALLOCATE(M3%REAL_SEND_PKG112(M3%NICF_S(2) * 2 + M3%NLKF_S * 3))
             N_REQ112 = N_REQ112 + 1
             CALL MPI_SEND_INIT(M3%REAL_SEND_PKG112(1),SIZE(M3%REAL_SEND_PKG112),MPI_DOUBLE_PRECISION, &
                                SNODE,NM,MPI_COMM_WORLD,REQ112(N_REQ112),IERR)
@@ -5093,9 +5093,9 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          ENDIF
       ENDIF
 
-      ! Exchange velocity, momentum rhs and previous substep dH/Dx1 for cut-faces, in PREDICTOR, IBM forcing:
+      ! Exchange momentum rhs FN for cut-faces, in PREDICTOR, IBM forcing:
       IF (CODE==5 .AND. PREDICTOR .AND. M3%NICF_S(1)>0) THEN
-         NQT2 = 4
+         NQT2 = 2
          LL   = 0
          IF (RNODE/=SNODE) THEN
             PACK_REAL_SEND_PKG112A: DO ICF1=1,M3%NICF_S(1)
@@ -5110,8 +5110,6 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      VAL_FN = CF%FN(JCF)
                   ENDIF
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_FN
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = 0._EB ! H_LO no longer packed
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+3) = 0._EB ! H_HI no longer packed
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A
          ELSE
@@ -5125,7 +5123,6 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   ELSE
                      CF%FN_OMESH(JCF) = CF%FN(JCF)
                   ENDIF
-                  ! No need to copy H_LO, H_HI
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A2
          ENDIF
@@ -5134,7 +5131,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ! Exchange Velocity at end of PREDICTOR: To be used in RCEDGEs estimation of OMEGA and TAU at next substep.
 
       IF (CODE==3 .AND. M3%NICF_S(1)>0) THEN
-         NQT2 = 4
+         NQT2 = 2
          LL   = 0
          IF (RNODE/=SNODE) THEN
             PACK_REAL_SEND_PKG112A3: DO ICF1=1,M3%NICF_S(1)
@@ -5150,8 +5147,6 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   ENDIF
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_VELS
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = CF%VEL_LNK(JCF)
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+3) = 0._EB ! H_LO no longer packed
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+4) = 0._EB ! H_HI no longer packed
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A3
          ELSE
@@ -5166,7 +5161,6 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      CF%VELS_OMESH(JCF) = CF%VELS(JCF)
                   ENDIF
                   CF%VEL_LNK_OMESH(JCF) = CF%VEL_LNK(JCF)
-                  ! No need to copy H_LO and H_HI.
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A4
          ENDIF
@@ -5337,9 +5331,9 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ENDIF
 
 
-      ! Exchange velocity, momentum rhs and previous substep dH/Dx1 for cut-faces, in CORRECTOR, IBM forcing:
+      ! Exchange momentum rhs FN for cut-faces, in CORRECTOR, IBM forcing:
       IF (CODE==5 .AND. CORRECTOR .AND. M3%NICF_S(1)>0) THEN
-         NQT2 = 4
+         NQT2 = 2
          LL   = 0
          IF (RNODE/=SNODE) THEN
             PACK_REAL_SEND_PKG112B: DO ICF1=1,M3%NICF_S(1)
@@ -5354,8 +5348,6 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      VAL_FN = CF%FN(JCF)
                   ENDIF
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_FN
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = 0._EB ! HS_LO no longer packed
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+3) = 0._EB ! HS_HI no longer packed
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B
          ELSE
@@ -5369,16 +5361,15 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   ELSE
                      CF%FN_OMESH(JCF) = CF%FN(JCF)
                   ENDIF
-                  ! No need to copy H_LO and H_HI.
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B2
          ENDIF
       ENDIF
 
-      ! Exchange Velocity and Pressure at end of CORRECTOR: To be used in RCEDGEs estimation of OMEGA and TAU next substep.
+      ! Exchange Velocity at end of CORRECTOR: To be used in RCEDGEs estimation of OMEGA and TAU next substep.
 
       IF (CODE==6 .AND. M3%NICF_S(1)>0) THEN
-         NQT2 = 4
+         NQT2 = 2
          LL   = 0
          IF (RNODE/=SNODE) THEN
             PACK_REAL_SEND_PKG112B3: DO ICF1=1,M3%NICF_S(1)
@@ -5394,8 +5385,6 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   ENDIF
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_VEL
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = CF%VEL_LNK(JCF)
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+3) = 0._EB ! HS_LO no longer packed
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+4) = 0._EB ! HS_HI no longer packed
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B3
          ELSE
@@ -5410,7 +5399,6 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      CF%VEL_OMESH(JCF) = CF%VEL(JCF)
                   ENDIF
                   CF%VEL_LNK_OMESH(JCF) = CF%VEL_LNK(JCF)
-                  ! No need to copy H_LO and H_HI.
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B4
          ENDIF
@@ -5422,7 +5410,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             UP => M%U  ; VP => M%V  ; WP => M%W
          ENDIF
          IF (RNODE/=SNODE) THEN
-            LL = 4 * M3%NICF_S(2)
+            LL = 2 * M3%NICF_S(2)
             DO KK=M3%K_MIN_S,M3%K_MAX_S
                DO JJ=M3%J_MIN_S,M3%J_MAX_S
                   DO II=M3%I_MIN_S,M3%I_MAX_S
@@ -5714,9 +5702,9 @@ RECV_MESH_LOOP: DO NOM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             ENDDO
          ENDIF
 
-         ! Unpack velocity, momentum rhs and previous substep dH/Dx1 for cut-faces, in PREDICTOR or CORRECTOR, IBM forcing:
+         ! Unpack momentum rhs FN for cut-faces, in PREDICTOR or CORRECTOR, IBM forcing:
          IF (CODE==5  .AND. M2%NICF_R(1)>0) THEN
-            NQT2 = 4
+            NQT2 = 2
             LL   = 0
             DO ICF1=1,M2%NICF_R(1)
                ICF = M2%ICF_UFFB_CF_R(ICF1)
@@ -5754,7 +5742,7 @@ RECV_MESH_LOOP: DO NOM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             ENDDO
          ENDIF
          IF(CODE==3 .AND. M2%NICF_R(1)>0) THEN
-            NQT2 = 4
+            NQT2 = 2
             LL   = 0
             DO ICF1=1,M2%NICF_R(1)
                ICF = M2%ICF_UFFB_CF_R(ICF1)
@@ -5819,7 +5807,7 @@ RECV_MESH_LOOP: DO NOM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             ENDDO
          ENDIF
          IF(CODE==6 .AND. M2%NICF_R(1)>0) THEN
-            NQT2 = 4
+            NQT2 = 2
             LL   = 0
             DO ICF1=1,M2%NICF_R(1)
                ICF = M2%ICF_UFFB_CF_R(ICF1)
@@ -5835,7 +5823,7 @@ RECV_MESH_LOOP: DO NOM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          ENDIF
          IF ((CODE==3.OR.CODE==6) .AND. M2%NLKF_R>0) THEN
             UP2 => M2%U_LNK ; VP2 => M2%V_LNK ; WP2 => M2%W_LNK
-            LL = 4 * M2%NICF_R(2)
+            LL = 2 * M2%NICF_R(2)
             DO KK=M2%K_MIN_R,M2%K_MAX_R
                DO JJ=M2%J_MIN_R,M2%J_MAX_R
                   DO II=M2%I_MIN_R,M2%I_MAX_R
