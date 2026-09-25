@@ -1419,8 +1419,6 @@ TYPE CC_CUTCELL_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:,:)    ::           NOMICC !< OMESH cut-cells array. (1:2,1:N_NOMICC)
 
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::             UNKH !< Cut-cells unknown number for pressure H. (1:NCELL)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::                H !< Cut-cells predictor pressure values.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      ::               HS !< Cut-cells corrector pressure values.
 
    ! Here: VIND=0, EP=1:INT_N_EXT_PTS, interpolation stencils for WVEL, RHO_0 into cut-cell centroids.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:)    :: INT_IJK          !< Interpolation (IAXIS:KAXIS,INT_NPE_LO+1:INT_NPE_LO+INT_NPE_HI)
