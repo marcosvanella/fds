@@ -1,0 +1,942 @@
+case,group,chid,n_mesh,cells,n_resolutions,dx,twod,stretched,t_end,solver,mpi_process,restart,reac,part,n_obst,n_devc,mass_file,firebot_ranks,firebot_listed,dataplot_n,dataplot_metric,dataplot_quantity,dataplot_tol,dataplot_expected
+Adaptive_Mesh_Refinement/ns2d_16_emb_1to1_refinement.fds,Adaptive_Mesh_Refinement,ns2d_16_emb_1to1_refinement,2,320,1,0.392699x0.1x0.392699,True,False,30.0,,False,False,False,False,0,3,False,2,commented,0,,,,
+Adaptive_Mesh_Refinement/ns2d_16_emb_1to2_refinement.fds,Adaptive_Mesh_Refinement,ns2d_16_emb_1to2_refinement,2,512,2,0.19635x0.1x0.19635;0.392699x0.1x0.392699,True,False,30.0,,False,False,False,False,0,3,False,2,commented,0,,,,
+Adaptive_Mesh_Refinement/ns2d_16_int_1to2_refinement.fds,Adaptive_Mesh_Refinement,ns2d_16_int_1to2_refinement,13,448,2,0.19635x0.1x0.19635;0.392699x0.1x0.392699,True,False,30.0,,False,False,False,False,0,3,False,13,commented,0,,,,
+Adaptive_Mesh_Refinement/random_meshes.fds,Adaptive_Mesh_Refinement,random_meshes,5,1600,2,0.05x0.2x0.05;0.1x0.2x0.1,True,False,300.,,True,False,False,False,0,1,False,4,yes,1,end,Relative Error,0.02,Adaptive_Mesh_Refinement/random_meshes.csv
+Aerosols/aerosol_agglomeration.fds,Aerosols,aerosol_agglomeration,1,1000,1,0.001x0.001x0.001,False,False,60.,,False,False,False,False,0,3,False,1,yes,2,end,Relative Error,0.02,Aerosols/aerosol_agglomeration.csv
+Aerosols/aerosol_agglomeration_2.fds,Aerosols,aerosol_agglomeration_2,1,1000,1,0.001x0.001x0.001,False,False,60.,,False,False,False,False,0,4,False,1,yes,2,end,Relative Error,0.02,Aerosols/aerosol_agglomeration_2.csv
+Aerosols/aerosol_gravitational_deposition.fds,Aerosols,aerosol_gravitational_deposition,1,1000,1,0.001x0.001x0.001,False,False,1.,,False,False,False,False,0,4,False,1,yes,2,end,Relative Error,0.02;0.03,Aerosols/aerosol_gravitational_deposition.csv
+Aerosols/aerosol_gravitational_deposition_2.fds,Aerosols,aerosol_gravitational_deposition_2,1,1000,1,0.001x0.001x0.001,False,False,1.,,False,False,False,False,0,4,False,1,yes,2,end,Relative Error,0.02;0.03,Aerosols/aerosol_gravitational_deposition_2.csv
+Aerosols/aerosol_scrubbing.fds,Aerosols,aerosol_scrubbing,1,64,1,0.1x0.1x0.1,False,False,5000.,,False,False,False,True,0,1,False,1,yes,1,end,Relative Error,0.02,Aerosols/aerosol_scrubbing.csv
+Aerosols/aerosol_thermophoretic_deposition.fds,Aerosols,aerosol_thermophoretic_deposition,1,1000,1,0.001x0.001x0.001,False,False,2.,,False,False,False,False,0,2,False,1,yes,2,end,Relative Error,0.02,Aerosols/aerosol_thermophoretic_deposition.csv
+Aerosols/aerosol_thermophoretic_deposition_2.fds,Aerosols,aerosol_thermophoretic_deposition_2,1,1000,1,0.001x0.001x0.001,False,False,2.,,False,False,False,False,0,2,False,1,yes,2,end,Relative Error,0.02,Aerosols/aerosol_thermophoretic_deposition.csv
+Aerosols/aerosol_turbulent_deposition.fds,Aerosols,aerosol_turbulent_deposition,3,3000,1,0.001x0.001x0.001,False,False,1.,,False,False,False,False,0,12,False,1,yes,3,end,Relative Error,0.02,Aerosols/aerosol_turbulent_deposition_devc.csv
+Aerosols/propane_flame_deposition.fds,Aerosols,propane_flame_deposition,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,1,True,1,yes,3,end;end_1_1;end_1_2,N/A;Relative Error,0;0.01,Aerosols/propane_flame_deposition.csv;Aerosols/propane_flame_deposition_cat_wall.csv
+Aerosols/propane_flame_deposition_gravitational.fds,Aerosols,propane_flame_deposition_gravitational,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,1,True,1,yes,0,,,,
+Aerosols/propane_flame_deposition_none.fds,Aerosols,propane_flame_deposition_none,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,1,True,1,yes,0,,,,
+Aerosols/propane_flame_deposition_thermophoretic.fds,Aerosols,propane_flame_deposition_thermophoretic,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,1,True,1,yes,0,,,,
+Aerosols/propane_flame_deposition_turbulent.fds,Aerosols,propane_flame_deposition_turbulent,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,1,True,1,yes,0,,,,
+Aerosols/soot_oxidation_wall.fds,Aerosols,soot_oxidation_wall,1,1000,1,0.1x0.1x0.1,False,False,15.,,False,False,True,False,0,4,False,1,yes,3,end,Absolute Error;Relative Error,0.000001;0.001,Aerosols/soot_oxidation_wall_analytic.csv
+Aerosols/sphere_propane_deposition.fds,Aerosols,sphere_propane_deposition,1,6144,1,0.25x0.25x0.25,False,False,20.0,,False,False,True,False,1,1,False,,no,0,,,,
+Atmospheric_Effects/MO_velocity_profile_stable.fds,Atmospheric_Effects,MO_velocity_profile_stable,1,320000,1,1x1x1,False,True,10.,,False,False,False,False,0,4,False,1,yes,1,area,Relative Error,0.05,Atmospheric_Effects/MO_velocity_profile_stable.csv
+Atmospheric_Effects/MO_velocity_profile_unstable.fds,Atmospheric_Effects,MO_velocity_profile_unstable,1,320000,1,1x1x1,False,True,10.,,False,False,False,False,0,4,False,1,yes,1,area,Relative Error,0.05,Atmospheric_Effects/MO_velocity_profile_unstable.csv
+Atmospheric_Effects/atmospheric_boundary_layer_1.fds,Atmospheric_Effects,atmospheric_boundary_layer_1,16,400000,1,10x10x10,False,False,3600.,,False,False,False,False,0,5,False,16,yes,0,,,,
+Atmospheric_Effects/atmospheric_boundary_layer_2.fds,Atmospheric_Effects,atmospheric_boundary_layer_2,16,400000,1,10x10x10,False,False,3600.,,False,False,False,False,0,5,False,16,yes,0,,,,
+Atmospheric_Effects/atmospheric_boundary_layer_3.fds,Atmospheric_Effects,atmospheric_boundary_layer_3,16,400000,1,10x10x10,False,False,3600.,,False,False,False,False,0,5,False,16,yes,0,,,,
+Atmospheric_Effects/atmospheric_boundary_layer_4.fds,Atmospheric_Effects,atmospheric_boundary_layer_4,16,400000,1,10x10x10,False,False,3600.,,False,False,False,False,0,5,False,16,yes,0,,,,
+Atmospheric_Effects/lapse_rate.fds,Atmospheric_Effects,lapse_rate,4,4000,1,1x1x1,False,False,1.0,,False,False,False,False,0,2,False,1,yes,2,end,Relative Error,0.001,Atmospheric_Effects/lapse_rate.csv
+Atmospheric_Effects/lee_waves.fds,Atmospheric_Effects,lee_waves,1,10000,1,50x2x50,True,False,6000.0,,False,False,False,False,5,0,False,1,yes,0,,,,
+Atmospheric_Effects/stack_effect.fds,Atmospheric_Effects,stack_effect,1,30000,1,1x2x1,True,False,100.,,False,False,False,False,1,6,False,1,yes,2,end,Relative Error,0.01;0.05,Atmospheric_Effects/stack_effect.csv
+Atmospheric_Effects/wind_example_10.fds,Atmospheric_Effects,wind_example_10,8,800000,1,5x5x5,False,False,900.,,False,False,False,False,0,3,False,8,yes,1,end,Absolute Error,1,Atmospheric_Effects/wind_example_time.csv
+Atmospheric_Effects/wind_example_32.fds,Atmospheric_Effects,wind_example_32,32,800000,1,5x5x5,False,False,300.,,False,False,False,False,44,2,False,32,yes,2,end,Absolute Error,1,Atmospheric_Effects/wind_example_prof.csv
+Atmospheric_Effects/wind_example_5.fds,Atmospheric_Effects,wind_example_5,8,100000,1,10x10x10,False,False,900.,,False,False,False,False,0,3,False,8,yes,1,end,Absolute Error,1,Atmospheric_Effects/wind_example_time.csv
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p0.fds,Chemistry,EDC_MultiCFDStep_Methane_grimech30_Zeta0p0,1,25,1,0.2x0.2x0.2,True,False,20.0,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p25.fds,Chemistry,EDC_MultiCFDStep_Methane_grimech30_Zeta0p25,1,25,1,0.2x0.2x0.2,True,False,20.0,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p5.fds,Chemistry,EDC_MultiCFDStep_Methane_grimech30_Zeta0p5,1,25,1,0.2x0.2x0.2,True,False,20.0,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p75.fds,Chemistry,EDC_MultiCFDStep_Methane_grimech30_Zeta0p75,1,25,1,0.2x0.2x0.2,True,False,20.0,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta1p0.fds,Chemistry,EDC_MultiCFDStep_Methane_grimech30_Zeta1p0,1,25,1,0.2x0.2x0.2,True,False,20.0,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p0.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_Zeta0p0,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p25.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_Zeta0p25,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p5.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_Zeta0p5,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p75.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_Zeta0p75,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta1p0.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_Zeta1p0,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p00001.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_taumix0p00001,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p0001.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_taumix0p0001,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p001.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_taumix0p001,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p01.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_taumix0p01,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p1.fds,Chemistry,EDC_OneCFDStep_Methane_grimech30_taumix0p1,1,25,1,0.2x0.2x0.2,True,False,0.1,,False,False,False,False,1,17,False,1,yes,0,,,,
+Chemistry/EDC_load_bal_methane_smooke_parallel.fds,Chemistry,EDC_load_bal_methane_smooke_parallel,24,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,False,False,1,3,False,24,yes,0,,,,
+Chemistry/EDC_load_bal_methane_smooke_serial.fds,Chemistry,EDC_load_bal_methane_smooke_serial,24,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,False,False,1,3,False,24,yes,0,,,,
+Chemistry/ign_delay_Ethylene_TianfengLu_T1100K_Phi1p0.fds,Chemistry,ign_delay_Ethylene_TianfengLu_T1100K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,1.0,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_Smooke_T1100K_Phi1p0.fds,Chemistry,ign_delay_Methane_Smooke_T1100K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,1.0,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_TianfengLu_T1100K_Phi1p0.fds,Chemistry,ign_delay_Methane_TianfengLu_T1100K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,1.0,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1000K_Phi0p6.fds,Chemistry,ign_delay_Methane_grimech30_T1000K_Phi0p6,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1000K_Phi1p0.fds,Chemistry,ign_delay_Methane_grimech30_T1000K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1000K_Phi1p4.fds,Chemistry,ign_delay_Methane_grimech30_T1000K_Phi1p4,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1100K_Phi0p6.fds,Chemistry,ign_delay_Methane_grimech30_T1100K_Phi0p6,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1100K_Phi1p0.fds,Chemistry,ign_delay_Methane_grimech30_T1100K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1100K_Phi1p4.fds,Chemistry,ign_delay_Methane_grimech30_T1100K_Phi1p4,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1200K_Phi0p6.fds,Chemistry,ign_delay_Methane_grimech30_T1200K_Phi0p6,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1200K_Phi1p0.fds,Chemistry,ign_delay_Methane_grimech30_T1200K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T1200K_Phi1p4.fds,Chemistry,ign_delay_Methane_grimech30_T1200K_Phi1p4,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T900K_Phi0p6.fds,Chemistry,ign_delay_Methane_grimech30_T900K_Phi0p6,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T900K_Phi1p0.fds,Chemistry,ign_delay_Methane_grimech30_T900K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Methane_grimech30_T900K_Phi1p4.fds,Chemistry,ign_delay_Methane_grimech30_T900K_Phi1p4,1,25,1,0.2x0.2x0.2,True,False,10,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Propane_USC_T1100K_Phi1p0.fds,Chemistry,ign_delay_Propane_USC_T1100K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,1.0,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_Propane_Z66_T1100K_Phi1p0.fds,Chemistry,ign_delay_Propane_Z66_T1100K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,1.0,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/ign_delay_nHeptane_Chalmers_T1100K_Phi1p0.fds,Chemistry,ign_delay_nHeptane_Chalmers_T1100K_Phi1p0,1,25,1,0.2x0.2x0.2,True,False,1.0,,False,False,False,False,1,2,False,1,yes,0,,,,
+Chemistry/load_bal_methane_2step_fast_parallel.fds,Chemistry,load_bal_methane_2step_fast_parallel,6,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,True,False,1,3,False,6,yes,0,,,,
+Chemistry/load_bal_methane_2step_fast_serial.fds,Chemistry,load_bal_methane_2step_fast_serial,6,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,True,False,1,3,False,6,yes,4,end,N/A;Relative Error,0.0001;0.01,Chemistry/load_bal_methane_2step_fast_serial_cpu.csv;Chemistry/load_bal_methane_2step_fast_serial_devc.csv
+Chemistry/load_bal_methane_smooke_parallel.fds,Chemistry,load_bal_methane_smooke_parallel,24,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,False,False,1,3,False,24,yes,0,,,,
+Chemistry/load_bal_methane_smooke_serial.fds,Chemistry,load_bal_methane_smooke_serial,24,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,False,False,1,3,False,24,yes,0,,,,
+Chemistry/load_bal_propane_2step_arrhenius_parallel.fds,Chemistry,load_bal_propane_2step_arrhenius_parallel,6,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,True,False,1,3,False,6,yes,0,,,,
+Chemistry/load_bal_propane_2step_arrhenius_serial.fds,Chemistry,load_bal_propane_2step_arrhenius_serial,6,49152,1,0.125x0.125x0.125,False,False,5.0,ULMAT,False,False,True,False,1,3,False,6,yes,4,end,N/A;Relative Error,0.0001;0.01,Chemistry/load_bal_propane_2step_arrhenius_serial_cpu.csv;Chemistry/load_bal_propane_2step_arrhenius_serial_devc.csv
+Complex_Geometry/ccibm_sphere_heat_flux.fds,Complex_Geometry,ccibm_sphere_heat_flux,1,32768,1,0.0875x0.0875x0.0875,False,False,10,,False,False,False,False,0,1,False,,no,0,,,,
+Complex_Geometry/ccibm_sphere_mass_flux.fds,Complex_Geometry,ccibm_sphere_mass_flux,1,32768,1,0.0875x0.0875x0.0875,False,False,5,,False,False,False,False,0,2,False,,no,0,,,,
+Complex_Geometry/cone_1mesh.fds,Complex_Geometry,cone_1mesh,1,300,1,0.6x0.6x0.666667,False,False,1.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/cube_cc_compute.fds,Complex_Geometry,cube_cc_compute,3,32768,1,0.125x0.125x0.125,False,False,1.0,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/cylinder_Re200.fds,Complex_Geometry,cylinder_Re200,1,186624,1,0.083333x0.083333x0.083333,False,False,60.0,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/devc_surface_integral.fds,Complex_Geometry,devc_surface_integral,1,1000,1,0.15x0.15x0.15,False,False,30.,UGLMAT,False,False,False,False,0,4,False,,no,0,,,,
+Complex_Geometry/geom_azim.fds,Complex_Geometry,geom_azim,1,1000,1,0.1x0.1x0.1,False,False,0.,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/geom_bad_inconsistent_normals.fds,Complex_Geometry,geom_bad_inconsistent_normals,1,1000,1,0.4x0.4x0.4,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_bad_inverted_normals.fds,Complex_Geometry,geom_bad_inverted_normals,1,1000,1,0.4x0.4x0.4,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_bad_non_manifold_edge.fds,Complex_Geometry,geom_bad_non_manifold_edge,1,1000,1,0.4x0.4x0.4,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_bad_non_manifold_vert.fds,Complex_Geometry,geom_bad_non_manifold_vert,1,1000,1,0.4x0.4x0.4,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_bad_open_surface.fds,Complex_Geometry,geom_bad_open_surface,1,1000,1,0.4x0.4x0.4,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_channel.fds,Complex_Geometry,geom_channel,1,108,1,0.125x1x0.166667,True,False,10.,,False,False,False,False,0,8,False,1,yes,0,,,,
+Complex_Geometry/geom_channel2.fds,Complex_Geometry,geom_channel2,2,184,1,0.125x1x0.125,True,False,1.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_channel_tmp.fds,Complex_Geometry,geom_channel_tmp,2,252,2,0.125x1x0.125;0.125x1x0.166667,True,False,1.,ULMAT,False,False,False,False,2,0,False,1,yes,0,,,,
+Complex_Geometry/geom_channel_tmp2.fds,Complex_Geometry,geom_channel_tmp2,2,184,1,0.125x1x0.125,True,False,100.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_elev.fds,Complex_Geometry,geom_elev,1,1000,1,0.1x0.1x0.1,False,False,0.,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/geom_extruded_poly.fds,Complex_Geometry,geom_extruded_poly,1,46656,1,0.111111x0.111111x0.111111,False,False,20.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_hrrpuv_init.fds,Complex_Geometry,geom_hrrpuv_init,1,8000,1,0.1x0.1x0.1,False,False,10,,False,False,False,False,0,0,False,1,yes,1,end,Relative Error,0.001,Complex_Geometry/geom_hrrpuv_init.csv
+Complex_Geometry/geom_intersection.fds,Complex_Geometry,geom_intersection,1,1000,1,0.4x0.4x0.4,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_mass_file_test.fds,Complex_Geometry,geom_mass_file_test,1,64000,1,0.025x0.025x0.025,False,False,0.1,,False,False,False,False,0,0,True,1,yes,5,end,Relative Error,0.001,Complex_Geometry/geom_mass_file_test_exact.csv
+Complex_Geometry/geom_obst.fds,Complex_Geometry,geom_obst,1,3375,1,0.133333x0.133333x0.133333,False,False,1.0,,False,False,True,False,1,0,False,1,yes,0,,,,
+Complex_Geometry/geom_part_init.fds,Complex_Geometry,geom_part_init,1,8000,1,0.1x0.1x0.1,False,False,10,,False,False,True,True,0,0,False,1,yes,1,end,Relative Error,0.01,Complex_Geometry/geom_hrrpuv_init.csv
+Complex_Geometry/geom_particle_cascade.fds,Complex_Geometry,geom_particle_cascade,1,62500,1,0.2x0.2x0.2,False,False,10.,,False,False,False,True,0,1,False,,no,0,,,,
+Complex_Geometry/geom_particle_cascade_2.fds,Complex_Geometry,geom_particle_cascade_2,4,32000,1,0.05x0.05x0.05,False,False,15,,False,False,False,True,1,8,False,4,yes,4,end,Relative Error,0.01,Complex_Geometry/geom_particle_cascade_2.csv
+Complex_Geometry/geom_particle_flux.fds,Complex_Geometry,geom_particle_flux,1,62500,1,0.2x0.2x0.2,False,False,20.,,False,False,False,True,0,1,False,,no,0,,,,
+Complex_Geometry/geom_poiseuille_N10a_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N10a_theta0_stm,1,48,1,0.25x0.25x0.1,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N10na_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N10na_theta0_stm,1,48,1,0.25x0.25x0.1,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N10nah_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N10nah_theta0_stm,1,48,1,0.25x0.25x0.1,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N20a_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N20a_theta0_stm,1,96,1,0.25x0.25x0.05,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N20na_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N20na_theta0_stm,1,96,1,0.25x0.25x0.05,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N20nah_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N20nah_theta0_stm,1,96,1,0.25x0.25x0.05,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N40a_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N40a_theta0_stm,1,192,1,0.25x0.25x0.025,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N40na_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N40na_theta0_stm,1,192,1,0.25x0.25x0.025,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N40nah_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N40nah_theta0_stm,1,192,1,0.25x0.25x0.025,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N80a_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N80a_theta0_stm,1,384,1,0.25x0.25x0.0125,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N80na_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N80na_theta0_stm,1,384,1,0.25x0.25x0.0125,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_poiseuille_N80nah_theta0_stm.fds,Complex_Geometry,geom_poiseuille_N80nah_theta0_stm,1,384,1,0.25x0.25x0.0125,True,False,60.0,ULMAT HYPRE,False,False,False,False,0,4,False,1,yes,0,,,,
+Complex_Geometry/geom_scale.fds,Complex_Geometry,geom_scale,1,1000,1,0.2x0.2x0.2,False,False,0.,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/geom_self_intersection.fds,Complex_Geometry,geom_self_intersection,1,8000,1,0.2x0.2x0.2,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_simple.fds,Complex_Geometry,geom_simple,1,1000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_simple2.fds,Complex_Geometry,geom_simple2,1,1000,1,0.1x0.1x0.1,False,False,0.,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/geom_sphere1a.fds,Complex_Geometry,geom_sphere1a,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere1b.fds,Complex_Geometry,geom_sphere1b,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere1c.fds,Complex_Geometry,geom_sphere1c,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere1d.fds,Complex_Geometry,geom_sphere1d,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere1e.fds,Complex_Geometry,geom_sphere1e,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere1f.fds,Complex_Geometry,geom_sphere1f,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere3a.fds,Complex_Geometry,geom_sphere3a,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere3b.fds,Complex_Geometry,geom_sphere3b,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere3c.fds,Complex_Geometry,geom_sphere3c,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere3d.fds,Complex_Geometry,geom_sphere3d,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere3e.fds,Complex_Geometry,geom_sphere3e,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_sphere3f.fds,Complex_Geometry,geom_sphere3f,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_stretched_grid.fds,Complex_Geometry,geom_stretched_grid,5,18432,2,25x25x16;100x100x23.875,False,True,1200,ULMAT,False,False,False,False,0,2,False,5,yes,2,max,Relative Error,0.001,Complex_Geometry/geom_stretched_grid_exact.csv
+Complex_Geometry/geom_terrain.fds,Complex_Geometry,geom_terrain,1,8000,1,0.1x0.1x0.1,False,False,0.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_terrain2.fds,Complex_Geometry,geom_terrain2,1,64000,1,0.05x0.05x0.05,False,False,1.0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_texture.fds,Complex_Geometry,geom_texture,1,1000,1,0.1x0.1x0.1,False,False,0.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_texture2.fds,Complex_Geometry,geom_texture2,1,1000,1,0.1x0.1x0.1,False,False,0.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_texture3a.fds,Complex_Geometry,geom_texture3a,1,1000,1,0.2x0.2x0.2,False,False,,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_texture3b.fds,Complex_Geometry,geom_texture3b,1,1000,1,0.2x0.2x0.2,False,False,,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_texture4a.fds,Complex_Geometry,geom_texture4a,1,1000,1,0.2x0.2x0.2,False,False,,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/geom_texture4b.fds,Complex_Geometry,geom_texture4b,1,1000,1,0.2x0.2x0.2,False,False,,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/obst_geom_sprk.fds,Complex_Geometry,obst_geom_sprk,24,648000,1,0.1x0.1x0.1,False,False,100.,ULMAT,False,False,True,False,3,6,False,24,yes,5,end,Relative Error,0.15,Complex_Geometry/obst_geom_sprk_devc.csv
+Complex_Geometry/rotated_cube_0deg_128_obs.fds,Complex_Geometry,rotated_cube_0deg_128_obs,1,16384,1,0.049087x2x0.049087,True,False,1.,UGLMAT,False,False,False,False,1,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_128_stm.fds,Complex_Geometry,rotated_cube_0deg_128_stm,1,16384,1,0.049087x2x0.049087,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_256_obs.fds,Complex_Geometry,rotated_cube_0deg_256_obs,1,65536,1,0.024544x2x0.024544,True,False,1.,UGLMAT,False,False,False,False,1,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_256_stm.fds,Complex_Geometry,rotated_cube_0deg_256_stm,1,65536,1,0.024544x2x0.024544,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_320_obs.fds,Complex_Geometry,rotated_cube_0deg_320_obs,1,102400,1,0.019635x2x0.019635,True,False,1.,UGLMAT,False,False,False,False,1,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_320_stm.fds,Complex_Geometry,rotated_cube_0deg_320_stm,1,102400,1,0.019635x2x0.019635,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_32_obs.fds,Complex_Geometry,rotated_cube_0deg_32_obs,1,1024,1,0.19635x2x0.19635,True,False,1.,UGLMAT,False,False,False,False,1,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_32_stm.fds,Complex_Geometry,rotated_cube_0deg_32_stm,1,1024,1,0.19635x2x0.19635,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_384_obs.fds,Complex_Geometry,rotated_cube_0deg_384_obs,1,147456,1,0.016362x2x0.016362,True,False,1.,UGLMAT,False,False,False,False,1,0,False,,no,0,,,,
+Complex_Geometry/rotated_cube_0deg_384_stm.fds,Complex_Geometry,rotated_cube_0deg_384_stm,1,147456,1,0.016362x2x0.016362,True,False,1.,UGLMAT,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/rotated_cube_0deg_64_obs.fds,Complex_Geometry,rotated_cube_0deg_64_obs,1,4096,1,0.098175x2x0.098175,True,False,1.,UGLMAT,False,False,False,False,1,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_0deg_64_stm.fds,Complex_Geometry,rotated_cube_0deg_64_stm,1,4096,1,0.098175x2x0.098175,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_27deg_128_stm.fds,Complex_Geometry,rotated_cube_27deg_128_stm,1,16384,1,0.109763x2x0.109763,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_27deg_256_stm.fds,Complex_Geometry,rotated_cube_27deg_256_stm,1,65536,1,0.054881x2x0.054881,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_27deg_320_stm.fds,Complex_Geometry,rotated_cube_27deg_320_stm,1,102400,1,0.043905x2x0.043905,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_27deg_32_stm.fds,Complex_Geometry,rotated_cube_27deg_32_stm,1,1024,1,0.439051x2x0.439051,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_27deg_384_stm.fds,Complex_Geometry,rotated_cube_27deg_384_stm,1,147456,1,0.036588x2x0.036588,True,False,1.,UGLMAT,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/rotated_cube_27deg_64_stm.fds,Complex_Geometry,rotated_cube_27deg_64_stm,1,4096,1,0.219525x2x0.219525,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_45deg_128_stm.fds,Complex_Geometry,rotated_cube_45deg_128_stm,1,16384,1,0.06942x2x0.06942,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_45deg_256_stm.fds,Complex_Geometry,rotated_cube_45deg_256_stm,1,65536,1,0.03471x2x0.03471,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_45deg_320_stm.fds,Complex_Geometry,rotated_cube_45deg_320_stm,1,102400,1,0.027768x2x0.027768,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_45deg_32_stm.fds,Complex_Geometry,rotated_cube_45deg_32_stm,1,1024,1,0.27768x2x0.27768,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/rotated_cube_45deg_384_stm.fds,Complex_Geometry,rotated_cube_45deg_384_stm,1,147456,1,0.02314x2x0.02314,True,False,1.,UGLMAT,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/rotated_cube_45deg_64_stm.fds,Complex_Geometry,rotated_cube_45deg_64_stm,1,4096,1,0.13884x2x0.13884,True,False,1.,UGLMAT,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/saad_CC_explicit_512_cfl_p0625.fds,Complex_Geometry,saad_CC_explicit_512_cfl_p0625,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Complex_Geometry/saad_CC_explicit_512_cfl_p125.fds,Complex_Geometry,saad_CC_explicit_512_cfl_p125,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Complex_Geometry/saad_CC_explicit_512_cfl_p25.fds,Complex_Geometry,saad_CC_explicit_512_cfl_p25,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Complex_Geometry/shunn3_128_cc_exp_chm.fds,Complex_Geometry,shunn3_128_cc_exp_chm,1,16384,1,0.015625x0.1x0.015625,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_128_cc_exp_gdv.fds,Complex_Geometry,shunn3_128_cc_exp_gdv,1,16384,1,0.015625x0.1x0.015625,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_256_cc_exp_chm.fds,Complex_Geometry,shunn3_256_cc_exp_chm,1,65536,1,0.007812x0.1x0.007812,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_256_cc_exp_gdv.fds,Complex_Geometry,shunn3_256_cc_exp_gdv,1,65536,1,0.007812x0.1x0.007812,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_320_cc_exp_chm.fds,Complex_Geometry,shunn3_320_cc_exp_chm,1,102400,1,0.00625x0.1x0.00625,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_320_cc_exp_gdv.fds,Complex_Geometry,shunn3_320_cc_exp_gdv,1,102400,1,0.00625x0.1x0.00625,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_32_cc_exp_chm.fds,Complex_Geometry,shunn3_32_cc_exp_chm,1,1024,1,0.0625x0.1x0.0625,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_32_cc_exp_gdv.fds,Complex_Geometry,shunn3_32_cc_exp_gdv,1,1024,1,0.0625x0.1x0.0625,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_384_cc_exp_chm.fds,Complex_Geometry,shunn3_384_cc_exp_chm,1,147456,1,0.005208x0.1x0.005208,True,False,1.,,False,False,False,False,0,0,True,,no,0,,,,
+Complex_Geometry/shunn3_384_cc_exp_gdv.fds,Complex_Geometry,shunn3_384_cc_exp_gdv,1,147456,1,0.005208x0.1x0.005208,True,False,1.,,False,False,False,False,0,0,True,,no,0,,,,
+Complex_Geometry/shunn3_64_cc_exp_chm.fds,Complex_Geometry,shunn3_64_cc_exp_chm,1,4096,1,0.03125x0.1x0.03125,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/shunn3_64_cc_exp_gdv.fds,Complex_Geometry,shunn3_64_cc_exp_gdv,1,4096,1,0.03125x0.1x0.03125,True,False,1.,,False,False,False,False,0,0,True,1,yes,0,,,,
+Complex_Geometry/sphere_Re200.fds,Complex_Geometry,sphere_Re200,2,186624,1,0.083333x0.083333x0.083333,False,False,60.0,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/sphere_cc_compute.fds,Complex_Geometry,sphere_cc_compute,8,373248,1,0.055556x0.055556x0.055556,False,False,1.,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/sphere_helium_1mesh.fds,Complex_Geometry,sphere_helium_1mesh,1,262144,1,0.0625x0.0625x0.0625,False,False,.1,UGLMAT,False,False,False,False,0,5,False,1,yes,0,,,,
+Complex_Geometry/sphere_helium_3meshes.fds,Complex_Geometry,sphere_helium_3meshes,3,262144,1,0.0625x0.0625x0.0625,False,False,.1,UGLMAT,False,False,False,False,0,5,False,3,yes,0,,,,
+Complex_Geometry/sphere_helium_conserve_3meshes.fds,Complex_Geometry,sphere_helium_conserve_3meshes,3,262144,1,0.0625x0.0625x0.0625,False,False,3.,UGLMAT,False,False,False,False,0,5,False,3,yes,0,,,,
+Complex_Geometry/sphere_leak.fds,Complex_Geometry,sphere_leak,1,32768,1,0.1x0.1x0.1,False,False,100.,ULMAT,False,False,False,False,1,1,False,1,yes,1,max,Relative Error,0.05,Complex_Geometry/sphere_leak.csv
+Complex_Geometry/sphere_propane_demo.fds,Complex_Geometry,sphere_propane_demo,6,49152,1,0.125x0.125x0.125,False,False,5.0,UGLMAT,False,False,True,False,1,3,False,,no,0,,,,
+Complex_Geometry/sphere_radiate.fds,Complex_Geometry,sphere_radiate,1,262144,1,0.0625x0.0625x0.0625,False,False,0.01,UGLMAT,False,False,False,False,0,7,False,1,yes,1,max,Relative Error,0.07,Complex_Geometry/sphere_radiate.csv
+Complex_Geometry/sphere_shadow.fds,Complex_Geometry,sphere_shadow,1,262144,1,0.0625x0.0625x0.0625,False,False,20.0,UGLMAT,False,False,False,False,0,6,False,,no,0,,,,
+Complex_Geometry/sphere_stress.fds,Complex_Geometry,sphere_stress,1,64000,1,0.05x0.05x0.05,False,False,1.0,,False,False,False,False,0,2,False,,no,0,,,,
+Complex_Geometry/t34_scaling.fds,Complex_Geometry,t34_scaling,1,1000000,1,0.1x0.1x0.1,False,False,0,,False,False,False,False,0,0,False,1,yes,0,,,,
+Complex_Geometry/thin_object_mass.fds,Complex_Geometry,thin_object_mass,3,65536,1,0.03125x0.03125x0.03125,False,False,2.0,,False,False,False,False,0,6,False,3,yes,0,,,,
+Complex_Geometry/two_spheres.fds,Complex_Geometry,two_spheres,1,66560,1,0.086154x0.0875x0.0875,False,False,.01,,False,False,False,False,0,0,False,,no,0,,,,
+Complex_Geometry/zero_thick_roof.fds,Complex_Geometry,zero_thick_roof,1,27000,1,0.1x0.1x0.1,False,False,,,False,False,False,False,0,0,False,1,commented,0,,,,
+Controls/activate_vents.fds,Controls,activate_vents,1,2100,1,0.1x0.1x0.1,False,False,20.,,False,False,False,True,0,6,False,1,yes,1,end,Relative Error,0,Controls/activate_vents.csv
+Controls/bi_dir.fds,Controls,bi_dir,3,3000,1,0.1x0.1x0.1,False,False,20,,False,False,False,False,0,6,False,1,yes,2,mean,Relative Error,0.02;0.04,Controls/bi_dir.csv
+Controls/control_test.fds,Controls,control_test,1,8000,1,0.1x0.1x0.1,False,False,10,,False,False,True,False,1,4,False,1,yes,0,,,,
+Controls/control_test_2.fds,Controls,control_test_2,1,8800,1,0.095455x0.1x0.1,False,False,10,,False,False,False,False,1,9,False,1,yes,1,end,Relative Error,0.01,Controls/control_test_2.csv
+Controls/create_remove.fds,Controls,create_remove,2,8000,1,0.05x0.05x0.05,False,False,7.,,False,False,False,False,4,7,False,1,yes,0,,,,
+Controls/cycle_test.fds,Controls,cycle_test,2,8000,1,0.05x0.05x0.05,False,False,10.,,False,False,False,False,1,1,False,1,yes,0,,,,
+Controls/device_test.fds,Controls,device_test,2,7000,1,0.1x0.1x0.1,False,False,60.0,,False,False,True,True,2,15,False,1,yes,0,,,,
+Controls/ext_heartbeat_std_curve.fds,Controls,ext_heartbeat_std_curve,1,2000,1,0.05x0.05x0.05,False,False,60,,False,False,True,False,0,4,False,1,commented,0,,,,
+Controls/hrr_freeze.fds,Controls,hrr_freeze,1,8000,1,0.05x0.05x0.05,False,False,20.,,False,False,True,False,0,2,False,1,yes,2,end,N/A,0,Controls/hrr_freeze.csv
+Controls/rms_cov_corr.fds,Controls,rms_cov_corr,1,1000,1,0.1x0.1x0.1,False,False,1000,,False,False,False,False,2,5,False,1,yes,3,end,Relative Error,0.02,Controls/rms_cov_corr.csv
+Controls/rms_example.fds,Controls,rms_example,1,27,1,0.333333x0.333333x0.333333,False,False,20.,,False,False,False,False,0,4,False,1,yes,1,mean,Relative Error,4.00E-02,Controls/rms_example.csv
+Controls/special_time_ramps.fds,Controls,special_time_ramps,1,64,1,0.25x0.25x0.25,False,False,100.,,False,False,False,False,0,2,False,1,yes,1,end,Absolute Error,0.01,Controls/special_time_ramps.csv
+Controls/spreading_fire.fds,Controls,spreading_fire,4,32000,1,0.2x0.2x0.2,False,False,200.,,False,False,True,False,0,2,False,4,yes,1,area,Relative Error,0.05,Controls/spreading_fire.csv
+Detectors/aspiration_detector.fds,Detectors,aspiration_detector,1,1000,1,0.2x0.2x0.2,False,False,200.,,False,False,True,False,0,4,False,1,yes,1,end,Relative Error,0.02,Detectors/aspiration_detector.csv
+Detectors/beam_detector.fds,Detectors,beam_detector,8,400000,1,0.1x0.1x0.1,False,False,1.0,,False,False,False,False,4,14,False,8,yes,2,end,N/A;Relative Error,0.01;0.02,Detectors/beam_detector.csv;Detectors/beam_detector_ss_check.csv
+Detectors/objects_dynamic.fds,Detectors,objects_dynamic,1,65536,1,0.1x0.05x0.065625,False,False,0.0,,False,False,False,False,0,11,False,1,yes,0,,,,
+Detectors/objects_static.fds,Detectors,objects_static,1,1024,1,0.4x0.2x0.09375,False,False,0.0,,False,False,False,False,0,13,False,1,yes,0,,,,
+Detectors/smoke_detector.fds,Detectors,smoke_detector,1,125,1,0.2x0.2x0.2,False,False,100.0,,False,False,False,False,0,1,False,1,yes,1,end_1_1,Relative Error,0.01,Detectors/smoke_detector.csv
+Energy_Budget/energy_budget_adiabatic_two_fuels.fds,Energy_Budget,energy_budget_adiabatic_two_fuels,1,4000,1,0.5x0.5x0.5,False,False,600.,,False,False,True,False,0,0,False,1,yes,1,end,Absolute Error,12,Energy_Budget/energy_budget_adiabatic_two_fuels.csv
+Energy_Budget/energy_budget_adiabatic_walls.fds,Energy_Budget,energy_budget_adiabatic_walls,1,32000,1,0.25x0.25x0.25,False,False,300.,,False,False,True,False,0,0,False,1,yes,1,mean,Absolute Error,20,Energy_Budget/energy_budget_adiabatic_walls.csv
+Energy_Budget/energy_budget_cold_walls.fds,Energy_Budget,energy_budget_cold_walls,1,32000,1,0.25x0.25x0.25,False,False,300.,,False,False,True,False,0,0,False,1,yes,1,mean,Absolute Error,20,Energy_Budget/energy_budget_cold_walls.csv
+Energy_Budget/energy_budget_combustion.fds,Energy_Budget,energy_budget_combustion,1,8000,1,0.05x0.05x0.05,False,False,0.001,,False,False,True,False,0,2,False,1,yes,1,end,Relative Error,0.05,Energy_Budget/energy_budget_combustion_devc.csv
+Energy_Budget/energy_budget_dns_100.fds,Energy_Budget,energy_budget_dns_100,1,2500,1,0.0001x0.001x0.0001,True,False,2.,,False,False,False,False,2,4,False,1,yes,1,end,Relative Error,0.01,Energy_Budget/energy_budget_dns.csv
+Energy_Budget/energy_budget_particles.fds,Energy_Budget,energy_budget_particles,1,1000,1,0.1x0.1x0.1,False,False,900.0,,False,False,False,True,0,4,False,1,yes,2,area,N/A;Relative Error,0;0.01,Energy_Budget/energy_budget_particles_hrr.csv
+Energy_Budget/energy_budget_solid.fds,Energy_Budget,energy_budget_solid,1,1000,1,0.1x0.1x0.1,False,False,2000.,,False,False,False,False,0,4,False,1,yes,2,end,Relative Error,0.01,Energy_Budget/energy_budget_solid.csv
+Energy_Budget/energy_budget_tmix.fds,Energy_Budget,energy_budget_tmix,1,121,1,1x1x1,True,False,20,,False,False,False,False,2,1,False,1,yes,1,end,Relative Error,0.01,Energy_Budget/energy_budget_tmix.csv
+Energy_Budget/test_hrr_2d_cyl.fds,Energy_Budget,test_hrr_2d_cyl,1,800,1,0.1x0.02x0.1,True,False,10,,False,False,True,False,1,1,False,1,yes,1,mean,Relative Error,0.02,Energy_Budget/test_hrr_3d_hrr.csv
+Energy_Budget/test_hrr_3d.fds,Energy_Budget,test_hrr_3d,1,64000,1,0.1x0.1x0.1,False,False,10,,False,False,True,False,1,1,False,1,yes,0,,,,
+Extinction/extinction_1.fds,Extinction,extinction_1,100,6400,1,0.025x0.025x0.025,False,False,0.25,,False,False,True,False,0,400,False,1,yes,0,,,,
+Extinction/extinction_2.fds,Extinction,extinction_2,100,6400,1,0.025x0.025x0.025,False,False,0.25,,False,False,True,False,0,400,False,1,yes,0,,,,
+Fires/HoC_Ideal.fds,Fires,HoC_Ideal,1,1000,1,0.1x0.1x0.1,False,False,4.0,,False,False,True,False,0,0,False,1,yes,1,end,Relative Error,0.0001,Fires/HoC.csv
+Fires/HoC_NonIdeal.fds,Fires,HoC_NonIdeal,1,1000,1,0.1x0.1x0.1,False,False,4.0,,False,False,True,False,0,0,False,1,yes,1,end,Relative Error,0.0001,Fires/HoC.csv
+Fires/box_burn_away1.fds,Fires,box_burn_away1,4,4000,1,0.1x0.1x0.1,False,False,30.,,False,False,False,False,1,1,False,4,yes,1,end,Relative Error,0.02,Fires/box_burn_away.csv
+Fires/box_burn_away10.fds,Fires,box_burn_away10,4,4000,1,0.1x0.1x0.1,False,False,30.,,False,False,False,False,2,1,False,4,yes,1,end,Relative Error,0.02,Fires/box_burn_away10.csv
+Fires/box_burn_away11.fds,Fires,box_burn_away11,4,4000,1,0.1x0.1x0.1,False,False,30.,,False,False,False,False,3,1,False,4,yes,1,end,Relative Error,0.01,Fires/box_burn_away11.csv
+Fires/box_burn_away2.fds,Fires,box_burn_away2,1,1000,1,0.1x0.1x0.1,False,False,30.,,False,False,False,False,1,2,False,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away.csv
+Fires/box_burn_away3.fds,Fires,box_burn_away3,1,1000,1,0.1x0.1x0.1,False,False,30.,,False,False,True,False,1,2,False,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away.csv
+Fires/box_burn_away4.fds,Fires,box_burn_away4,1,1000,1,0.1x0.1x0.1,False,False,30.,,False,False,True,False,1,2,False,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away.csv
+Fires/box_burn_away5.fds,Fires,box_burn_away5,1,1000,1,0.1x0.1x0.1,False,False,30.,,False,False,True,False,1,2,True,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away.csv
+Fires/box_burn_away6.fds,Fires,box_burn_away6,1,1000,1,0.1x0.1x0.1,False,False,30.,,False,False,True,False,1,3,True,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away.csv
+Fires/box_burn_away7.fds,Fires,box_burn_away7,1,1000,1,0.1x0.1x0.1,False,False,20.,,False,False,True,False,1,1,False,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away7.csv
+Fires/box_burn_away8.fds,Fires,box_burn_away8,1,1000,1,0.1x0.1x0.1,False,False,30.,,False,False,True,False,1,2,False,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away.csv
+Fires/box_burn_away9.fds,Fires,box_burn_away9,4,4000,1,0.1x0.1x0.1,False,False,180.,,False,False,False,False,1,1,False,4,yes,1,end,Relative Error,0.01,Fires/box_burn_away9.csv
+Fires/box_burn_away_2D.fds,Fires,box_burn_away_2D,1,100,1,0.1x0.01x0.1,True,False,30.,,False,False,True,False,1,2,True,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away_2D.csv
+Fires/box_burn_away_2D_residue.fds,Fires,box_burn_away_2D_residue,1,100,1,0.1x0.01x0.1,True,False,30.,,False,False,True,False,1,2,True,1,yes,1,end,Relative Error,0.02,Fires/box_burn_away_2D.csv
+Fires/circular_burner.fds,Fires,circular_burner,8,64000,1,0.05x0.05x0.05,False,False,20.,,False,False,True,False,0,0,False,8,yes,1,end,Relative Error,1.00E-02,Fires/circular_burner.csv
+Fires/couch.fds,Fires,couch,8,60000,1,0.1x0.1x0.1,False,False,600.,,False,False,True,True,5,0,False,8,yes,1,max,Relative Error,0.2,Fires/couch.csv
+Fires/fire_const_gamma.fds,Fires,fire_const_gamma,1,8192,1,0.25x0.25x0.25,False,False,30.0,,False,False,True,False,0,2,True,1,yes,2,end,Relative Error,1.00E-05,Fires/fire_const_gamma.csv
+Fires/ftp.fds,Fires,ftp,1,1000,1,0.1x0.1x0.1,False,False,10,,False,False,True,False,0,2,False,1,yes,1,end,Relative Error,0.02,Fires/ftp.csv
+Fires/simple_test.fds,Fires,simple_test,1,20736,1,0.1x0.1x0.1,False,False,60.0,,False,False,True,False,1,0,False,1,yes,0,,,,
+Fires/spray_burner.fds,Fires,spray_burner,1,24000,1,0.1x0.1x0.1,False,False,90.,,False,False,True,True,5,2,False,1,yes,1,area,Relative Error,0.05,Fires/spray_burner.csv
+Fires/tmp_lower_limit_default.fds,Fires,tmp_lower_limit_default,1,8000,1,0.01x0.2x0.01,True,False,1.0,,False,False,True,False,3,1,False,1,yes,1,threshold,Absolute Error,0.05,Fires/tmp_lower_limit.csv
+Fires/tmp_lower_limit_simple.fds,Fires,tmp_lower_limit_simple,1,2000,1,0.02x0.08x0.02,True,False,1,,False,False,True,False,0,1,False,1,yes,1,threshold,Absolute Error,0.01,Fires/tmp_lower_limit.csv
+Fires/tunnel_const_gamma.fds,Fires,tunnel_const_gamma,1,400,1,0.001x0.001x0.001,True,False,0.2,,False,False,False,False,0,4,False,1,yes,4,end;mean,Relative Error,0.01,Fires/tunnel_const_gamma.csv
+Fires/tunnel_linear_cp.fds,Fires,tunnel_linear_cp,1,400,1,0.001x0.001x0.001,True,False,0.2,,False,False,False,False,0,5,False,1,yes,4,end;mean,Relative Error,0.01,Fires/tunnel_linear_cp.csv
+Flowfields/blasius_128.fds,Flowfields,blasius_128,1,24576,1,0.000781x0.01x0.002344,True,False,10,,False,False,False,False,0,2,False,,no,0,,,,
+Flowfields/blasius_16.fds,Flowfields,blasius_16,1,384,1,0.00625x0.01x0.01875,True,False,10,,False,False,False,False,0,1,False,1,yes,0,,,,
+Flowfields/blasius_32.fds,Flowfields,blasius_32,1,1536,1,0.003125x0.01x0.009375,True,False,10,,False,False,False,False,0,1,False,1,yes,0,,,,
+Flowfields/blasius_64.fds,Flowfields,blasius_64,1,6144,1,0.001562x0.01x0.004687,True,False,10,,False,False,False,False,0,1,False,1,yes,0,,,,
+Flowfields/cyl_test_1.fds,Flowfields,cyl_test_1,1,2400,1,0.1x0.002x0.1,True,False,20,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,Flowfields/cyl_test_1_devc.csv
+Flowfields/cyl_test_2.fds,Flowfields,cyl_test_2,1,2400,1,0.1x0.02x0.1,True,False,20,,False,False,False,False,1,1,False,1,yes,0,,,,
+Flowfields/cyl_test_3.fds,Flowfields,cyl_test_3,1,5000,1,0.001x0.002x0.001,True,False,3,,False,False,True,False,1,1,False,1,yes,1,end,Relative Error,0.01,Flowfields/cyl_test_3_devc.csv
+Flowfields/cyl_test_4.fds,Flowfields,cyl_test_4,1,5000,1,0.001x0.004x0.001,True,False,3,,False,False,True,False,1,1,False,1,yes,0,,,,
+Flowfields/divergence_test_1.fds,Flowfields,divergence_test_1,1,8000,1,0.05x0.05x0.05,False,True,10.,UGLMAT,False,False,False,False,2,4,False,1,yes,1,end,Absolute Error,1.00E-10,Flowfields/divergence_test_1.csv
+Flowfields/divergence_test_2.fds,Flowfields,divergence_test_2,1,81,1,0.111111x0.1x0.111111,True,False,10.,,False,False,False,True,0,1,False,1,yes,1,end,Absolute Error,1.00E-10,Flowfields/divergence_test_2.csv
+Flowfields/divergence_test_3.fds,Flowfields,divergence_test_3,4,12000,1,0.001x0.002x0.001,True,False,2.0,,False,False,False,False,2,4,False,4,yes,1,end,Absolute Error,1.00E-10,Flowfields/divergence_test_3.csv
+Flowfields/gas_filling.fds,Flowfields,gas_filling,1,15360,1,0.2x0.2x0.2,False,False,300.0,,False,False,False,False,0,0,True,1,yes,1,end,Relative Error,0.01,Flowfields/gas_filling.csv
+Flowfields/helium_1d_const_gamma.fds,Flowfields,helium_1d_const_gamma,1,8192,1,0.25x0.25x0.25,False,False,15,,False,False,False,False,0,6,False,1,yes,6,max,Absolute Error,1.00E-06,Flowfields/helium_1d_const_gamma_data.csv
+Flowfields/helium_1d_isothermal.fds,Flowfields,helium_1d_isothermal,1,8192,1,0.25x0.25x0.25,False,False,15,,False,False,False,False,0,6,False,1,yes,6,max,Absolute Error,1.00E-06,Flowfields/helium_1d_isothermal_data.csv
+Flowfields/helium_2d_isothermal.fds,Flowfields,helium_2d_isothermal,1,10368,1,0.001111x0.002x0.001111,True,False,2.0,,False,False,False,False,1,2,False,1,yes,2,max;min,Absolute Error,0.01,Flowfields/helium_2d.csv
+Flowfields/helium_air_jet_floor.fds,Flowfields,helium_air_jet_floor,1,108000,1,0.025x0.025x0.025,False,False,2.,,False,False,False,False,0,2,False,1,yes,2,max;min,Absolute Error,0.05,Flowfields/helium_air_jet_floor_data.csv
+Flowfields/hole.fds,Flowfields,hole,1,8000,1,0.1x0.1x0.1,False,False,10,,False,False,True,False,6,1,False,1,yes,1,end,Absolute Error,0.0001,Flowfields/no_hole_hrr.csv
+Flowfields/hot_layer_360.fds,Flowfields,hot_layer_360,1,1800,1,0.2x1x0.005556,True,False,10.,,False,False,False,False,0,80,False,1,yes,0,,,,
+Flowfields/jet_fan.fds,Flowfields,jet_fan,1,20000,1,0.2x0.2x0.2,False,False,10.0,,False,False,True,False,6,0,False,1,yes,0,,,,
+Flowfields/mass_heat_wall_device_test.fds,Flowfields,mass_heat_wall_device_test,1,256000,1,0.15x0.15x0.15,False,False,60.0,,False,False,False,False,0,4,True,1,yes,2,end,Relative Error,0.01,Flowfields/mass_heat_wall_device_test_data.csv
+Flowfields/mass_heat_wall_device_test_2.fds,Flowfields,mass_heat_wall_device_test_2,1,256000,1,0.15x0.15x0.15,False,False,60.0,,False,False,False,False,0,4,True,1,yes,2,end,Relative Error,0.01,Flowfields/mass_heat_wall_device_test_data.csv
+Flowfields/mwtest_cfl.fds,Flowfields,mwtest_cfl,1,120,1,0.05x0.1x0.05,True,False,60.,,False,False,False,False,0,2,False,1,yes,2,max;min,Absolute Error,1.00E-06,Flowfields/mwtest.csv
+Flowfields/no_hole.fds,Flowfields,no_hole,1,8000,1,0.1x0.1x0.1,False,False,10,,False,False,True,False,6,0,False,1,yes,0,,,,
+Flowfields/parabolic_profile.fds,Flowfields,parabolic_profile,4,500000,1,0.2x0.2x0.2,False,False,60.0,,False,False,False,False,0,1,False,4,yes,1,end,Relative Error,0.01,Flowfields/parabolic_profile.csv
+Flowfields/particle_offgas_1.fds,Flowfields,particle_offgas_1,1,8000,1,0.05x0.05x0.05,False,False,10.0,,False,False,False,True,0,2,False,1,yes,1,end,Absolute Error,0.001,Flowfields/particle_offgas.csv
+Flowfields/particle_offgas_2.fds,Flowfields,particle_offgas_2,1,8000,1,0.05x0.05x0.05,False,False,10.0,,False,False,False,True,0,2,False,1,yes,1,end,Absolute Error,0.001,Flowfields/particle_offgas.csv
+Flowfields/particle_offgas_3.fds,Flowfields,particle_offgas_3,1,8000,1,0.05x0.05x0.05,False,False,10.0,,False,False,True,True,0,2,False,1,yes,1,end,Absolute Error,0.001,Flowfields/particle_offgas.csv
+Flowfields/particle_offgas_4.fds,Flowfields,particle_offgas_4,1,8000,1,0.05x0.05x0.05,False,False,10.0,,False,False,True,False,1,2,False,1,yes,1,end,Absolute Error,0.001,Flowfields/particle_offgas.csv
+Flowfields/realizable_mass_fractions.fds,Flowfields,realizable_mass_fractions,1,12000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,0,6,False,1,yes,1,max_1_4,Absolute Error,1.00E-06,Flowfields/realizable_mass_fractions.csv
+Flowfields/simple_duct.fds,Flowfields,simple_duct,5,98480,1,0.05x0.05x0.05,False,False,30.0,,False,False,False,False,2,0,True,5,yes,1,end,Relative Error,0.01,Flowfields/simple_duct.csv
+Flowfields/species_conservation_1.fds,Flowfields,species_conservation_1,1,8000,1,0.2x0.2x0.2,False,False,60.,,False,False,False,False,0,0,True,1,yes,1,end,Relative Error,0.01,Flowfields/species_conservation_1.csv
+Flowfields/species_conservation_2.fds,Flowfields,species_conservation_2,1,2000,1,0.1x0.1x0.1,False,False,25.,UGLMAT,False,False,False,False,1,2,False,1,yes,1,end,Absolute Error,1.00E-02,Flowfields/species_conservation_2.csv
+Flowfields/species_conservation_3.fds,Flowfields,species_conservation_3,1,1000,1,0.1x0.1x0.1,False,False,100.,,False,False,False,False,1,6,False,1,yes,1,end,Relative Error,1.00E-01,Flowfields/species_conservation_3.csv
+Flowfields/species_conservation_4.fds,Flowfields,species_conservation_4,1,1000,1,0.1x0.1x0.1,False,False,100.,,False,False,False,False,0,7,False,1,yes,1,end,Absolute Error,5.00E-03,Flowfields/species_conservation_4.csv
+Flowfields/symmetry_test.fds,Flowfields,symmetry_test,1,1000,1,0.1x0.1x0.1,False,False,50.,,False,False,False,False,9,6,False,1,yes,1,mean,Absolute Error,0.01,Flowfields/symmetry_test_devc.csv
+Flowfields/symmetry_test_2.fds,Flowfields,symmetry_test_2,1,49152,1,0.03x0.03x0.03,False,False,4.,,False,False,True,False,5,4,False,1,yes,1,end,Relative Error,0.001,Flowfields/symmetry_test_2_devc.csv
+Flowfields/symmetry_test_mpi.fds,Flowfields,symmetry_test_mpi,8,8000,1,0.05x0.05x0.05,False,False,500.,,False,False,False,False,9,6,False,8,yes,1,mean,Absolute Error,0.01,Flowfields/symmetry_test_mpi_devc.csv
+Flowfields/tangential_velocity.fds,Flowfields,tangential_velocity,1,25000,1,0.1x0.1x0.1,False,False,20.0,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.04,Flowfields/tangential_velocity.csv
+Flowfields/uniform_shear_dudy.fds,Flowfields,uniform_shear_dudy,1,4096,1,0.0625x0.0625x0.0625,False,False,3.,,False,False,False,False,0,2,False,,no,0,,,,
+Flowfields/uniform_shear_dudz.fds,Flowfields,uniform_shear_dudz,1,4096,1,0.0625x0.0625x0.0625,False,False,3.,,False,False,False,False,0,2,False,,no,0,,,,
+Flowfields/uniform_shear_dvdz.fds,Flowfields,uniform_shear_dvdz,1,4096,1,0.0625x0.0625x0.0625,False,False,3.,,False,False,False,False,0,2,False,,no,0,,,,
+Flowfields/velocity_bc_test.fds,Flowfields,velocity_bc_test,3,216000,1,0.2x0.2x0.2,False,False,200.,,False,False,False,False,11,6,False,1,yes,2,mean_1_2,Absolute Error;Relative Error,0.03;0.05,Flowfields/velocity_bc_test_line.csv
+Flowfields/volume_flow_1.fds,Flowfields,volume_flow_1,8,8000,1,0.05x0.05x0.05,False,False,100.,,False,False,False,False,0,1,False,8,yes,1,mean,Relative Error,0.01,Flowfields/volume_flow.csv
+Flowfields/volume_flow_2.fds,Flowfields,volume_flow_2,8,8000,1,0.05x0.05x0.05,False,False,100.,,False,False,False,False,1,1,False,8,yes,1,mean,Relative Error,0.01,Flowfields/volume_flow.csv
+GPU_Tests/HYPRE_GPU_SCALING/test_16mesh_NOFRPG.fds,GPU_Tests,test_16mesh_NOFRPG,16,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/HYPRE_GPU_SCALING/test_16mesh_RS4.fds,GPU_Tests,test_16mesh_RS4,16,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/HYPRE_GPU_SCALING/test_32mesh_NOFRPG.fds,GPU_Tests,test_32mesh_NOFRPG,32,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/HYPRE_GPU_SCALING/test_32mesh_RS8.fds,GPU_Tests,test_32mesh_RS8,32,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/HYPRE_GPU_SCALING/test_4mesh.fds,GPU_Tests,test_4mesh,4,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/HYPRE_GPU_SCALING/test_4mesh_RS4.fds,GPU_Tests,test_4mesh_RS4,4,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/HYPRE_GPU_SCALING/test_8mesh_NOFRPG.fds,GPU_Tests,test_8mesh_NOFRPG,8,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/HYPRE_GPU_SCALING/test_8mesh_RS2.fds,GPU_Tests,test_8mesh_RS2,8,1000000,1,0.008x0.008x0.01,False,False,0.5,UGLMAT,False,False,True,False,1,1,False,,no,0,,,,
+GPU_Tests/test_gpu.fds,GPU_Tests,test_gpu,8,1000000,1,0.008x0.008x0.01,False,False,1.,UGLMAT HYPRE,False,False,True,False,1,1,False,,no,0,,,,
+HVAC/HVAC_aircoil.fds,HVAC,HVAC_aircoil,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,False,1,2,False,1,yes,2,end,Relative Error,0.01,HVAC/HVAC_aircoil_ideal.csv
+HVAC/HVAC_damper.fds,HVAC,HVAC_damper,1,8000,1,0.05x0.05x0.05,False,False,15.,,False,False,False,False,1,7,False,1,yes,2,end,Absolute Error;Relative Error,0.005;0.05,HVAC/HVAC_damper_ideal.csv
+HVAC/HVAC_energy_pressure.fds,HVAC,HVAC_energy_pressure,1,1100,1,0.1x0.1x0.1,False,False,20,,False,False,False,False,1,6,True,1,yes,3,end,Relative Error,0.01,HVAC/HVAC_energy_pressure_ideal.csv
+HVAC/HVAC_filter.fds,HVAC,HVAC_filter,1,1000,1,0.1x0.1x0.1,False,False,500.,,False,False,False,False,0,12,True,1,yes,4,end;mean,Absolute Error;Relative Error,0.01;0.07;1.00E-05,HVAC/HVAC_filter_ideal.csv
+HVAC/HVAC_flow_loss.fds,HVAC,HVAC_flow_loss,1,8000,1,0.05x0.05x0.05,False,False,10.,,False,False,False,False,1,3,False,1,yes,1,end,Relative Error,0.02,HVAC/HVAC_flow_loss_ideal.csv
+HVAC/HVAC_geom.fds,HVAC,HVAC_geom,2,16000,1,0.05x0.05x0.05,False,False,5,,False,False,False,False,1,3,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_geom.csv
+HVAC/HVAC_leak_exponent.fds,HVAC,HVAC_leak_exponent,3,24000,1,0.5x0.5x0.5,False,False,100.,,False,False,False,False,0,3,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_leak_exponent.csv
+HVAC/HVAC_leak_exponent_2.fds,HVAC,HVAC_leak_exponent_2,8,138240,1,0.04x0.04x0.04,False,False,300.,,False,False,False,False,5,2,False,8,yes,1,mean,Relative Error,0.01,HVAC/HVAC_leak_exponent_2.csv
+HVAC/HVAC_mass_conservation.fds,HVAC,HVAC_mass_conservation,1,8000,1,0.05x0.05x0.05,False,False,10,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_conservation_ideal.csv
+HVAC/HVAC_mass_transport.fds,HVAC,HVAC_mass_transport,1,8400,1,0.05x0.05x0.05,False,False,20.,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_ideal.csv
+HVAC/HVAC_mass_transport_1.fds,HVAC,HVAC_mass_transport_1,1,8400,1,0.05x0.05x0.05,False,False,20.,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_ideal.csv
+HVAC/HVAC_mass_transport_2.fds,HVAC,HVAC_mass_transport_2,1,8400,1,0.05x0.05x0.05,False,False,20.,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_ideal.csv
+HVAC/HVAC_mass_transport_3.fds,HVAC,HVAC_mass_transport_3,1,8400,1,0.05x0.05x0.05,False,False,20.,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_ideal.csv
+HVAC/HVAC_mass_transport_4.fds,HVAC,HVAC_mass_transport_4,1,8400,1,0.05x0.05x0.05,False,False,20.,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_ideal.csv
+HVAC/HVAC_mass_transport_branch.fds,HVAC,HVAC_mass_transport_branch,1,8400,1,0.05x0.05x0.05,False,False,20.,,False,False,False,False,1,2,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_branch_ideal.csv
+HVAC/HVAC_mass_transport_combine.fds,HVAC,HVAC_mass_transport_combine,1,8400,1,0.05x0.05x0.05,False,False,5.,,False,False,False,False,2,3,False,1,yes,1,end,Absolute Error,0.01,HVAC/HVAC_mass_transport_combine_ideal.csv
+HVAC/HVAC_mass_transport_conservation_1.fds,HVAC,HVAC_mass_transport_conservation_1,1,8400,1,0.05x0.05x0.05,False,False,200.,,False,False,False,False,1,7,False,1,yes,2,end,Relative Error,0.01,HVAC/HVAC_mass_transport_conservation_1_ideal.csv
+HVAC/HVAC_mass_transport_conservation_2.fds,HVAC,HVAC_mass_transport_conservation_2,1,8400,1,0.05x0.05x0.05,False,False,100.,,False,False,False,False,1,2,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_conservation_2_ideal.csv
+HVAC/HVAC_mass_transport_conservation_3.fds,HVAC,HVAC_mass_transport_conservation_3,1,8400,1,0.05x0.05x0.05,False,False,100.,,False,False,False,False,1,2,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_mass_transport_conservation_3_ideal.csv
+HVAC/HVAC_mass_transport_conv_0020.fds,HVAC,HVAC_mass_transport_conv_0020,1,8400,1,0.05x0.05x0.05,False,False,2.,,False,False,False,False,1,1,False,1,yes,0,,,,
+HVAC/HVAC_mass_transport_conv_0040.fds,HVAC,HVAC_mass_transport_conv_0040,1,8400,1,0.05x0.05x0.05,False,False,2.,,False,False,False,False,1,1,False,1,yes,0,,,,
+HVAC/HVAC_mass_transport_conv_0080.fds,HVAC,HVAC_mass_transport_conv_0080,1,8400,1,0.05x0.05x0.05,False,False,2.,,False,False,False,False,1,1,False,1,yes,0,,,,
+HVAC/HVAC_mass_transport_conv_0160.fds,HVAC,HVAC_mass_transport_conv_0160,1,8400,1,0.05x0.05x0.05,False,False,2.,,False,False,False,False,1,1,False,1,yes,0,,,,
+HVAC/HVAC_mass_transport_conv_0320.fds,HVAC,HVAC_mass_transport_conv_0320,1,8400,1,0.05x0.05x0.05,False,False,2.,,False,False,False,False,1,1,False,1,yes,0,,,,
+HVAC/HVAC_mass_transport_energy.fds,HVAC,HVAC_mass_transport_energy,1,1100,1,0.1x0.1x0.1,False,False,40,,False,False,False,False,1,6,False,1,yes,2,mean,Relative Error,0.01,HVAC/HVAC_mass_transport_energy_ideal.csv
+HVAC/HVAC_tee_loss_1.fds,HVAC,HVAC_tee_loss_1,1,8000,1,0.05x0.05x0.05,False,False,10.,,False,False,False,False,1,3,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_flow_loss_ideal.csv
+HVAC/HVAC_tee_loss_2.fds,HVAC,HVAC_tee_loss_2,1,8000,1,0.05x0.05x0.05,False,False,10.,,False,False,False,False,1,3,False,1,yes,1,end,Relative Error,0.01,HVAC/HVAC_tee_loss_2_ideal.csv
+HVAC/ashrae7_fixed_flow.fds,HVAC,ashrae7_fixed_flow,1,8000,1,0.5x0.5x0.5,False,False,30.,,False,False,False,False,0,8,False,1,yes,1,end,Relative Error,0.01,HVAC/ashrae_7_exp.csv
+HVAC/ashrae7_quadratic.fds,HVAC,ashrae7_quadratic,1,8000,1,0.5x0.5x0.5,False,False,30.,,False,False,False,False,0,8,False,1,yes,1,end,Relative Error,0.01,HVAC/ashrae_7_exp.csv
+HVAC/ashrae7_table.fds,HVAC,ashrae7_table,1,8000,1,0.5x0.5x0.5,False,False,30.,,False,False,False,False,0,8,False,1,yes,1,end,Relative Error,0.01,HVAC/ashrae_7_exp.csv
+HVAC/door_crack.fds,HVAC,door_crack,1,8000,1,0.2x0.2x0.2,False,False,900.0,,False,False,True,False,8,4,False,1,yes,2,mean,Relative Error,0.05;0.08,HVAC/door_crack.csv
+HVAC/fan_test.fds,HVAC,fan_test,2,4000,1,0.15x0.2x0.2,False,False,60.0,,False,False,False,False,1,4,False,1,yes,2,end,Relative Error,0.02;0.04,HVAC/fan_test.csv
+HVAC/fan_test_2.fds,HVAC,fan_test_2,2,4000,1,0.15x0.2x0.2,False,False,60.0,,False,False,False,False,1,4,False,1,yes,2,end,Relative Error,0.02;0.04,HVAC/fan_test_2.csv
+HVAC/leak_enthalpy.fds,HVAC,leak_enthalpy,1,200,1,0.1x1x0.1,True,False,5,,False,False,False,False,1,7,False,1,yes,2,end,Absolute Error;Relative Error,0.01;1.00E-05,HVAC/leak_enthalpy.csv
+HVAC/leak_geom.fds,HVAC,leak_geom,1,24000,1,0.05x0.05x0.05,False,False,5,,False,False,False,False,4,4,False,1,yes,1,end,Relative Error,0.01,HVAC/leak_geom.csv
+HVAC/leak_test.fds,HVAC,leak_test,1,2000,1,0.1x0.1x0.1,False,False,30.0,,False,False,False,False,2,1,False,1,yes,1,end,Relative Error,0.01,HVAC/leak_test.csv
+HVAC/leak_test_2.fds,HVAC,leak_test_2,1,2000,1,0.1x0.1x0.1,False,False,30.0,,False,False,False,False,2,7,False,1,yes,1,end,Absolute Error,1.9,HVAC/leak_test_2.csv
+HVAC/leak_test_3.fds,HVAC,leak_test_3,2,4400,1,0.1x0.1x0.1,False,False,30.0,ULMAT,False,False,False,False,1,4,False,2,yes,2,end,Relative Error,0.01,HVAC/leak_test_3.csv
+HVAC/leak_test_4.fds,HVAC,leak_test_4,1,64000,1,0.1x0.1x0.1,False,False,30.,ULMAT,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.05,HVAC/leak_test_4.csv
+HVAC/qfan_multi.fds,HVAC,qfan_multi,2,32000,1,0.05x0.1x0.1,False,False,20.0,,False,False,False,False,1,8,False,1,yes,4,end,Relative Error,0.02;0.05,HVAC/qfan_multi.csv
+HVAC/qfan_test.fds,HVAC,qfan_test,2,4000,1,0.15x0.2x0.2,False,False,20.0,,False,False,False,False,1,4,False,1,yes,2,end,Relative Error,0.02;0.04,HVAC/qfan_test.csv
+Heat_Transfer/SFPE_Case_1.fds,Heat_Transfer,SFPE_Case_1,1,3456,1,0.01x0.01x0.01,False,False,1800,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/SFPE_Case_1.csv
+Heat_Transfer/SFPE_Case_13.fds,Heat_Transfer,SFPE_Case_13,1,1728,1,0.01x0.01x0.01,False,False,10800,,False,False,False,False,1,3,False,1,yes,2,end,Relative Error,0.01,Heat_Transfer/SFPE_Case_13.csv
+Heat_Transfer/SFPE_Case_16.fds,Heat_Transfer,SFPE_Case_16,8,37856,1,0.02x0.02x0.02,False,False,3600,,False,False,False,False,1,0,False,8,yes,2,start,Relative Error,0.02,Heat_Transfer/SFPE_Case_16.csv
+Heat_Transfer/SFPE_Case_2.fds,Heat_Transfer,SFPE_Case_2,1,1728,1,0.01x0.01x0.01,False,False,900,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/SFPE_Case_2.csv
+Heat_Transfer/SFPE_Case_6.fds,Heat_Transfer,SFPE_Case_6,1,1728,1,0.1x0.1x0.1,False,False,1,,False,False,False,False,1,1,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/SFPE_Case_6.csv
+Heat_Transfer/SFPE_Case_7.fds,Heat_Transfer,SFPE_Case_7,1,1728,1,0.01x0.01x0.01,False,False,10800,,False,False,False,False,1,3,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/SFPE_Case_7.csv
+Heat_Transfer/SFPE_Case_8.fds,Heat_Transfer,SFPE_Case_8,1,1728,1,0.01x0.01x0.01,False,False,10800,,False,False,False,False,1,3,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/SFPE_Case_8.csv
+Heat_Transfer/SFPE_Case_9.fds,Heat_Transfer,SFPE_Case_9,1,1728,1,0.01x0.01x0.01,False,False,10800,,False,False,False,False,5,1,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/SFPE_Case_9.csv
+Heat_Transfer/adiabatic_con_flux.fds,Heat_Transfer,adiabatic_con_flux,1,1000,1,0.2x0.2x0.2,False,False,60.,,False,False,False,False,0,4,False,1,yes,2,end,Relative Error,0.01,Heat_Transfer/adiabatic_flux.csv
+Heat_Transfer/adiabatic_net_flux.fds,Heat_Transfer,adiabatic_net_flux,1,1000,1,0.2x0.2x0.2,False,False,60.,,False,False,False,False,0,4,False,1,yes,2,end,Relative Error,0.01,Heat_Transfer/adiabatic_flux.csv
+Heat_Transfer/back_wall.fds,Heat_Transfer,back_wall,1,64,1,0.25x0.25x0.25,False,False,2000,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.001,Heat_Transfer/back_wall.csv
+Heat_Transfer/back_wall_test.fds,Heat_Transfer,back_wall_test,4,32000,1,0.05x0.05x0.05,False,False,3600.,,False,False,False,False,7,5,False,4,yes,2,end,Relative Error,0.005,Heat_Transfer/back_wall_test_devc.csv
+Heat_Transfer/back_wall_test_2.fds,Heat_Transfer,back_wall_test_2,3,192000,1,0.025x0.025x0.025,False,False,20.,,False,False,False,False,4,12,False,3,yes,3,end,Relative Error,0.02,Heat_Transfer/back_wall_test_2_devc.csv
+Heat_Transfer/checkerboard.fds,Heat_Transfer,checkerboard,4,62720,1,0.025x0.025x0.025,False,False,30.,,False,False,True,False,2,2,False,4,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/checkerboard_devc.csv
+Heat_Transfer/convective_cooling.fds,Heat_Transfer,convective_cooling,1,27,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/convective_cooling.csv
+Heat_Transfer/convective_cooling_p00125.fds,Heat_Transfer,convective_cooling_p00125,1,27,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,0,1,False,1,yes,0,,,,
+Heat_Transfer/convective_cooling_p0025.fds,Heat_Transfer,convective_cooling_p0025,1,27,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,0,1,False,1,yes,0,,,,
+Heat_Transfer/convective_cooling_p005.fds,Heat_Transfer,convective_cooling_p005,1,27,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,0,1,False,1,yes,0,,,,
+Heat_Transfer/convective_cooling_p01.fds,Heat_Transfer,convective_cooling_p01,1,27,1,0.1x0.1x0.1,False,False,1800,,False,False,False,False,0,1,False,1,yes,0,,,,
+Heat_Transfer/convective_cooling_p025.fds,Heat_Transfer,convective_cooling_p025,1,27,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,0,1,False,1,yes,0,,,,
+Heat_Transfer/convective_cooling_p05.fds,Heat_Transfer,convective_cooling_p05,1,27,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,0,1,False,1,yes,0,,,,
+Heat_Transfer/convective_cooling_p1.fds,Heat_Transfer,convective_cooling_p1,1,27,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,0,1,False,1,yes,1,end,N/A,0,Heat_Transfer/convective_cooling_error.csv
+Heat_Transfer/heat_conduction_a.fds,Heat_Transfer,heat_conduction_a,1,27,1,0.1x0.1x0.1,False,False,2000.,,False,False,False,False,0,6,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/heat_conduction_a.csv
+Heat_Transfer/heat_conduction_b.fds,Heat_Transfer,heat_conduction_b,1,27,1,0.1x0.1x0.1,False,False,14000.,,False,False,False,False,0,6,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/heat_conduction_b.csv
+Heat_Transfer/heat_conduction_c.fds,Heat_Transfer,heat_conduction_c,1,27,1,0.1x0.1x0.1,False,False,50000.,,False,False,False,False,0,6,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/heat_conduction_c.csv
+Heat_Transfer/heat_conduction_d.fds,Heat_Transfer,heat_conduction_d,1,27,1,0.1x0.1x0.1,False,False,50000.,,False,False,False,False,0,6,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/heat_conduction_d.csv
+Heat_Transfer/heat_conduction_kc.fds,Heat_Transfer,heat_conduction_kc,1,36,1,0.1x0.1x0.1,False,False,1000.,,False,False,False,False,0,6,False,1,yes,2,end,Relative Error,0.01;0.02,Heat_Transfer/heat_conduction_kc.csv
+Heat_Transfer/ht1d_pile.fds,Heat_Transfer,ht1d_pile,1,2000,1,0.01x0.01x0.01,False,False,10800.,,False,False,False,False,3,0,False,1,yes,1,slope,Relative Error,1.00E-02,Heat_Transfer/ht1d_pile.csv
+Heat_Transfer/ht3d_average_temp.fds,Heat_Transfer,ht3d_average_temp,1,8000,1,0.05x0.05x0.05,False,False,10800,,False,False,False,False,1,2,False,1,yes,1,mean,Relative Error,1.00E-02,Heat_Transfer/ht3d_average_temp_devc.csv
+Heat_Transfer/ht3d_beam_heating_1.fds,Heat_Transfer,ht3d_beam_heating_1,1,800,1,0.1x0.1x0.1,False,False,600,,False,False,False,False,3,2,False,1,yes,1,end,Relative Error,4.00E-02,Heat_Transfer/ht3d_beam_heating_1.csv
+Heat_Transfer/ht3d_beam_heating_2.fds,Heat_Transfer,ht3d_beam_heating_2,1,800,1,0.1x0.1x0.1,False,False,600,,False,False,False,False,3,2,False,1,yes,1,end,Relative Error,4.00E-02,Heat_Transfer/ht3d_beam_heating_2.csv
+Heat_Transfer/ht3d_beam_intersection.fds,Heat_Transfer,ht3d_beam_intersection,2,16000,1,0.1x0.1x0.1,False,False,900,,False,False,True,False,8,3,False,,no,0,,,,
+Heat_Transfer/ht3d_demo.fds,Heat_Transfer,ht3d_demo,8,125000,1,0.01x0.01x0.01,False,False,100,,False,False,False,False,6,2,False,8,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_demo_devc.csv
+Heat_Transfer/ht3d_energy_conservation.fds,Heat_Transfer,ht3d_energy_conservation,1,62500,1,0.02x0.02x0.02,False,False,10,,False,False,False,False,2,2,False,1,yes,2,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_energy_conservation_devc.csv
+Heat_Transfer/ht3d_energy_conservation_2.fds,Heat_Transfer,ht3d_energy_conservation_2,1,62500,1,0.02x0.02x0.02,False,False,10,,False,False,False,False,2,2,False,1,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_energy_conservation_2_devc.csv
+Heat_Transfer/ht3d_energy_conservation_3.fds,Heat_Transfer,ht3d_energy_conservation_3,1,62500,1,0.02x0.02x0.02,False,False,10,,False,False,False,False,2,2,False,1,yes,1,end,Relative Error,3.00E-02,Heat_Transfer/ht3d_energy_conservation_3_devc.csv
+Heat_Transfer/ht3d_energy_conservation_4.fds,Heat_Transfer,ht3d_energy_conservation_4,8,125000,1,0.01x0.01x0.01,False,False,100,,False,False,False,False,2,7,False,8,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_energy_conservation_4_devc.csv
+Heat_Transfer/ht3d_energy_conservation_5.fds,Heat_Transfer,ht3d_energy_conservation_5,8,125000,1,0.01x0.01x0.01,False,False,100,,False,False,False,False,3,7,False,8,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_energy_conservation_5_devc.csv
+Heat_Transfer/ht3d_energy_conservation_6.fds,Heat_Transfer,ht3d_energy_conservation_6,8,125000,1,0.01x0.01x0.01,False,False,100,,False,False,False,False,2,7,False,8,yes,1,end,Relative Error,2.00E-02,Heat_Transfer/ht3d_energy_conservation_6_devc.csv
+Heat_Transfer/ht3d_energy_conservation_7.fds,Heat_Transfer,ht3d_energy_conservation_7,8,40000,1,0.01x0.01x0.01,False,False,300,,False,False,False,False,2,3,False,8,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_energy_conservation_7_devc.csv
+Heat_Transfer/ht3d_energy_conservation_8.fds,Heat_Transfer,ht3d_energy_conservation_8,36,64800,1,0.05x0.05x0.05,False,False,900.,,False,False,False,False,4,2,False,36,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_energy_conservation_8_devc.csv
+Heat_Transfer/ht3d_energy_conservation_9.fds,Heat_Transfer,ht3d_energy_conservation_9,8,27648,1,0.0005x0.0005x0.0005,False,False,300.0,,False,False,False,False,7,1,False,8,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_energy_conservation_9.csv
+Heat_Transfer/ht3d_ibeam.fds,Heat_Transfer,ht3d_ibeam,1,85184,1,0.01x0.01x0.01,False,False,3600,,False,False,False,False,3,6,False,1,yes,1,end,Relative Error,8.00E-02,Heat_Transfer/ht3d_ibeam_FEM_results.csv
+Heat_Transfer/ht3d_mass_conservation.fds,Heat_Transfer,ht3d_mass_conservation,1,8000,1,0.05x0.05x0.05,False,False,180,,False,False,False,False,3,0,True,1,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_mass_conservation.csv
+Heat_Transfer/ht3d_mass_conservation_2.fds,Heat_Transfer,ht3d_mass_conservation_2,1,8000,1,0.05x0.05x0.05,False,False,180,,False,False,False,False,3,1,True,1,yes,1,end,Relative Error,1.00E-02,Heat_Transfer/ht3d_mass_conservation_2_devc.csv
+Heat_Transfer/ht3d_network.fds,Heat_Transfer,ht3d_network,2,3200,1,0.1x0.1x0.1,False,False,28800,,False,False,False,False,19,4,False,2,yes,1,end,Relative Error,1.00E-03,Heat_Transfer/ht3d_network_devc.csv
+Heat_Transfer/ht3d_pile.fds,Heat_Transfer,ht3d_pile,1,2000,1,0.01x0.01x0.01,False,False,10800.,,False,False,False,False,3,0,False,1,yes,1,slope,Relative Error,1.00E-02,Heat_Transfer/ht1d_pile.csv
+Heat_Transfer/ht3d_slab.fds,Heat_Transfer,ht3d_slab,1,27,1,0.1x0.1x0.1,False,False,1800,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,1.00E-03,Heat_Transfer/ht3d_slab_soln.csv
+Heat_Transfer/ht3d_sphere_24.fds,Heat_Transfer,ht3d_sphere_24,1,13824,1,0.01x0.01x0.01,False,False,180.,,False,False,False,False,1,0,False,1,yes,0,,,,
+Heat_Transfer/ht3d_sphere_48.fds,Heat_Transfer,ht3d_sphere_48,8,110592,1,0.005x0.005x0.005,False,False,180.,,True,False,False,False,1,0,False,4,yes,0,,,,
+Heat_Transfer/ht3d_sphere_96.fds,Heat_Transfer,ht3d_sphere_96,64,884736,1,0.0025x0.0025x0.0025,False,False,180.,,False,False,False,False,1,0,False,64,yes,0,,,,
+Heat_Transfer/insulated_steel_column.fds,Heat_Transfer,insulated_steel_column,1,2000,1,0.1x0.1x0.1,False,False,1800.,,False,False,False,False,5,6,False,1,yes,0,,,,
+Heat_Transfer/insulated_steel_pipe.fds,Heat_Transfer,insulated_steel_pipe,1,27,1,0.1x0.1x0.1,False,False,36000.,,False,False,False,False,0,0,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/insulated_steel_pipe.csv
+Heat_Transfer/insulated_steel_pipe_2d.fds,Heat_Transfer,insulated_steel_pipe_2d,1,105,1,0.01x0.02x0.01,True,False,36000.,,False,False,False,False,1,0,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/insulated_steel_pipe_2d.csv
+Heat_Transfer/insulated_steel_plate.fds,Heat_Transfer,insulated_steel_plate,1,27,1,0.1x0.1x0.1,False,False,36000.,,False,False,False,False,0,0,False,1,yes,1,end,Relative Error,0.01,Heat_Transfer/insulated_steel_plate.csv
+Heat_Transfer/internal_heating.fds,Heat_Transfer,internal_heating,1,15625,1,0.02x0.02x0.02,False,False,600.,,False,False,False,True,0,2,False,1,yes,2,mean,Relative Error,0.01,Heat_Transfer/internal_heating.csv
+Heat_Transfer/thermocouple_time_constant.fds,Heat_Transfer,thermocouple_time_constant,1,6750,1,0.133333x0.133333x0.133333,False,False,20.,,False,False,False,False,0,4,False,1,yes,3,max,Relative Error,0.01,Heat_Transfer/thermocouple_time_constant.csv
+Miscellaneous/devc_interpolation_temperature.fds,Miscellaneous,devc_interpolation_temperature,1,25,1,0.2x1x0.2,True,False,200.,GLMAT,False,False,False,False,0,3,False,1,yes,1,end_1_3,Absolute Error,0.01,Miscellaneous/devc_interpolation.csv
+Miscellaneous/devc_interpolation_velocity.fds,Miscellaneous,devc_interpolation_velocity,1,25,1,0.2x1x0.2,True,False,200.,,False,False,False,False,0,3,False,1,yes,1,end_1_3,Absolute Error,0.01,Miscellaneous/devc_interpolation.csv
+Miscellaneous/external_test.fds,Miscellaneous,external_test,2,2000,1,0.1x0.1x0.1,False,False,10,,False,False,False,False,1,2,False,2,yes,2,end,Absolute Error;Relative Error,0.0001;0.001,Miscellaneous/external_test.csv
+Miscellaneous/init_overlap.fds,Miscellaneous,init_overlap,1,1000,1,0.2x0.2x0.2,False,False,1.,,False,False,False,True,0,16,False,1,yes,16,start,Relative Error,0.02,Miscellaneous/init_overlap.csv
+Miscellaneous/layer_1mesh.fds,Miscellaneous,layer_1mesh,1,8000,1,0.1x0.1x0.1,False,False,60.0,,False,False,True,False,0,3,False,1,yes,2,mean,Relative Error,0.1;0.2,Miscellaneous/layer_1mesh_devc.csv
+Miscellaneous/layer_4mesh.fds,Miscellaneous,layer_4mesh,4,8000,1,0.1x0.1x0.1,False,False,60.0,,True,False,True,False,0,3,False,3,yes,0,,,,
+Miscellaneous/mesh_transformation.fds,Miscellaneous,mesh_transformation,1,10000,1,0.03x0.03x0.025,False,True,0.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Miscellaneous/obst_box_mass_flux.fds,Miscellaneous,obst_box_mass_flux,1,125000,1,0.005x0.005x0.005,False,False,0.02,,False,False,False,False,1,6,False,1,yes,0,,,,
+Miscellaneous/obst_cone.fds,Miscellaneous,obst_cone,1,125000,1,0.005x0.005x0.005,False,False,0,,False,False,False,False,1,0,False,1,yes,0,,,,
+Miscellaneous/obst_cone_mass_flux.fds,Miscellaneous,obst_cone_mass_flux,1,125000,1,0.005x0.005x0.005,False,False,0.02,,False,False,False,False,1,2,False,1,yes,0,,,,
+Miscellaneous/obst_cylinder.fds,Miscellaneous,obst_cylinder,1,125000,1,0.005x0.005x0.005,False,False,0,,False,False,False,False,1,0,False,1,yes,0,,,,
+Miscellaneous/obst_cylinder_mass_flux.fds,Miscellaneous,obst_cylinder_mass_flux,1,125000,1,0.005x0.005x0.005,False,False,0.02,,False,False,False,False,1,3,False,1,yes,0,,,,
+Miscellaneous/obst_multi.fds,Miscellaneous,obst_multi,8,8192,1,0.1x0.1x0.1,False,False,0.,,False,False,True,True,3,0,False,1,yes,0,,,,
+Miscellaneous/obst_rotbox.fds,Miscellaneous,obst_rotbox,1,125000,1,0.005x0.005x0.005,False,False,0,,False,False,False,False,1,0,False,1,yes,0,,,,
+Miscellaneous/obst_single.fds,Miscellaneous,obst_single,1,8192,1,0.1x0.1x0.1,False,False,0.,,False,False,True,True,3,0,False,1,yes,0,,,,
+Miscellaneous/obst_sphere.fds,Miscellaneous,obst_sphere,1,125000,1,0.005x0.005x0.005,False,False,0,,False,False,False,False,1,0,False,1,yes,0,,,,
+Miscellaneous/obst_sphere_mass_flux.fds,Miscellaneous,obst_sphere_mass_flux,1,125000,1,0.005x0.005x0.005,False,False,0.02,,False,False,False,False,1,1,False,1,yes,0,,,,
+Miscellaneous/part_orientation_ramp.fds,Miscellaneous,part_orientation_ramp,1,8000,1,0.05x0.1x0.1,False,False,10,,False,False,False,True,0,1,False,1,yes,1,end,Relative Error,0.01,Miscellaneous/part_orientation_ramp.csv
+Miscellaneous/part_path_ramp_jog.fds,Miscellaneous,part_path_ramp_jog,2,9702,1,0.045455x0.047619x0.047619,False,False,10.,,False,False,False,True,0,3,True,2,yes,1,end,Relative Error,0.001,Miscellaneous/part_path_ramp_jog.csv
+Miscellaneous/pyramid.fds,Miscellaneous,pyramid,1,1000000,1,0.01x0.01x0.01,False,False,0.,,False,False,False,False,4,0,False,1,yes,0,,,,
+Miscellaneous/ramp_time.fds,Miscellaneous,ramp_time,1,1000,1,0.1x0.1x0.1,False,False,10.,,False,False,False,False,0,2,False,1,yes,1,all,Absolute Error,0.001,Miscellaneous/ramp_time_exact.csv
+NS_Analytical_Solution/ns2d_16.fds,NS_Analytical_Solution,ns2d_16,1,256,1,0.392699x0.1x0.392699,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,0,,,,
+NS_Analytical_Solution/ns2d_16_nupt1.fds,NS_Analytical_Solution,ns2d_16_nupt1,1,256,1,0.392699x0.1x0.392699,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,1,end,Convergent Series,0,NS_Analytical_Solution/ns2d_16_nupt1_exact.csv
+NS_Analytical_Solution/ns2d_32.fds,NS_Analytical_Solution,ns2d_32,1,1024,1,0.19635x0.1x0.19635,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,0,,,,
+NS_Analytical_Solution/ns2d_32_nupt1.fds,NS_Analytical_Solution,ns2d_32_nupt1,1,1024,1,0.19635x0.1x0.19635,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,1,end,Convergent Series,0,NS_Analytical_Solution/ns2d_32_nupt1_exact.csv
+NS_Analytical_Solution/ns2d_64.fds,NS_Analytical_Solution,ns2d_64,1,4096,1,0.098175x0.1x0.098175,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,0,,,,
+NS_Analytical_Solution/ns2d_64_nupt1.fds,NS_Analytical_Solution,ns2d_64_nupt1,1,4096,1,0.098175x0.1x0.098175,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,1,mean,Relative Error,0.01,NS_Analytical_Solution/ns2d_64_nupt1_exact.csv
+NS_Analytical_Solution/ns2d_8.fds,NS_Analytical_Solution,ns2d_8,1,64,1,0.785398x0.1x0.785398,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,1,end,N/A,0,NS_Analytical_Solution/ns2d_error.csv
+NS_Analytical_Solution/ns2d_8_nupt1.fds,NS_Analytical_Solution,ns2d_8_nupt1,1,64,1,0.785398x0.1x0.785398,True,False,6.283185,,False,False,False,False,0,3,False,1,yes,2,end,Convergent Series;N/A,0,NS_Analytical_Solution/ns2d_8_nupt1_exact.csv;NS_Analytical_Solution/ns2d_nupt1_error.csv
+NS_Analytical_Solution/vort2d_160.fds,NS_Analytical_Solution,vort2d_160,1,25600,1,0.001945x0.001945x0.001945,True,False,0.04,,False,False,False,False,0,32,False,1,yes,0,,,,
+NS_Analytical_Solution/vort2d_320.fds,NS_Analytical_Solution,vort2d_320,1,102400,1,0.000972x0.000972x0.000972,True,False,0.027,,False,False,False,False,0,64,False,1,yes,0,,,,
+NS_Analytical_Solution/vort2d_40.fds,NS_Analytical_Solution,vort2d_40,1,1600,1,0.00778x0.00778x0.00778,True,False,0.04,,False,False,False,False,0,8,False,1,yes,0,,,,
+NS_Analytical_Solution/vort2d_80.fds,NS_Analytical_Solution,vort2d_80,1,6400,1,0.00389x0.00389x0.00389,True,False,0.04,,False,False,False,False,0,16,False,1,yes,0,,,,
+Pressure_Effects/isentropic.fds,Pressure_Effects,isentropic,2,16000,1,0.05x0.05x0.05,False,False,60.,,False,False,False,True,0,8,False,1,yes,4,end,Relative Error,0.01,Pressure_Effects/isentropic.csv
+Pressure_Effects/isentropic2.fds,Pressure_Effects,isentropic2,2,16000,1,0.05x0.05x0.05,False,False,60.,,False,False,False,False,0,8,False,1,yes,4,end,Relative Error,0.01;0.03,Pressure_Effects/isentropic2.csv
+Pressure_Effects/obst_coarse_fine_interface.fds,Pressure_Effects,obst_coarse_fine_interface,2,171,2,0.25x0.25x0.25;0.5x0.5x0.5,False,False,10,,False,False,False,False,3,3,False,1,yes,1,end,Absolute Error,2,Pressure_Effects/obst_coarse_fine_interface_exact.csv
+Pressure_Effects/pressure_boundary.fds,Pressure_Effects,pressure_boundary,1,80000,1,0.05x0.05x0.05,False,False,30.,,False,False,True,False,0,0,False,1,yes,0,,,,
+Pressure_Effects/pressure_rise.fds,Pressure_Effects,pressure_rise,3,1200,1,0.05x0.002x0.05,True,False,600.0,,False,False,False,False,0,9,True,1,yes,3,end,Relative Error,0.01;0.02,Pressure_Effects/pressure_rise.csv
+Pressure_Effects/thick_orifice_5cm.fds,Pressure_Effects,thick_orifice_5cm,8,512000,1,0.05x0.05x0.05,False,False,30.0,,False,False,False,False,1,1,False,8,yes,1,max,Relative Error,0.05,Pressure_Effects/thick_orifice.csv
+Pressure_Effects/zone_break_fast.fds,Pressure_Effects,zone_break_fast,1,30000,1,0.2x0.2x0.2,False,False,30.,,False,False,False,False,3,6,False,1,yes,1,max,Relative Error,0.02,Pressure_Effects/zone_break.csv
+Pressure_Effects/zone_break_fast_uglmat.fds,Pressure_Effects,zone_break_fast_uglmat,4,30000,1,0.2x0.2x0.2,False,False,30.,UGLMAT PARDISO,False,False,False,False,3,6,False,4,yes,0,,,,
+Pressure_Effects/zone_break_fast_uglmat_hypre.fds,Pressure_Effects,zone_break_fast_uglmat_hypre,4,30000,1,0.2x0.2x0.2,False,False,30.,UGLMAT HYPRE,False,False,False,False,3,6,False,4,yes,0,,,,
+Pressure_Effects/zone_break_fast_ulmat.fds,Pressure_Effects,zone_break_fast_ulmat,1,30000,1,0.2x0.2x0.2,False,False,30.,ULMAT,False,False,False,False,3,6,False,1,yes,1,max,Relative Error,0.02,Pressure_Effects/zone_break.csv
+Pressure_Effects/zone_break_slow.fds,Pressure_Effects,zone_break_slow,1,30000,1,0.2x0.2x0.2,False,False,30.,,False,False,False,False,3,6,False,1,yes,1,max,Relative Error,0.02,Pressure_Effects/zone_break.csv
+Pressure_Effects/zone_break_slow_ulmat.fds,Pressure_Effects,zone_break_slow_ulmat,1,30000,1,0.2x0.2x0.2,False,False,30.,ULMAT,False,False,False,False,3,6,False,1,yes,1,max,Relative Error,0.02,Pressure_Effects/zone_break.csv
+Pressure_Effects/zone_shape.fds,Pressure_Effects,zone_shape,2,30000,1,0.2x0.2x0.2,False,False,25.,,False,False,False,False,3,5,False,2,yes,1,mean,Relative Error,0.015,Pressure_Effects/zone_shape.csv
+Pressure_Effects/zone_shape_2.fds,Pressure_Effects,zone_shape_2,8,32768,1,0.2x0.2x0.2,False,False,300.0,,False,False,False,False,30,3,True,8,yes,2,end;mean,Relative Error,0.01,Pressure_Effects/zone_shape_2.csv
+Pressure_Solver/dancing_eddies_1mesh.fds,Pressure_Solver,dancing_eddies_1mesh,1,12000,1,0.001x0.002x0.001,True,False,2.0,,False,False,False,False,2,3,False,1,yes,0,,,,
+Pressure_Solver/dancing_eddies_default.fds,Pressure_Solver,dancing_eddies_default,4,12000,1,0.001x0.002x0.001,True,False,2.0,,False,False,False,False,2,3,False,4,yes,1,end,Absolute Error,0.01,Pressure_Solver/dancing_eddies_1mesh_devc.csv
+Pressure_Solver/dancing_eddies_embed.fds,Pressure_Solver,dancing_eddies_embed,5,14400,2,0.0005x0.002x0.0005;0.001x0.002x0.001,True,False,2.0,,False,False,False,False,2,3,False,5,yes,0,,,,
+Pressure_Solver/dancing_eddies_tight.fds,Pressure_Solver,dancing_eddies_tight,4,12000,1,0.001x0.002x0.001,True,False,2.0,,False,False,False,False,2,4,False,4,yes,13,end,Absolute Error;N/A,0;0.3,Pressure_Solver/dancing_eddies_1mesh_devc.csv;Pressure_Solver/dancing_eddies_tight_devc.csv
+Pressure_Solver/dancing_eddies_tight_no_precon.fds,Pressure_Solver,dancing_eddies_tight_no_precon,4,12000,1,0.001x0.002x0.001,True,False,2.0,,False,False,False,False,2,4,False,4,yes,0,,,,
+Pressure_Solver/dancing_eddies_uglmat_hypre.fds,Pressure_Solver,dancing_eddies_uglmat_hypre,4,12000,1,0.001x0.002x0.001,True,False,2.0,UGLMAT HYPRE,False,False,False,False,2,4,False,4,yes,0,,,,
+Pressure_Solver/dancing_eddies_uglmat_pardiso.fds,Pressure_Solver,dancing_eddies_uglmat_pardiso,4,12000,1,0.001x0.002x0.001,True,False,2.0,UGLMAT PARDISO,False,False,False,False,2,4,False,4,yes,4,end,Absolute Error,0.01,Pressure_Solver/dancing_eddies_1mesh_devc.csv
+Pressure_Solver/dancing_eddies_uglmat_refine.fds,Pressure_Solver,dancing_eddies_uglmat_refine,4,7600,2,0.001x0.002x0.001;0.002x0.002x0.002,True,False,2.0,UGLMAT,False,False,False,False,2,4,False,4,yes,0,,,,
+Pressure_Solver/dancing_eddies_ulmat.fds,Pressure_Solver,dancing_eddies_ulmat,4,12000,1,0.001x0.002x0.001,True,False,2.0,ULMAT,False,False,False,False,2,4,False,4,yes,0,,,,
+Pressure_Solver/dancing_eddies_ulmat_hypre.fds,Pressure_Solver,dancing_eddies_ulmat_hypre,4,12000,1,0.001x0.002x0.001,True,False,2.0,ULMAT HYPRE,False,False,False,False,2,4,False,4,yes,0,,,,
+Pressure_Solver/duct_flow.fds,Pressure_Solver,duct_flow,8,32768,1,0.2x0.2x0.2,False,False,60.0,,False,False,False,False,29,4,False,8,yes,2,end;end_1_2,N/A;Relative Error,0;0.05,Pressure_Solver/duct_flow.csv
+Pressure_Solver/duct_flow_uglmat_hypre.fds,Pressure_Solver,duct_flow_uglmat_hypre,8,32768,1,0.2x0.2x0.2,False,False,60.0,UGLMAT HYPRE,False,False,False,False,29,4,False,8,yes,2,end;end_1_2,N/A;Relative Error,0;0.05,Pressure_Solver/duct_flow.csv
+Pressure_Solver/duct_flow_uglmat_pardiso.fds,Pressure_Solver,duct_flow_uglmat_pardiso,8,32768,1,0.2x0.2x0.2,False,False,60.0,UGLMAT PARDISO,False,False,False,False,29,4,False,8,yes,2,end;end_1_2,N/A;Relative Error,0;0.05,Pressure_Solver/duct_flow.csv
+Pressure_Solver/duct_flow_uglmat_refine.fds,Pressure_Solver,duct_flow_uglmat_refine,8,147456,2,0.1x0.1x0.1;0.2x0.2x0.2,False,False,60.0,UGLMAT HYPRE,False,False,False,False,29,4,False,8,yes,2,end;end_1_2,N/A;Relative Error,0;0.05,Pressure_Solver/duct_flow.csv
+Pressure_Solver/duct_flow_ulmat.fds,Pressure_Solver,duct_flow_ulmat,8,32768,1,0.2x0.2x0.2,False,False,60.0,ULMAT,False,False,False,False,29,4,False,8,yes,0,,,,
+Pressure_Solver/duct_flow_ulmat_hypre.fds,Pressure_Solver,duct_flow_ulmat_hypre,8,32768,1,0.2x0.2x0.2,False,False,60.0,ULMAT HYPRE,False,False,False,False,29,4,False,8,yes,0,,,,
+Pressure_Solver/hallways.fds,Pressure_Solver,hallways,5,73728,1,0.0625x0.0625x0.0625,False,False,60.0,,False,False,True,True,0,0,False,5,yes,1,mean,Absolute Error,3,Pressure_Solver/hallways_hrr.csv
+Pressure_Solver/obst_activation_default.fds,Pressure_Solver,obst_activation_default,4,1024,1,0.05x0.002x0.05,True,False,2.0,,False,False,False,False,6,8,False,4,yes,1,max,Absolute Error,1.00E-13,Pressure_Solver/obst_activation_exact.csv
+Pressure_Solver/obst_activation_default_gases.fds,Pressure_Solver,obst_activation_default_gases,4,1024,1,0.05x0.002x0.05,True,False,30.0,,False,False,False,False,6,8,False,4,yes,1,max,Absolute Error,0.005,Pressure_Solver/obst_activation_default_gases.csv
+Pressure_Solver/obst_activation_ulmat.fds,Pressure_Solver,obst_activation_ulmat,4,1024,1,0.05x0.002x0.05,True,False,2.0,ULMAT,False,False,False,False,6,8,False,4,yes,1,max,Absolute Error,1.00E-13,Pressure_Solver/obst_activation_exact.csv
+Pressure_Solver/opening_ulmat.fds,Pressure_Solver,opening_ulmat,1,512,1,0.1x0.1x0.1,False,False,10.,ULMAT,False,False,False,False,1,2,False,1,yes,1,tolerance,Absolute Error,1.00E-10,Pressure_Solver/opening_pressure_error.csv
+Pressure_Solver/pressure_iteration2d_default.fds,Pressure_Solver,pressure_iteration2d_default,8,1024,1,0.025x0.02x0.025,True,False,0.5,,False,False,False,False,1,5,False,8,yes,0,,,,
+Pressure_Solver/pressure_iteration2d_uglmat.fds,Pressure_Solver,pressure_iteration2d_uglmat,8,1024,1,0.025x0.02x0.025,True,False,0.5,UGLMAT,False,False,False,False,1,5,False,8,yes,0,,,,
+Pressure_Solver/pressure_iteration3d_default.fds,Pressure_Solver,pressure_iteration3d_default,8,32768,1,0.025x0.025x0.025,False,False,0.5,,False,False,False,False,1,6,False,8,yes,0,,,,
+Pressure_Solver/pressure_iteration3d_uglmat.fds,Pressure_Solver,pressure_iteration3d_uglmat,8,32768,1,0.025x0.025x0.025,False,False,0.5,UGLMAT,False,False,False,False,1,6,False,8,yes,0,,,,
+Pressure_Solver/random_obstructions_fft.fds,Pressure_Solver,random_obstructions_fft,16,65536,1,0.025x0.025x0.025,False,False,2.0,,False,False,True,False,176,9,False,16,yes,2,tolerance,Absolute Error,0.0125;100,Pressure_Solver/random_obstructions_fft.csv
+Pressure_Solver/stairwell.fds,Pressure_Solver,stairwell,11,1637828,1,0.1x0.1x0.1,False,False,50.,,True,False,False,False,391,19,False,10,yes,1,mean,Relative Error,0.05,Pressure_Solver/stairwell.csv
+Pressure_Solver/tunnel_demo.fds,Pressure_Solver,tunnel_demo,8,256000,1,0.2x0.2x0.2,False,False,30.,,False,False,True,False,0,0,False,8,yes,2,min,Absolute Error,100;100000,Pressure_Solver/tunnel_demo.csv
+Pressure_Solver/tunnel_demo_glmat.fds,Pressure_Solver,tunnel_demo_glmat,8,256000,1,0.2x0.2x0.2,False,False,30.,GLMAT,False,False,True,False,0,0,False,8,yes,2,min,Absolute Error,100;100000,Pressure_Solver/tunnel_demo.csv
+Pressure_Solver/ulmat_2zone.fds,Pressure_Solver,ulmat_2zone,2,1000,1,0.1x0.1x0.1,False,False,10,ULMAT,False,False,False,False,1,0,False,2,yes,0,,,,
+Pyrolysis/anca-couce-fig1_10K.fds,Pyrolysis,anca-couce-fig1_10K,1,9,1,0.1x0.1x0.1,True,False,,,False,False,True,False,0,0,False,1,yes,0,,,,
+Pyrolysis/anca-couce-fig1_2p5K.fds,Pyrolysis,anca-couce-fig1_2p5K,1,9,1,0.1x0.1x0.1,True,False,,,False,False,True,False,0,0,False,1,yes,0,,,,
+Pyrolysis/anca-couce-fig1_5K.fds,Pyrolysis,anca-couce-fig1_5K,1,9,1,0.1x0.1x0.1,True,False,,,False,False,True,False,0,0,False,1,yes,0,,,,
+Pyrolysis/anca-couce-fig2_10K.fds,Pyrolysis,anca-couce-fig2_10K,1,9,1,0.1x0.1x0.1,True,False,,,False,False,True,False,0,0,False,1,yes,0,,,,
+Pyrolysis/anca-couce-fig2_2p5K.fds,Pyrolysis,anca-couce-fig2_2p5K,1,9,1,0.1x0.1x0.1,True,False,,,False,False,True,False,0,0,False,1,yes,0,,,,
+Pyrolysis/anca-couce-fig2_5K.fds,Pyrolysis,anca-couce-fig2_5K,1,9,1,0.1x0.1x0.1,True,False,,,False,False,True,False,0,0,False,1,yes,0,,,,
+Pyrolysis/birch_tga_1step_2.fds,Pyrolysis,birch_tga_1step_2,1,12,1,2x1x0.25,True,False,24000.,,False,False,True,False,0,3,False,1,yes,2,end,Relative Error,0.05,Pyrolysis/birch_tga_20_exp.csv;Pyrolysis/birch_tga_2_exp.csv
+Pyrolysis/birch_tga_1step_20.fds,Pyrolysis,birch_tga_1step_20,1,12,1,2x1x0.25,True,False,2400.,,False,False,True,False,0,3,False,1,yes,0,,,,
+Pyrolysis/cable_11_insulation_mcc.fds,Pyrolysis,cable_11_insulation_mcc,1,12,1,1.33333x1x0.25,True,False,800.,,False,False,True,False,0,4,False,1,yes,1,area,Relative Error,0.03,Pyrolysis/cable_11_insulation_mcc_exp.csv
+Pyrolysis/cable_11_jacket_mcc.fds,Pyrolysis,cable_11_jacket_mcc,1,12,1,1.33333x1x0.25,True,False,800.,,False,False,True,False,0,4,False,1,yes,1,area,Relative Error,0.05,Pyrolysis/cable_11_jacket_mcc_exp.csv
+Pyrolysis/cable_23_insulation_mcc.fds,Pyrolysis,cable_23_insulation_mcc,1,12,1,1.33333x1x0.25,True,False,800.,,False,False,True,False,0,4,False,1,yes,1,area,Relative Error,0.01,Pyrolysis/cable_23_insulation_mcc_exp.csv
+Pyrolysis/cable_23_jacket_mcc.fds,Pyrolysis,cable_23_jacket_mcc,1,12,1,1.33333x1x0.25,True,False,800.,,False,False,True,False,0,4,False,1,yes,1,area,Relative Error,0.05,Pyrolysis/cable_23_jacket_mcc_exp.csv
+Pyrolysis/cable_701_insulation_mcc.fds,Pyrolysis,cable_701_insulation_mcc,1,12,1,1.33333x1x0.25,True,False,800.,,False,False,True,False,0,4,False,1,yes,1,area,Relative Error,0.01,Pyrolysis/cable_701_insulation_mcc_exp.csv
+Pyrolysis/cable_701_jacket_mcc.fds,Pyrolysis,cable_701_jacket_mcc,1,12,1,1.33333x1x0.25,True,False,800.,,False,False,True,False,0,4,False,1,yes,1,area,Relative Error,0.01,Pyrolysis/cable_701_jacket_mcc_exp.csv
+Pyrolysis/cell_burn_away.fds,Pyrolysis,cell_burn_away,1,125,1,0.04x0.04x0.04,False,False,110.,,False,False,True,False,1,0,False,1,yes,1,area,Relative Error,0.04,Pyrolysis/cell_burn_away.csv
+Pyrolysis/cellulose_TGA_1KPM_Air.fds,Pyrolysis,cellulose_TGA_1KPM_Air,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/cellulose_TGA_3KPM_Air.fds,Pyrolysis,cellulose_TGA_3KPM_Air,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/cellulose_TGA_5KPM_Air.fds,Pyrolysis,cellulose_TGA_5KPM_Air,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/enthalpy.fds,Pyrolysis,enthalpy,1,36,1,0.1x0.1x0.1,False,False,7,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.01,Pyrolysis/enthalpy.csv
+Pyrolysis/ice_cube.fds,Pyrolysis,ice_cube,1,1000,1,0.1x0.1x0.1,False,False,50,,False,False,False,True,1,1,False,1,yes,1,end,Relative Error,0.01,Pyrolysis/ice_cube.csv
+Pyrolysis/liquid_mixture.fds,Pyrolysis,liquid_mixture,1,1000,1,0.4x0.5x0.5,False,False,600.,,False,False,False,False,0,8,True,1,yes,1,end,Relative Error,0.01,Pyrolysis/liquid_mixture.csv
+Pyrolysis/matl_e_cons_1.fds,Pyrolysis,matl_e_cons_1,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_1.csv
+Pyrolysis/matl_e_cons_2.fds,Pyrolysis,matl_e_cons_2,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_2.csv
+Pyrolysis/matl_e_cons_3.fds,Pyrolysis,matl_e_cons_3,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_3.csv
+Pyrolysis/matl_e_cons_4.fds,Pyrolysis,matl_e_cons_4,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_4.csv
+Pyrolysis/matl_e_cons_5.fds,Pyrolysis,matl_e_cons_5,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,3,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_5.csv
+Pyrolysis/matl_e_cons_6.fds,Pyrolysis,matl_e_cons_6,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,3,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_6.csv
+Pyrolysis/matl_e_cons_7.fds,Pyrolysis,matl_e_cons_7,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_7.csv
+Pyrolysis/matl_e_cons_8.fds,Pyrolysis,matl_e_cons_8,1,64,1,1x1x1,False,False,1,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_8+9.csv
+Pyrolysis/matl_e_cons_9.fds,Pyrolysis,matl_e_cons_9,1,64,1,1x1x1,False,False,1,,False,False,False,True,0,1,False,1,yes,1,end,Relative Error,0.005,Pyrolysis/matl_e_cons_8+9.csv
+Pyrolysis/methanol_evaporation.fds,Pyrolysis,methanol_evaporation,8,13824,1,0.05x0.05x0.05,False,False,360.,,False,False,False,False,5,5,False,8,yes,2,end,Relative Error,0.015;0.02,Pyrolysis/methanol_evaporation.csv;Pyrolysis/methanol_evaporation_devc.csv
+Pyrolysis/part_baking_soda_420K.fds,Pyrolysis,part_baking_soda_420K,1,125,1,0.4x0.4x0.4,False,False,10.,,False,False,False,True,0,7,False,1,yes,2,area,Relative Error,0.01,Pyrolysis/part_baking_soda_420K.csv
+Pyrolysis/part_baking_soda_450K.fds,Pyrolysis,part_baking_soda_450K,1,125,1,0.4x0.4x0.4,False,False,10.,,False,False,False,True,0,7,False,1,yes,2,area,Relative Error,0.05,Pyrolysis/part_baking_soda_450K.csv
+Pyrolysis/part_baking_soda_500K.fds,Pyrolysis,part_baking_soda_500K,1,125,1,0.4x0.4x0.4,False,False,10.,,False,False,False,True,0,7,False,1,yes,2,area,Relative Error,0.1,Pyrolysis/part_baking_soda_500K.csv
+Pyrolysis/pine_wood_TGA_exp03_1C.fds,Pyrolysis,pine_wood_TGA_exp03_1C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp03_3C.fds,Pyrolysis,pine_wood_TGA_exp03_3C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp13_1C.fds,Pyrolysis,pine_wood_TGA_exp13_1C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp13_3C.fds,Pyrolysis,pine_wood_TGA_exp13_3C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp14_1C.fds,Pyrolysis,pine_wood_TGA_exp14_1C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp14_3C.fds,Pyrolysis,pine_wood_TGA_exp14_3C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp15_1C.fds,Pyrolysis,pine_wood_TGA_exp15_1C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp15_3C.fds,Pyrolysis,pine_wood_TGA_exp15_3C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp16_1C.fds,Pyrolysis,pine_wood_TGA_exp16_1C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp16_3C.fds,Pyrolysis,pine_wood_TGA_exp16_3C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp17_1C.fds,Pyrolysis,pine_wood_TGA_exp17_1C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pine_wood_TGA_exp17_3C.fds,Pyrolysis,pine_wood_TGA_exp17_3C,1,1000,1,0.1x0.1x0.1,False,False,1.,,False,False,False,True,0,0,False,1,yes,0,,,,
+Pyrolysis/pyrolysis_1.fds,Pyrolysis,pyrolysis_1,1,12,1,1.33333x1x0.25,True,False,4800.,,False,False,False,False,0,3,False,1,yes,0,,,,
+Pyrolysis/pyrolysis_2.fds,Pyrolysis,pyrolysis_2,1,12,1,1.33333x1x0.25,True,False,9600.,,False,False,False,False,0,3,False,1,yes,0,,,,
+Pyrolysis/shrink_swell.fds,Pyrolysis,shrink_swell,6,216,1,0.1x0.1x0.1,False,False,15.,,False,False,True,False,0,18,False,1,yes,4,end_1_1,Relative Error,0.01,Pyrolysis/shrink_swell.csv
+Pyrolysis/specified_hrr.fds,Pyrolysis,specified_hrr,1,36,1,0.1x0.1x0.1,False,False,30.,,False,False,True,False,0,2,False,1,yes,0,,,,
+Pyrolysis/spyro_cone_demo.fds,Pyrolysis,spyro_cone_demo,1,16,1,0.1x0.1x0.1,True,False,1500.,,False,False,True,False,0,4,False,1,yes,2,end,N/A,0,Pyrolysis/spyro_cone_demo.csv
+Pyrolysis/spyro_cone_demo_2.fds,Pyrolysis,spyro_cone_demo_2,1,16,1,0.1x0.1x0.1,True,False,600.,,False,False,True,False,0,1,False,1,yes,1,mean,Relative Error,0.01,Pyrolysis/spyro_cone_demo_2.csv
+Pyrolysis/spyro_cone_demo_3.fds,Pyrolysis,spyro_cone_demo_3,1,9,1,0.1x0.1x0.1,True,False,500,,False,False,True,False,0,1,False,1,yes,1,mean,Relative Error,0.01,Pyrolysis/spyro_cone_demo_3.csv
+Pyrolysis/surf_mass_part_char_cart_fuel.fds,Pyrolysis,surf_mass_part_char_cart_fuel,1,216,1,0.5x0.5x0.5,False,False,200.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_char_cart.csv
+Pyrolysis/surf_mass_part_char_cart_gas.fds,Pyrolysis,surf_mass_part_char_cart_gas,1,216,1,0.5x0.5x0.5,False,False,200.,,False,False,False,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_char_cart.csv
+Pyrolysis/surf_mass_part_char_cyl_fuel.fds,Pyrolysis,surf_mass_part_char_cyl_fuel,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_char_cyl.csv
+Pyrolysis/surf_mass_part_char_cyl_gas.fds,Pyrolysis,surf_mass_part_char_cyl_gas,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_char_cyl.csv
+Pyrolysis/surf_mass_part_char_spher_fuel.fds,Pyrolysis,surf_mass_part_char_spher_fuel,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_char_spher.csv
+Pyrolysis/surf_mass_part_char_spher_gas.fds,Pyrolysis,surf_mass_part_char_spher_gas,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_char_spher.csv
+Pyrolysis/surf_mass_part_nonchar_cart_fuel.fds,Pyrolysis,surf_mass_part_nonchar_cart_fuel,1,216,1,0.5x0.5x0.5,False,False,110.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_nonchar_cart.csv
+Pyrolysis/surf_mass_part_nonchar_cart_gas.fds,Pyrolysis,surf_mass_part_nonchar_cart_gas,1,216,1,0.5x0.5x0.5,False,False,110.,,False,False,False,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_nonchar_cart.csv
+Pyrolysis/surf_mass_part_nonchar_cyl_fuel.fds,Pyrolysis,surf_mass_part_nonchar_cyl_fuel,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_nonchar_cyl.csv
+Pyrolysis/surf_mass_part_nonchar_cyl_gas.fds,Pyrolysis,surf_mass_part_nonchar_cyl_gas,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,False,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_nonchar_cyl.csv
+Pyrolysis/surf_mass_part_nonchar_spher_fuel.fds,Pyrolysis,surf_mass_part_nonchar_spher_fuel,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_nonchar_spher.csv
+Pyrolysis/surf_mass_part_nonchar_spher_gas.fds,Pyrolysis,surf_mass_part_nonchar_spher_gas,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,False,True,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_part_nonchar_spher.csv
+Pyrolysis/surf_mass_part_specified.fds,Pyrolysis,surf_mass_part_specified,1,216,1,0.5x0.5x0.5,False,False,20.,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.01,Pyrolysis/surf_mass_part_specified.csv
+Pyrolysis/surf_mass_two_species_cart.fds,Pyrolysis,surf_mass_two_species_cart,1,64,1,0.25x0.25x0.25,False,False,1000.,,False,False,True,True,0,4,False,1,yes,1,end,Relative Error,0.02,Pyrolysis/surf_mass_two_species.csv
+Pyrolysis/surf_mass_two_species_cyl.fds,Pyrolysis,surf_mass_two_species_cyl,1,64,1,0.25x0.25x0.25,False,False,1000.,,False,False,True,True,0,4,False,1,yes,1,end,Relative Error,0.04,Pyrolysis/surf_mass_two_species.csv
+Pyrolysis/surf_mass_two_species_spher.fds,Pyrolysis,surf_mass_two_species_spher,1,64,1,0.25x0.25x0.25,False,False,1000.,,False,False,True,True,0,4,False,1,yes,1,end,Relative Error,0.04,Pyrolysis/surf_mass_two_species.csv
+Pyrolysis/surf_mass_vent_char_cart_fuel.fds,Pyrolysis,surf_mass_vent_char_cart_fuel,1,216,1,0.5x0.5x0.5,False,False,200.,,False,False,True,False,0,3,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_char_cart.csv
+Pyrolysis/surf_mass_vent_char_cart_gas.fds,Pyrolysis,surf_mass_vent_char_cart_gas,1,216,1,0.5x0.5x0.5,False,False,200.,,False,False,False,False,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_char_cart.csv
+Pyrolysis/surf_mass_vent_char_cyl_fuel.fds,Pyrolysis,surf_mass_vent_char_cyl_fuel,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,False,0,3,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_char_cyl.csv
+Pyrolysis/surf_mass_vent_char_cyl_gas.fds,Pyrolysis,surf_mass_vent_char_cyl_gas,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,False,False,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_char_cyl.csv
+Pyrolysis/surf_mass_vent_char_spher_fuel.fds,Pyrolysis,surf_mass_vent_char_spher_fuel,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,False,0,3,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_char_spher.csv
+Pyrolysis/surf_mass_vent_char_spher_gas.fds,Pyrolysis,surf_mass_vent_char_spher_gas,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,False,False,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_char_spher.csv
+Pyrolysis/surf_mass_vent_liquid_fuel.fds,Pyrolysis,surf_mass_vent_liquid_fuel,1,216,1,0.5x0.5x0.5,False,False,200.,,False,False,True,False,0,4,False,1,yes,1,end_1_2,Relative Error,0.01,Pyrolysis/surf_mass_vent_liquid.csv
+Pyrolysis/surf_mass_vent_liquid_fuel_nonconforming.fds,Pyrolysis,surf_mass_vent_liquid_fuel_nonconforming,1,125,1,0.6x0.6x0.6,False,False,200.,,False,False,True,False,0,4,False,1,yes,1,end_1_2,Relative Error,0.01,Pyrolysis/surf_mass_vent_liquid.csv
+Pyrolysis/surf_mass_vent_nonchar_cart_fuel.fds,Pyrolysis,surf_mass_vent_nonchar_cart_fuel,1,216,1,0.5x0.5x0.5,False,False,200.,,False,False,True,False,0,3,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_nonchar_cart.csv
+Pyrolysis/surf_mass_vent_nonchar_cart_gas.fds,Pyrolysis,surf_mass_vent_nonchar_cart_gas,1,216,1,0.5x0.5x0.5,False,False,200.,,False,False,False,False,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_nonchar_cart.csv
+Pyrolysis/surf_mass_vent_nonchar_cyl_fuel.fds,Pyrolysis,surf_mass_vent_nonchar_cyl_fuel,1,216,1,0.5x0.5x0.5,False,False,150.,,False,False,True,False,0,3,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_nonchar_cyl.csv
+Pyrolysis/surf_mass_vent_nonchar_cyl_gas.fds,Pyrolysis,surf_mass_vent_nonchar_cyl_gas,1,216,1,0.5x0.5x0.5,False,False,150.,,False,False,False,False,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_nonchar_cyl.csv
+Pyrolysis/surf_mass_vent_nonchar_spher_fuel.fds,Pyrolysis,surf_mass_vent_nonchar_spher_fuel,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,True,False,0,3,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_nonchar_spher.csv
+Pyrolysis/surf_mass_vent_nonchar_spher_gas.fds,Pyrolysis,surf_mass_vent_nonchar_spher_gas,1,216,1,0.5x0.5x0.5,False,False,100.,,False,False,False,False,0,2,False,1,yes,1,end_1_1,Relative Error,0.01,Pyrolysis/surf_mass_vent_nonchar_spher.csv
+Pyrolysis/tga_analysis.fds,Pyrolysis,tga_analysis,2,24,1,1.33333x1x0.25,True,False,60.,,False,False,True,False,0,0,False,2,yes,6,end;max,N/A,0,Pyrolysis/tga_analysis_exact.csv
+Pyrolysis/tga_sample.fds,Pyrolysis,tga_sample,1,16,1,1x1x0.25,True,False,9600.,,False,False,False,False,0,9,False,1,yes,2,end;max,Relative Error,0.01;0.05,Pyrolysis/tga_sample_data.csv
+Pyrolysis/two_step_solid_reaction.fds,Pyrolysis,two_step_solid_reaction,1,36,1,0.1x0.1x0.1,False,False,50,,False,False,False,False,0,3,False,1,yes,1,end,Absolute Error,0.01,Pyrolysis/two_step_solid_reaction.csv
+Pyrolysis/water_pool.fds,Pyrolysis,water_pool,1,5000,1,0.1x0.1x0.1,False,False,3600.,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.06,Pyrolysis/water_pool.csv
+Radiation/TC_heating.fds,Radiation,TC_heating,1,8000,1,0.05x0.05x0.05,False,False,150.0,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.01,Radiation/TC_heating.csv
+Radiation/TC_view_factor.fds,Radiation,TC_view_factor,1,8000,1,0.05x0.05x0.05,False,False,180.,,False,False,False,False,0,2,False,1,yes,1,end,Relative Error,0.03,Radiation/TC_view_factor.csv
+Radiation/adiabatic_surface_temperature.fds,Radiation,adiabatic_surface_temperature,1,8000,1,0.05x0.05x0.05,False,False,120.,,False,False,False,False,1,4,False,1,yes,2,mean,Relative Error,0.0001;0.01,Radiation/adiabatic_surface_temperature_devc.csv
+Radiation/check_kappa.fds,Radiation,check_kappa,100,900,1,0.3x0.1x0.3,True,False,0.2,,False,False,True,False,0,0,False,,no,0,,,,
+Radiation/droplet_absorption_cart.fds,Radiation,droplet_absorption_cart,1,27,1,1x1x1,False,False,.01,,False,False,False,True,0,2,False,1,yes,1,end,Relative Error,0.01,Radiation/droplet_absorption_cart_devc.csv
+Radiation/droplet_absorption_cyl.fds,Radiation,droplet_absorption_cyl,1,9,1,1x0.01x1,True,False,.01,,False,False,False,True,0,2,False,1,yes,1,end,Relative Error,0.01,Radiation/droplet_absorption_cyl_devc.csv
+Radiation/emissivity.fds,Radiation,emissivity,1,36,1,0.1x0.1x0.1,False,False,10,,False,False,False,False,0,1,False,1,yes,1,end,Absolute Error,0.1,Radiation/emissivity.csv
+Radiation/geom_rad.fds,Radiation,geom_rad,2,250000,1,0.02x0.02x0.02,False,False,2,,False,False,False,False,2,4,False,2,yes,2,max,Relative Error,0.001,Radiation/geom_rad_devc.csv
+Radiation/geom_rad_2.fds,Radiation,geom_rad_2,8,504000,1,0.02x0.02x0.02,False,False,2,ULMAT,False,False,False,False,0,2,False,8,yes,2,max,Relative Error,0.03,Radiation/geom_rad_2.csv
+Radiation/hot_spheres.fds,Radiation,hot_spheres,2,16000,1,0.05x0.05x0.05,False,False,10.,,False,False,False,True,0,4,False,1,yes,4,end,Relative Error,0.01;0.03;0.04;0.06,Radiation/hot_spheres.csv
+Radiation/net_rad_1000_cgeom.fds,Radiation,net_rad_1000_cgeom,1,288000,1,0.05x0.05x0.25,False,False,0.010,,False,False,False,False,0,2,False,1,yes,2,mean,Relative Error,0.02,Radiation/net_rad_1000_exact.csv
+Radiation/net_rad_1000_obst.fds,Radiation,net_rad_1000_obst,1,216000,1,0.05x0.05x0.333333,False,False,0.010,,False,False,False,False,41,3,False,1,yes,3,mean,Relative Error,0.3;0.8;1,Radiation/net_rad_1000_exact.csv
+Radiation/part_attenuation.fds,Radiation,part_attenuation,5,5000,1,0.1x0.1x0.1,False,False,2.0,,False,False,False,True,0,21,False,1,yes,1,end,N/A,0,Radiation/part_attenuation_devc.csv
+Radiation/plate_view_factor_2D_100.fds,Radiation,plate_view_factor_2D_100,1,200,1,0.1x1x0.1,True,False,.1,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_2D_30.fds,Radiation,plate_view_factor_2D_30,1,200,1,0.1x1x0.1,True,False,.1,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_2D_60.fds,Radiation,plate_view_factor_2D_60,1,200,1,0.1x1x0.1,True,False,.1,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_cart_100.fds,Radiation,plate_view_factor_cart_100,1,4000,1,0.1x0.1x0.1,False,False,.01,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_cart_30.fds,Radiation,plate_view_factor_cart_30,1,4000,1,0.1x0.1x0.1,False,False,.01,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_cart_60.fds,Radiation,plate_view_factor_cart_60,1,4000,1,0.1x0.1x0.1,False,False,.01,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_cyl_100.fds,Radiation,plate_view_factor_cyl_100,1,100,1,0.3x1x0.3,True,False,.1,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_cyl_30.fds,Radiation,plate_view_factor_cyl_30,1,100,1,0.3x1x0.3,True,False,.1,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_cyl_60.fds,Radiation,plate_view_factor_cyl_60,1,100,1,0.3x1x0.3,True,False,.1,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_ibm_100.fds,Radiation,plate_view_factor_ibm_100,1,1000000,1,0.03x0.03x0.03,False,False,.01,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_ibm_30.fds,Radiation,plate_view_factor_ibm_30,1,1000000,1,0.03x0.03x0.03,False,False,.01,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/plate_view_factor_ibm_60.fds,Radiation,plate_view_factor_ibm_60,1,1000000,1,0.03x0.03x0.03,False,False,.01,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiating_polygon_square_20.fds,Radiation,radiating_polygon_square_20,1,11520,1,0.083333x0.083333x0.05,False,False,0.05,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiating_polygon_square_40.fds,Radiation,radiating_polygon_square_40,1,92160,1,0.041667x0.041667x0.025,False,False,0.05,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiating_polygon_square_80.fds,Radiation,radiating_polygon_square_80,1,737280,1,0.020833x0.020833x0.0125,False,False,0.05,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_box_100_1000.fds,Radiation,radiation_box_100_1000,1,1000000,1,0.01x0.01x0.01,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box_100_2000.fds,Radiation,radiation_box_100_2000,1,1000000,1,0.01x0.01x0.01,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box_100__100.fds,Radiation,radiation_box_100__100,1,1000000,1,0.01x0.01x0.01,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box_100__300.fds,Radiation,radiation_box_100__300,1,1000000,1,0.01x0.01x0.01,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box_100___50.fds,Radiation,radiation_box_100___50,1,1000000,1,0.01x0.01x0.01,False,False,0.1,,False,False,False,False,0,20,False,1,yes,1,mean_1_5,Relative Error,0.02,Radiation/radiation_box.csv
+Radiation/radiation_box__20_1000.fds,Radiation,radiation_box__20_1000,1,8000,1,0.05x0.05x0.05,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box__20_2000.fds,Radiation,radiation_box__20_2000,1,8000,1,0.05x0.05x0.05,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box__20__100.fds,Radiation,radiation_box__20__100,1,8000,1,0.05x0.05x0.05,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box__20__300.fds,Radiation,radiation_box__20__300,1,8000,1,0.05x0.05x0.05,False,False,0.1,,False,False,False,False,0,20,False,1,yes,0,,,,
+Radiation/radiation_box__20___50.fds,Radiation,radiation_box__20___50,1,8000,1,0.05x0.05x0.05,False,False,0.1,,False,False,False,False,0,20,False,1,yes,1,mean_1_5,Convergent Series,0.01,Radiation/radiation_box.csv
+Radiation/radiation_gas_panel.fds,Radiation,radiation_gas_panel,6,243000,1,0.003333x0.01016x0.01016,False,False,1.5,,False,False,False,False,0,2,False,6,yes,1,mean,Relative Error,0.02,Radiation/radiation_gas_panel.csv
+Radiation/radiation_plane_layer_1_1.fds,Radiation,radiation_plane_layer_1_1,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_1_2.fds,Radiation,radiation_plane_layer_1_2,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_1_3.fds,Radiation,radiation_plane_layer_1_3,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_1_4.fds,Radiation,radiation_plane_layer_1_4,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_1_5.fds,Radiation,radiation_plane_layer_1_5,1,60000,1,0.006667x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_2_1.fds,Radiation,radiation_plane_layer_2_1,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_2_2.fds,Radiation,radiation_plane_layer_2_2,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_2_3.fds,Radiation,radiation_plane_layer_2_3,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_2_4.fds,Radiation,radiation_plane_layer_2_4,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_2_5.fds,Radiation,radiation_plane_layer_2_5,1,60000,1,0.006667x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_3_1.fds,Radiation,radiation_plane_layer_3_1,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_3_2.fds,Radiation,radiation_plane_layer_3_2,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_3_3.fds,Radiation,radiation_plane_layer_3_3,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_3_4.fds,Radiation,radiation_plane_layer_3_4,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_3_5.fds,Radiation,radiation_plane_layer_3_5,1,60000,1,0.006667x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_4_1.fds,Radiation,radiation_plane_layer_4_1,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_4_2.fds,Radiation,radiation_plane_layer_4_2,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_4_3.fds,Radiation,radiation_plane_layer_4_3,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_4_4.fds,Radiation,radiation_plane_layer_4_4,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_4_5.fds,Radiation,radiation_plane_layer_4_5,1,60000,1,0.006667x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_5_1.fds,Radiation,radiation_plane_layer_5_1,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_5_2.fds,Radiation,radiation_plane_layer_5_2,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_5_3.fds,Radiation,radiation_plane_layer_5_3,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_5_4.fds,Radiation,radiation_plane_layer_5_4,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_5_5.fds,Radiation,radiation_plane_layer_5_5,1,60000,1,0.006667x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_6_1.fds,Radiation,radiation_plane_layer_6_1,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_6_2.fds,Radiation,radiation_plane_layer_6_2,1,8000,1,0.05x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_6_3.fds,Radiation,radiation_plane_layer_6_3,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_6_4.fds,Radiation,radiation_plane_layer_6_4,1,400,1,0.05x20x1,True,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_plane_layer_6_5.fds,Radiation,radiation_plane_layer_6_5,1,60000,1,0.006667x1x1,False,False,0.0001,,False,False,False,False,0,1,False,1,yes,0,,,,
+Radiation/radiation_shield.fds,Radiation,radiation_shield,1,1000,1,0.1x0.1x0.1,True,False,500.,,False,False,False,False,1,3,False,1,yes,2,mean,Relative Error,0.01,Radiation/radiation_shield.csv
+Radiation/target_test.fds,Radiation,target_test,2,31250,1,0.04x0.04x0.04,False,False,5,,False,False,False,True,1,2,False,1,yes,1,end,Relative Error,0.01,Radiation/target_test_devc.csv
+Radiation/thermocouples.fds,Radiation,thermocouples,1,8000,1,0.05x0.05x0.05,False,False,120.,,False,False,False,True,0,6,False,1,yes,1,end,Relative Error,0.01,Radiation/thermocouples_devc.csv
+Radiation/wall_internal_radiation.fds,Radiation,wall_internal_radiation,1,60,1,0.1x0.1x0.1,False,False,0.0001,,False,False,False,False,0,7,False,1,yes,0,,,,
+Restart/clocks_restart_a.fds,Restart,clocks_restart_a,1,8000,1,0.25x0.25x0.25,False,False,29.0,,False,False,True,False,1,0,False,1,yes,0,,,,
+Restart/clocks_restart_b.fds,Restart,clocks_restart_a,1,8000,1,0.25x0.25x0.25,False,False,29.0,,False,True,True,False,1,0,False,1,yes,0,,,,
+Restart/clocks_restart_base_case.fds,Restart,clocks_restart_base_case,1,8000,1,0.25x0.25x0.25,False,False,29.0,,False,False,True,False,1,0,False,1,yes,1,mean,Relative Error,0.01,Restart/clocks_restart_base_case_hrr.csv
+Restart/csvf_restart_a.fds,Restart,csvf_restart,8,1000,1,0.2x0.2x0.2,False,False,10,UGLMAT,False,False,True,False,1,0,False,8,yes,0,,,,
+Restart/csvf_restart_b.fds,Restart,csvf_restart,8,1000,1,0.2x0.2x0.2,False,False,10,UGLMAT,False,False,True,False,1,0,False,8,yes,0,,,,
+Restart/device_restart_a.fds,Restart,device_restart_a,4,10374,1,0.4x0.4x0.4,False,False,40.0,,False,False,True,False,4,2,False,4,yes,0,,,,
+Restart/device_restart_b.fds,Restart,device_restart_a,4,10374,1,0.4x0.4x0.4,False,False,60.0,,False,True,True,False,4,2,False,4,yes,0,,,,
+Restart/device_restart_base_case.fds,Restart,device_restart_base_case,4,10374,1,0.4x0.4x0.4,False,False,60.0,,False,False,True,False,4,2,False,4,yes,1,end,Absolute Error,5,Restart/device_restart_base_case_devc.csv
+Restart/geom_ls_restart_a.fds,Restart,geom_ls_restart,1,12500,1,1x1x1,False,False,25.,,False,False,True,False,0,0,False,1,yes,0,,,,
+Restart/geom_ls_restart_b.fds,Restart,geom_ls_restart,1,12500,1,1x1x1,False,False,50.,,False,True,True,False,0,0,False,1,yes,0,,,,
+Restart/geom_ls_restart_base_case.fds,Restart,geom_ls_restart_base_case,1,12500,1,1x1x1,False,False,50.,,False,False,True,False,0,0,False,1,yes,1,area,Relative Error,1.00E-02,Restart/geom_ls_restart_base_case_hrr.csv
+Restart/geom_restart_a.fds,Restart,geom_restart,1,1000,1,0.1x0.1x0.1,False,False,750.0,,False,False,False,False,1,7,False,1,yes,0,,,,
+Restart/geom_restart_b.fds,Restart,geom_restart,1,1000,1,0.1x0.1x0.1,False,False,1200.0,,False,True,False,False,1,7,False,1,yes,0,,,,
+Restart/geom_restart_base_case.fds,Restart,geom_restart_base_case,1,1000,1,0.1x0.1x0.1,False,False,1200.0,,False,False,False,False,1,7,False,1,yes,1,end,Relative Error,1.00E-03,Restart/geom_restart_base_case_devc.csv
+Restart/restart_test1a.fds,Restart,restart_test1a,1,8192,1,0.1x0.1x0.1,False,False,5.,,False,False,True,True,3,18,False,1,yes,0,,,,
+Restart/restart_test1b.fds,Restart,restart_test1a,1,8192,1,0.1x0.1x0.1,False,False,10.,,False,True,True,True,3,18,False,1,yes,0,,,,
+Restart/restart_ulmat_a.fds,Restart,restart_ulmat,4,30000,1,0.2x0.2x0.2,False,False,30.,ULMAT,False,False,False,False,3,6,False,4,yes,0,,,,
+Restart/restart_ulmat_b.fds,Restart,restart_ulmat,4,30000,1,0.2x0.2x0.2,False,False,50.,ULMAT,False,True,False,False,3,6,False,4,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL0_128.fds,Scalar_Analytical_Solution,compression_wave_FL0_128,1,16384,1,0.049087x1x0.049087,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL0_16.fds,Scalar_Analytical_Solution,compression_wave_FL0_16,1,256,1,0.392699x1x0.392699,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL0_32.fds,Scalar_Analytical_Solution,compression_wave_FL0_32,1,1024,1,0.19635x1x0.19635,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL0_64.fds,Scalar_Analytical_Solution,compression_wave_FL0_64,1,4096,1,0.098175x1x0.098175,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL2_128.fds,Scalar_Analytical_Solution,compression_wave_FL2_128,1,16384,1,0.049087x1x0.049087,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL2_16.fds,Scalar_Analytical_Solution,compression_wave_FL2_16,1,256,1,0.392699x1x0.392699,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL2_32.fds,Scalar_Analytical_Solution,compression_wave_FL2_32,1,1024,1,0.19635x1x0.19635,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL2_64.fds,Scalar_Analytical_Solution,compression_wave_FL2_64,1,4096,1,0.098175x1x0.098175,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL4_128.fds,Scalar_Analytical_Solution,compression_wave_FL4_128,1,16384,1,0.049087x1x0.049087,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL4_16.fds,Scalar_Analytical_Solution,compression_wave_FL4_16,1,256,1,0.392699x1x0.392699,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL4_32.fds,Scalar_Analytical_Solution,compression_wave_FL4_32,1,1024,1,0.19635x1x0.19635,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/compression_wave_FL4_64.fds,Scalar_Analytical_Solution,compression_wave_FL4_64,1,4096,1,0.098175x1x0.098175,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/move_slug.fds,Scalar_Analytical_Solution,move_slug,4,6400,1,0.0125x0.02x0.0125,True,False,1.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Scalar_Analytical_Solution/move_slug_fl1.fds,Scalar_Analytical_Solution,move_slug_fl1,4,6400,1,0.0125x0.02x0.0125,True,False,1.,,False,False,False,False,0,0,False,1,yes,0,,,,
+Scalar_Analytical_Solution/move_slug_left.fds,Scalar_Analytical_Solution,move_slug_left,4,6400,1,0.0125x0.02x0.0125,True,False,1.,,False,False,False,False,0,0,False,,no,0,,,,
+Scalar_Analytical_Solution/pulsating_FL0_128.fds,Scalar_Analytical_Solution,pulsating_FL0_128,1,16384,1,0.049087x1x0.049087,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL0_16.fds,Scalar_Analytical_Solution,pulsating_FL0_16,1,256,1,0.392699x1x0.392699,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL0_32.fds,Scalar_Analytical_Solution,pulsating_FL0_32,1,1024,1,0.19635x1x0.19635,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL0_64.fds,Scalar_Analytical_Solution,pulsating_FL0_64,1,4096,1,0.098175x1x0.098175,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL2_128.fds,Scalar_Analytical_Solution,pulsating_FL2_128,1,16384,1,0.049087x1x0.049087,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL2_16.fds,Scalar_Analytical_Solution,pulsating_FL2_16,1,256,1,0.392699x1x0.392699,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL2_32.fds,Scalar_Analytical_Solution,pulsating_FL2_32,1,1024,1,0.19635x1x0.19635,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL2_64.fds,Scalar_Analytical_Solution,pulsating_FL2_64,1,4096,1,0.098175x1x0.098175,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL4_128.fds,Scalar_Analytical_Solution,pulsating_FL4_128,1,16384,1,0.049087x1x0.049087,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL4_16.fds,Scalar_Analytical_Solution,pulsating_FL4_16,1,256,1,0.392699x1x0.392699,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL4_32.fds,Scalar_Analytical_Solution,pulsating_FL4_32,1,1024,1,0.19635x1x0.19635,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/pulsating_FL4_64.fds,Scalar_Analytical_Solution,pulsating_FL4_64,1,4096,1,0.098175x1x0.098175,True,False,12.5,,False,False,False,False,0,3,False,1,yes,0,,,,
+Scalar_Analytical_Solution/saad_512_cfl_1.fds,Scalar_Analytical_Solution,saad_512_cfl_1,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Scalar_Analytical_Solution/saad_512_cfl_p0625.fds,Scalar_Analytical_Solution,saad_512_cfl_p0625,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Scalar_Analytical_Solution/saad_512_cfl_p125.fds,Scalar_Analytical_Solution,saad_512_cfl_p125,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Scalar_Analytical_Solution/saad_512_cfl_p25.fds,Scalar_Analytical_Solution,saad_512_cfl_p25,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Scalar_Analytical_Solution/saad_512_cfl_p5.fds,Scalar_Analytical_Solution,saad_512_cfl_p5,1,2048,1,0.003906x0.1x0.0625,True,False,0.390625,,False,False,False,False,0,9,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_128.fds,Scalar_Analytical_Solution,shunn3_128,1,16384,1,0.015625x0.1x0.015625,True,False,1,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_256.fds,Scalar_Analytical_Solution,shunn3_256,1,65536,1,0.007812x0.1x0.007812,True,False,1,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_256_cfl_1.fds,Scalar_Analytical_Solution,shunn3_256_cfl_1,1,65536,1,0.007812x0.1x0.007812,True,False,0.013,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_256_cfl_p0625.fds,Scalar_Analytical_Solution,shunn3_256_cfl_p0625,1,65536,1,0.007812x0.1x0.007812,True,False,0.013,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_256_cfl_p125.fds,Scalar_Analytical_Solution,shunn3_256_cfl_p125,1,65536,1,0.007812x0.1x0.007812,True,False,0.013,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_256_cfl_p25.fds,Scalar_Analytical_Solution,shunn3_256_cfl_p25,1,65536,1,0.007812x0.1x0.007812,True,False,0.013,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_256_cfl_p5.fds,Scalar_Analytical_Solution,shunn3_256_cfl_p5,1,65536,1,0.007812x0.1x0.007812,True,False,0.013,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_32.fds,Scalar_Analytical_Solution,shunn3_32,1,1024,1,0.0625x0.1x0.0625,True,False,1,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_4mesh_128.fds,Scalar_Analytical_Solution,shunn3_4mesh_128,4,16384,1,0.015625x0.1x0.015625,True,False,1,,False,False,False,False,0,0,True,4,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_4mesh_256.fds,Scalar_Analytical_Solution,shunn3_4mesh_256,4,65536,1,0.007812x0.1x0.007812,True,False,1,,False,False,False,False,0,0,True,4,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_4mesh_32.fds,Scalar_Analytical_Solution,shunn3_4mesh_32,4,1024,1,0.0625x0.1x0.0625,True,False,1,,False,False,False,False,0,0,True,4,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_4mesh_512.fds,Scalar_Analytical_Solution,shunn3_4mesh_512,4,262144,1,0.003906x0.1x0.003906,True,False,1,,False,False,False,False,0,0,True,4,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_4mesh_64.fds,Scalar_Analytical_Solution,shunn3_4mesh_64,4,4096,1,0.03125x0.1x0.03125,True,False,1,,False,False,False,False,0,0,True,4,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_512.fds,Scalar_Analytical_Solution,shunn3_512,1,262144,1,0.003906x0.1x0.003906,True,False,1,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_64.fds,Scalar_Analytical_Solution,shunn3_64,1,4096,1,0.03125x0.1x0.03125,True,False,1,,False,False,False,False,0,0,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_FavreZ_32.fds,Scalar_Analytical_Solution,shunn3_FavreZ_32,1,1024,1,0.0625x0.1x0.0625,True,False,10.,,False,False,False,False,0,2,True,1,yes,0,,,,
+Scalar_Analytical_Solution/shunn3_FavreZ_64.fds,Scalar_Analytical_Solution,shunn3_FavreZ_64,1,4096,1,0.03125x0.1x0.03125,True,False,10,,False,False,False,False,0,2,True,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_cos_wave_128.fds,Scalar_Analytical_Solution,soborot_charm_cos_wave_128,4,16384,1,0.007812x1x0.007812,True,False,1.575745,,False,False,False,False,0,1,False,4,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_cos_wave_16.fds,Scalar_Analytical_Solution,soborot_charm_cos_wave_16,1,256,1,0.0625x1x0.0625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_cos_wave_32.fds,Scalar_Analytical_Solution,soborot_charm_cos_wave_32,1,1024,1,0.03125x1x0.03125,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_cos_wave_64.fds,Scalar_Analytical_Solution,soborot_charm_cos_wave_64,1,4096,1,0.015625x1x0.015625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_square_wave_128.fds,Scalar_Analytical_Solution,soborot_charm_square_wave_128,4,16384,1,0.007812x1x0.007812,True,False,1.575745,,False,False,False,False,0,1,False,4,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_square_wave_16.fds,Scalar_Analytical_Solution,soborot_charm_square_wave_16,1,256,1,0.0625x1x0.0625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_square_wave_32.fds,Scalar_Analytical_Solution,soborot_charm_square_wave_32,1,1024,1,0.03125x1x0.03125,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_charm_square_wave_64.fds,Scalar_Analytical_Solution,soborot_charm_square_wave_64,1,4096,1,0.015625x1x0.015625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_godunov_square_wave_128.fds,Scalar_Analytical_Solution,soborot_godunov_square_wave_128,4,16384,1,0.007812x1x0.007812,True,False,3.14159,,False,False,False,False,0,1,False,4,yes,0,,,,
+Scalar_Analytical_Solution/soborot_godunov_square_wave_16.fds,Scalar_Analytical_Solution,soborot_godunov_square_wave_16,1,256,1,0.0625x1x0.0625,True,False,3.14159,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_godunov_square_wave_32.fds,Scalar_Analytical_Solution,soborot_godunov_square_wave_32,1,1024,1,0.03125x1x0.03125,True,False,3.14159,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_godunov_square_wave_64.fds,Scalar_Analytical_Solution,soborot_godunov_square_wave_64,1,4096,1,0.015625x1x0.015625,True,False,3.14159,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_128.fds,Scalar_Analytical_Solution,soborot_superbee_cos_wave_128,4,16384,1,0.007812x1x0.007812,True,False,1.575745,,False,False,False,False,0,1,False,4,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_16.fds,Scalar_Analytical_Solution,soborot_superbee_cos_wave_16,1,256,1,0.0625x1x0.0625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_32.fds,Scalar_Analytical_Solution,soborot_superbee_cos_wave_32,1,1024,1,0.03125x1x0.03125,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_64.fds,Scalar_Analytical_Solution,soborot_superbee_cos_wave_64,1,4096,1,0.015625x1x0.015625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_square_wave_128.fds,Scalar_Analytical_Solution,soborot_superbee_square_wave_128,4,16384,1,0.007812x1x0.007812,True,False,1.575745,,False,False,False,False,0,1,False,4,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_square_wave_128_1mesh.fds,Scalar_Analytical_Solution,soborot_superbee_square_wave_128_1mesh,1,16384,1,0.007812x1x0.007812,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_square_wave_16.fds,Scalar_Analytical_Solution,soborot_superbee_square_wave_16,1,256,1,0.0625x1x0.0625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_square_wave_32.fds,Scalar_Analytical_Solution,soborot_superbee_square_wave_32,1,1024,1,0.03125x1x0.03125,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Scalar_Analytical_Solution/soborot_superbee_square_wave_64.fds,Scalar_Analytical_Solution,soborot_superbee_square_wave_64,1,4096,1,0.015625x1x0.015625,True,False,1.575745,,False,False,False,False,0,1,False,1,yes,0,,,,
+Species/1_step_2_step_compare.fds,Species,1_step_2_step_compare,4,32000,1,0.05x0.05x0.05,False,False,10,,False,False,True,False,4,8,False,4,yes,2,end,Relative Error,0.005,Species/1_step_2_step_compare_devc.csv
+Species/FED_CO_HCN.fds,Species,FED_CO_HCN,1,125,1,0.4x0.4x0.4,False,False,100.0,,False,False,True,False,0,5,False,1,yes,1,end,Relative Error,0.01,Species/FED_CO_HCN.csv
+Species/FED_FIC.fds,Species,FED_FIC,1,500,1,0.4x0.4x0.4,False,False,100.0,,False,False,False,False,3,8,False,1,yes,8,end,Absolute Error;Relative Error,0.01,Species/FED_FIC.csv
+Species/FED_FIC_SMIX.fds,Species,FED_FIC_SMIX,1,500,1,0.4x0.4x0.4,False,False,100.0,,False,False,False,False,3,8,False,1,yes,8,end,Absolute Error;Relative Error,0.01,Species/FED_FIC.csv
+Species/FED_moving.fds,Species,FED_moving,1,1331,1,0.272727x0.272727x0.272727,False,False,0.4,,True,False,False,True,0,1,False,1,yes,1,all,Relative Error,0.01,Species/FED_moving.csv
+Species/bound_test_1.fds,Species,bound_test_1,1,16,1,0.25x1x0.25,True,False,1,,False,False,True,False,0,7,False,1,yes,1,end,Absolute Error,0.001,Species/bound_test_1.csv
+Species/bound_test_2.fds,Species,bound_test_2,1,16,1,0.25x1x0.25,True,False,1,,False,False,True,False,0,8,False,1,yes,1,end,Absolute Error,0.001,Species/bound_test_2.csv
+Species/burke_schumann.fds,Species,burke_schumann,15,960,1,0.025x0.025x0.025,False,False,0.02,,False,False,True,False,0,165,True,1,yes,2,end,Absolute Error,1.00E-03,Species/burke_schumann_expected.csv
+Species/condensation_1.fds,Species,condensation_1,1,125,1,0.2x0.2x0.2,False,False,0.01,,False,False,False,False,0,7,False,1,yes,2,end,Relative Error,0.02,Species/condensation_1.csv
+Species/condensation_2.fds,Species,condensation_2,1,125,1,0.2x0.2x0.2,False,False,10.0,,False,False,False,False,0,7,False,1,yes,2,end,Relative Error,0.02,Species/condensation_2.csv
+Species/condensation_3.fds,Species,condensation_3,2,2000,1,0.1x0.1x0.1,False,False,0.000010,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.01,Species/condensation_3_devc.csv
+Species/favre_test.fds,Species,favre_test,3,27000,1,0.02x0.02x0.02,False,False,20.,,False,False,True,False,1,16,False,3,yes,0,,,,
+Species/hrrpuv_reac_arrhenius.fds,Species,hrrpuv_reac_arrhenius,1,64,1,0.025x0.025x0.025,False,False,4.0,,False,False,True,False,0,2,False,1,yes,1,mean,Relative Error,1.00E-03,Species/hrrpuv_reac_arrhenius_devc.csv
+Species/hrrpuv_reac_extinction.fds,Species,hrrpuv_reac_extinction,1,100000,1,0.0175x0.019x0.02,False,False,1.0,,False,False,True,False,7,2,False,1,yes,1,end,Relative Error,1.00E-05,Species/hrrpuv_reac_extinction_devc.csv
+Species/hrrpuv_reac_parallel.fds,Species,hrrpuv_reac_parallel,1,100000,1,0.0175x0.019x0.02,False,False,1.0,,False,False,True,False,7,3,False,1,yes,1,end_1_2,Relative Error,1.00E-05,Species/hrrpuv_reac_parallel_devc.csv
+Species/hrrpuv_reac_parallel_2.fds,Species,hrrpuv_reac_parallel_2,1,100000,1,0.0175x0.019x0.02,False,False,1.0,,False,False,True,False,7,3,False,1,yes,1,end_1_2,Relative Error,1.00E-05,Species/hrrpuv_reac_parallel_2_devc.csv
+Species/hrrpuv_reac_series.fds,Species,hrrpuv_reac_series,1,100000,1,0.0175x0.019x0.02,False,False,2.0,,False,False,True,False,7,4,False,1,yes,1,end_1_2,Relative Error,1.00E-05,Species/hrrpuv_reac_series_devc.csv
+Species/hrrpuv_reac_simple.fds,Species,hrrpuv_reac_simple,1,100000,1,0.0175x0.019x0.02,False,False,1.0,,False,False,True,False,7,2,False,1,yes,1,end,Relative Error,1.00E-05,Species/hrrpuv_reac_simple_devc.csv
+Species/hrrpuv_reac_single.fds,Species,hrrpuv_reac_single,1,100000,1,0.0175x0.019x0.02,False,False,1.0,,False,False,True,False,7,2,False,1,yes,1,end,Relative Error,1.00E-05,Species/hrrpuv_reac_single_devc.csv
+Species/hrrpuv_reac_soot.fds,Species,hrrpuv_reac_soot,1,400,1,0.1x0.1x0.1,True,False,5.0,,False,False,True,False,0,3,False,1,yes,1,end_1_2,Relative Error,1.00E-05,Species/hrrpuv_reac_soot_devc.csv
+Species/humidity.fds,Species,,1,64,1,0.25x0.25x0.25,False,False,1.,,False,False,False,False,0,1,False,1,yes,1,end,Relative Error,0.001,Species/humidity.csv
+Species/lumped_stoich_simple.fds,Species,lumped_stoich_simple,1,64,1,0.25x0.25x0.25,False,False,0.,,False,False,True,False,0,0,False,,no,0,,,,
+Species/lumped_stoich_soot.fds,Species,lumped_stoich_soot,1,64,1,0.25x0.25x0.25,False,False,0.,,False,False,True,False,0,0,False,,no,0,,,,
+Species/mass_balance_gas_volume.fds,Species,mass_balance_gas_volume,1,8000,1,0.5x0.5x0.5,False,False,2000.0,,False,False,False,False,0,7,False,1,yes,0,,,,
+Species/mass_balance_reac.fds,Species,mass_balance_reac,8,64000,1,0.25x0.25x0.25,False,False,20.0,UGLMAT,False,False,True,False,1,36,True,8,yes,0,,,,
+Species/mass_balance_reac_2.fds,Species,mass_balance_reac_2,8,64000,1,0.25x0.25x0.25,False,False,5.0,UGLMAT,False,False,True,False,1,36,True,1,yes,0,,,,
+Species/mass_flux_comparison.fds,Species,mass_flux_comparison,1,40000,1,0.05x0.05x0.05,False,False,50,,False,False,False,False,1,7,False,1,yes,2,mean_1_2;mean_1_3,Relative Error,0.01,Species/mass_flux_comparison.csv
+Species/mass_flux_wall_yindex.fds,Species,mass_flux_wall_yindex,1,8000,1,0.5x0.5x0.5,False,False,2000,,False,False,False,False,0,2,True,1,yes,0,,,,
+Species/mass_flux_wall_zindex.fds,Species,mass_flux_wall_zindex,1,8000,1,0.5x0.5x0.5,False,False,2000.0,,False,False,False,False,0,2,True,1,yes,0,,,,
+Species/methane_flame_lumped.fds,Species,methane_flame_lumped,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,3,True,1,yes,0,,,,
+Species/methane_flame_lumped_fuel.fds,Species,methane_flame_lumped_fuel,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,0,2,True,1,yes,0,,,,
+Species/methane_flame_lumped_ox.fds,Species,methane_flame_lumped_ox,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,0,2,True,1,yes,0,,,,
+Species/methane_flame_primitive.fds,Species,methane_flame_primitive,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,3,True,1,yes,1,end_1_1,Relative Error,1.00E-02,Species/methane_flame_simple_devc.csv
+Species/methane_flame_primitive_2.fds,Species,methane_flame_primitive_2,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,0,2,True,1,yes,1,end_1_1,Relative Error,0.01,Species/methane_flame_primitive_2_devc.csv
+Species/methane_flame_simple.fds,Species,methane_flame_simple,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,3,True,1,yes,1,end,Relative Error,0.01,Species/methane_flame_simple_devc.csv
+Species/methane_flame_simple_2.fds,Species,methane_flame_simple_2,1,2000,1,0.1x0.1x0.1,False,False,10.0,,False,False,True,False,1,3,True,1,yes,0,,,,
+Species/multiple_reac_hrrpua.fds,Species,multiple_reac_hrrpua,1,1000,1,0.1x0.1x0.1,False,False,5,,False,False,True,False,0,0,False,1,yes,1,end,Relative Error,0.01,Species/multiple_reac_hrrpua.csv
+Species/multiple_reac_n_simple.fds,Species,multiple_reac_n_simple,3,3000,1,0.1x0.1x0.1,False,False,0.0001,,False,False,True,False,0,12,True,1,yes,3,end,Relative Error,0.01,Species/multiple_reac_n_simple.csv
+Species/propane_flame_2reac.fds,Species,propane_flame_2reac,1,32640,1,0.025x0.025x0.025,False,False,2.,,False,False,True,False,5,0,False,1,yes,1,end,Relative Error,0.01,Species/propane_flame_2reac_hrr.csv
+Species/propane_flame_2reac_simple.fds,Species,propane_flame_2reac_simple,1,32640,1,0.025x0.025x0.025,False,False,2.,,False,False,True,False,5,0,False,1,yes,0,,,,
+Species/pvc_combustion.fds,Species,pvc_combustion,1,16,1,0.025x0.025x0.025,True,False,2.0,,False,False,True,False,0,9,True,1,yes,1,end,Absolute Error,1.00E-03,Species/pvc_combustion_soln.csv
+Species/ramp_chi_r.fds,Species,ramp_chi_r,1,4096,1,0.125x0.125x0.125,False,False,10.,,False,False,True,False,0,1,False,1,yes,1,end,Absolute Error,0.001,Species/ramp_chi_r.csv
+Species/reactionrate_EDC_1step_CH4_nonmix.fds,Species,reactionrate_EDC_1step_CH4_nonmix,1,100,1,0.01x0.01x0.01,True,False,60.0,,False,False,True,False,0,7,False,1,yes,3,end,Absolute Error;Relative Error,0.01;1.00E-03,Species/reactionrate_EDC_1step_CH4_nonmix_spec.csv;Species/reactionrate_EDC_1step_CH4_nonmix_temppres.csv
+Species/reactionrate_EDC_O2lim_1step.fds,Species,reactionrate_EDC_O2lim_1step,1,512,1,0.0125x0.0125x0.0125,False,False,1.0,,False,False,True,False,0,4,False,1,yes,1,end,Absolute Error,1.00E-03,Species/reactionrate_EDC_O2lim_1step_soln.csv
+Species/reactionrate_EDC_O2lim_2fuel_lump.fds,Species,reactionrate_EDC_O2lim_2fuel_lump,1,16,1,0.025x0.025x0.025,True,False,1,,False,False,True,False,0,5,True,1,yes,0,,,,
+Species/reactionrate_EDC_O2lim_2fuel_prim.fds,Species,reactionrate_EDC_O2lim_2fuel_prim,1,16,1,0.025x0.025x0.025,True,False,1,,False,False,True,False,0,5,True,1,yes,1,end,Absolute Error,1.00E-03,Species/reactionrate_EDC_O2lim_2fuel_lump_devc.csv
+Species/reactionrate_EDC_flim_1step_C3H8.fds,Species,reactionrate_EDC_flim_1step_C3H8,1,512,1,0.0125x0.0125x0.0125,False,False,2.0,,False,False,True,False,0,6,False,1,yes,3,end,Absolute Error;Relative Error,0.01;1.00E-03,Species/reactionrate_EDC_flim_1step_C3H8_spec.csv;Species/reactionrate_EDC_flim_1step_C3H8_temppres.csv
+Species/reactionrate_EDC_flim_1step_CH4.fds,Species,reactionrate_EDC_flim_1step_CH4,1,512,1,0.0125x0.0125x0.0125,False,False,2.0,,False,False,True,False,0,6,False,1,yes,3,end,Absolute Error;Relative Error,0.01;1.00E-03,Species/reactionrate_EDC_flim_1step_CH4_spec.csv;Species/reactionrate_EDC_flim_1step_CH4_temppres.csv
+Species/reactionrate_EDC_flim_2step.fds,Species,reactionrate_EDC_flim_2step,1,16,1,0.025x0.025x0.025,True,False,1,,False,False,True,False,0,5,True,1,yes,1,end,Absolute Error,1.00E-03,Species/reactionrate_EDC_flim_2step_soln.csv
+Species/reactionrate_arrhenius_0order_1step.fds,Species,reactionrate_arrhenius_0order_1step,1,64,1,0.025x0.025x0.025,False,False,10.0,,False,False,True,False,0,4,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_0order_1step_soln.csv
+Species/reactionrate_arrhenius_0order_1step_cvode.fds,Species,reactionrate_arrhenius_0order_1step_cvode,1,64,1,0.025x0.025x0.025,False,False,10.0,,False,False,True,False,0,4,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_0order_1step_soln.csv
+Species/reactionrate_arrhenius_1p75order_2step.fds,Species,reactionrate_arrhenius_1p75order_2step,1,512,1,0.0125x0.0125x0.0125,False,False,10,,False,False,True,False,0,5,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_1p75order_2step_soln.csv
+Species/reactionrate_arrhenius_1p75order_2step_cvode.fds,Species,reactionrate_arrhenius_1p75order_2step_cvode,1,512,1,0.0125x0.0125x0.0125,False,False,10,,False,False,True,False,0,5,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_1p75order_2step_soln.csv
+Species/reactionrate_arrhenius_1p75order_2stepr.fds,Species,reactionrate_arrhenius_1p75order_2stepr,1,512,1,0.0125x0.0125x0.0125,False,False,10,,False,False,True,False,0,5,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_1p75order_2stepr_soln.csv
+Species/reactionrate_arrhenius_1p75order_2stepr_cvode.fds,Species,reactionrate_arrhenius_1p75order_2stepr_cvode,1,512,1,0.0125x0.0125x0.0125,False,False,10,,False,False,True,False,0,5,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_1p75order_2stepr_soln.csv
+Species/reactionrate_arrhenius_2order_1step.fds,Species,reactionrate_arrhenius_2order_1step,1,512,1,0.0125x0.0125x0.0125,False,False,5,,False,False,True,False,0,4,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_2order_1step_soln.csv
+Species/reactionrate_arrhenius_2order_1step_cvode.fds,Species,reactionrate_arrhenius_2order_1step_cvode,1,512,1,0.0125x0.0125x0.0125,False,False,5,,False,False,True,False,0,4,False,1,yes,1,end,Absolute Error,1.00E-02,Species/reactionrate_arrhenius_2order_1step_soln.csv
+Species/reactionrate_arrhenius_equilibrium.fds,Species,reactionrate_arrhenius_equilibrium,1,16,1,0.025x0.025x0.025,True,False,4,,False,False,True,False,0,9,False,1,yes,3,end,Absolute Error;Relative Error,1.00E-02;2.00E-02,Species/reactionrate_arrhenius_equilibrium_soln.csv
+Species/reactionrate_arrhenius_equilibrium_cvode.fds,Species,reactionrate_arrhenius_equilibrium_cvode,1,16,1,0.025x0.025x0.025,True,False,4,,False,False,True,False,0,9,False,1,yes,3,end,Absolute Error;Relative Error,1.00E-02;2.00E-02,Species/reactionrate_arrhenius_equilibrium_soln.csv
+Species/reactionrate_arrhenius_jones_lindstedt.fds,Species,reactionrate_arrhenius_jones_lindstedt,1,16,1,0.025x0.025x0.025,True,False,5,,False,False,True,False,0,10,True,1,yes,3,end,Absolute Error;Relative Error,1.00E-02,Species/reactionrate_arrhenius_jones_lindstedt_soln.csv
+Species/reactionrate_arrhenius_jones_lindstedt_cvode.fds,Species,reactionrate_arrhenius_jones_lindstedt_cvode,1,16,1,0.025x0.025x0.025,True,False,5,,False,False,True,False,0,10,True,1,yes,3,end,Absolute Error;Relative Error,1.00E-02,Species/reactionrate_arrhenius_jones_lindstedt_soln.csv
+Species/reactionrate_fast_slow.fds,Species,reactionrate_fast_slow,1,8000,1,0.05x0.05x0.05,False,False,0.001,,False,False,True,False,0,4,False,1,yes,1,end,Absolute Error,0.001,Species/reactionrate_fast_slow.csv
+Species/reactionrate_lumped_two_air.fds,Species,reactionrate_lumped_two_air,1,16,1,0.025x0.025x0.025,True,False,1.0,,False,False,True,False,0,4,False,1,yes,1,end,Absolute Error,1.00E-03,Species/reactionrate_lumped_two_air_soln.csv
+Species/reactionrate_lumped_two_air_2.fds,Species,reactionrate_lumped_two_air_2,1,16,1,0.025x0.025x0.025,True,False,1.0,,False,False,True,False,0,4,False,1,yes,0,,,,
+Species/reactionrate_series_reaction.fds,Species,reactionrate_series_reaction,1,16,1,0.025x0.025x0.025,True,False,1.0,,False,False,True,False,0,7,True,1,yes,1,end,Absolute Error,1.00E-03,Species/reactionrate_series_reaction_soln.csv
+Species/species_props.fds,Species,species_props,5,80,1,0.1x0.1x0.1,True,False,0.02,,False,False,False,False,0,15,False,1,yes,3,end,Absolute Error;Relative Error,0.01,Species/species_props.csv
+Species/wall_cond.fds,Species,wall_cond,1,27,1,0.333333x0.333333x0.333333,False,False,20000.0,,False,False,False,False,0,9,False,1,yes,2,end,Relative Error,0.05,Species/wall_cond.csv
+Sprinklers_and_Sprays/activate_sprinklers.fds,Sprinklers_and_Sprays,activate_sprinklers,1,2100,1,0.1x0.1x0.1,False,False,20.,,False,False,False,True,0,3,False,1,yes,0,,,,
+Sprinklers_and_Sprays/adiabatic_surf_temp_spray.fds,Sprinklers_and_Sprays,adiabatic_surf_temp_spray,1,8000,1,0.05x0.05x0.05,False,False,150.,,False,False,False,True,1,6,False,1,yes,1,mean,N/A,0.01,Sprinklers_and_Sprays/adiabatic_surf_temp_spray_devc.csv
+Sprinklers_and_Sprays/bucket_test_1.fds,Sprinklers_and_Sprays,bucket_test_1,4,62500,1,0.2x0.2x0.2,False,False,40.,,False,False,False,True,0,2,False,4,yes,1,end,Relative Error,0.02,Sprinklers_and_Sprays/bucket_test_1.csv
+Sprinklers_and_Sprays/bucket_test_2.fds,Sprinklers_and_Sprays,bucket_test_2,1,62500,1,0.2x0.2x0.2,False,False,15.,,False,False,False,True,0,2,False,1,yes,1,end,Relative Error,0.03,Sprinklers_and_Sprays/bucket_test_2.csv
+Sprinklers_and_Sprays/bucket_test_3.fds,Sprinklers_and_Sprays,bucket_test_3,1,8000,1,0.1x0.1x0.1,False,False,10.,,False,False,False,True,0,2,False,1,yes,1,end,Relative Error,0.02,Sprinklers_and_Sprays/bucket_test_3.csv
+Sprinklers_and_Sprays/bucket_test_4.fds,Sprinklers_and_Sprays,bucket_test_4,1,8000,1,0.05x0.05x0.05,False,False,60.,,False,False,False,True,1,3,False,1,yes,2,end;mean,Relative Error,0.02;0.05,Sprinklers_and_Sprays/bucket_test_4.csv
+Sprinklers_and_Sprays/cannon_ball.fds,Sprinklers_and_Sprays,cannon_ball,1,9000,1,1x1x1,False,False,2.5,,False,False,False,True,0,4,False,1,yes,1,end,Relative Error,0.01,Sprinklers_and_Sprays/cannon_ball.csv
+Sprinklers_and_Sprays/cascade.fds,Sprinklers_and_Sprays,cascade,1,14336,1,0.25x0.25x0.25,False,False,100.0,,False,False,False,True,3,4,False,1,yes,1,end_1_1,Relative Error,0.02,Sprinklers_and_Sprays/cascade.csv
+Sprinklers_and_Sprays/cascadempi.fds,Sprinklers_and_Sprays,cascadempi,6,57344,1,0.25x0.25x0.25,False,False,100.0,,False,False,False,True,1,16,False,6,yes,4,area,Relative Error,0.02,Sprinklers_and_Sprays/cascadempi.csv
+Sprinklers_and_Sprays/cloud_drag.fds,Sprinklers_and_Sprays,cloud_drag,1,24000,1,0.05x0.05x0.05,False,False,30.0,,False,False,False,True,0,3,False,,no,0,,,,
+Sprinklers_and_Sprays/droplet_distributions.fds,Sprinklers_and_Sprays,droplet_distributions,1,64,1,0.25x0.25x0.25,False,False,0.1,,False,False,False,True,0,8,False,1,yes,4,end,N/A,0.01,Sprinklers_and_Sprays/droplet_distributions_LOGNORMAL_cdf.csv;Sprinklers_and_Sprays/droplet_distributions_ROSIN-RAMMLER-LOGNORMAL_cdf.csv;Sprinklers_and_Sprays/droplet_distributions_ROSIN-RAMMLER_cdf.
+Sprinklers_and_Sprays/droplet_distributions_2.fds,Sprinklers_and_Sprays,droplet_distributions_2,1,64,1,0.25x0.25x0.25,False,False,11,,False,False,False,True,0,16,False,1,yes,8,end,N/A;Relative Error,0.01;2.00E-02,Sprinklers_and_Sprays/droplet_distributions_2.csv;Sprinklers_and_Sprays/droplet_distributions_2_LOGNORMAL_cdf.csv;Sprinklers_and_Sprays/droplet_distributions_2_ROSIN-RAMMLER-LOGNORMAL_cdf.csv;Sprinkle
+Sprinklers_and_Sprays/e_coefficient.fds,Sprinklers_and_Sprays,e_coefficient,2,16000,1,0.05x0.05x0.05,False,False,30.,,False,False,True,True,5,4,False,2,yes,2,max,Absolute Error,3,Sprinklers_and_Sprays/e_coefficient.csv
+Sprinklers_and_Sprays/flat_fire.fds,Sprinklers_and_Sprays,flat_fire,1,5000,1,2.02x1x1,False,False,1.65,,False,False,False,True,0,4,False,1,yes,5,end,Relative Error,0.01;0.02,Sprinklers_and_Sprays/flat_fire.csv
+Sprinklers_and_Sprays/flow_rate.fds,Sprinklers_and_Sprays,flow_rate,1,25600,1,0.25x0.25x0.25,False,False,70.,,False,False,False,True,0,12,False,1,yes,2,end;max,Relative Error,0;0.01,Sprinklers_and_Sprays/flow_rate.csv
+Sprinklers_and_Sprays/flow_rate_2.fds,Sprinklers_and_Sprays,flow_rate_2,1,25600,1,0.25x0.25x0.25,False,False,70.,,False,False,False,True,0,12,False,1,yes,2,end;max,Relative Error,0;0.01,Sprinklers_and_Sprays/flow_rate_2.csv
+Sprinklers_and_Sprays/fluid_part_mom_x.fds,Sprinklers_and_Sprays,fluid_part_mom_x,1,640,1,0.25x0.25x0.25,False,False,1.,,False,False,False,True,0,2,False,1,yes,0,,,,
+Sprinklers_and_Sprays/fluid_part_mom_y.fds,Sprinklers_and_Sprays,fluid_part_mom_y,1,640,1,0.25x0.25x0.25,False,False,1.,,False,False,False,True,0,2,False,1,yes,0,,,,
+Sprinklers_and_Sprays/fluid_part_mom_z.fds,Sprinklers_and_Sprays,fluid_part_mom_z,1,640,1,0.25x0.25x0.25,False,False,1.,,False,False,False,True,0,2,False,1,yes,0,,,,
+Sprinklers_and_Sprays/geom_sprk_mass.fds,Sprinklers_and_Sprays,geom_sprk_mass,2,54000,1,0.1x0.1x0.1,False,False,50.,,False,False,False,True,1,4,False,2,yes,2,max,Relative Error,0.02,Sprinklers_and_Sprays/geom_sprk_mass.csv
+Sprinklers_and_Sprays/particle_anisotropic_radi.fds,Sprinklers_and_Sprays,particle_anisotropic_radi,4,4000,1,0.1x0.1x0.1,False,False,50,,False,False,False,True,1,9,False,1,yes,3,end,Relative Error,0.01,Sprinklers_and_Sprays/particle_anisotropic_radi_devc.csv
+Sprinklers_and_Sprays/particle_colors.fds,Sprinklers_and_Sprays,particle_colors,1,2048,1,0.125x0.125x0.125,False,False,20.0,,False,False,True,True,0,0,False,1,yes,0,,,,
+Sprinklers_and_Sprays/particle_drag_U100_N16.fds,Sprinklers_and_Sprays,particle_drag_U100_N16,1,64,1,0.25x0.25x0.25,False,False,25,,False,False,False,True,0,1,False,1,yes,1,end,Absolute Error,0.01,Sprinklers_and_Sprays/particle_drag_U100_N16.csv
+Sprinklers_and_Sprays/particle_drag_U100_N1600.fds,Sprinklers_and_Sprays,particle_drag_U100_N1600,1,64,1,0.25x0.25x0.25,False,False,5,,False,False,False,True,0,1,False,1,yes,1,end,Absolute Error,0.01,Sprinklers_and_Sprays/particle_drag_U100_N1600.csv
+Sprinklers_and_Sprays/particle_drag_U10_N16.fds,Sprinklers_and_Sprays,particle_drag_U10_N16,1,64,1,0.25x0.25x0.25,False,False,100,,False,False,False,True,0,2,False,1,yes,2,end,Absolute Error;Relative Error,0.01,Sprinklers_and_Sprays/particle_drag_U10_N16.csv
+Sprinklers_and_Sprays/particle_drag_U150_N1600.fds,Sprinklers_and_Sprays,particle_drag_U150_N1600,1,64,1,0.25x0.25x0.25,False,False,6,,False,False,False,True,0,1,False,1,yes,1,end,Absolute Error,0.01,Sprinklers_and_Sprays/particle_drag_U150_N1600.csv
+Sprinklers_and_Sprays/particle_drag_U50_N16.fds,Sprinklers_and_Sprays,particle_drag_U50_N16,1,64,1,0.25x0.25x0.25,False,False,50,,False,False,False,True,0,1,False,1,yes,1,end,Absolute Error,0.01,Sprinklers_and_Sprays/particle_drag_U50_N16.csv
+Sprinklers_and_Sprays/particle_drag_U50_N1600.fds,Sprinklers_and_Sprays,particle_drag_U50_N1600,1,64,1,0.25x0.25x0.25,False,False,4,,False,False,False,True,0,1,False,1,yes,1,end,Absolute Error,0.01,Sprinklers_and_Sprays/particle_drag_U50_N1600.csv
+Sprinklers_and_Sprays/particle_flux.fds,Sprinklers_and_Sprays,particle_flux,1,62500,1,0.2x0.2x0.2,False,False,20.,,False,False,False,True,1,2,False,1,yes,1,end,Relative Error,0.01,Sprinklers_and_Sprays/particle_flux.csv
+Sprinklers_and_Sprays/particle_heating_convection.fds,Sprinklers_and_Sprays,particle_heating_convection,1,1000,1,0.1x0.1x0.1,False,False,900,,False,False,False,True,0,10,False,1,yes,2,end,Relative Error,0.02,Sprinklers_and_Sprays/particle_heating.csv
+Sprinklers_and_Sprays/particle_heating_radiation.fds,Sprinklers_and_Sprays,particle_heating_radiation,1,1000,1,0.1x0.1x0.1,False,False,900,,False,False,False,True,0,8,False,1,yes,2,end,Relative Error,0.02,Sprinklers_and_Sprays/particle_heating.csv
+Sprinklers_and_Sprays/particle_isotropic_radi.fds,Sprinklers_and_Sprays,particle_isotropic_radi,4,4000,1,0.1x0.1x0.1,False,False,50,,False,False,False,True,1,9,False,1,yes,3,end,Relative Error,0.015,Sprinklers_and_Sprays/particle_isotropic_radi_devc.csv
+Sprinklers_and_Sprays/porous_media.fds,Sprinklers_and_Sprays,porous_media,3,63072,3,0.020833x0.020833x0.020833;0.041667x0.041667x0.041667;0.083333x0.083333x0.083333,False,False,10.,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.01,Sprinklers_and_Sprays/porous_media.csv
+Sprinklers_and_Sprays/screen_drag_1.fds,Sprinklers_and_Sprays,screen_drag_1,3,6000,1,0.1x0.1x0.1,False,False,4.,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.03,Sprinklers_and_Sprays/screen_drag_1.csv
+Sprinklers_and_Sprays/screen_drag_2.fds,Sprinklers_and_Sprays,screen_drag_2,3,6000,1,0.1x0.1x0.1,False,False,10.,,False,False,False,True,0,9,False,1,yes,1,mean,Relative Error,0.08,Sprinklers_and_Sprays/screen_drag_2.csv
+Sprinklers_and_Sprays/sphere_drag_1.fds,Sprinklers_and_Sprays,sphere_drag_1,5,80000,1,0.05x0.05x0.05,False,False,10.,,False,False,False,True,0,5,False,1,yes,1,end,Relative Error,0.01,Sprinklers_and_Sprays/sphere_drag_1.csv
+Sprinklers_and_Sprays/sphere_drag_2.fds,Sprinklers_and_Sprays,sphere_drag_2,1,10000,1,0.1x0.1x0.1,False,False,100.,,False,False,False,True,0,1,False,1,yes,1,max,Relative Error,0.02,Sprinklers_and_Sprays/sphere_drag_2.csv
+Sprinklers_and_Sprays/terminal_velocity_dt_0_0001.fds,Sprinklers_and_Sprays,terminal_velocity_dt_0_0001,1,160,1,0.5x0.5x-40.1,False,False,20.,,False,False,False,True,0,2,False,1,yes,0,,,,
+Sprinklers_and_Sprays/terminal_velocity_dt_0_001.fds,Sprinklers_and_Sprays,terminal_velocity_dt_0_001,1,160,1,0.5x0.5x-40.1,False,False,20.,,False,False,False,True,0,2,False,1,yes,0,,,,
+Sprinklers_and_Sprays/terminal_velocity_dt_0_01.fds,Sprinklers_and_Sprays,terminal_velocity_dt_0_01,1,160,1,0.5x0.5x-40.1,False,False,20.,,False,False,False,True,0,2,False,1,yes,0,,,,
+Sprinklers_and_Sprays/terminal_velocity_dt_0_1.fds,Sprinklers_and_Sprays,terminal_velocity_dt_0_1,1,160,1,0.5x0.5x-40.1,False,False,20.,,False,False,False,True,0,2,False,1,yes,0,,,,
+Sprinklers_and_Sprays/terminal_velocity_dt_1_0.fds,Sprinklers_and_Sprays,terminal_velocity_dt_1_0,1,160,1,0.5x0.5x-40.1,False,False,20.,,False,False,False,True,0,3,False,1,yes,0,,,,
+Sprinklers_and_Sprays/water_evap_1_const_gamma.fds,Sprinklers_and_Sprays,water_evap_1_const_gamma,1,1000,1,0.1x0.1x0.1,False,False,10.0,,False,False,False,True,0,9,True,1,yes,6,end,Relative Error,0.01,Sprinklers_and_Sprays/water_evap_1_const_gamma.csv
+Sprinklers_and_Sprays/water_evaporation_1.fds,Sprinklers_and_Sprays,water_evaporation_1,1,1000,1,0.1x0.1x0.1,False,False,10.0,,False,False,False,True,0,8,True,1,yes,6,end,Relative Error,0.01,Sprinklers_and_Sprays/water_evaporation_1.csv
+Sprinklers_and_Sprays/water_evaporation_2.fds,Sprinklers_and_Sprays,water_evaporation_2,1,64,1,0.1x0.1x0.1,False,False,50000.0,,False,False,False,True,0,9,True,1,yes,6,end,Relative Error,0.01,Sprinklers_and_Sprays/water_evaporation_2.csv
+Sprinklers_and_Sprays/water_evaporation_3.fds,Sprinklers_and_Sprays,water_evaporation_3,1,1000,1,0.1x0.1x0.1,False,False,20.0,,False,False,False,True,0,9,True,1,yes,6,end;end_1_1,Relative Error,0.01;0.02;0.07,Sprinklers_and_Sprays/water_evaporation_3.csv
+Sprinklers_and_Sprays/water_evaporation_4.fds,Sprinklers_and_Sprays,water_evaporation_4,1,3000,1,0.1x0.1x0.1,False,False,40.,,False,False,False,True,0,7,False,1,yes,2,end,Relative Error,0.06,Sprinklers_and_Sprays/water_evaporation_4.csv
+Sprinklers_and_Sprays/water_evaporation_4_np100.fds,Sprinklers_and_Sprays,water_evaporation_4_np100,1,3000,1,0.1x0.1x0.1,False,False,40.,,False,False,False,True,0,7,False,1,yes,0,,,,
+Sprinklers_and_Sprays/water_evaporation_5.fds,Sprinklers_and_Sprays,water_evaporation_5,1,64,1,0.05x0.05x0.05,False,False,712.,,False,False,False,True,0,2,False,1,yes,2,end,Absolute Error,1.00E-04,../../exp/Ranz_Marshall/Ranz_Marshall_Time_Dep.csv
+Sprinklers_and_Sprays/water_evaporation_6.fds,Sprinklers_and_Sprays,water_evaporation_6,1,1000,1,0.1x0.1x0.1,False,False,200.0,,False,False,False,True,0,10,True,1,yes,2,end,Relative Error,0.01;0.015,Sprinklers_and_Sprays/water_evaporation_6.csv
+Sprinklers_and_Sprays/water_evaporation_6a.fds,Sprinklers_and_Sprays,water_evaporation_6a,1,1000,1,0.1x0.1x0.1,False,False,20.0,,False,False,False,True,0,9,False,1,yes,1,mean_1_3,Absolute Error,0.01,Sprinklers_and_Sprays/water_evaporation_6a.csv
+Sprinklers_and_Sprays/water_evaporation_7.fds,Sprinklers_and_Sprays,water_evaporation_7,1,6000,1,0.1x0.1x0.1,False,False,200.,,False,False,True,True,1,4,False,1,yes,3,mean_1_1;mean_2_2;mean_3_3,Absolute Error;Relative Error,0.05;1,Sprinklers_and_Sprays/water_evaporation_7.csv
+Sprinklers_and_Sprays/water_evaporation_8.fds,Sprinklers_and_Sprays,water_evaporation_8,1,3630,1,0.1x0.1x0.1,False,False,16,,False,False,False,True,0,4,False,1,yes,4,end,Absolute Error,0.05;5,Sprinklers_and_Sprays/water_evaporation_8.csv
+Sprinklers_and_Sprays/water_fuel_sprays.fds,Sprinklers_and_Sprays,water_fuel_sprays,1,25000,1,0.2x0.2x0.19,False,False,120.,,False,False,True,True,0,9,False,1,yes,0,,,,
+Thread_Check/race_test_1.fds,Thread_Check,race_test_1,6,37440,3,-0.05x0.05x0.05;0.01x0.01x0.01;0.05x0.05x0.05,False,False,5.,,False,False,True,False,1,2,False,1,yes,2,end,Absolute Error,0.01,Thread_Check/race_test_1_devc.csv
+Thread_Check/race_test_4.fds,Thread_Check,race_test_4,6,37440,3,-0.05x0.05x0.05;0.01x0.01x0.01;0.05x0.05x0.05,False,False,5.,,False,False,True,False,1,2,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128a.fds,Timing_Benchmarks,openmp_test128a,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128b.fds,Timing_Benchmarks,openmp_test128b,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128c.fds,Timing_Benchmarks,openmp_test128c,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128d.fds,Timing_Benchmarks,openmp_test128d,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128e.fds,Timing_Benchmarks,openmp_test128e,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128f.fds,Timing_Benchmarks,openmp_test128f,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128g.fds,Timing_Benchmarks,openmp_test128g,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test128h.fds,Timing_Benchmarks,openmp_test128h,1,2097152,1,0.007812x0.007812x0.007812,False,False,1.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64a.fds,Timing_Benchmarks,openmp_test64a,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64b.fds,Timing_Benchmarks,openmp_test64b,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64c.fds,Timing_Benchmarks,openmp_test64c,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64d.fds,Timing_Benchmarks,openmp_test64d,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64e.fds,Timing_Benchmarks,openmp_test64e,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64f.fds,Timing_Benchmarks,openmp_test64f,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64g.fds,Timing_Benchmarks,openmp_test64g,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Timing_Benchmarks/openmp_test64h.fds,Timing_Benchmarks,openmp_test64h,1,262144,1,0.015625x0.015625x0.015625,False,False,10.0,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/csmag0_32.fds,Turbulence,csmag0_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/csmag_32.fds,Turbulence,csmag_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/csmag_64.fds,Turbulence,csmag_64,1,262144,1,0.008836x0.008836x0.008836,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/deardorff_32.fds,Turbulence,deardorff_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/deardorff_64.fds,Turbulence,deardorff_64,1,262144,1,0.008836x0.008836x0.008836,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/dsmag_32.fds,Turbulence,dsmag_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/dsmag_64.fds,Turbulence,dsmag_64,1,262144,1,0.008836x0.008836x0.008836,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/mu0_32.fds,Turbulence,mu0_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/ramp_prof_u_z.fds,Turbulence,ramp_prof_u_z,1,24000,1,0.00196x0.00196x0.00196,False,False,5.,,False,False,False,False,1,1,False,1,yes,0,,,,
+Turbulence/rng_32.fds,Turbulence,rng_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,,no,0,,,,
+Turbulence/rng_64.fds,Turbulence,rng_64,1,262144,1,0.008836x0.008836x0.008836,False,False,0.67,,False,False,False,False,0,1,False,,no,0,,,,
+Turbulence/sem_atm_leddy_p2.fds,Turbulence,sem_atm_leddy_p2,1,35937,1,0.030303x0.030303x0.030303,False,False,60.,,False,False,False,False,0,6,False,1,yes,0,,,,
+Turbulence/sem_flat_leddy_p2.fds,Turbulence,sem_flat_leddy_p2,1,35937,1,0.030303x0.030303x0.030303,False,False,60.,,False,False,False,False,0,6,False,1,yes,0,,,,
+Turbulence/sem_open_wind.fds,Turbulence,sem_open_wind,1,99840,1,0.5x0.25x0.25,False,False,60.,,False,False,False,False,0,4,False,1,yes,0,,,,
+Turbulence/sem_par_leddy_p2.fds,Turbulence,sem_par_leddy_p2,1,35937,1,0.030303x0.030303x0.030303,False,False,60.,,False,False,False,False,0,6,False,1,yes,0,,,,
+Turbulence/sem_ramp_leddy_p2.fds,Turbulence,sem_ramp_leddy_p2,1,35937,1,0.030303x0.030303x0.030303,False,False,60.,,False,False,False,False,0,6,False,1,yes,0,,,,
+Turbulence/sem_test.fds,Turbulence,sem_test,4,604800,1,0.00975x0.010278x0.01,False,False,600.,,False,False,False,False,0,5,False,,no,0,,,,
+Turbulence/vreman_32.fds,Turbulence,vreman_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/vreman_64.fds,Turbulence,vreman_64,1,262144,1,0.008836x0.008836x0.008836,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/wale_32.fds,Turbulence,wale_32,1,32768,1,0.017672x0.017672x0.017672,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/wale_64.fds,Turbulence,wale_64,1,262144,1,0.008836x0.008836x0.008836,False,False,0.67,,False,False,False,False,0,1,False,1,yes,0,,,,
+Turbulence/yplus_16.fds,Turbulence,yplus_16,1,128,1,1x1x0.0625,True,False,10.0,,False,False,False,False,0,3,False,1,yes,0,,,,
+Turbulence/yplus_32.fds,Turbulence,yplus_32,1,256,1,1x1x0.03125,True,False,10.0,,False,False,False,False,0,3,False,1,yes,0,,,,
+Turbulence/yplus_8.fds,Turbulence,yplus_8,1,64,1,1x1x0.125,True,False,10.0,,False,False,False,False,0,3,False,1,yes,0,,,,
+VTK/beam_detector.fds,VTK,beam_detector,8,400000,1,0.1x0.1x0.1,False,False,1.0,,False,False,False,False,4,14,False,,no,0,,,,
+VTK/cascade.fds,VTK,cascade,1,14336,1,0.25x0.25x0.25,False,False,100.0,,False,False,False,True,3,4,False,,no,0,,,,
+VTK/couch.fds,VTK,couch,4,60000,1,0.1x0.1x0.1,False,False,600.,,False,False,True,True,5,0,False,,no,0,,,,
+VTK/storage.fds,VTK,storage,8,27000,1,0.3x0.3x0.3,False,False,300.,,False,False,True,True,3,26,False,,no,0,,,,
+WUI/Bova_1a.fds,WUI,Bova_1a,1,40000,1,10x10x10,False,False,1080,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Bova_1b.fds,WUI,Bova_1b,1,40000,1,10x10x10,False,False,1620,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Bova_4a.fds,WUI,Bova_4a,1,40000,1,10x10x10,False,False,2160,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/LS4_ember_ignition.fds,WUI,LS4_ember_ignition,2,2000,1,0.5x0.5x0.5,False,False,50.,,False,False,True,True,0,2,False,1,yes,1,end,Relative Error,0.01,WUI/LS4_ember_ignition.csv
+WUI/LS4_ember_yield.fds,WUI,LS4_ember_yield,1,8000,1,0.5x0.5x0.5,False,False,100.,,False,False,True,True,0,9,False,1,yes,2,end,Relative Error,0.01;0.1,WUI/LS4_ember_yield.csv
+WUI/LS_ellipse_0ms_00deg.fds,WUI,LS_ellipse_0ms_00deg,1,12500,1,0.2x0.2x0.2,False,False,125.,,False,False,False,False,0,8,False,1,yes,0,,,,
+WUI/LS_ellipse_0ms_30deg.fds,WUI,LS_ellipse_0ms_30deg,1,12500,1,0.2x0.2x2,False,False,125.,,False,False,False,False,0,8,False,1,yes,0,,,,
+WUI/LS_ellipse_5ms_00deg.fds,WUI,LS_ellipse_5ms_00deg,1,12500,1,0.2x0.2x0.2,False,False,125.,,False,False,False,False,0,8,False,1,yes,0,,,,
+WUI/LS_ellipse_5ms_30deg.fds,WUI,LS_ellipse_5ms_30deg,1,12500,1,0.2x0.2x2,False,False,125.,,False,False,False,False,0,8,False,1,yes,0,,,,
+WUI/LS_wind_ramp_lin.fds,WUI,LS_wind_ramp_lin,1,12500,1,0.2x0.2x2,False,False,160.,,False,False,False,False,0,2,False,1,yes,2,mean,Relative Error,0.05,WUI/LS_wind_ramp.csv
+WUI/LS_wind_ramp_quad.fds,WUI,LS_wind_ramp_quad,1,12500,1,0.2x0.2x2,False,False,160.,,False,False,False,False,0,2,False,1,yes,0,,,,
+WUI/Morvan_TGA.fds,WUI,Morvan_TGA,1,125,1,0.96x0.48x1.92,False,False,1.,,False,False,True,True,0,0,False,1,yes,2,mean,N/A,0,WUI/Morvan_Data_Mass.csv;WUI/Morvan_Data_SG_Deriv.csv
+WUI/Morvan_TGA_2.fds,WUI,Morvan_TGA_2,1,125,1,0.96x0.48x1.92,False,False,1.,,False,False,True,True,0,0,False,1,yes,2,mean,N/A,0,WUI/Morvan_Data_Mass.csv;WUI/Morvan_Data_SG_Deriv.csv
+WUI/Needle_TGA_A.fds,WUI,Needle_TGA_A,1,16,1,1x1x0.25,True,False,4050.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Needle_TGA_B.fds,WUI,Needle_TGA_B,1,16,1,1x1x0.25,True,False,4050.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Needle_TGA_C.fds,WUI,Needle_TGA_C,1,16,1,1x1x0.25,True,False,4050.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Needle_TGA_D.fds,WUI,Needle_TGA_D,1,16,1,1x1x0.25,True,False,5000.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Needle_TGA_E.fds,WUI,Needle_TGA_E,1,16,1,1x1x0.25,True,False,11000.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Needle_TGA_F.fds,WUI,Needle_TGA_F,1,16,1,1x1x0.25,True,False,1200.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Needle_TGA_G.fds,WUI,Needle_TGA_G,1,16,1,1x1x0.25,True,False,2000.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/Needle_TGA_H.fds,WUI,Needle_TGA_H,1,16,1,1x1x0.25,True,False,1200.,,False,False,False,False,0,0,False,1,yes,0,,,,
+WUI/bulk_density_file.fds,WUI,bulk_density_file,1,75000,1,1x1x1,False,False,0.1,,False,False,False,True,0,4,False,1,yes,1,end,Absolute Error,0.001,WUI/bulk_density_file_expected.csv
+WUI/char_oxidation_1.fds,WUI,char_oxidation_1,1,4500,1,0.1x0.1x0.1,False,False,25,,False,False,True,True,0,2,False,1,yes,2,area;end,Relative Error,0.01;0.03,WUI/char_oxidation_1.csv
+WUI/char_oxidation_2.fds,WUI,char_oxidation_2,2,128,1,0.125x0.125x0.125,False,False,25,,False,False,False,True,0,40,False,2,yes,4,end,N/A;Relative Error,0.01;0.1,WUI/char_oxidation_2.csv;WUI/char_oxidation_2_devc.csv
+WUI/dragon_5a.fds,WUI,dragon_5a,1,12000,1,0.1x0.1x0.1,False,False,300.,,False,False,True,True,9,2,False,1,yes,1,end,Relative Error,0.05,WUI/dragon_5a.csv
+WUI/ember_1.fds,WUI,ember_1,1,12000,1,0.1x0.1x0.1,False,False,300.,,False,False,True,True,9,2,False,,no,0,,,,
+WUI/ground_vegetation_conv.fds,WUI,ground_vegetation_conv,2,640,1,0.05x0.05x0.05,False,False,30.,,False,False,False,True,0,4,False,2,yes,4,mean,Relative Error,0.05,WUI/ground_vegetation_conv.csv
+WUI/ground_vegetation_drag.fds,WUI,ground_vegetation_drag,3,72000,1,0.05x0.05x0.05,False,False,90.,,False,False,True,True,0,3,False,3,yes,2,mean,Relative Error,0.05,WUI/ground_vegetation_drag_devc.csv
+WUI/ground_vegetation_load.fds,WUI,ground_vegetation_load,2,48000,1,0.05x0.05x0.05,False,False,50.,,False,False,True,True,0,4,False,2,yes,3,end;max,N/A;Relative Error,0;0.15,WUI/ground_vegetation_load.csv;WUI/ground_vegetation_load_devc.csv
+WUI/ground_vegetation_radi.fds,WUI,ground_vegetation_radi,2,128000,1,0.025x0.025x0.025,False,False,1.,,False,False,False,True,1,2,False,2,yes,1,end_1_1,Relative Error,0.2,WUI/ground_vegetation_radi.csv
+WUI/hot_rods.fds,WUI,hot_rods,1,1000,1,0.1x0.1x0.1,False,False,300.,,False,False,True,True,1,4,False,1,yes,2,mean,Relative Error,0.01,WUI/hot_rods.csv
+WUI/level_set_fuel_model_1.fds,WUI,level_set_fuel_model_1,1,25600,1,25x25x25,False,False,36000,,False,False,True,False,0,1,False,1,yes,1,end,Relative Error,0.01,WUI/level_set_fuel_model_1.csv
+WUI/part_drag_prof_ux.fds,WUI,part_drag_prof_ux,1,500,1,0.5x2x2,False,True,1.E-6,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_uy.fds,WUI,part_drag_prof_uy,1,500,1,2x0.5x2,False,True,10,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_uz.fds,WUI,part_drag_prof_uz,1,500,1,2x2x0.5,False,True,10.,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_vx.fds,WUI,part_drag_prof_vx,1,500,1,0.5x2x2,False,True,10.,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_vy.fds,WUI,part_drag_prof_vy,1,500,1,2x0.5x2,False,True,1.E-6,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_vz.fds,WUI,part_drag_prof_vz,1,500,1,2x2x0.5,False,True,10.,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_wx.fds,WUI,part_drag_prof_wx,1,500,1,0.5x2x2,False,True,10.,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_wy.fds,WUI,part_drag_prof_wy,1,500,1,2x0.5x2,False,True,10.,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_prof_wz.fds,WUI,part_drag_prof_wz,1,500,1,2x2x0.5,False,True,1.E-6,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_drag_stretched.fds,WUI,part_drag_stretched,1,8000,1,0.5x0.5x0.5,False,True,30,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.03,WUI/part_drag_stretched_devc.csv
+WUI/part_spec_prof.fds,WUI,part_spec_prof,1,500,1,2x2x0.5,False,True,10.,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/part_temp_prof.fds,WUI,part_temp_prof,1,500,1,2x2x0.5,False,True,10.,,False,False,False,True,0,0,False,1,yes,0,,,,
+WUI/particle_surface_density.fds,WUI,particle_surface_density,2,20000,1,1x1x1,False,False,100.,,False,False,False,True,1,2,False,,no,0,,,,
+WUI/pine_needles.fds,WUI,pine_needles,1,1000,1,0.1x0.1x0.1,False,False,10.,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.01,WUI/pine_needles.csv
+WUI/radiation_gas-veg_consistency_gas.fds,WUI,radiation_gas-veg_consistency_gas,1,5760,1,0.1x0.1x0.1,False,False,40.,,False,False,False,False,0,3,False,1,yes,1,end,Relative Error,0.01,WUI/radiation_gas-veg_consistency_veg.csv
+WUI/radiation_gas-veg_consistency_veg.fds,WUI,radiation_gas-veg_consistency_veg,1,5760,1,0.1x0.1x0.1,False,False,40.,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.01,WUI/radiation_gas-veg_consistency_gas.csv
+WUI/random_walk_1.fds,WUI,random_walk_1,1,2000,1,1x1x1,False,False,60.,,False,False,False,True,0,1,False,1,yes,1,max,Relative Error,0.05,WUI/random_walk.csv
+WUI/random_walk_2.fds,WUI,random_walk_2,1,2000,1,1x1x1,False,False,60.,,False,False,False,True,0,1,False,1,yes,1,max,Relative Error,0.1,WUI/random_walk.csv
+WUI/tree_shapes.fds,WUI,tree_shapes,13,395200,1,0.025x0.025x0.025,False,False,.1,,False,False,False,True,0,10,False,1,yes,0,,,,
+WUI/vegetation_absorb.fds,WUI,vegetation_absorb,6,24000,1,0.1x0.1x0.1,False,False,4.,,False,False,False,True,0,6,False,6,yes,1,mean,Relative Error,0.03,WUI/vegetation_absorb.csv
+WUI/vegetation_drag_1.fds,WUI,vegetation_drag_1,3,12000,1,0.1x0.1x0.1,False,False,10.,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.03,WUI/vegetation_drag_1.csv
+WUI/vegetation_drag_2.fds,WUI,vegetation_drag_2,3,12000,1,0.1x0.1x0.1,False,False,10.,,False,False,False,True,0,3,False,1,yes,1,end,Relative Error,0.02,WUI/vegetation_drag_2.csv
