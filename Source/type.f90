@@ -1054,8 +1054,9 @@ TYPE OMESH_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CFACE_QUERY_FRONT !< Front CFACE index (in NM) associated with each query
 
    ! CC_IBM data exchange arrays:
+   ! NFEP_R(1:2) are unused (they counted the removed cut-face interpolation stencil); 3:5 are the cut-cell/edge stencils.
    INTEGER :: NICC_S(2)=0, NICC_R(2)=0, NICF_S(2)=0, NICF_R(2)=0, NLKF_S=0, NLKF_R=0, &
-              NFCC_S(2)=0, NFCC_R(2)=0, NCC_INT_R=0, NFEP_R(5)=0, NFEP_R_G=0
+              NFCC_S(2)=0, NFCC_R(2)=0, NCC_INT_R=0, NFEP_R(5)=0
    REAL(EB), ALLOCATABLE, DIMENSION(:) ::                &
          REAL_SEND_PKG11,REAL_SEND_PKG112,REAL_SEND_PKG12,REAL_SEND_PKG13,&
          REAL_RECV_PKG11,REAL_RECV_PKG112,REAL_RECV_PKG12,REAL_RECV_PKG13
@@ -1076,7 +1077,7 @@ TYPE OMESH_TYPE
    INTEGER, ALLOCATABLE, DIMENSION(:) :: IIO_FC_R,JJO_FC_R,KKO_FC_R,AXS_FC_R,IIO_FC_S,JJO_FC_S,KKO_FC_S,AXS_FC_S
    INTEGER, ALLOCATABLE, DIMENSION(:) :: IIO_CC_R,JJO_CC_R,KKO_CC_R,IIO_CC_S,JJO_CC_S,KKO_CC_S
    INTEGER, ALLOCATABLE, DIMENSION(:) :: IIO_LF_R,JJO_LF_R,KKO_LF_R,AXS_LF_R,IIO_LF_S,JJO_LF_S,KKO_LF_S,AXS_LF_S
-   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: IFEP_R_1, IFEP_R_2, IFEP_R_3, IFEP_R_4, IFEP_R_5
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: IFEP_R_3, IFEP_R_4, IFEP_R_5
    REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: U_LNK, V_LNK, W_LNK
 
    ! Level Set
@@ -1339,23 +1340,6 @@ TYPE CC_CUTFACE_TYPE
    REAL(EB) :: FV=0._EB,FV_B=0._EB                       !< Momentum RHS and baroclinic torque in Cartesian face.
    REAL(EB) :: ALPHA_CF=1._EB                            !< Area fraction for all gas cut-faces in a given cartesian face.
    REAL(EB) :: VEL_CF=0._EB,VEL_CRT=0._EB                !< Average cut-face velocity, cartesian velocity containers.
-
-   ! Here: VIND=IAXIS:KAXIS, EP=1:INT_N_EXT_PTS,
-   ! INT_VEL_IND = 1; INT_VELS_IND = 2; INT_FV_IND = 3; INT_DHDX_IND = 4; N_INT_FVARS = 4;
-   ! INT_NPE_LO = INT_NPE(LOW,VIND,EP,IFACE); INT_NPE_HI = INT_NPE(HIGH,VIND,EP,IFACE).
-   ! Interpolation of variables for boundary cut-faces (CFACEs).
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:)    :: INT_IJK        !< Interpolation (IAXIS:KAXIS,INT_NPE_LO+1:INT_NPE_LO+INT_NPE_HI)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)      :: INT_COEF       !< Interpolation (INT_NPE_LO+1:INT_NPE_LO+INT_NPE_HI)
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    :: INT_DCOEF      !< Interpolation (IAXIS:KAXIS,INT_NPE_LO+1:INT_NPE_LO+INT_NPE_HI)
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    :: INT_XYZBF,INT_NOUT !< Interpolation (IAXIS:KAXIS,0:NFACE)
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:)    :: INT_INBFC      !< Interpolation (1:3,0:NFACE)
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:,:,:):: INT_NPE        !< Interpolation (LOW:HIGH,VIND,EP,0:NFACE)
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    :: INT_XN,INT_CN  !< Interpolation (0:INT_N_EXT_PTS,0:NFACE) !0 is interp point.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    :: INT_FVARS      !< Interp (1:N_INT_FVARS,INT_NPE_LO+1:INT_NPE_LO+INT_NPE_HI)
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:)    :: INT_NOMIND     !< Interp (LOW_IND:HIGH_IND,INT_NPE_LO+1:INT_NPE_LO+INT_NPE_HI)
-   ! Fields used in INBOUNDARY faces:
-   ! Here: VIND=0, EP=1:INT_N_EXT_PTS, INT_H_IND=1, etc. N_INT_CVARS=INT_P_IND+N_TRACKED_SPECIES
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:)    :: INT_CVARS      !< Interpolation (1:N_INT_CVARS,INT_NPE_LO+1:INT_NPE_LO+INT_NPE_HI)
 
 END TYPE CC_CUTFACE_TYPE
 
