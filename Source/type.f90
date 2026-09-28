@@ -1507,6 +1507,8 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: NBR_GCELL   !< (1:N) neighbor-side GCELL index, 0 if boundary.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: KIND        !< (1:N) CC_FACE_KIND_* (gas / wall / ext-domain / remote / refine).
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: ROLE        !< (1:N) CC_FACE_ROLE_EXTERNAL or CC_FACE_ROLE_INTERNAL.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PARTNER_NM  !< (1:N) mesh holding the other row of a mesh-interface face, else 0.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PARTNER     !< (1:N) FACE row of the same face on mesh PARTNER_NM, else 0.
    ! --- provenance back to legacy faces ---
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: FTYPE       !< (1:N) legacy source kind CC_FTYPE_RCGAS/CFGAS/CFINB/RGGAS.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IRC     !< (1:N) source RC_FACE index for RCGAS; set in GET_GASPHASE_REGRCFACES_DATA.
@@ -1518,6 +1520,10 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK_FACE    !< (IAXIS:KAXIS,1:N) Cartesian face locator for axis faces.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: NBR_IJK     !< (IAXIS:KAXIS,1:N) outside Cartesian cell for FV/structured coupling.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKF        !< (1:N) legacy-compatible staggered momentum link row.
+   ! Link group -> FACE rows (CSR): rows with UNKF==IL are (LINK_NM,LINK_ROW)(LINK_PTR(IL):LINK_PTR(IL+1)-1).
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_PTR    !< (1:NUNK_F+1) CSR offsets into LINK_NM/LINK_ROW.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_NM     !< (1:sum group sizes) mesh of each group member.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_ROW    !< (1:sum group sizes) FACE row of each group member.
    ! --- geometry ---
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: AREA        !< (1:N) face area.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: FLUX_AREA   !< (1:N) legacy-exact area used by identity-scope flux operators.
