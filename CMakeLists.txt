@@ -23,6 +23,9 @@ option(USE_SYSTEM_SUNDIALS "Use the sundials library from the system" OFF)
 
 option(USE_OPENMP          "Use OpenMP"                               ON)
 
+# Optional AMReX driver (FDS-AMReX). OFF (default) leaves the FDS build unchanged.
+option(USE_AMREX           "Build the AMReX driver (Source/driver) instead of the stand-alone FDS executable" OFF)
+
 # The existing FDS makefile links MKL statically, but this is optional and can
 # be changed to dynamic
 set(MKL_LINK static CACHE STRING "Linking method for MKL (static or dynamic)")
@@ -264,6 +267,11 @@ if(USE_SUNDIALS)
         target_compile_definitions(fds PRIVATE WITH_SUNDIALS)
         target_compile_definitions(fds PRIVATE SUNDIALS_PP="${SUNDIALS_VERSION}")
     endif()
+endif()
+
+# AMReX driver: rebuilds the fds target as the C++/AMReX executable fds_amr (Source/driver/CMakeLists.txt).
+if(USE_AMREX)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/Source/driver/CMakeLists.txt)
 endif()
 
 install(TARGETS fds)

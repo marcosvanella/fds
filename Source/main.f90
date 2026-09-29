@@ -1,7 +1,20 @@
 !> \brief Fire Dynamics Simulator (FDS) is a computational fluid dynamics (CFD) code designed to model
 !> fire and other thermal phenomena.
 
+#ifdef WITH_AMREX
+!> \brief FDS setup entry for the AMReX driver. The C++ main initializes MPI (FUNNELED) and AMReX, then calls this routine,
+!> which runs the unchanged FDS set-up sequence up to the start of the time-stepping loop and returns.
+!> \details MODE=0 runs set-up and returns. MODE=1 or 2 (call after set-up) runs END_FDS: it closes the FDS output, calls
+!> MPI_FINALIZE and STOPs, so the driver must have finalized AMReX before making that call. MODE=2 first marks the run as
+!> set-up only, so that the stop message does not claim a completed simulation.
+!> \param MODE 0 = set up, 1 = finish normally, 2 = finish after set-up only
+!> \param FNAME NUL-terminated name of the FDS input file (the C++ main has no Fortran command line)
+!> \param DT_OUT Initial time step from READ_DATA (passed out to the driver)
+SUBROUTINE FDS_SETUP(MODE,FNAME,DT_OUT) BIND(C,NAME='fds_setup')
+USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_DOUBLE,C_CHAR,C_NULL_CHAR,C_INT
+#else
 PROGRAM FDS
+#endif
 
 USE PRECISION_PARAMETERS
 USE MESH_VARIABLES
@@ -57,6 +70,13 @@ USE VTK_FDS_INTERFACE, ONLY : WRITE_VTKHDF_GEOM_FILE, INITIALIZE_VTKHDF_FILES
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 
+#ifdef WITH_AMREX
+INTEGER(C_INT), VALUE :: MODE
+CHARACTER(KIND=C_CHAR), INTENT(IN) :: FNAME(*)
+REAL(C_DOUBLE), INTENT(OUT) :: DT_OUT
+SAVE  ! a main program keeps its locals; this routine must too (the internal procedures below use them)
+#endif
+
 ! Miscellaneous declarations
 
 LOGICAL  :: EX=.FALSE.,DIAGNOSTICS,CTRL_STOP_STATUS,CHECK_FREEZE_VELOCITY=.TRUE.,EXTERNAL_FAIL,FIRST_RESTART_TIME_STEP, &
@@ -95,9 +115,26 @@ INTEGER :: N_WRITTEN
 INTEGER :: ERROR
 #endif
 
+#ifdef WITH_AMREX
+IF (MODE>0) THEN
+   IF (MODE==2) STOP_STATUS = SETUP_ONLY_STOP
+   CALL END_FDS
+ENDIF
+#endif
+
 ! Initialize OpenMP
 
 CALL OPENMP_INIT
+
+#ifdef WITH_AMREX
+! Take the input file name from the caller (the C++ main passes it explicitly)
+
+FN_INPUT = ' '
+DO I=1,LEN(FN_INPUT)
+   IF (FNAME(I)==C_NULL_CHAR) EXIT
+   FN_INPUT(I:I) = FNAME(I)
+ENDDO
+#endif
 
 ! Output version info if fds is invoked without any arguments. This must be done before MPI is initialized.
 
@@ -105,7 +142,11 @@ CALL VERSION_INFO
 
 ! Initialize MPI
 
+#ifdef WITH_AMREX
+CALL MPI_QUERY_THREAD(PROVIDED,IERR)  ! the C++ main has already called MPI_INIT_THREAD
+#else
 CALL MPI_INIT_THREAD(REQUIRED,PROVIDED,IERR)
+#endif
 CALL MPI_COMM_RANK(MPI_COMM_WORLD, MY_RANK, IERR)
 CALL MPI_COMM_SIZE(MPI_COMM_WORLD, N_MPI_PROCESSES, IERR)
 CALL MPI_GET_PROCESSOR_NAME(PNAME, PNAMELEN, IERR)
@@ -685,6 +726,13 @@ IF (UNFREEZE_TIME > 0._EB) THEN
    SOLID_PHASE_ONLY=.TRUE.
    LOCK_TIME_STEP=.TRUE.
 ENDIF
+
+#ifdef WITH_AMREX
+! Set-up is complete. The C++ driver owns the time loop, so return here. The FDS time loop below is not executed in this build.
+
+DT_OUT = DT
+RETURN
+#endif
 
 !***********************************************************************************************************************************
 !                                                   MAIN TIMESTEPPING LOOP
@@ -5146,4 +5194,8 @@ MY_RANK_RS_MASTERS=-1; IF(IN_MASTERS_RS) CALL MPI_COMM_RANK(MPI_COMM_RS_MASTERS,
 END SUBROUTINE DEFINE_RS_COMM_INFO
 
 
+#ifdef WITH_AMREX
+END SUBROUTINE FDS_SETUP
+#else
 END PROGRAM FDS
+#endif
