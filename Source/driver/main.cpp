@@ -13,9 +13,12 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "FdsAmr.H"
+#include <cstring>
+
+#include "FdsSetup.H"
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
+int fds_selftest(const fdsamr::Level0& l0);   // tests/selftest_fds.cpp
 
 int main(int argc, char** argv)
 {
@@ -39,6 +42,10 @@ int main(int argc, char** argv)
             fdsamr::Level0 l0 = fdsamr::build_level0();
             fdsamr::print_level0(l0);
             amrex::Print() << "FDS-AMReX: initial dt from FDS set-up = " << dt << "\n";
+            if (argc > 2 && std::strcmp(argv[2], "--selftest") == 0) {
+                const int nfail = fds_selftest(l0);
+                amrex::Print() << (nfail == 0 ? "SELFTEST PASS" : "SELFTEST FAIL") << "\n";
+            }
         }
         amrex::Finalize();
         fds_setup(mode_end, argv[1], nullptr);  // does not return

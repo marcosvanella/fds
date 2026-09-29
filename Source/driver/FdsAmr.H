@@ -38,9 +38,10 @@ struct Level0 {
     double dx[3];
 };
 
-// Queries the Fortran set-up data (fds_mesh_query.f90) and builds Level0. Aborts with a message for meshes outside the M2a scope
-// (nonuniform grid, cylindrical, unequal cell sizes, overlapping boxes).
-Level0 build_level0();
+// Builds Level0 from the mesh list (index i = FDS mesh i+1). Aborts with a message for meshes outside the M2a scope (cylindrical,
+// unequal cell sizes, corners off the cell lattice, overlapping boxes, rank out of range). Pure C++: FdsSetup.cpp fills the mesh list
+// from the FDS set-up, the unit tests fill it synthetically.
+Level0 assemble_level0(const amrex::Vector<MeshInfo>& meshes, const DomainInfo& dom);
 
 // Prints one line per box (rank 0 only).
 void print_level0(const Level0& l0);

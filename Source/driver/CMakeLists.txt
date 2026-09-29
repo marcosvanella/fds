@@ -8,6 +8,7 @@
 # Kernel-facing rules (M2a): (a) passive scalars are handled by Fields.cpp (S2); (b) only uniform Cartesian metrics are used.
 
 enable_language(CXX)
+enable_language(C)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -33,8 +34,16 @@ target_compile_definitions(fds PRIVATE WITH_AMREX)
 target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/main.cpp
     ${CMAKE_CURRENT_LIST_DIR}/FdsAmr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/FdsSetup.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tests/selftest_fds.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_alias.c
 )
+set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90
+    PROPERTIES COMPILE_OPTIONS "-ffree-line-length-none")
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 
@@ -46,3 +55,18 @@ if (USE_OPENMP)
     target_link_libraries(fds PRIVATE OpenMP::OpenMP_CXX)
 endif()
 message(STATUS "USE_AMREX=ON: AMReX ${AMReX_VERSION} from ${AMREX_INSTALL_DIR}; executable fds_amr")
+
+# Driver unit tests (no FDS objects, AMReX only): index maps, ghost widths, face fill, side data, tile race. Run by tests/run_driver_tests.sh
+# (1 and 4 ranks, threads 1). The FDS-linked checks are the `--selftest` mode of fds_amr (tests/selftest_fds.cpp).
+add_executable(driver_unit_tests
+    ${CMAKE_CURRENT_LIST_DIR}/tests/test_units.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/FdsAmr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp)
+target_include_directories(driver_unit_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_options(driver_unit_tests PRIVATE -Wall -Wextra)
+target_link_libraries(driver_unit_tests PRIVATE AMReX::amrex MPI::MPI_CXX)
+if (USE_OPENMP)
+    target_link_libraries(driver_unit_tests PRIVATE OpenMP::OpenMP_CXX)
+endif()
+set_target_properties(driver_unit_tests PROPERTIES LINKER_LANGUAGE CXX)

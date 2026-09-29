@@ -1,35 +1,25 @@
 // FdsAmr.cpp: see FdsAmr.H. Kernel-facing rules (M2a): (a) passive scalars are handled by Fields.cpp (S2); (b) only uniform
-// Cartesian metrics are used, R(I)/RRN(I) are dropped and CYLINDRICAL/TRN* meshes are rejected.
+// Cartesian metrics are used, R(I)/RRN(I) are dropped and CYLINDRICAL/TRN* meshes are rejected. No Fortran symbol is referenced here,
+// so the unit tests link this file without the FDS objects (the FDS queries are in FdsSetup.cpp).
 #include "FdsAmr.H"
 
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 #include <AMReX_RealBox.H>
 
 #include <algorithm>
 #include <cmath>
 
-extern "C" {
-int fds_get_nmeshes();
-void fds_get_mesh(int nm, int* ijk, double* xb, int* rank, int* nonuniform);
-void fds_get_domain(int* periodic, int* cyl, int* n_tracked, int* n_total, int* nranks);
-}
-
 namespace fdsamr {
 
-Level0 build_level0()
+Level0 assemble_level0(const amrex::Vector<MeshInfo>& meshes, const DomainInfo& dom)
 {
     Level0 l0;
-    fds_get_domain(l0.dom.periodic, &l0.dom.cylindrical, &l0.dom.n_tracked, &l0.dom.n_total, &l0.dom.nranks);
+    l0.dom = dom;
+    l0.mesh = meshes;
     if (l0.dom.cylindrical) amrex::Abort("M2a: CYLINDRICAL meshes are not supported (IR-002)");
-
-    const int nm = fds_get_nmeshes();
-    l0.mesh.resize(nm);
-    for (int i = 0; i < nm; ++i) {
-        int nonuniform = 0;
-        MeshInfo& m = l0.mesh[i];
-        fds_get_mesh(i + 1, m.ijk, m.xb, &m.rank, &nonuniform);
-        if (nonuniform) amrex::Abort("M2a: TRNX/TRNY/TRNZ (nonuniform) meshes are not supported (IR-002)");
-    }
+    const int nm = static_cast<int>(l0.mesh.size());
+    AMREX_ALWAYS_ASSERT(nm >= 1);
 
     // Uniform cell size, equal in all meshes (level 0 has one geometry).
     for (int d = 0; d < 3; ++d) {

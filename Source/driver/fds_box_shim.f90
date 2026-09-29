@@ -1,0 +1,411 @@
+!> \brief Binding of AMReX FAB memory to the ALLOCATABLE components of MESHES(NM) (decision 1: the W2 alias trick, isolated here and in
+!> fds_alias.c) and read-only access for tests (M2a, S2).
+!>
+!> Kernel-facing file rules (M2a):
+!> (a) Passive scalars (N_TOTAL_SCALARS beyond the tracked species) are handled by Fields.cpp: ZZ and ZZS are 4-D with the scalar count
+!>     as the last extent, so a passive scalar is one more component; nothing here depends on the count.
+!> (b) Only uniform Cartesian metrics are used. R(I)/RRN(I) are not bound (they stay Fortran-owned per-box side data, S3).
+!>
+!> An aliased component must never be DEALLOCATEd or reallocated by Fortran: call FDS_SHIM_RELEASE first. Binding over an array FDS has
+!> already allocated deallocates it (the FDS copy is lost; only the driver's selftest does that after set-up).
+!> Boundary table entries: README.md, "Fortran/C++ boundary".
+
+MODULE FDS_BOX_SHIM
+
+USE ISO_C_BINDING
+USE MESH_VARIABLES, ONLY: MESHES,MESH_TYPE
+USE GLOBAL_CONSTANTS, ONLY: NMESHES
+
+IMPLICIT NONE (TYPE,EXTERNAL)
+PRIVATE
+
+INTERFACE
+   SUBROUTINE ALIAS3(A,BASE,LB,EXT,STRIDE) BIND(C,NAME='fds_alias_alloc')
+      IMPORT :: C_DOUBLE,C_PTR,C_INT,C_LONG
+      REAL(C_DOUBLE), ALLOCATABLE, INTENT(INOUT) :: A(:,:,:)
+      TYPE(C_PTR), VALUE :: BASE
+      INTEGER(C_INT), INTENT(IN) :: LB(*),EXT(*)
+      INTEGER(C_LONG), INTENT(IN) :: STRIDE(*)
+   END SUBROUTINE ALIAS3
+   SUBROUTINE ALIAS4(A,BASE,LB,EXT,STRIDE) BIND(C,NAME='fds_alias_alloc')
+      IMPORT :: C_DOUBLE,C_PTR,C_INT,C_LONG
+      REAL(C_DOUBLE), ALLOCATABLE, INTENT(INOUT) :: A(:,:,:,:)
+      TYPE(C_PTR), VALUE :: BASE
+      INTEGER(C_INT), INTENT(IN) :: LB(*),EXT(*)
+      INTEGER(C_LONG), INTENT(IN) :: STRIDE(*)
+   END SUBROUTINE ALIAS4
+   SUBROUTINE RELEASE3(A) BIND(C,NAME='fds_alias_release')
+      IMPORT :: C_DOUBLE
+      REAL(C_DOUBLE), ALLOCATABLE, INTENT(INOUT) :: A(:,:,:)
+   END SUBROUTINE RELEASE3
+   SUBROUTINE RELEASE4(A) BIND(C,NAME='fds_alias_release')
+      IMPORT :: C_DOUBLE
+      REAL(C_DOUBLE), ALLOCATABLE, INTENT(INOUT) :: A(:,:,:,:)
+   END SUBROUTINE RELEASE4
+END INTERFACE
+
+CONTAINS
+
+!> \brief Convert a NUL-terminated C string to a Fortran string
+FUNCTION CSTR(S) RESULT(F)
+CHARACTER(KIND=C_CHAR), INTENT(IN) :: S(*)
+CHARACTER(LEN=32) :: F
+INTEGER :: I
+F = ' '
+DO I=1,LEN(F)
+   IF (S(I)==C_NULL_CHAR) EXIT
+   F(I:I) = S(I)
+ENDDO
+END FUNCTION CSTR
+
+!> \brief Bind field NAME of mesh NM to FAB memory. BASE points at the element (LB(1),LB(2),LB(3)[,1]); STRIDE in elements (4 entries for ZZ, ZZS)
+!> \return 0 on success, 1 unknown field, 2 mesh not local/allocated
+FUNCTION FDS_SHIM_BIND(NM,NAME,BASE,LB,EXT,STRIDE) BIND(C,NAME='fds_shim_bind') RESULT(IERR)
+INTEGER(C_INT), VALUE :: NM
+CHARACTER(KIND=C_CHAR), INTENT(IN) :: NAME(*)
+TYPE(C_PTR), VALUE :: BASE
+INTEGER(C_INT), INTENT(IN) :: LB(*),EXT(*)
+INTEGER(C_LONG), INTENT(IN) :: STRIDE(*)
+INTEGER(C_INT) :: IERR
+TYPE(MESH_TYPE), POINTER :: M
+IERR = 0
+IF (NM<1 .OR. NM>NMESHES) THEN ; IERR = 2 ; RETURN ; ENDIF
+M => MESHES(NM)
+SELECT CASE(TRIM(CSTR(NAME)))
+   CASE('RHO')
+      IF (ALLOCATED(M%RHO)) DEALLOCATE(M%RHO)
+      CALL ALIAS3(M%RHO,BASE,LB,EXT,STRIDE)
+   CASE('RHOS')
+      IF (ALLOCATED(M%RHOS)) DEALLOCATE(M%RHOS)
+      CALL ALIAS3(M%RHOS,BASE,LB,EXT,STRIDE)
+   CASE('TMP')
+      IF (ALLOCATED(M%TMP)) DEALLOCATE(M%TMP)
+      CALL ALIAS3(M%TMP,BASE,LB,EXT,STRIDE)
+   CASE('U')
+      IF (ALLOCATED(M%U)) DEALLOCATE(M%U)
+      CALL ALIAS3(M%U,BASE,LB,EXT,STRIDE)
+   CASE('V')
+      IF (ALLOCATED(M%V)) DEALLOCATE(M%V)
+      CALL ALIAS3(M%V,BASE,LB,EXT,STRIDE)
+   CASE('W')
+      IF (ALLOCATED(M%W)) DEALLOCATE(M%W)
+      CALL ALIAS3(M%W,BASE,LB,EXT,STRIDE)
+   CASE('US')
+      IF (ALLOCATED(M%US)) DEALLOCATE(M%US)
+      CALL ALIAS3(M%US,BASE,LB,EXT,STRIDE)
+   CASE('VS')
+      IF (ALLOCATED(M%VS)) DEALLOCATE(M%VS)
+      CALL ALIAS3(M%VS,BASE,LB,EXT,STRIDE)
+   CASE('WS')
+      IF (ALLOCATED(M%WS)) DEALLOCATE(M%WS)
+      CALL ALIAS3(M%WS,BASE,LB,EXT,STRIDE)
+   CASE('H')
+      IF (ALLOCATED(M%H)) DEALLOCATE(M%H)
+      CALL ALIAS3(M%H,BASE,LB,EXT,STRIDE)
+   CASE('HS')
+      IF (ALLOCATED(M%HS)) DEALLOCATE(M%HS)
+      CALL ALIAS3(M%HS,BASE,LB,EXT,STRIDE)
+   CASE('KRES')
+      IF (ALLOCATED(M%KRES)) DEALLOCATE(M%KRES)
+      CALL ALIAS3(M%KRES,BASE,LB,EXT,STRIDE)
+   CASE('D')
+      IF (ALLOCATED(M%D)) DEALLOCATE(M%D)
+      CALL ALIAS3(M%D,BASE,LB,EXT,STRIDE)
+   CASE('DS')
+      IF (ALLOCATED(M%DS)) DEALLOCATE(M%DS)
+      CALL ALIAS3(M%DS,BASE,LB,EXT,STRIDE)
+   CASE('DDDT')
+      IF (ALLOCATED(M%DDDT)) DEALLOCATE(M%DDDT)
+      CALL ALIAS3(M%DDDT,BASE,LB,EXT,STRIDE)
+   CASE('MU')
+      IF (ALLOCATED(M%MU)) DEALLOCATE(M%MU)
+      CALL ALIAS3(M%MU,BASE,LB,EXT,STRIDE)
+   CASE('RSUM')
+      IF (ALLOCATED(M%RSUM)) DEALLOCATE(M%RSUM)
+      CALL ALIAS3(M%RSUM,BASE,LB,EXT,STRIDE)
+   CASE('FVX')
+      IF (ALLOCATED(M%FVX)) DEALLOCATE(M%FVX)
+      CALL ALIAS3(M%FVX,BASE,LB,EXT,STRIDE)
+   CASE('FVY')
+      IF (ALLOCATED(M%FVY)) DEALLOCATE(M%FVY)
+      CALL ALIAS3(M%FVY,BASE,LB,EXT,STRIDE)
+   CASE('FVZ')
+      IF (ALLOCATED(M%FVZ)) DEALLOCATE(M%FVZ)
+      CALL ALIAS3(M%FVZ,BASE,LB,EXT,STRIDE)
+   CASE('ZZ')
+      IF (ALLOCATED(M%ZZ)) DEALLOCATE(M%ZZ)
+      CALL ALIAS4(M%ZZ,BASE,LB,EXT,STRIDE)
+   CASE('ZZS')
+      IF (ALLOCATED(M%ZZS)) DEALLOCATE(M%ZZS)
+      CALL ALIAS4(M%ZZS,BASE,LB,EXT,STRIDE)
+   CASE DEFAULT
+      IERR = 1
+END SELECT
+END FUNCTION FDS_SHIM_BIND
+
+!> \brief Release field NAME of mesh NM (leaves it unallocated)
+FUNCTION FDS_SHIM_RELEASE(NM,NAME) BIND(C,NAME='fds_shim_release') RESULT(IERR)
+INTEGER(C_INT), VALUE :: NM
+CHARACTER(KIND=C_CHAR), INTENT(IN) :: NAME(*)
+INTEGER(C_INT) :: IERR
+TYPE(MESH_TYPE), POINTER :: M
+IERR = 0
+IF (NM<1 .OR. NM>NMESHES) THEN ; IERR = 2 ; RETURN ; ENDIF
+M => MESHES(NM)
+SELECT CASE(TRIM(CSTR(NAME)))
+   CASE('RHO')
+      CALL RELEASE3(M%RHO)
+   CASE('RHOS')
+      CALL RELEASE3(M%RHOS)
+   CASE('TMP')
+      CALL RELEASE3(M%TMP)
+   CASE('U')
+      CALL RELEASE3(M%U)
+   CASE('V')
+      CALL RELEASE3(M%V)
+   CASE('W')
+      CALL RELEASE3(M%W)
+   CASE('US')
+      CALL RELEASE3(M%US)
+   CASE('VS')
+      CALL RELEASE3(M%VS)
+   CASE('WS')
+      CALL RELEASE3(M%WS)
+   CASE('H')
+      CALL RELEASE3(M%H)
+   CASE('HS')
+      CALL RELEASE3(M%HS)
+   CASE('KRES')
+      CALL RELEASE3(M%KRES)
+   CASE('D')
+      CALL RELEASE3(M%D)
+   CASE('DS')
+      CALL RELEASE3(M%DS)
+   CASE('DDDT')
+      CALL RELEASE3(M%DDDT)
+   CASE('MU')
+      CALL RELEASE3(M%MU)
+   CASE('RSUM')
+      CALL RELEASE3(M%RSUM)
+   CASE('FVX')
+      CALL RELEASE3(M%FVX)
+   CASE('FVY')
+      CALL RELEASE3(M%FVY)
+   CASE('FVZ')
+      CALL RELEASE3(M%FVZ)
+   CASE('ZZ')
+      CALL RELEASE4(M%ZZ)
+   CASE('ZZS')
+      CALL RELEASE4(M%ZZS)
+   CASE DEFAULT
+      IERR = 1
+END SELECT
+END FUNCTION FDS_SHIM_RELEASE
+
+!> \brief Bounds of field NAME of mesh NM as Fortran sees them (LBOUND/UBOUND). ALLOC=0 if the component is not allocated.
+FUNCTION FDS_SHIM_BOUNDS(NM,NAME,LB,UB,RNK,ALLOC_OUT) BIND(C,NAME='fds_shim_bounds') RESULT(IERR)
+INTEGER(C_INT), VALUE :: NM
+CHARACTER(KIND=C_CHAR), INTENT(IN) :: NAME(*)
+INTEGER(C_INT), INTENT(OUT) :: LB(4),UB(4),RNK,ALLOC_OUT
+INTEGER(C_INT) :: IERR
+TYPE(MESH_TYPE), POINTER :: M
+LOGICAL :: ALLOC
+IERR = 0 ; LB = 0 ; UB = 0 ; RNK = 0 ; ALLOC = .FALSE.
+IF (NM<1 .OR. NM>NMESHES) THEN ; IERR = 2 ; ALLOC_OUT = 0 ; RETURN ; ENDIF
+M => MESHES(NM)
+SELECT CASE(TRIM(CSTR(NAME)))
+   CASE('RHO')
+      ALLOC = ALLOCATED(M%RHO)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%RHO) ; UB(1:3) = UBOUND(M%RHO) ; ENDIF
+      RNK = 3
+   CASE('RHOS')
+      ALLOC = ALLOCATED(M%RHOS)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%RHOS) ; UB(1:3) = UBOUND(M%RHOS) ; ENDIF
+      RNK = 3
+   CASE('TMP')
+      ALLOC = ALLOCATED(M%TMP)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%TMP) ; UB(1:3) = UBOUND(M%TMP) ; ENDIF
+      RNK = 3
+   CASE('U')
+      ALLOC = ALLOCATED(M%U)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%U) ; UB(1:3) = UBOUND(M%U) ; ENDIF
+      RNK = 3
+   CASE('V')
+      ALLOC = ALLOCATED(M%V)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%V) ; UB(1:3) = UBOUND(M%V) ; ENDIF
+      RNK = 3
+   CASE('W')
+      ALLOC = ALLOCATED(M%W)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%W) ; UB(1:3) = UBOUND(M%W) ; ENDIF
+      RNK = 3
+   CASE('US')
+      ALLOC = ALLOCATED(M%US)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%US) ; UB(1:3) = UBOUND(M%US) ; ENDIF
+      RNK = 3
+   CASE('VS')
+      ALLOC = ALLOCATED(M%VS)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%VS) ; UB(1:3) = UBOUND(M%VS) ; ENDIF
+      RNK = 3
+   CASE('WS')
+      ALLOC = ALLOCATED(M%WS)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%WS) ; UB(1:3) = UBOUND(M%WS) ; ENDIF
+      RNK = 3
+   CASE('H')
+      ALLOC = ALLOCATED(M%H)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%H) ; UB(1:3) = UBOUND(M%H) ; ENDIF
+      RNK = 3
+   CASE('HS')
+      ALLOC = ALLOCATED(M%HS)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%HS) ; UB(1:3) = UBOUND(M%HS) ; ENDIF
+      RNK = 3
+   CASE('KRES')
+      ALLOC = ALLOCATED(M%KRES)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%KRES) ; UB(1:3) = UBOUND(M%KRES) ; ENDIF
+      RNK = 3
+   CASE('D')
+      ALLOC = ALLOCATED(M%D)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%D) ; UB(1:3) = UBOUND(M%D) ; ENDIF
+      RNK = 3
+   CASE('DS')
+      ALLOC = ALLOCATED(M%DS)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%DS) ; UB(1:3) = UBOUND(M%DS) ; ENDIF
+      RNK = 3
+   CASE('DDDT')
+      ALLOC = ALLOCATED(M%DDDT)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%DDDT) ; UB(1:3) = UBOUND(M%DDDT) ; ENDIF
+      RNK = 3
+   CASE('MU')
+      ALLOC = ALLOCATED(M%MU)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%MU) ; UB(1:3) = UBOUND(M%MU) ; ENDIF
+      RNK = 3
+   CASE('RSUM')
+      ALLOC = ALLOCATED(M%RSUM)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%RSUM) ; UB(1:3) = UBOUND(M%RSUM) ; ENDIF
+      RNK = 3
+   CASE('FVX')
+      ALLOC = ALLOCATED(M%FVX)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%FVX) ; UB(1:3) = UBOUND(M%FVX) ; ENDIF
+      RNK = 3
+   CASE('FVY')
+      ALLOC = ALLOCATED(M%FVY)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%FVY) ; UB(1:3) = UBOUND(M%FVY) ; ENDIF
+      RNK = 3
+   CASE('FVZ')
+      ALLOC = ALLOCATED(M%FVZ)
+      IF (ALLOC) THEN ; LB(1:3) = LBOUND(M%FVZ) ; UB(1:3) = UBOUND(M%FVZ) ; ENDIF
+      RNK = 3
+   CASE('ZZ')
+      ALLOC = ALLOCATED(M%ZZ)
+      IF (ALLOC) THEN ; LB(1:4) = LBOUND(M%ZZ) ; UB(1:4) = UBOUND(M%ZZ) ; ENDIF
+      RNK = 4
+   CASE('ZZS')
+      ALLOC = ALLOCATED(M%ZZS)
+      IF (ALLOC) THEN ; LB(1:4) = LBOUND(M%ZZS) ; UB(1:4) = UBOUND(M%ZZS) ; ENDIF
+      RNK = 4
+   CASE DEFAULT
+      IERR = 1
+END SELECT
+ALLOC_OUT = 0
+IF (ALLOC) ALLOC_OUT = 1
+END FUNCTION FDS_SHIM_BOUNDS
+
+!> \brief Read (DOSET=0) or write (DOSET=1) one element of field NAME of mesh NM with FDS indices (test access)
+FUNCTION FDS_SHIM_ACCESS(NM,NAME,I,J,K,N,VAL,DOSET) BIND(C,NAME='fds_shim_access') RESULT(IERR)
+INTEGER(C_INT), VALUE :: NM,I,J,K,N,DOSET
+CHARACTER(KIND=C_CHAR), INTENT(IN) :: NAME(*)
+REAL(C_DOUBLE), INTENT(INOUT) :: VAL
+INTEGER(C_INT) :: IERR
+TYPE(MESH_TYPE), POINTER :: M
+IERR = 0
+IF (NM<1 .OR. NM>NMESHES) THEN ; IERR = 2 ; RETURN ; ENDIF
+M => MESHES(NM)
+SELECT CASE(TRIM(CSTR(NAME)))
+   CASE('RHO')
+      IF (DOSET/=0) THEN ; M%RHO(I,J,K) = VAL ; ELSE ; VAL = M%RHO(I,J,K) ; ENDIF
+   CASE('RHOS')
+      IF (DOSET/=0) THEN ; M%RHOS(I,J,K) = VAL ; ELSE ; VAL = M%RHOS(I,J,K) ; ENDIF
+   CASE('TMP')
+      IF (DOSET/=0) THEN ; M%TMP(I,J,K) = VAL ; ELSE ; VAL = M%TMP(I,J,K) ; ENDIF
+   CASE('U')
+      IF (DOSET/=0) THEN ; M%U(I,J,K) = VAL ; ELSE ; VAL = M%U(I,J,K) ; ENDIF
+   CASE('V')
+      IF (DOSET/=0) THEN ; M%V(I,J,K) = VAL ; ELSE ; VAL = M%V(I,J,K) ; ENDIF
+   CASE('W')
+      IF (DOSET/=0) THEN ; M%W(I,J,K) = VAL ; ELSE ; VAL = M%W(I,J,K) ; ENDIF
+   CASE('US')
+      IF (DOSET/=0) THEN ; M%US(I,J,K) = VAL ; ELSE ; VAL = M%US(I,J,K) ; ENDIF
+   CASE('VS')
+      IF (DOSET/=0) THEN ; M%VS(I,J,K) = VAL ; ELSE ; VAL = M%VS(I,J,K) ; ENDIF
+   CASE('WS')
+      IF (DOSET/=0) THEN ; M%WS(I,J,K) = VAL ; ELSE ; VAL = M%WS(I,J,K) ; ENDIF
+   CASE('H')
+      IF (DOSET/=0) THEN ; M%H(I,J,K) = VAL ; ELSE ; VAL = M%H(I,J,K) ; ENDIF
+   CASE('HS')
+      IF (DOSET/=0) THEN ; M%HS(I,J,K) = VAL ; ELSE ; VAL = M%HS(I,J,K) ; ENDIF
+   CASE('KRES')
+      IF (DOSET/=0) THEN ; M%KRES(I,J,K) = VAL ; ELSE ; VAL = M%KRES(I,J,K) ; ENDIF
+   CASE('D')
+      IF (DOSET/=0) THEN ; M%D(I,J,K) = VAL ; ELSE ; VAL = M%D(I,J,K) ; ENDIF
+   CASE('DS')
+      IF (DOSET/=0) THEN ; M%DS(I,J,K) = VAL ; ELSE ; VAL = M%DS(I,J,K) ; ENDIF
+   CASE('DDDT')
+      IF (DOSET/=0) THEN ; M%DDDT(I,J,K) = VAL ; ELSE ; VAL = M%DDDT(I,J,K) ; ENDIF
+   CASE('MU')
+      IF (DOSET/=0) THEN ; M%MU(I,J,K) = VAL ; ELSE ; VAL = M%MU(I,J,K) ; ENDIF
+   CASE('RSUM')
+      IF (DOSET/=0) THEN ; M%RSUM(I,J,K) = VAL ; ELSE ; VAL = M%RSUM(I,J,K) ; ENDIF
+   CASE('FVX')
+      IF (DOSET/=0) THEN ; M%FVX(I,J,K) = VAL ; ELSE ; VAL = M%FVX(I,J,K) ; ENDIF
+   CASE('FVY')
+      IF (DOSET/=0) THEN ; M%FVY(I,J,K) = VAL ; ELSE ; VAL = M%FVY(I,J,K) ; ENDIF
+   CASE('FVZ')
+      IF (DOSET/=0) THEN ; M%FVZ(I,J,K) = VAL ; ELSE ; VAL = M%FVZ(I,J,K) ; ENDIF
+   CASE('ZZ')
+      IF (DOSET/=0) THEN ; M%ZZ(I,J,K,N) = VAL ; ELSE ; VAL = M%ZZ(I,J,K,N) ; ENDIF
+   CASE('ZZS')
+      IF (DOSET/=0) THEN ; M%ZZS(I,J,K,N) = VAL ; ELSE ; VAL = M%ZZS(I,J,K,N) ; ENDIF
+   CASE DEFAULT
+      IERR = 1
+END SELECT
+END FUNCTION FDS_SHIM_ACCESS
+
+!> \brief Pass field NAME of mesh NM to an explicit-shape dummy argument (as the unmodified kernels do) and report what the compiler did:
+!> ADDR = address of element (LB+1) seen by the dummy, MARK is written there. The caller compares ADDR with the FAB address and reads the
+!> marked element back from the FAB. Only the 3-D fields are supported. This is a test of the alias, not a driver entry point.
+FUNCTION FDS_SHIM_PASS_TEST(NM,NAME,MARK,ADDR) BIND(C,NAME='fds_shim_pass_test') RESULT(IERR)
+INTEGER(C_INT), VALUE :: NM
+CHARACTER(KIND=C_CHAR), INTENT(IN) :: NAME(*)
+REAL(C_DOUBLE), VALUE :: MARK
+TYPE(C_PTR), INTENT(OUT) :: ADDR
+INTEGER(C_INT) :: IERR
+TYPE(MESH_TYPE), POINTER :: M
+IERR = 0
+ADDR = C_NULL_PTR
+IF (NM<1 .OR. NM>NMESHES) THEN ; IERR = 2 ; RETURN ; ENDIF
+M => MESHES(NM)
+SELECT CASE(TRIM(CSTR(NAME)))
+   CASE('RHO')
+      CALL TOUCH3(M%RHO,LBOUND(M%RHO,1),SIZE(M%RHO,1),LBOUND(M%RHO,2),SIZE(M%RHO,2),LBOUND(M%RHO,3),SIZE(M%RHO,3),MARK,ADDR)
+   CASE('RHOS')
+      CALL TOUCH3(M%RHOS,LBOUND(M%RHOS,1),SIZE(M%RHOS,1),LBOUND(M%RHOS,2),SIZE(M%RHOS,2),LBOUND(M%RHOS,3),SIZE(M%RHOS,3),MARK,ADDR)
+   CASE('TMP')
+      CALL TOUCH3(M%TMP,LBOUND(M%TMP,1),SIZE(M%TMP,1),LBOUND(M%TMP,2),SIZE(M%TMP,2),LBOUND(M%TMP,3),SIZE(M%TMP,3),MARK,ADDR)
+   CASE('U')
+      CALL TOUCH3(M%U,LBOUND(M%U,1),SIZE(M%U,1),LBOUND(M%U,2),SIZE(M%U,2),LBOUND(M%U,3),SIZE(M%U,3),MARK,ADDR)
+   CASE('H')
+      CALL TOUCH3(M%H,LBOUND(M%H,1),SIZE(M%H,1),LBOUND(M%H,2),SIZE(M%H,2),LBOUND(M%H,3),SIZE(M%H,3),MARK,ADDR)
+   CASE DEFAULT
+      IERR = 1
+END SELECT
+END FUNCTION FDS_SHIM_PASS_TEST
+
+SUBROUTINE TOUCH3(A,LB1,N1,LB2,N2,LB3,N3,MARK,ADDR)
+INTEGER, INTENT(IN) :: LB1,N1,LB2,N2,LB3,N3
+REAL(C_DOUBLE), INTENT(INOUT), TARGET :: A(LB1:LB1+N1-1,LB2:LB2+N2-1,LB3:LB3+N3-1)
+REAL(C_DOUBLE), INTENT(IN) :: MARK
+TYPE(C_PTR), INTENT(OUT) :: ADDR
+A(LB1+1,LB2+1,LB3+1) = MARK
+ADDR = C_LOC(A(LB1+1,LB2+1,LB3+1))
+END SUBROUTINE TOUCH3
+
+END MODULE FDS_BOX_SHIM
