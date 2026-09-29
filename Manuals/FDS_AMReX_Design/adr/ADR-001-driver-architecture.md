@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed. **Driver choice (Option A, C++ AmrCore driver) is owner-confirmed via D-027**; kernel style (K1/K2) open until the P1 readability review (NFR-044); K2 redefined as Fortran + OpenMP `target` offload (v0.3) |
-| Version | v0.3.7 (2026-09-25): owner decisions: NVIDIA is the only GPU target, AMD out of scope; second-compiler check optional (ifx only); AMR mode uniform grids per level, stretched cases FDS-only; see "v0.3.7 changes". v0.3.6 (2026-09-25): pressure section reduced to pointers to ADR-002 v0.2 (maxorder 2 confirmed by P2); HYPRE per D-026; see "v0.3.6 changes". v0.3.5 (2026-09-25): D-031 pass order: one-species case, gate and sync count stated; see "v0.3.5 changes". v0.3.4 (2026-09-25): D-031 rulings: two-phase density terms on valid+2; clip flags only from uncovered valid cells; see "v0.3.4 changes". v0.3.3 (2026-09-25): D-031 pass order with two host OR reductions, coarse-side mask, A-37 closed (47 checks pass), two-phase target form; see "v0.3.3 changes". v0.3.2 (2026-09-25): D-031 ghost-depth ruling (redundant density clip over valid+1, one pre-clip `FillBoundary`); see "v0.3.2 changes". v0.3.1 (2026-09-25): species/density clipping rewritten as a layout-independent gather (D-031). v0.3 (2026-09-25): owner decision changes K2 from OpenACC to Fortran + OpenMP `target` offload, with a no-copy device-data rule; see "v0.3 changes". v0.2 (2026-09-25): owner decisions D-027 and NVIDIA-only GPU target |
+| Status | **Proposed; ready for acceptance except one gate (v0.5): the S5 review and the owner's sign-off.** A1 and S4a are done and S4b ran (v0.5: K1 and K2 both match at T1 and T0 on an NVIDIA GPU). Driver choice (Option A, C++ AmrCore driver) is owner-confirmed via D-027; C++ is limited to the driver and AMReX glue (D-043); the regrid-time rebuild may run on the host until Phase 11 (owner decision D-047, NFR-043, v0.4); the S5 reviewers are named (D-048, v0.4). The one open decision is the kernel style (K1/K2). Left for acceptance: the S5 review and the owner's sign-off of its outcome (package: `drafts/s5-readability-review-package.md`; checklist in "v0.4 changes", items 1 and 2 done in v0.5). Sign-off gaps: `signoff-gaps.md` |
+| Version | v0.5 (2026-09-29): A1 done (NVHPC 26.9, CUDA 13.3); S4a done; S4b run on an NVIDIA GPU (cc 8.9) with K1 and K2 bitwise equal to the CPU; new "K2 coding rules" (no private copy of loop-invariant values, parenthesised order-sensitive sums, widened D-029 clause list) and a "GPU build flags" requirement; `ParallelAllReduce::Or` wording fixed; S5 package written; see "v0.5 changes". v0.4 (2026-09-26): owner decisions recorded: regrid-time side-data rebuild host-allowed until Phase 11 (D-047, A4, NFR-043); S5 reviewers named (D-048); S4 split into a compile-only part (gates acceptance) and a GPU-run part (does not); acceptance checklist; pressure and geometry text aligned with ADR-002 v1.1 and ADR-003 v1.1; see "v0.4 changes". v0.3.8 (2026-09-26): Q8 aligned with D-043; radiation coupling D-039 and the FR-062 ruling in the kernel interface; regrid-time rebuild recommendation (for owner confirmation); Q5 answered by ADR-004; masked level 0 needs the C++ MLMG path; see "v0.3.8 changes". v0.3.7 (2026-09-25): owner decisions: NVIDIA is the only GPU target, AMD out of scope; second-compiler check optional (ifx only); AMR mode uniform grids per level, stretched cases FDS-only; see "v0.3.7 changes". v0.3.6 (2026-09-25): pressure section reduced to pointers to ADR-002 v0.2 (maxorder 2 confirmed by P2); HYPRE per D-026; see "v0.3.6 changes". v0.3.5 (2026-09-25): D-031 pass order: one-species case, gate and sync count stated; see "v0.3.5 changes". v0.3.4 (2026-09-25): D-031 rulings: two-phase density terms on valid+2; clip flags only from uncovered valid cells; see "v0.3.4 changes". v0.3.3 (2026-09-25): D-031 pass order with two host OR reductions, coarse-side mask, A-37 closed (47 checks pass), two-phase target form; see "v0.3.3 changes". v0.3.2 (2026-09-25): D-031 ghost-depth ruling (redundant density clip over valid+1, one pre-clip `FillBoundary`); see "v0.3.2 changes". v0.3.1 (2026-09-25): species/density clipping rewritten as a layout-independent gather (D-031). v0.3 (2026-09-25): owner decision changes K2 from OpenACC to Fortran + OpenMP `target` offload, with a no-copy device-data rule; see "v0.3 changes". v0.2 (2026-09-25): owner decisions D-027 and NVIDIA-only GPU target |
 | Type | Full ADR |
 | Date | 2026-09-25 |
 | Owner | AMR Chief Architect (for the project owner) |
@@ -15,6 +15,41 @@
 All counts were run with `rg`/`wc` on `Source` on 2026-09-25. "Refs" are textual occurrences. Teammate inventory numbers (`docs/inventory/`, `docs/amrex/mapping.md`, `docs/pressure/`) were produced against `ce1f659`. FireX changed 22 source files (+8,621/−847 lines, `git diff ce1f659 --stat -- Source`), mostly `vtkf.f90` (new), `dump.f90`, `main.f90`, `pres.f90`, `read.f90` and `radi.f90`, so their line numbers in those files have moved. Where both are quoted, the FireX figure comes first.
 
 Cross-references: risks R-02, R-03, R-08, R-11, R-12, R-18, R-21, R-22, R-23, R-26, R-29, R-30, R-31, R-36, R-38, R-39; requirements FR-001/002, FR-005, FR-010, FR-030, FR-037, FR-039, FR-050..052, FR-072/073, IR-002, IR-004, IR-005, IR-006, IR-007, NFR-012, NFR-030/031, NFR-043, NFR-044; owner questions Q2 (answered by D-027), Q5, Q8, Q9, Q11; decisions D-012, D-021, D-027 (supersedes D-004), D-028, D-029, D-031; assumption A-37; roadmap Phase 11 / M11.
+
+## v0.5 changes (2026-09-29): A1 and S4a done, S4b run, K2 coding rules, S5 package
+Evidence: `docs/amrex/s4-cuda-mass-findings.md` (§4-§10), kernels in `src-s4/amrex/s4_mass/` at `b51f4361b3`.
+- **A1 done.** NVIDIA HPC SDK 26.9 (CUDA 13.3 default; `docs/build/nvhpc-sdk.md`) is installed. It provides `nvfortran` and `nvc++`, so the items that waited on A-31 are closed.
+- **A2 (S4a) done.** K1 and K2 compile for CUDA (sm_80, no spills; ptxas and `-Minfo` tables in findings §4). On the CPU (K1 build, K2 host fallback) both are byte-identical to P1/FDS: 60 comparisons and 69 checks at 1, 2 and 4 ranks. Not ported: MP5, `N_ZONE>0`, refinement ratio other than 1. Effort (findings §7): K1 279 code lines for 12 kernels; K2 372 lines plus 96 lines of C++ wrappers, a mechanical port from K1 whose extra work was bounds plumbing, `private` lists, the `is_device_ptr` clause and the mixed nvcc/nvfortran link.
+- **S4b ran** (it is not a gate; it was done early) on an NVIDIA GPU with compute capability 8.9, one GPU and one process. After the two fixes below, K1 and K2 each pass 29/29 comparisons at T1 and T0 (bitwise) and 36 checks, with clip counts equal to P1 (978, 2520, 154354, 7970) and a bitwise run-to-run repeat. `is_device_ptr` carries AMReX's device pointers to nvfortran, so S4's "Overturns if" condition (K2 cannot share AMReX's device memory) is **not** met and K2 stays a candidate. Single-sample timings, informational only (SUPERBEE, 32³ box, 8 steps): loop 6.1 ms (K1) and 8.3 ms (K2). K2 has 144 host synchronisation points per case (9 per stage and level). Removing the post-K2 syncs, their cost and a profile (R-39) are not measured yet.
+- **Two K2 failures found on the device**, both invisible on the CPU paths:
+  1. An nvfortran 26.9 offload defect: a `private` copy of a loop-invariant value (`QMIN = QMIN_IN` at the top of the collapsed loop) is handled wrongly, every cell is flagged as clipped and mass is created (total density +306 %).
+  2. nvfortran reassociates an unparenthesised sum at `-O2` (gfortran and the C++ K1 do not), which gave last-bit differences (T0 lost, T1 kept).
+  Both are fixed in the kernel source without changing the numerics. K1 showed neither. This is evidence for the S5 reviewers to weigh, not a decision.
+- **D-029 clause list widened** (see "K2 coding rules"): `map`, `collapse`, `private` and `is_device_ptr`. nvfortran 26.9 rejects `has_device_addr` (syntax error) and `c_f_pointer` inside a target region fails to compile, so the `is_device_ptr` route on explicit-shape dummies, which this ADR named as the fallback, is the rule for nvfortran; gfortran keeps `has_device_addr`. The Spec & Program Lead owns the D-029/IR-007 wording.
+- **GPU build flags are a requirement** (see "GPU build flags"). With FMA contraction on, the two-level case fails T1 (about 1.6e-3).
+- **`ParallelAllReduce::Or` wording** in "Species/density clipping": in AMReX 26.09 it takes a single value, so the packed reductions use `Max` over 0/1 integers.
+- P1's two-level reference predates the v0.3.3/v0.3.4 rules; S4 reproduces it with `s4.coarse_mask=0`, and the covered-cell checks (findings §6, sections 6, 7, 7b) cover the new rules.
+- **S5 package written** (`drafts/s5-readability-review-package.md`) for the three reviewers. The Chief Architect accepts or amends this ADR when the answers are in.
+- Acceptance checklist status: 1 (A1) done, 2 (A2) done, 3 (S5 review plus owner sign-off) open, 4 (Accepted) waits on 3.
+
+## v0.4 changes (2026-09-26): owner decisions; acceptance checklist
+- **Regrid-time side-data rebuild (A4, owner decision D-047, spec v0.4.28, NFR-043).** The rebuild of per-box side data at regrid (`WALL`, `CELL_INDEX`, `EXTERNAL_WALL`, wall records, particle bookkeeping) may run on the host (CPU) until Phase 11; it must be device-capable by Phase 11 (M11). It is not counted in the device time step before then. The v0.3.8 recommendation is adopted unchanged, and "Layering" (c) and "Decision needed" item 5 are closed.
+- **S5 reviewers (owner decision D-048, spec v0.4.28; NFR-044 and roadmap P1 name them):** the project owner, the AMR Species & Combustion Lead and the FDS Legacy Mapper. The owner signs off the outcome. "Decision needed" item 6 is reduced to that sign-off.
+- **S4 split.** *S4a (compile-only, gates acceptance):* NVIDIA HPC SDK installed (A-31); the mass kernel written as K1 and K2; both compiled for CUDA (nvc++/nvfortran, D-029); K1 CPU build and K2 host fallback match the shimmed kernel at T1; effort per variant and the device-data mechanism accepted by the compiler (`has_device_addr` or the `is_device_ptr` + `c_f_pointer` fallback) recorded. *S4b (GPU run, does not gate acceptance):* on the owner-provided NVIDIA test machine, both variants match at T1 on the device, and K2's ordering against AMReX's CUDA stream and its sync cost per step are measured (R-39). S4b runs before Phase 11 kernel extraction starts. If the review picks K2 and S4b then meets S4's "Overturns if" condition, only the kernel style reopens, and K1 is the fallback.
+- **Aligned with ADR-002 v1.1 and ADR-003 v1.1 (D-046):** the pressure solve sits behind a solver-agnostic interface (MLMG, or assembled-matrix HYPRE PCG + BoomerAMG), both in layer (a); a device HYPRE build becomes a GPU-phase work item. EB is one of two complex-geometry candidates, and it still needs C++ if chosen.
+- **Acceptance checklist (exactly what is left):**
+  1. A1: NVIDIA HPC SDK installed (compile-only; AMReX Integration Lead with a build chief).
+  2. A2: S4a passes as defined above (AMReX Integration Lead; running now, compile-only).
+  3. A3: S5 review of both variants by the three named reviewers; outcome, reasons and any CUDA Fortran kernels recorded in the "P1 readability review record"; owner sign-off.
+  4. The Chief Architect records the outcome, sets Status to Accepted and marks the rejected kernel style in "Rejected alternatives". Writing only.
+  Nothing else gates acceptance: no owner question is open for ADR-001; GPU test hardware (Q11 (b)), S4b and device timing (R-39) are implementation items.
+
+## v0.3.8 changes (2026-09-26)
+- **Q8 answered (D-043):** C++ is used for the driver and the AMReX glue only (time loop, FillPatch and flux registers, regrid, pressure solvers, particle container, checkpoint). Physics stays in Fortran unless the NFR-044 readability review picks K1. "Decision needed" item 1 is closed; A-30 is answered.
+- **Radiation coupling (D-039, FR-062 ruling, `drafts/rulings-IR008-FR062.md` §2.1):** the default and only required mode is a fully parallel per-box lagged sweep. It adds one kernel-interface rule (below): the per-box sweep kernel reads box-face intensities from the previous exchange only (double-buffered), and the face exchange is a host-side step between passes, the same for same-rank and cross-rank faces. No ordering between boxes; `RADIATION_ITERATIONS` gives K passes per step.
+- **Regrid-time side-data rebuild (NFR-043), recommendation for owner confirmation:** host execution is allowed through the CPU phases; the rebuild must be device-capable by Phase 11 (M11). Rationale: it runs once per regrid interval, not every step, and S3 bounds its cost (< 10 % of step time at a 10-step interval, R-26); keeping it on the host until then avoids porting `init.f90` wall setup before the kernels it serves. This replaces the open point in "Layering" (c).
+- **Q5 answered by ADR-004 (accepted):** Smokeview-format output on static output meshes plus VTK; output stays on the host under NFR-043's I/O exception. "Decision needed" item 4 is closed.
+- **Masked (non-box) level 0** (`drafts/ruling-nonbox-level0.md`) uses single-level masked MLMG with an overset mask, which is C++-only (layer (a)). Consistent with D-043.
 
 ## v0.3.7 changes (owner decisions, 2026-09-25)
 - **NVIDIA is the only GPU target; AMD is out of scope, not deferred.** "Decision needed: AMD deferred or dropped?" is closed as decided. AMD/HIP/rocFFT planning text is removed or marked "out of scope per owner decision 2026-09-25".
@@ -57,7 +92,7 @@ Cross-references: risks R-02, R-03, R-08, R-11, R-12, R-18, R-21, R-22, R-23, R-
 
 ## v0.2 changes (owner decisions, 2026-09-25)
 - **Full time step on the GPU; only I/O may stay on the host** (D-027, supersedes D-004; NFR-043; charter O7). On the development machine NFR-043 is verifiable only by a real GPU-backend compile plus a host-fallback run (D-029, R-38); on-device acceptance waits for test hardware (roadmap Phase 11, M11).
-- **GPU target: NVIDIA only for now; AMD is deferred and not a current requirement** (owner answer to charter Q11 (a); Q11 (b) test hardware and (c) x/y-stretched meshes stay open). The spec docs still list Q11 as open and name ifx + SYCL as a compile route (NFR-043, D-029, A-30); updating them is the Spec & Program Lead's call.
+- **GPU target: NVIDIA only; AMD is out of scope** (owner answer to charter Q11 (a), 2026-09-25; v0.3.7). Q11 (c) is closed (stretched cases FDS-only); Q11 (b) test hardware stays open.
 - **FDS developers are Fortran-only, and C++ maintainability is a stated concern** (D-027; NFR-044; charter O8).
 - Consequences here: Option B rejected definitively; the `POINT_TO_BOX` shim becomes a CPU-only stepping stone with mandatory kernel extraction (R-26 now governs timing only); new sections "Kernel implementation style" (K1 vs K2, co-equal, decided by the P1 readability review), "Layering for maintainability" and "Pressure path and global reductions"; spike plan and owner questions updated.
 
@@ -126,7 +161,7 @@ Cross-references: risks R-02, R-03, R-08, R-11, R-12, R-18, R-21, R-22, R-23, R-
 - AMReX GPU backends are `NONE|SYCL|CUDA|HIP` only (`Tools/CMake/AMReXOptions.cmake:124-125`). OpenMP `target` and OpenACC are not backends, and AMReX's CMake has no offload option (`rg` over `Tools/CMake`). The GNU-make docs allow `USE_ACC=TRUE` for PGI, Cray and GNU (`GPU.rst:137`) and say OpenMP offload is supported only with IBM compilers (`GPU.rst:140`).
 - Pragma kernels on AMReX memory are documented: a C++ `MFIter` loop passes `BL_TO_FORTRAN_BOX/ANYD` to a Fortran routine, which marks the FAB pointer `deviceptr` (OpenACC) or `is_device_ptr` (OpenMP `target`) (`GPU.rst:1457-1530`). The next section notes that CUDA/HIP launches are asynchronous (`GPU.rst:1536`ff), so pragma regions on the compiler's own queue need explicit ordering against AMReX's stream (R-39).
 - AMReX CI builds a CUDA AMReX with the NVIDIA HPC SDK (`nvc`/`nvc++`/`nvfortran`, job `tests-nvhpc-nvcc`, `.github/workflows/cuda.yml:188-252`, Fortran compiler at `:242`) and a HIP AMReX with ROCm `flang` (`.github/workflows/hip.yml:21, 66`; AMD/HIP out of scope per owner decision 2026-09-25). Neither job compiles OpenACC/OpenMP-target code, so Fortran offload on AMReX memory is not tested upstream.
-- Toolchains on the development machine (checked 2026-09-25): gfortran; Intel oneAPI 2026.1 at `/opt/intel/oneapi` with `ifx` 2026.1.1 and `icpx` (ifx offload targets Intel GPUs, not NVIDIA; it serves as K2's optional, non-gating second-compiler check, not tried); **no** `nvfortran`, `nvc++` or `nvcc` (NVIDIA HPC SDK install is A-31, open); no GPU (R-38).
+- Toolchains on the development machine (checked 2026-09-25): gfortran; Intel oneAPI 2026.1 at `/opt/intel/oneapi` with `ifx` 2026.1.1 and `icpx` (ifx offload targets Intel GPUs, not NVIDIA; it serves as K2's optional, non-gating second-compiler check, not tried); NVIDIA HPC SDK 26.9 with `nvfortran`, `nvc++` and CUDA 13.3 installed on 2026-09-26 (A1 done, v0.5; compile-only here); no GPU on the development machine (R-38).
 
 ### Ecosystem precedent
 - IAMR, incflo and PeleLMeX contain 0 Fortran files. Their kernels are `amrex::ParallelFor` lambdas (`rg -c ParallelFor` over `Source/`: PeleLMeX 262, incflo 153; ERF 1,478).
@@ -227,7 +262,7 @@ Both candidates need the same rewrite of each kernel: explicit array arguments a
 
 ### K2 — Fortran kernels with simple OpenMP `target` offload on AMReX device memory (v0.3, owner decision)
 - Each kernel stays Fortran. The C++ `MFIter` loop passes box bounds and FAB device addresses through `BIND(C)` (`GPU.rst:1457-1530` documents the pattern); the loop nest carries one `!$omp target teams loop` directive.
-- **Allowed subset:** `!$omp target teams loop` plus `collapse`; data via `has_device_addr` (see "Kernel interface and device data"); `map` only for small host scalars/constants. Not allowed: `distribute parallel do`, nested or combined constructs beyond this one, `declare target` on module data, or other complex constructs. The style guide shared with K1 fixes naming (FDS variable names kept).
+- **Allowed subset (v0.5):** `!$omp target teams loop` plus `collapse`, `private` and the device-address clause (`is_device_ptr` on nvfortran, `has_device_addr` on gfortran; see "Kernel interface and device data" and "K2 coding rules"); `map` only for small host scalars/constants. Not allowed: `distribute parallel do`, nested or combined constructs beyond this one, `declare target` on module data, or other complex constructs. The style guide shared with K1 fixes naming (FDS variable names kept).
 - **Toolchain:** `nvfortran` for the kernels, with AMReX built for CUDA by the same NVIDIA HPC SDK (`nvc++`, as in `cuda.yml:188-252`). The SDK is free and compiles without a GPU (A-31).
 - **Second-compiler check (optional, non-gating; v0.3.7):** kernel code may also be compiled with Intel `ifx` 2026.1.1, which is already on the development machine (not tried). It is a source-level check only and gates nothing. `amdflang` is dropped (AMD out of scope per owner decision 2026-09-25).
 - **CUDA Fortran (optional, NVIDIA-only):** allowed only for hot loops where profiling on real NVIDIA hardware shows a meaningful gap against the OpenMP version. Each such kernel keeps its OpenMP version as fallback and correctness reference (T1 against it). None exist yet; none can be justified before GPU hardware (R-38, Q11 (b)).
@@ -236,7 +271,7 @@ Both candidates need the same rewrite of each kernel: explicit array arguments a
   - AMReX kernels run asynchronously on AMReX's stream, `target` regions on the OpenMP runtime's queue; every C++/Fortran kernel boundary needs a synchronization or the OpenMP queue wired onto AMReX's stream (R-39). The cost per boundary is unmeasured.
   - `POINT_TO_MESH` module pointers (`mesh.f90:367-376`) are host descriptors and cannot enter `target` regions as they are, so kernels need explicit array arguments: the same rewrite as K1.
   - **Portability:** not a criterion. Only the optional CUDA Fortran kernels are NVIDIA-specific, and NVIDIA is the only GPU target; AMD/HIP pairing questions are out of scope per owner decision 2026-09-25.
-- Status here: `nvfortran` is not installed (A-31 open), so K2 cannot be compiled for the target yet.
+- Status (v0.5): `nvfortran` 26.9 is installed; K2 compiles for CUDA and matches at T1 and T0 on the CPU and on an NVIDIA GPU after two source fixes (see "K2 coding rules").
 
 | | K1 restricted C++ | K2 Fortran + OpenMP `target teams loop` |
 |---|---|---|
@@ -247,9 +282,9 @@ Both candidates need the same rewrite of each kernel: explicit array arguments a
 | AMD | out of scope per owner decision 2026-09-25 (source portable in principle) | out of scope per owner decision 2026-09-25 |
 | AMReX upstream support | backend, CI-built, used by PeleLMeX/ERF/incflo | documented pattern; not a backend; not CI-tested |
 | Stream/sync | native | sync or stream wiring at every boundary (R-39) |
-| Device data | `Array4` captured by value | `has_device_addr` on explicit-shape dummies (fallback `is_device_ptr` + `c_f_pointer`); no `map` of field data |
+| Device data | `Array4` captured by value | `is_device_ptr` on explicit-shape dummies (nvfortran; `has_device_addr` on gfortran); no `map` of field data |
 | Kernel rewrite (explicit args) | required | required |
-| Compilable on the development machine now | CUDA: no (A-31); a SYCL device compile with the installed `icpx` is possible in principle (not tried) | NVIDIA: no (A-31); optional ifx compile possible in principle (not tried) |
+| Compiles for CUDA and runs on an NVIDIA GPU (v0.5) | yes; T1 and T0 bitwise | yes after two source fixes; T1 and T0 bitwise |
 
 ### Kernel interface and device data for K2 (IR-007)
 - **No-copy rule.** AMReX-owned arrays already live in device arena memory, so `map(tofrom:)` on them at kernel entry would copy again or be wrong. Kernel entry wrappers pass AMReX `Array4` data as explicit-shape dummy arrays and declare them `has_device_addr` (OpenMP 5.1) on the `target teams loop` construct. If the first nvfortran compile (A-31) shows `has_device_addr` unsupported for Fortran dummy arrays, fall back to `is_device_ptr` on `type(c_ptr)` arguments with `c_f_pointer` inside the target region. The mechanism is confirmed by that first compile.
@@ -257,6 +292,23 @@ Both candidates need the same rewrite of each kernel: explicit array arguments a
 - **AMReX managed memory** (`amrex.the_arena_is_managed=1`) is rejected for production (page-migration cost; it hides missing-device-data bugs) and allowed only as a debugging aid.
 - **Threading rule (reworded for v0.3):** no host-threading OpenMP (`parallel do`) inside device kernels; `target` directives appear only in kernel files. AMReX handles host threading and tiling from the driver. This replaces "no `!$omp` inside device kernels" (IR-007), which would forbid K2's own directives.
 - The Spec & Program Lead owns the IR-007/NFR-044 text (currently "OpenACC Fortran", `deviceptr`, "no `!$omp` threading inside the kernel") and has been asked to update it; IR-007 carries the no-copy rule.
+
+### K2 coding rules and GPU build flags (v0.5, from S4b; requirement text owned by the Spec & Program Lead)
+These apply to every K2 kernel file. Evidence: `docs/amrex/s4-cuda-mass-findings.md` §5 and §10.
+1. **No private copy of a loop-invariant value in an offload loop.** A scalar dummy, or any expression that does not depend on the loop indices, is read directly inside the loop. It is never copied into a local first (`QMIN = QMIN_IN` at the loop top) and never put on the `private` list. `private` is for temporaries that each iteration assigns from cell data or indices. Reason: nvfortran 26.9 handles such a copy wrongly at the teams level and the device threads use a wrong value (every cell clipped, mass created). The CPU paths do not show it.
+2. **Parenthesise every sum whose order matters.** A sum that must reproduce the FDS or K1 order (T0) is written with explicit parentheses in that left-to-right order, for example `RHS = ((A + B) + C) + D` and `0.5*((X + Y) - DT*RHS)`. Fortran lets a compiler reassociate an unparenthesised sum, and nvfortran `-O2` does; it honours parentheses. Species loops stay sequential `do N` loops (`-Minfo` reports "run sequentially").
+3. **Clause list (widened D-029).** `!$omp target teams loop collapse(3)`, `private(...)` for loop-local temporaries only, and the device-address clause: `is_device_ptr(...)` on the explicit-shape dummies for nvfortran, `has_device_addr(...)` for gfortran, selected under `#if defined(__NVCOMPILER)`. `map` only for small host scalars. No `c_f_pointer` inside a target region (nvfortran fails to compile it; BIND(C) array dummies already carry the device address).
+4. **Compile flags for K2 kernels:** `-O2 -Minline -gpu=ccXX,nofma`, never `-fast`. Without `-Minline`, a kernel that calls a routine is mapped to teams only (one thread per team).
+5. **Enforcement.** Each K2 kernel is accepted only when its device result equals the gfortran host result bitwise on every output array after every kernel (harness `prototypes/s4_cuda_mass/k2_repro`), and its `-Minfo=mp` output has no "implicit private" line for a variable the kernel meant to keep shared or invariant. The device comparison needs the owner's test GPU (R-39); on the development machine the host-fallback T0 run and the `-Minfo` review are what can be checked.
+6. The nvfortran defect is to be reported to NVIDIA with `k2_repro/mini`; the rules stay in force regardless of a fix.
+
+**GPU build flags (requirement, both styles).** T1 on the device needs contraction and fast-math off: `nvcc --fmad=false` (K1), `-gpu=nofma` (K2), `AMReX_CUDA_FASTMATH=OFF` (the AMReX option defaults to ON, `AMReXCUDAOptions.cmake:204`), no `-use_fast_math`, and host `-ffp-contract=off`. With contraction on, T0 is lost in every case and the two-level blob case fails T1 at about 1.6e-3 (the SUPERBEE limiter branches and clip thresholds amplify ulp changes). These flags go into the CMake presets and the build docs.
+
+### Radiation sweep (D-039, FR-062 ruling)
+- One per-box sweep kernel per angle subset. It reads box-face intensities only from the previous exchange (double-buffered faces) and writes its own outgoing faces to the other buffer, so the result does not depend on the order or concurrency in which boxes are swept.
+- The face exchange is a host-side step between passes, using one mechanism for faces between boxes on the same rank and on different ranks. With `RADIATION_ITERATIONS=K` there are K sweep passes and K exchanges per radiation step.
+- Consequence: at a fixed box layout, radiation is independent of rank count, ranks per GPU, box ownership and processing order; only the box split changes results (D-039). The physics-feeding sums (`RAD_Q_SUM`, `KFST4_SUM`) use the FR-005 (ii) exact accumulation, replacing the `!$OMP CRITICAL` sum at `radi.f90:4119-4122`.
+- Optional escalation only if the lag-error check fails at K ≤ 3: a radiation BoxArray with larger boxes (built from geometry and a fixed size, never from rank count), then a globally ordered sweep. Neither is built by default.
 
 ### Species/density clipping (D-031)
 Applies to both kernel styles and to the CPU shim path.
@@ -271,7 +323,7 @@ Applies to both kernel styles and to the CPU shim path.
 **Decision: gather rewrite; no exemption or tolerance.** The byte-identical rule for explicit stages (T0 kernel parity, D-022; IR-007) stands.
 - Each cell gathers the contributions it would receive, in FDS's K,J,I scatter order: k-1, j-1, i-1, self, i+1, j+1, k+1. This reproduces the floating-point summation order of single-mesh FDS bitwise.
 - Ghost data: one pre-clip `FillBoundary` only; see "Ghost depth" below.
-- Pass order per stage and level (v0.3.3; p1-findings §13.3), with two host-side `ParallelAllReduce::Or` reductions:
+- Pass order per stage and level (v0.3.3; p1-findings §13.3), with two host-side OR reductions (in AMReX 26.09 `ParallelAllReduce::Or` takes only a single value, so the packed flag vectors use `ParallelAllReduce::Max` over 0/1 integers):
   - (a) density clip + gather over valid+1 (see "Ghost depth"); `CLIP_RHOMIN`/`CLIP_RHOMAX` set from valid, uncovered cells only (`:799-849`; see "Clip flags");
   - (b) **OR #1** on the host over the density flags `CLIP_RHOMIN`, `CLIP_RHOMAX`;
   - (c) density apply gated by the reduced density flags (`:853-854`);
@@ -329,26 +381,27 @@ The mass kernel (`MASS_FINITE_DIFFERENCES`, `mass.f90:20`, and `DENSITY`, `mass.
 
 | Item | Value |
 |---|---|
-| Status | **pending** (blocked on A-31) |
-| Reviewers | TBD (FDS Fortran developers) |
-| Variants and commits | TBD |
-| Device compile (backend, compiler versions) | TBD (K2: nvfortran OpenMP offload; `has_device_addr` vs fallback recorded here) |
+| Review status | Package written for the three reviewers (v0.5, 2026-09-29): `drafts/s5-readability-review-package.md`; answers pending |
+| Reviewers | Project owner; AMR Species & Combustion Lead; FDS Legacy Mapper (owner decision D-048, 2026-09-26) |
+| Variants and commits | K1 `s4_mass_k1.H`; K2 `s4_mass_k2.F90` + `s4_mass_k2.H`; branch `s4-cuda-mass`, `b51f4361b3` (`0bbb0c7cb5` plus the S4b fixes) |
+| Device compile (backend, compiler versions) | K1: nvcc 13.3 (NVHPC 26.9); K2: nvfortran 26.9, sm_80. nvfortran rejects `has_device_addr`; `is_device_ptr` on the explicit-shape dummies works (v0.5) |
 | K2 optional `ifx` compile (non-gating) | TBD |
-| Host result vs shimmed kernel | TBD |
+| Host result vs shimmed kernel | K1 and K2 byte-identical to P1/FDS: 60 comparisons, 69 checks at 1, 2, 4 ranks. On an NVIDIA GPU (cc 8.9) both 29/29 at T1 and T0 bitwise, K2 after the two fixes |
 | Outcome (K1 / K2) and reasons | TBD |
 | Owner sign-off (if K2: any CUDA Fortran kernels) | TBD |
 
 ## Layering for maintainability
 - **(a) Driver, regrid, pressure: C++.** `AmrCore` subclass, time loop, FillPatch/flux registers, regrid and side-data rebuild orchestration, `FFT::Poisson`/MLMG, particles container, checkpoint. Small and stable once written; needs real C++ skill, owned by the AMReX-side team.
 - **(b) Physics kernels: restricted style (K1 or K2).** Where FDS developers work day to day. One kernel = one `ParallelFor` body or one Fortran loop nest under `!$omp target teams loop`, with explicit arguments.
-- **(c) Input parsing, setup and output: may stay Fortran on the host.** `read.f90`, setup in `init.f90`, `dump.f90`/`vtkf.f90`. This matches NFR-043's I/O exception and keeps the largest FDS-specific code unchanged. Open: whether regrid-time side-data rebuild (`WALL`, `CELL_INDEX`, `EXTERNAL_WALL`) counts as part of the time step under NFR-043 (Spec & Program Lead).
+- **(c) Input parsing, setup and output: may stay Fortran on the host.** `read.f90`, setup in `init.f90`, `dump.f90`/`vtkf.f90`. This matches NFR-043's I/O exception and keeps the largest FDS-specific code unchanged. Regrid-time side-data rebuild (`WALL`, `CELL_INDEX`, `EXTERNAL_WALL`, wall records): host-allowed until Phase 11 and device-capable by Phase 11 (owner decision D-047, NFR-043, v0.4).
+- **(d) Scope of C++ (D-043):** layer (a) only, plus the K1 kernels if the NFR-044 review picks K1. No FDS physics moves to C++ otherwise.
 
 ## Pressure path and global reductions (room decisions, 2026-09-25; details in ADR-002 v0.2)
 - **Solver choice, per-step selection, shared gauge and eps_H agreement:** see ADR-002 v0.2, "Accepted decisions / Pressure solver" (`amrex::FFT::Poisson` replaces porting `pois.f90`, D-021; FR-037, FR-039, D-012).
-- **MLMG order:** `setMaxOrder(2)`, confirmed by P2; the FR-039 fallback to order 3 is not needed. Evidence and the other P2 rulings (mean removal, `average_down_faces`, HYPRE as bottom solver only): ADR-002 v0.2.
+- **MLMG order:** `setMaxOrder(2)`, confirmed by P2; the FR-039 fallback to order 3 is not needed. Evidence and the other P2 rulings (mean removal, `average_down_faces`): ADR-002 v0.2. **v0.4:** HYPRE is no longer bottom-solver only; the pressure solve sits behind a solver-agnostic interface with MLMG and an assembled-matrix HYPRE PCG + BoomerAMG backend, default set by comparison A-56 (ADR-002 v1.1, D-046).
 - **Refinement ratio ≤ 4, supported {2,4}:** see ADR-002 v0.2, "Refinement ratios" (FR-010, D-030).
 - **Global scalar reductions:** exact fixed-point sums from per-box sums, computed domain-wide; see ADR-002 v0.2, "Decomposition requirements" (FR-005 (ii), (v); D-028; R-36). On GPU builds the per-box accumulation runs on the device.
-- **On the GPU (NFR-043):** `FFT::Poisson` via cuFFT for single-level uniform runs; composite MLMG on the device otherwise. `PoissonHybrid` (z-stretched only; device branch at `AMReX_FFT_Poisson.H:715-780`) is no longer needed: stretched-grid cases stay FDS-only (owner decision 2026-09-25, D-030), so R-29/A-29 are moot. HYPRE is CPU-only in our builds, including the FireX-pinned v2.32.0-24 `63331f19c` (`HYPRE_USING_CUDA`/`HYPRE_USING_GPU` undefined, `(local GNU third-party library tree)/libs/hypre/63331f19/include/HYPRE_config.h:93, 144`; D-026), so MLMG's native bottom solver is the device default (a GPU HYPRE would need its own build per backend; R-30). Stretched meshes need no GPU pressure path: AMR mode uses uniform grids on each level and stretched cases stay FDS-only, which closes charter Q11 (c) (ADR-002 v0.2.1).
+- **On the GPU (NFR-043):** `FFT::Poisson` via cuFFT for single-level uniform runs; composite MLMG on the device otherwise. `PoissonHybrid` (z-stretched only; device branch at `AMReX_FFT_Poisson.H:715-780`) is no longer needed: stretched-grid cases stay FDS-only (owner decision 2026-09-25, D-030), so R-29/A-29 are moot. HYPRE is CPU-only in our builds, including the FireX-pinned v2.32.0-24 `63331f19c` (`HYPRE_USING_CUDA`/`HYPRE_USING_GPU` undefined, `(local GNU third-party library tree)/libs/hypre/63331f19/include/HYPRE_config.h:93, 144`; D-026), so MLMG's native bottom solver is the device default (a GPU HYPRE would need its own build per backend; R-30). v0.4: with the assembled-matrix backend of ADR-002 v1.1, a device HYPRE build becomes a GPU-phase work item. Stretched meshes need no GPU pressure path: AMR mode uses uniform grids on each level and stretched cases stay FDS-only, which closes charter Q11 (c) (ADR-002 v0.2.1).
 
 ## Recommendation
 **Adopt Option A (C++ AmrCore driver), owner-confirmed via D-027. Migrate through the Option C `POINT_TO_BOX` shim as a CPU-only stage with the three scope decisions above, then extract every kernel onto the device in style K1 or K2, chosen by the P1 readability review. Reject B definitively.**
@@ -357,7 +410,7 @@ The driver decision rests on four points, the first now decisive on its own:
 1. GPU: the full time step must run on the device (D-027, NFR-043), and F_Interfaces has no GPU support (`GPU.rst:105-106`).
 2. Particles: the fixed `amrex_particle` struct cannot carry FDS particle state.
 3. Maintenance: the F_Interfaces layer is maintained but not developed, so every new AMReX feature would need our bindings.
-4. ADR-003's EB option needs C++.
+4. ADR-003's EB candidate for complex geometry needs C++ (v0.4: EB is one of two candidates, ADR-003 v1.1).
 
 The pressure path is not among them: F_Interfaces can drive a cell-centred variable-β projection, though `FFT::Poisson` would have needed a C++ wrapper (FR-030).
 
@@ -379,7 +432,7 @@ Confidence: **high** for rejecting B (owner requirement plus upstream documentat
 - **−** Two languages; transitional shim code; every time-step kernel is rewritten (Phase 11 / M11; schedule TBD until S4).
 - **R-26 (shim becomes permanent / too costly):** now a timing rule only; extraction itself is required.
 - **R-38 (no GPU on the development machine):** NFR-043 is verified here by a real GPU-backend compile and host-fallback runs only (D-029); device correctness and the no-transfer rule wait for hardware.
-- **R-39 (offload toolchain shares AMReX's device runtime, unproven):** applies to K2 only (nvfortran OpenMP offload, and any CUDA Fortran kernels); tested in the P1 review once nvfortran is installed (A-31), together with the `has_device_addr` mechanism.
+- **R-39 (offload toolchain shares AMReX's device runtime, unproven):** applies to K2 only (nvfortran OpenMP offload, and any CUDA Fortran kernels); first tested in S4b (v0.5): `is_device_ptr` shares AMReX's device memory and the two K2 defects are recorded in "K2 coding rules"; stream ordering, sync cost and a profile remain open.
 - **R-31 (rank model):** FireX's `FDS_RANKS_PER_GPU` gather-to-master does not carry over to MLMG on device.
 - **K2 NVIDIA-specific code:** CUDA Fortran kernels, if any, keep their OpenMP fallback. Portability is not a criterion (AMD out of scope per owner decision 2026-09-25).
 - **C++ skill:** layer (a) needs C++ developers who stay with the project; layers (b)/(c) are sized for Fortran developers.
@@ -396,7 +449,7 @@ Confidence: **high** for rejecting B (owner requirement plus upstream documentat
   - Classify the ~163 `POINT_TO_MESH` callers as shim-able (module pointers only), OMESH-reading, or `MESHES(NM)%`-direct.
   - `module_globals.csv` has landed: 1,551 module-level variables, 326 flagged `blocks_pure_kernel=yes` and 3 `maybe` (top modules: GLOBAL_CONSTANTS 63, FDS 45, CC_SCALARS 42, OUTPUT_CLOCKS 27, GLOBMAT_SOLVER 24). Next: tag which of the 326 are written inside the Phase-1 kernel set, so the shim's per-box save/restore list can be sized (R-26), and which are read inside kernels (they become kernel arguments or device constants under K1/K2).
 - **AMReX Integration Lead:**
-  - Install the NVIDIA HPC SDK (A-31) so both P1 variants compile for CUDA.
+  - ~~Install the NVIDIA HPC SDK (A-31) so both P1 variants compile for CUDA.~~ Done (A1, S4a, S4b; v0.5).
   - For K2: document how an `nvfortran` OpenMP `target` region is ordered against AMReX's CUDA stream, and measure the per-boundary cost (R-39). In the first compile (A-31), confirm `has_device_addr` on explicit-shape Fortran dummies, or switch to the `is_device_ptr` + `c_f_pointer` fallback.
   - Confirm pointer re-binding rules after `FillBoundary`/regrid.
   - D-031: build the §13.5 two-phase clip (terms once, then gather; density terms on valid+2), rerun the 47 `check_clip.sh` checks, and add the covered-coarse-cell check (only a covered coarse cell clips; uncovered cells not renormalised). A-37 is closed for the unoptimised form.
@@ -405,8 +458,8 @@ Confidence: **high** for rejecting B (owner requirement plus upstream documentat
 - **AMR Spec & Program Lead:**
   - Update charter Q11, NFR-043, D-029, R-39 and A-30 for the NVIDIA-only target; (v0.3.7) AMD is out of scope, not deferred (A-32 moot); Q11 (c) closed (stretched cases FDS-only); NFR-045/A-36 become optional and non-gating, `ifx` only; R-29/A-29 moot. Q11 (b) stays open.
   - (Asked, v0.3) Update IR-007, NFR-044, R-38 and R-39 from OpenACC to OpenMP-offload Fortran: reworded threading rule (no host-threading `parallel do` inside device kernels; `target` directives only in kernel files), the no-copy device-data rule (`has_device_addr`; `map` only for host scalars), the second-compiler portability check, and CUDA Fortran only for profiled hot loops with OpenMP fallback.
-  - Does regrid-time side-data rebuild count as part of the time step under NFR-043?
-  - Minimum feature set for the Phase 2 demo; Smokeview as a hard requirement (Q5)? Stretched grids: *answered* (owner, 2026-09-25): not in AMR mode; stretched cases stay FDS-only.
+  - Regrid-time side-data rebuild under NFR-043: *answered* (owner, v0.4): host-allowed until Phase 11, device-capable by Phase 11; logged as D-047 in NFR-043; S5 reviewers logged as D-048 (spec v0.4.28).
+  - Minimum feature set for the Phase 2 demo. Smokeview: *answered* (ADR-004, FR-072). Stretched grids: *answered* (owner, 2026-09-25): not in AMR mode; stretched cases stay FDS-only.
 - **AMR Pressure Solver Lead:** confirm the pressure path sits wholly outside the shim. *Done* (P2, ADR-002 v0.2): maxorder 2 vs 3 study and FFT/MLMG eps_H check (FR-039).
 - **AMR V&V Lead:** S1 tolerance class T1 vs FireX baseline, with `OMP_NUM_THREADS=1`; T1 check of each K1/K2 port against its shimmed kernel.
 - **GNU/Intel build chiefs:**
@@ -414,7 +467,7 @@ Confidence: **high** for rejecting B (owner requirement plus upstream documentat
   - Optional, non-gating `ifx` compile of K2 kernel files (amdflang dropped).
   - `C_F_POINTER` + bounds-remap idioms on all compilers.
   - AMReX OpenMP vs FDS `-fopenmp`.
-  - HYPRE per D-026: FireX pins v2.32.0-24 `63331f19c` (FireX CMake mislabels it "3.0.0"), and AMReX is built against it at `(local AMReX install built against HYPRE 2.32)` (R-30). HYPRE is CPU-only and used only as MLMG's bottom solver; a CUDA HYPRE build only if HYPRE is ever wanted on device.
+  - HYPRE per D-026: FireX pins v2.32.0-24 `63331f19c` (FireX CMake mislabels it "3.0.0"), and AMReX is built against it at `(local AMReX install built against HYPRE 2.32)` (R-30). HYPRE is CPU-only today; v0.4: it is also the assembled-matrix pressure backend (ADR-002 v1.1), so a CUDA HYPRE build is needed for the GPU phase.
 
 ## Spike plan
 | Spike | Scope | Pass | Overturns if |
@@ -422,14 +475,16 @@ Confidence: **high** for rejecting B (owner requirement plus upstream documentat
 | **S1 Shim feasibility** (2 wk) | Minimal C++ AmrCore (from `Advection_AmrCore`), single level, periodic, no walls. Shim binds `RHO, ZZ, U, V, W, TMP`; runs `DENSITY` and `COMPUTE_VISCOSITY` built from the FireX sources (outside the read-only tree). | T1 vs FireX baseline; edit count per kernel recorded; overhead ≤ 10% | pervasive kernel edits needed, or overhead > 30% (then extract kernels directly, skipping the shim) |
 | ~~S2 F_Interfaces counter-spike~~ | Cancelled by D-027: its reopen condition required GPU out of scope. | — | — |
 | **S3 Regrid wall-state rebuild** (2 wk, with ADR-003) | Rebuild `WALL`/`BOUNDARY_ONE_D` for a box with one OBST after a synthetic regrid | conserved exactly; rebuild < 10% of step time at a 10-step interval (R-26) | full re-init needed per regrid |
-| **S4 GPU cost probe = P1 readability variants** (1–2 wk) | Port the S1 mass kernel to K1 (first) and K2 (OpenMP-offload Fortran, `target teams loop`; no OpenACC variant); compile both for CUDA (D-029, after A-31); K2 optionally also with `ifx` (non-gating); run K1 CPU build and K2 host fallback | both match the shimmed kernel at T1; effort per variant recorded (Phase 11 estimate); sync points per step counted for K2; device-data mechanism (`has_device_addr` or fallback) recorded | K2 cannot share AMReX's device memory (neither `has_device_addr` nor `is_device_ptr`) or stream with nvfortran (drops K2; R-39) |
-| **S5 P1 readability review** (NFR-044) | FDS Fortran developers review both variants (K2 = OpenMP-offload Fortran; blocked on A-31) | outcome recorded in "P1 readability review record" above | — (decides K1 vs K2) |
+| **S4 GPU cost probe = P1 readability variants** (1–2 wk; v0.4: S4a compile-only gates acceptance, S4b GPU run does not, see "v0.4 changes") | Port the S1 mass kernel to K1 (first) and K2 (OpenMP-offload Fortran, `target teams loop`; no OpenACC variant); compile both for CUDA (D-029, after A-31); K2 optionally also with `ifx` (non-gating); run K1 CPU build and K2 host fallback | both match the shimmed kernel at T1; effort per variant recorded (Phase 11 estimate); sync points per step counted for K2; device-data mechanism (`has_device_addr` or fallback) recorded | K2 cannot share AMReX's device memory (neither `has_device_addr` nor `is_device_ptr`) or stream with nvfortran (drops K2; R-39) |
+| **S5 P1 readability review** (NFR-044) | FDS Fortran developers review both variants (K2 = OpenMP-offload Fortran); v0.5: unblocked, package written | outcome recorded in "P1 readability review record" above | — (decides K1 vs K2) |
 
 ## Decision needed from the project owner
-1. **Q8: are C++ components acceptable in the code base?** Implied yes by D-027 (C++ driver decided); direct confirmation still requested (A-30).
+1. ~~Q8: are C++ components acceptable in the code base?~~ **Decided (D-043):** C++ for the driver and AMReX glue only; physics stays Fortran unless the NFR-044 review picks K1.
 2. **Q2** is answered by D-027. **Q11 (a)** answered: NVIDIA is the only GPU target; AMD out of scope (owner, 2026-09-25). **Q11 (c)** closed: AMR mode uses uniform grids on each level and stretched cases stay FDS-only (owner, 2026-09-25). Still open: **Q11 (b)** GPU test hardware.
 3. ~~AMD: deferred or dropped?~~ **Decided** (owner, 2026-09-25): AMD is out of scope; the second-compiler check is optional and non-gating (`ifx` only).
-4. **Q5: are refined-level outputs Smokeview-native, or VTK (FireX `vtkf.f90`) / AMReX plotfiles?**
+4. ~~Q5: refined-level output format?~~ **Decided:** Smokeview format and VTK (FR-072), design in ADR-004 (accepted).
+5. ~~Regrid-time side-data rebuild under NFR-043?~~ **Decided** (D-047, owner, 2026-09-26): host-allowed until Phase 11, device-capable by Phase 11 (v0.4).
+6. **P1 readability review (S5):** reviewers **named** (D-048, owner, 2026-09-26): the project owner, the AMR Species & Combustion Lead and the FDS Legacy Mapper. v0.5: S4a is done and the package is written. Still open: the three answers and the owner's sign-off of the K1/K2 outcome.
 
 ## References
 FireX `Source/{mesh,init,mass,main,read,dump,vtkf,pres,velo,wall,turb,vege,type,ccib,pois}.f90`, `CMakeLists.txt`, `Build/makefile` @ `36975d765f`. AMReX `Src/F_Interfaces/**`, `Src/FFT/AMReX_FFT_Poisson.H`, `Src/LinearSolvers/MLMG/{AMReX_MLLinOp,AMReX_MLCellLinOp}.H`, `Src/Boundary/AMReX_InterpBndryData.H`, `Docs/sphinx_documentation/source/{Fortran_Chapter,GPU}.rst`, `Tools/CMake/AMReXOptions.cmake`, `Tests/CMakeLists.txt`, `.github/workflows/{cuda,hip}.yml`, `CHANGES.md` @ `99ddfda`. HYPRE v2.32.0-24 `63331f19c` `HYPRE_config.h` (`(local GNU third-party library tree)/libs/hypre/63331f19`; D-026). ERF `Source/Microphysics/Morrison/*`; PeleLMeX, incflo, ERF `Source/`. Tutorials `FortranInterface/Advection_F`, `Amr/Advection_AmrCore`. Teammate docs: `docs/{risks,requirements,roadmap,charter,README,spec-responses}.md`, `docs/inventory/*`, `docs/amrex/{mapping,driver-options}.md`, `docs/pressure/0{0,1}-*.md`.

@@ -44,7 +44,7 @@ A6. **Parallelism.** MPI across boxes, with OpenMP/GPU optional. Nothing in this
 A7. **Other physics unchanged.** The divergence `D` (`DIVERGENCE_PART_1`, `divg.f90:22-785`), the flux term `F`
     (`VELOCITY_FLUX`, `velo.f90:563`) and the zone model are assumed to be ported by other teams. This spec fixes only
     **what the pressure step needs from them**: where D lives, how covered cells are treated, and which integrals are formed.
-A8. **No results from running AMReX are claimed.** Statements marked [VERIFY] come from reading docs/source, not from execution.
+A8. **No results from running AMReX are claimed**, except where a statement cites the single-level masked-MLMG runs of `adr/drafts/ruling-nonbox-level0.md` §5 (§E thin-wall row, REC-A1b emulation). Statements marked [VERIFY] come from reading docs/source, not from execution.
 
 ---
 
@@ -109,8 +109,10 @@ face gradient/flux of the solution (velocity update); domain, level and C/F BCs;
 **[REC-A1b]** The operator choice does not force the driver language for the roadmap Phase 4 scope:
 * A2-a/E-1 needs only `amrex_poisson`. A2-b needs only `amrex_abeclaplacian`.
 * E-2 without an overset mask can be emulated in Fortran with `amrex_abeclaplacian`: set β = 0 on faces touching solids, and
-  give solid cells a unit `a`-coefficient with zero RHS (α·a·φ decouples them). This emulation is **[VERIFY]**: with a ≠ 0
-  somewhere, MLMG will not treat the problem as singular, so per-zone compatibility (§C.4) must be enforced by the application.
+  give solid cells a unit `a`-coefficient with zero RHS (α·a·φ decouples them). This emulation is **checked on a single level** (`adr/drafts/ruling-nonbox-level0.md` §5.1): it matches the overset
+  solution within 1e-13 to 1.6e-11 (relative L2). With a ≠ 0 somewhere MLMG does not treat the problem as singular, so per-component compatibility (§C.4) must be
+  enforced by the application; confirmed, since a zone-wide mean leaves an imbalance of 3.3e3·max|RHS| at the pins. Geometric coarsening converges only if every
+  β = 0 face is 2^L-aligned, so the maximum coarsening level must be set from the mask alignment.
 * E-3 (EB) and `MacProjector` reuse require C++.
 
 See §G.1 for the ADR-001 implications.
@@ -334,8 +336,8 @@ its minimum, leaving a large bottom problem. Mitigations: LPInfo agglomeration/c
 | FDS reference | `NO_FLUX` forcing + iteration (`velo.f90:1348-1563`) | UGLMAT gas-only numbering (`pres.f90:5750-5759`), exact Neumann | cut-cell `CC_IBM` (out of scope) |
 | AMReX realisation | `MLPoisson` (constant β) over all cells. F on solid faces forced as in `NO_FLUX` | `MLABecLaplacian`, β_face = 0 on every face touching a solid cell or thin obstruction. Solid cells marked "known" with the **overset mask** (1 = unknown, 0 = known; supported for cell-centred MLABecLaplacian/MLPoisson, LinearSolvers docs; `MacProjector` accepts `a_overset_mask`, `hydro_MacProjector.H:53`) | `MLEBABecLap`, homogeneous Neumann on EB by default (`setEBDirichlet` available) |
 | No-flux accuracy | approximate, ≤ `VELOCITY_TOLERANCE` after iterations | exact (to solver tolerance) in one solve | exact on the EB |
-| Zones separated by solids | the operator stays connected through solid cells, so there is one null space | **one null space per disconnected zone**: needs per-zone compatibility (§C.4) and a per-zone pin (one mask = 0 cell per zone with a known value) or the per-zone gauge | as E-2 |
-| MG robustness | best | variable β with zeros; thin walls can "leak" on coarse MG levels, which slows convergence but does not affect the fine-level answer. **Verified (AMReX 99ddfda):** `prepareForSolve` always calls `averageDownCoeffs` (`AMReX_MLABecLaplacian.H:497-510`). Face β is coarsened by the arithmetic mean of the r² fine subfaces, both between MG levels of one AMR level (`:711-737`) and onto the coarse AMR level under the fine level (`:799-815`; kernel `AMReX_MultiFabUtil_3D_C.H:95-120`). So covered and C/F coarse faces always get the fine average, whatever the driver sets. Under FR-040 R3-T (thin-wall band rule) that average is exactly 0 or 1 in the interface band. Fractional β appears only on M1–M4 covered faces and on coarse MG levels, where walls interior to a coarsened cell vanish. Both affect convergence only. **Rule (FR-040 R3, E-2):** β = 0 on the wall faces of each level's own R1 mask; covered/C/F coarse faces take MLMG's fine average (`03-fr034-fr040r3-answers.md` Q5). **[VERIFY]** convergence when thin walls split a level into disconnected components (per-component pin) | known to work in AMReX codes, higher implementation cost |
+| Zones separated by solids | the operator stays connected through solid cells, so there is one null space | **one null space per disconnected component**. It needs per-component compatibility (§C.4 mean removal applied per component; in FDS every sealed zone is one component, `adr/drafts/ruling-nonbox-level0.md` §5.3), a per-component pin (one mask = 0 cell per component with a known value, lowest global index) and the per-component gauge afterwards (`pres.f90:3495-3540`). This is FDS's own rule: one pin and one mean per indefinite connected-zone matrix (`pres.f90:3369-3406, 3447`) | as E-2 |
+| MG robustness | best | variable β with zeros; thin walls can "leak" on coarse MG levels, which slows convergence but does not affect the fine-level answer. **Verified (AMReX 99ddfda):** `prepareForSolve` always calls `averageDownCoeffs` (`AMReX_MLABecLaplacian.H:497-510`). Face β is coarsened by the arithmetic mean of the r² fine subfaces, both between MG levels of one AMR level (`:711-737`) and onto the coarse AMR level under the fine level (`:799-815`; kernel `AMReX_MultiFabUtil_3D_C.H:95-120`). So covered and C/F coarse faces always get the fine average, whatever the driver sets. Under FR-040 R3-T (thin-wall band rule) that average is exactly 0 or 1 in the interface band. Fractional β appears only on M1–M4 covered faces and on coarse MG levels, where walls interior to a coarsened cell vanish. Both affect convergence only. **Rule (FR-040 R3, E-2):** β = 0 on the wall faces of each level's own R1 mask; covered/C/F coarse faces take MLMG's fine average (`03-fr034-fr040r3-answers.md` Q5). **Checked on a single level (runs, `adr/drafts/ruling-nonbox-level0.md` §5.1):** when thin walls or gaps split a level into disconnected components, one pin and one D-032 mean per component give a true residual, pinned rows included, of ≤ 9e-9·max\|RHS\|. The geometric-MG reconnection is real: a-coefficient pins stall when a wall face lies inside a coarse cell (x-face 29: 0.14 after 100 V-cycles) and converge when it is 2^L-aligned (x-face 32: 24). A single overset pin stops level-0 coarsening (`AMReX_MLCellABecLap.H:192-241`). **Rule:** a > 0 in mask-0 cells (the BiCGStab `normalize` otherwise divides 0/0, `AMReX_MLABecLaplacian.H:1340-1400`), a HYPRE bottom solver on level 0, and no `setNSolve` (`adr/drafts/ruling-nonbox-level0.md` §5.5). The composite (multi-level) case stays **[VERIFY]** | known to work in AMReX codes, higher implementation cost |
 | Obstruction create/remove (`GLOBAL_MATRIX_REASSIGN`, `main.f90:1806-1835`) | nothing to rebuild | `updateBeta` + mask update + MLMG re-setup (O(N)) | EB regeneration (expensive) |
 
 **[REC-E1]** Roadmap Phase 4: implement **E-1** first, for fidelity and direct comparability with the FDS default. Implement
@@ -552,9 +554,6 @@ Conditions:
   **4**(37):1370, 2019. doi:10.21105/joss.01370.
 * R. A. Sweet, "Direct methods for the solution of Poisson's equation on a staggered grid," *J. Comput. Phys.* **12**:422–428,
   1973 (as given in `Manuals/Bibliography/FDS_general.bib:7169-7176` and cited at `TechGuide/Momentum_Chapter.tex:366`).
-* M. Vanella, R. McDermott, G. Forney, K. McGrattan, "Fire Dynamics Simulator: Advances in simulation capability for complex
-  geometry," Fire and Evacuation Modeling Technical Conference (FEMTC) 2016, paper
-  https://media.thunderheadeng.net/femtc/2016_d1-07-vanella-paper.pdf (title/authors checked from the PDF).
 * S. Kilian, "The FDS pressure equation: Intuitive understanding and solution strategies," FEMTC 2020,
   https://media.thunderheadeng.net/femtc/2020_d3-10-kilian-paper.pdf (title/author checked from the PDF).
 * FDS Technical Reference Guide (NIST SP 1018-1), LaTeX source at `Manuals/FDS_Technical_Reference_Guide/` @ `36975d765f` (identical to `ce1f659`).

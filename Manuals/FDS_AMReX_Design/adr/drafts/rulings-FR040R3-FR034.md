@@ -4,7 +4,7 @@
 |---|---|
 | Status | **ACCEPTED (final), AMR Chief Architect, 2026-09-25.** Incorporates the AMR Pressure Solver Lead's answers and corrections (`pressure/03-fr034-fr040r3-answers.md`). Changes from the draft are listed in §5. The requirements text is in §6 for the Spec Lead (same batch as the IR-002 and FR-041a wording fixes). Folding these rulings into ADR-002 / ADR-003 is a later editorial step with no change of content. Amends D-009 (band rule R3-T) and adds to D-032 (removed-mean diagnostic); D-028 unchanged. |
 | Date | Draft 2026-09-25; final 2026-09-25 |
-| Source pin | All `*.f90` citations are **FireX 36975d765f** (`Source`, read-only), per requirements.md:16 (D-034 citation rule). FireX 36975d7 is the base of branch `FDS-AMReX` (local, and on `marcosvanella/fds`). AMReX citations are commit `99ddfda` (`(local AMReX checkout)`). All Verification-input citations are `Verification/...`. Docs are cited relative to `Manuals/FDS_AMReX_Design/`. |
+| Source pin | All `*.f90` citations are **FireX 36975d765f** (`Source`, read-only), per requirements.md:16 (D-034 citation rule). FireX 36975d7 is the base of branch `FDS-AMReX` (local, and on the project owner's fork). AMReX citations are commit `99ddfda` (`(local AMReX checkout)`). All Verification-input citations are `Verification/...`. Docs are cited relative to `Manuals/FDS_AMReX_Design/`. |
 | Answers | requirements.md:226 (FR-040 "Open point R3"); requirements.md:180 (FR-034 "Open point: leak area across levels"); vv/scope_alignment.md:132-133, 142-143. |
 | Owners | Decided: AMR Chief Architect. Reviewed: AMR Pressure Solver Lead (Ruling 2; E-2 and interpolation items of Ruling 1). Actions: AMR Spec & Program Lead (§6 text into requirements.md); AMReX Integration Lead (exact-sum scale, zone numbering and seeding, §2.2 (g)); AMR V&V Lead (acceptance tests §1.6, §2.5; derived variants under A-41); FDS Legacy Mapper (§3.3, §3.2 Q4 [VERIFY]). |
 
@@ -129,7 +129,13 @@ A failed check after a regrid is a bug in the tagger, not a user error, and must
 - A covered-only M2 case (thin on the coarse level only, thick on the fine) must not raise ERROR(421) from the covered coarse copy.
 - The same face owned by an uncovered coarse level must raise it, exactly as single-mesh FDS at that resolution would.
 
-**(i) Disconnected parts. [ruling] [VERIFY]** If thin walls split a level into disconnected gas parts, the fine operator has one null vector per part while MLMG's singular handling knows one constant per level, and coarse MG levels reconnect the parts. Under E-2 each disconnected part gets one pinned cell (mask = 0), in addition to D-032's per-zone mean removal. Parts are identified by the zone flood fill of (e). Convergence rate on such a case is **[VERIFY]**; it goes on the E-2 test list (e.g. zone_shape_2 with E-2). Under E-1 the all-cell operator is connected and nothing is needed.
+**(i) Disconnected parts. [ruling] Checked: single level (`ruling-nonbox-level0.md` §5.1, §5.5); composite solve still [VERIFY].** If thin walls split a level into disconnected gas parts, the fine operator has one null vector per part while MLMG's singular handling knows one constant per level, and coarse MG levels reconnect the parts. Under E-2 each disconnected part gets one pinned cell (mask = 0), and D-032's mean removal is applied **per part** (not only per zone). This is FDS's own rule: one pin and one mean per indefinite connected-zone matrix (`pres.f90:3369-3406, 3447`). Parts are identified by a flood fill over the faces with β ≠ 0 of the operator actually solved. That flood fill agrees with the zone flood fill of (e) for FDS input, and a setup assertion checks it. Measured on single-level split cases, with a true residual including pinned rows of ≤ 9e-9·max|RHS|:
+- A single pinned cell stops level-0 MG coarsening (`AMReX_MLCellABecLap.H:192-241`), so level 0 needs the HYPRE bottom solver.
+- Masked cells need a > 0, or MLMG's BiCGStab bottom returns NaN (`AMReX_MLABecLaplacian.H:1340-1400`).
+- `setNSolve` does not converge.
+- a-coefficient pins with geometric MG converge only when the wall faces lie on 2^L boundaries. This confirms that coarse levels reconnect the parts.
+
+The composite (multi-level) case stays on the E-2 test list (e.g. zone_shape_2 with E-2). Under E-1 the all-cell operator is connected and nothing is needed.
 
 ### 1.4 Rationale
 
@@ -224,7 +230,11 @@ Status: **IN** for FR-006 with the static hierarchy as given (resolves vv/scope_
 
 **(h) Background pressure: one composite definition.** FDS holds one global `P_0(z)` (init.f90:452-484), initialises the per-mesh `PBAR` from it (init.f90:1044-1054), and shifts it uniformly by the zone scalar each stage (mass.f90:548, 730), with one globally reduced `D_PBAR_DT` per zone (divg.f90:1519).
 - AMR stores **one scalar ΔP_zone(t) per zone**, advanced once per stage from the composite `D_PBAR_DT`.
-- `P_0(z)` stays a function (the ramp), built once from global extents, not a level-0 array. Ramp spacing `RP%RDT` against the finest dz is **[VERIFY]** (init.f90:458-469).
+- `P_0(z)` stays a function (the ramp), built once from global extents, not a level-0 array. **Ramp spacing checked (`ruling-nonbox-level0.md` §5.2): no constraint needed.**
+  - The table has 5000 entries over [ZSW, ZFW] (read.f90:10503, 10597, 2227-2231), so its spacing is span/5000 (sub-mm) and independent of every dz.
+  - `EVALUATE_RAMP` takes the nearest entry (func.f90:852-854). The lookup error is ≤ ρ·g·span/10000 (derived).
+  - FDS never takes differences of `P_0` (hydrostatic term analytic, divg.f90:684).
+  - The table is built once, with level-0 extents (including level-0 `DZS_MAX`/`DZF_MAX` under HVAC), and every level evaluates the same lookup at its own cell centres. That keeps `PBAR`/`P_0` ambient cancellation exact on every level and in every gap component.
 - Each level (or box) evaluates `PBAR_ℓ(k,zone) = P_0(z_k^ℓ) + ΔP_zone`, with its own `R_PBAR` and `PBAR_S`, at its own cell centres, and at faces where FDS averages (`P_AVE`, hvac.f90:2522-2530). `NODE_P` takes the owning level's sample.
 - Rejected: integrating `D_PBAR_DT` per level (breaks the single per-zone compatibility of divg.f90:1540); one level-0 z-array interpolated to fine levels (adds interpolation error in `R_PBAR`, `RHO_F`, `NODE_P`).
 
@@ -327,7 +337,7 @@ With the same stage's face velocities in USUM and in the Poisson BC, the mean re
 - **Q2 (C/F interpolation across a thin wall). Resolved:** standard MLMG plus the §1.6 item 7 check; order-1 AMReX patch only as the fallback. See §1.3 (e).
 - **Q3 (E-1 coarse mask). Resolved:** the coarse R1 mask suffices; forcing on each level's owned wall faces. See §1.3 (e).
 - **Q4 (OBSTs created or removed at run time). [ruling]** The R3-T mismatch list is computed at setup for **every** OBST in the input, whatever its initial activation state, so activating one at run time cannot create an unchecked band mismatch. **[VERIFY]** (FDS Legacy Mapper, before Phase 5): that DEVC/CTRL creation and removal only toggle OBSTs present in the input list and never move them.
-- **Still open:** the disconnected-parts pin of §1.3 (i) and the `P_0` ramp spacing of §2.2 (h), both **[VERIFY]**.
+- **Closed:** the disconnected-parts pin of §1.3 (i) (single level; the composite case stays on the E-2 test list) and the `P_0` ramp spacing of §2.2 (h). Both are checked in `ruling-nonbox-level0.md` §5.
 
 ### 3.3 Observation for the FDS Legacy Mapper (reading only, not run)
 

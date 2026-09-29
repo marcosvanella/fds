@@ -1,8 +1,8 @@
 # 01 — Solid Phase & Wall Coupling on AMReX: spec v0.1
 
-Owner: AMR Solid Phase Lead · Status: **v0.1 for review**, 2026-09-26 (outline 2026-09-25) · Proposals only; nothing here is decided unless it cites a D-xxx.
-Reference tree: this repository (FireX `36975d765f`), read-only. Line numbers are from that tree.
-Binding: uniform grids per level (D-030); GEOM/CC_IBM and HT3D deferred, thin OBSTs required (D-033); FR-006; bitwise per-kernel on frozen inputs, whole runs by tolerance (D-022); refluxing (D-023); Phase 5 stateful-wall freeze (D-010, FR-041a); wall ownership rule (ADR-003 v0.2.1).
+Owner: AMR Solid Phase Lead · Status: **v0.1.2 for review**, 2026-09-26 · Proposals only; nothing here is decided unless it cites a D-xxx.
+Reference tree: FireX `36975d765f` on the `FDS-AMReX` branch. Line numbers are from that tree.
+Binding: uniform grids per level (D-030); GEOM/CC_IBM and HT3D deferred, thin OBSTs required (D-033); FR-006; bitwise per-kernel on frozen inputs, whole runs by tolerance (D-022); refluxing (D-023); Phase 5 stateful-wall freeze (D-010, FR-041a); wall ownership rule (ADR-003 v0.2.1); `VARIABLE_THICKNESS` IN, frozen at setup (D-038).
 Scope: FDS data flow, level mapping, conservation, time stepping, GPU and cost, verification, phase plan, traceability. CFACE paths are listed for completeness; they belong to deferred GEOM. Folded into the project docs in v0.4.17 as FR-045..047, NFR-048, the FR-022 wall part, the FR-041b proposed rule, NFR-035 (walls) and R-55..R-60 (§8).
 
 ## 1. Current FDS data flow (FireX)
@@ -34,8 +34,15 @@ Key property: given its gas-side inputs, each wall cell's 1-D solve is **local**
 
 **Where state lives.**
 - Phase 5 (D-010): per level, on the owning level, built by the per-level `INIT_WALL_CELL` equivalent. A static hierarchy may cross a stateful wall; a regrid may not cut one.
-- FR-041b recommendation, **option A, "finest-ever records"** (ADR-003 sub-choice, line 67): key each 1-D record to the OBST face patch at the finest resolution that has ever covered it, stored outside the box layout. When a coarse level owns the face, each of its r² fine records is solved with the coarse face's gas-side inputs; the coarse face's mass, species and heat fluxes are the area-sum of the records. Refine copies nothing (the records exist); first-time refinement splits a coarse record into r² identical copies (exact per-area). Conservation is exact and reversible, and burn-away heterogeneity is kept. Cost: solid work stays at the finest-ever count.
-- Option B, remap: coarsen by area-averaging r² profiles. Needs a conservative depth remap (profiles have different node counts after renoding, :2361-2804), per-material mass and enthalpy with T recovered from a nonlinear `RHO_C_S(T)`, plus rules for `T_IGN`, `BURNAWAY`, `INT_FTP`, `PART_MASS`, `A_LP_MPUA`. Lossy on re-refinement. Not recommended.
+- FR-041b, **option A, "finest-ever records" (accepted by the AMR Chief Architect; `adr/drafts/ruling-FR041b-G2.md`)**: each 1-D record is keyed to the OBST face patch at the finest resolution that has ever covered it, stored outside the box layout under the FR-046 face key. A coarse owner drives its records (r² per level jump, compounded across levels) with its own gas-side inputs and applies their mass, species and heat fluxes summed in a fixed order. First-time refinement splits a coarse record into identical copies. Option B (remap) is rejected on correctness: the depth remap over renoded multi-material profiles, D-038, lost heterogeneity, and a GPU regrid kernel.
+- Conditions on A (ruling §2):
+  - A1. Records follow D-038: split copies inherit the thickness frozen at setup; nothing is recomputed at the finer level.
+  - A2. Records exist only for faces inside the refinable region, at the levels it permits; elsewhere a face keeps one record at its level-0 or static-box resolution. Finest-ever depth is bounded by the local maximum level.
+  - A3. Determinism (FR-005 (i)): aggregation order within a record group is fixed by the face key; migration between ranks copies records bit for bit; every record is bitwise unchanged across a regrid except at its first split.
+  - A4. Outputs (FR-045, FR-070): budgets and boundary files use the owner's aggregated face value; a point wall device reads the finest-ever record containing the point.
+  - A5. Restart writes records with their face keys and finest-ever depth, independent of layout (replacing dump.f90:3981).
+  - A6. `SOLID_HEAT_TRANSFER` is unchanged (FR-047 a); only the driver loop over records changes.
+- Cost check G2a and the fallback (a record-depth cap, not option B): ruling §3; results in `03-g2a-cost-check.md`.
 
 **Thin OBSTs.** `THIN_WALL` cells and lateral conduction follow the owning level. The R3-T rule (ADR-003 v0.2.1) keeps a C/F interface off thin-wall faces.
 
@@ -48,7 +55,7 @@ Key property: given its gas-side inputs, each wall cell's 1-D solve is **local**
 
 **Back-side coupling.** Replace `MESHES(BACK_MESH)%WALL(BACK_INDEX)` with a lookup through a level- and layout-independent face key, filled by a per-step exchange (front and back may be on different levels or ranks).
 
-**`VARIABLE_THICKNESS`** (charter Q4 item 1). It is a 1-D feature. It only shares noding and grouping code with HT3D (init.f90:1594-1650, 3926-4051; read.f90:841-849). Its thickness comes from the snapped OBST depth, so it depends on the level. **Recommendation: IN**, with thickness computed once at setup from the owning level at t=0 and frozen as part of the solid state. This matches FDS for uniform and static runs and is compatible with option A. `box_burn_away*` also needs FR-042 (burn-away removal).
+**`VARIABLE_THICKNESS`** (charter Q4 item 1; **decided IN, D-038**). It is a 1-D feature. It only shares noding and grouping code with HT3D (init.f90:1594-1650, 3926-4051; read.f90:841-849). Its thickness comes from the snapped OBST depth, so it depends on the level. **Decision (D-038):** IN, with thickness computed once at setup from the owning level at t=0 and frozen as part of the solid state. This matches FDS for uniform and static runs and is compatible with option A. `box_burn_away*` also needs FR-042 (burn-away removal).
 
 ## 3. Conservation of wall fluxes across coarse/fine
 
@@ -78,7 +85,7 @@ Key property: given its gas-side inputs, each wall cell's 1-D solve is **local**
 - Pyrolysis, char, liquids: `Pyrolysis/pyrolysis_1`, `pyrolysis_2`, `two_step_solid_reaction`, `matl_e_cons_1`…`_9`, `enthalpy`, `shrink_swell`, `cell_burn_away`, `methanol_evaporation`, `water_pool`, `liquid_mixture`, `specified_hrr`.
 - Mass conservation at walls: `Pyrolysis/surf_mass_vent_char_cart_fuel`, `surf_mass_vent_nonchar_cart_gas`, `surf_mass_two_species_cart`, `surf_mass_vent_liquid_fuel`.
 - Energy budget: `Energy_Budget/energy_budget_solid`, `energy_budget_cold_walls`, `energy_budget_adiabatic_walls`.
-- Burn-away and `VARIABLE_THICKNESS` (pending Q4): `Fires/box_burn_away1`…`11`, `box_burn_away_2D_residue`.
+- Burn-away and `VARIABLE_THICKNESS` (IN, D-038): `Fires/box_burn_away1`…`11`, `box_burn_away_2D_residue`.
 - Level set, mode 4: `WUI/level_set_fuel_model_1`, `LS4_ember_ignition`, `LS4_ember_yield`, `ground_vegetation_drag`. Mode 1 cases (`WUI/LS_ellipse_*`, `LS_wind_ramp_*`, `Bova_*`) never call wall BCs and need only the level-0 rule. `Restart/geom_ls_restart_*` uses GEOM and is deferred.
 - Excluded (HT3D deferred): `Heat_Transfer/ht3d_*`. Particle-surface cases (`surf_mass_part_*`) follow the particle phase.
 - Refined variants to write (A-52, A-46 style): `energy_budget_solid` and `surf_mass_vent_char_cart_fuel` at 2:1 over the burning face; `back_wall_test` with front and back on different levels; a static C/F crossing a stateful wall (D-010 clarification); `level_set_fuel_model_1` with a 2:1 patch over part of the burn area (checks the level-0 rule and HRR against the unrefined run).
@@ -89,7 +96,7 @@ Key property: given its gas-side inputs, each wall cell's 1-D solve is **local**
 |---|---|---|
 | 5 | Per-level wall records, ownership mask (FR-045), face key and back-side exchange (FR-046), global `WALL_COUNTER`/`BC_CLOCK` (FR-047 b), owned-face budgets and outputs, HVAC and level-set rules (§2), counter-based `MASS_FLUX_VAR` draw, restart per level, freeze enforced (FR-041a). | FR-022 walls and FR-045 on the A-52 variants; FR-046 on `back_wall_test` at two layouts; FR-047 b trace. |
 | 6 | Per-level wall cadence with subcycling; time-averaged gas-side inputs (§4); OQ-3 answered. | FR-022 walls with subcycling. |
-| after 6 | FR-041b transfer, option A if G2 supports it; FR-042 burn-away with refinement. | Solid mass and enthalpy change across regrid ≤ 1e-12 relative; `box_burn_away*` refined. |
+| after 6 | FR-041b transfer, option A with A1-A6 (G2 scoped to A); FR-042 burn-away with refinement. | Solid mass and enthalpy change across regrid ≤ 1e-12 relative; `box_burn_away*` refined. |
 | 11 | Device port: flat SoA (NFR-048 a), deterministic gather (NFR-048 b), load-balance weight (NFR-035 walls). | FR-005 (i) on GPU; A-measurement of wall share of step time. |
 
 ## 8. Traceability, new proposals, open questions
@@ -100,10 +107,10 @@ Key property: given its gas-side inputs, each wall cell's 1-D solve is **local**
 | SP-R2 wall budget closure | FR-022 (walls), FR-020 | proposed |
 | SP-R3 back-side coupling | FR-046 | proposed |
 | SP-R4 kernel parity, cadence | FR-047 | proposed; (a) needs D-022 amendment |
-| SP-R5 FR-041b rule | FR-041b proposed rule | open until G2 (OQ-2) |
+| SP-R5 FR-041b rule | FR-041b | option A accepted with A1-A6; G2a cost check in `03-g2a-cost-check.md` |
 | SP-R6 device layout | NFR-048 | proposed |
 | SP-R7 load-balance weight | NFR-035 (wall part) | proposed |
-| SP-R8 `VARIABLE_THICKNESS` frozen at setup | FR-042 note, charter Q4 | pending the project owner's decision (OQ-1) |
+| SP-R8 `VARIABLE_THICKNESS` frozen at setup | D-038, FR-042 note | decided |
 | SR-1..SR-6 | R-55..R-60 | open |
 
 New in v0.1 (for the Spec Lead; IDs to assign)
@@ -112,12 +119,14 @@ New in v0.1 (for the Spec Lead; IDs to assign)
 - **SR-7 Level-set values depend on resolution.** `BURN_DURATION` and `AREA_ADJUST` use `DX`,`DY` (vege.f90:570-593). A per-level level-set solve would change spread and HRR with refinement; the level-0 rule avoids that but ignites a whole coarse column at once. (M/M)
 
 Open questions
-- **OQ-1 (project owner)** `VARIABLE_THICKNESS`: IN with frozen thickness (recommended), or deferred with HT3D? `box_burn_away1` is UNCLEAR for FR-006 until then.
-- **OQ-2 (Chief Architect)** FR-041b option A vs B; G2 measures option A. Not raised with the Architect yet (coordinator hold).
+- **OQ-1** Closed by D-038: `VARIABLE_THICKNESS` IN, thickness frozen at setup by the owning level; its 12 cases are IN for FR-006.
+- **OQ-2** Closed: option A accepted with conditions A1-A6 (`adr/drafts/ruling-FR041b-G2.md`). G2a result decides whether the record-depth cap is needed.
 - **OQ-3 (with Chief Architect, ADR-002)** Keep `WALL_INCREMENT=2` in AMR mode, or tie it to the level?
 - **OQ-4 (Spec Lead to assign)** Owners for the solid-particle rule (particle phase) and the level-set module (level-0 rule vs per-level solve). Proposals in §2.
 - **OQ-5** Closed by SP-R9.
 
 ## Change log
+- v0.1.2, 2026-09-26: FR-041b option A accepted; conditions A1-A6 folded into §2; OQ-2 closed; G2a results linked.
+- v0.1.1, 2026-09-26: OQ-1 closed by D-038; OQ-2 case sent for ruling (`02-g2-wall-state-options.md`); removed machine paths.
 - v0.1, 2026-09-26: closed the *(unread)* items (`MASS_FLUX_VAR`, HVAC, solid particles, level-set modes); added build/rebuild, special-path rules, phase plan, traceability to v0.4.17 IDs, SP-R9, SP-R10, SR-7.
 - Outline, 2026-09-25.

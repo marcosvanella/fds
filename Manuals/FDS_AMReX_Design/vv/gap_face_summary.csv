@@ -1,0 +1,41 @@
+case,n_mesh,cell_sizes,level0,bbox,box_fill,n_gap_mesh_faces,gap_face_area,open_vents,other_vents,open_entries,other_entries,other_surf_ids,partial_entries,notes
+Aerosols/aerosol_turbulent_deposition.fds,3,0.001x0.001x0.001,all meshes (uniform resolution),0 0.01 0 0.01 0 0.05,0.600,4,0.0004,0,0,0,0,,0,SURF DEFAULT=T: DEF (gap walls get this surface)
+Controls/bi_dir.fds,3,0.1x0.1x0.1,all meshes (uniform resolution),0 3.2 0 1 0 1,0.938,4,4,1,2,2,2,10p0 1p0,0,SURF DEFAULT=T: SLIP (gap walls get this surface)
+Controls/device_test.fds,2,0.1x0.1x0.1,all meshes (uniform resolution),0 4 0 4 0 1,0.438,2,6,0,0,0,0,,0,
+Extinction/extinction_1.fds,100,0.025x0.025x0.025,all meshes (uniform resolution),0 1.9 0 0.1 0 1.9,0.277,360,3.6,0,0,0,0,,0,SURF DEFAULT=T: LINER (gap walls get this surface)
+Extinction/extinction_2.fds,100,0.025x0.025x0.025,all meshes (uniform resolution),0 1.9 0 0.1 0 1.9,0.277,360,3.6,0,0,0,0,,0,SURF DEFAULT=T: LINER (gap walls get this surface)
+Flowfields/simple_duct.fds,5,0.05x0.05x0.05,all meshes (uniform resolution),0 3.5 -0.9 0.9 0 3.2,0.611,17,16.58,0,0,0,0,,0,
+Flowfields/velocity_bc_test.fds,3,0.2x0.2x0.2,all meshes (uniform resolution),-5 20 -2.4 2.4 -2.4 12.4,0.973,4,480,4,0,4,0,,0,3 &HOLE ignored in OBST coverage check
+HVAC/qfan_multi.fds,2,0.05x0.1x0.1,all meshes (uniform resolution),-2.2 2.2 -1 1 0 2,0.909,2,8,2,0,2,0,,0,
+Heat_Transfer/back_wall_test.fds,4,0.05x0.05x0.05,all meshes (uniform resolution),-1.5 1.5 -0.5 1.5 -0.5 0.5,0.667,5,4,3,0,5,0,,1,SURF DEFAULT=T: STEEL PLATE (gap walls get this surface)
+Pressure_Effects/isentropic.fds,2,0.05x0.05x0.05,all meshes (uniform resolution),0 2.1 0 1 0 1,0.952,2,2,0,0,0,0,,0,SURF DEFAULT=T: Adiabatic Wall (gap walls get this surface)
+Pressure_Effects/isentropic2.fds,2,0.05x0.05x0.05,all meshes (uniform resolution),0 2.1 0 1 0 1,0.952,2,2,0,0,0,0,,0,SURF DEFAULT=T: Adiabatic Wall (gap walls get this surface)
+Pressure_Solver/hallways.fds,5,0.0625x0.0625x0.0625,all meshes (uniform resolution),0 8 0 4 0 4,0.141,12,37,1,0,1,0,,0,
+Pressure_Solver/stairwell.fds,11,0.1x0.1x0.1,all meshes (uniform resolution),-5.2 13.7 -7 10.3 -23.9 31,0.091,50,1483.25,0,0,0,0,,0,SURF DEFAULT=T: CONCRETE (gap walls get this surface)
+Pyrolysis/shrink_swell.fds,6,0.1x0.1x0.1,all meshes (uniform resolution),1 6.3 -0.15 0.15 0 0.4,0.340,10,1.2,2,0,10,0,,0,
+Radiation/check_kappa.fds,100,0.3x0.3,all meshes (uniform resolution),0 9.9 0 0.1 0 9.9,0.826,360,32.4,0,0,0,0,,0,
+Radiation/hot_spheres.fds,2,0.05x0.05x0.05,all meshes (uniform resolution),0 3 0 1 0 1,0.667,2,2,2,0,2,0,,0,
+Radiation/part_attenuation.fds,5,0.1x0.1x0.1,all meshes (uniform resolution),-2 7 0 1 0 1,0.556,8,8,0,1,0,4,HOT,0,SURF DEFAULT=T: BLACK (gap walls get this surface)
+Radiation/target_test.fds,2,0.04x0.04x0.04,all meshes (uniform resolution),0 3 0 1 0 1,0.667,2,2,0,0,0,0,,0,
+Restart/device_restart_a.fds,4,0.4x0.4x0.4,all meshes (uniform resolution),-12.8 14.4 -0.4 20.4 0 2.8,0.419,9,202.72,1,0,1,0,,0,
+Restart/device_restart_b.fds,4,0.4x0.4x0.4,all meshes (uniform resolution),-12.8 14.4 -0.4 20.4 0 2.8,0.419,9,202.72,1,0,1,0,,0,
+Restart/device_restart_base_case.fds,4,0.4x0.4x0.4,all meshes (uniform resolution),-12.8 14.4 -0.4 20.4 0 2.8,0.419,9,202.72,1,0,1,0,,0,
+Species/1_step_2_step_compare.fds,4,0.05x0.05x0.05,all meshes (uniform resolution),0 7 0 1 0 1,0.571,6,6,0,0,0,0,,0,
+Species/burke_schumann.fds,15,0.025x0.025x0.025,all meshes (uniform resolution),0 2.9 0 0.1 0 0.1,0.517,28,0.28,0,0,0,0,,0,SURF DEFAULT=T: LINER (gap walls get this surface)
+Species/condensation_3.fds,2,0.1x0.1x0.1,all meshes (uniform resolution),0 3 0 1 0 1,0.667,2,2,0,1,0,1,HOT,0,
+Species/multiple_reac_n_simple.fds,3,0.1x0.1x0.1,all meshes (uniform resolution),0 5 0 1 0 1,0.600,4,4,0,0,0,0,,0,
+Species/species_props.fds,5,0.1x0.1,all meshes (uniform resolution),0 4.4 0 0.1 0 0.4,0.455,8,0.32,0,0,0,0,,0,
+Sprinklers_and_Sprays/particle_anisotropic_radi.fds,4,0.1x0.1x0.1,all meshes (uniform resolution),0 7 0 1 0 1,0.571,6,6,0,2,0,6,COLD HOT,0,
+Sprinklers_and_Sprays/particle_isotropic_radi.fds,4,0.1x0.1x0.1,all meshes (uniform resolution),0 7 0 1 0 1,0.571,6,6,0,0,0,0,,0,SURF DEFAULT=T: HOT (gap walls get this surface)
+Sprinklers_and_Sprays/screen_drag_1.fds,3,0.1x0.1x0.1,all meshes (uniform resolution),0 2 0 1 0 3.2,0.938,4,8,0,2,0,4,SLIP,0,
+Sprinklers_and_Sprays/screen_drag_2.fds,3,0.1x0.1x0.1,all meshes (uniform resolution),0 2 0 1 0 3.2,0.938,4,8,0,2,0,4,SLIP,0,
+Sprinklers_and_Sprays/sphere_drag_1.fds,5,0.05x0.05x0.05,all meshes (uniform resolution),0 2 0 1 0 5.4,0.926,8,16,0,2,0,8,SLIP,0,
+WUI/LS4_ember_ignition.fds,2,0.5x0.5x0.5,all meshes (uniform resolution),0 12.5 -2.5 2.5 0 5,0.800,2,50,2,0,2,0,,0,
+WUI/char_oxidation_2.fds,2,0.125x0.125x0.125,all meshes (uniform resolution),0 1.5 0 0.5 0 0.5,0.667,2,0.5,0,0,0,0,,0,SURF DEFAULT=T: WALL (gap walls get this surface)
+WUI/ground_vegetation_conv.fds,2,0.05x0.05x0.05,all meshes (uniform resolution),0 1 -0.1 0.1 0 0.5,0.800,2,0.4,0,0,0,0,,0,SURF DEFAULT=T: WALL (gap walls get this surface)
+WUI/ground_vegetation_drag.fds,3,0.05x0.05x0.05,all meshes (uniform resolution),0 6 -0.5 0.5 0 2.5,0.600,4,24,0,5,0,6,GROUND LS GRASS MIRROR,0,
+WUI/ground_vegetation_load.fds,2,0.05x0.05x0.05,all meshes (uniform resolution),0 3 -0.5 0.5 0 2.5,0.800,2,6,0,2,0,2,GROUND HOT,0,
+WUI/ground_vegetation_radi.fds,2,0.025x0.025x0.025,all meshes (uniform resolution),0 2.5 -0.5 0.5 0 1,0.800,2,2,0,2,0,2,MIRROR,0,
+WUI/vegetation_absorb.fds,6,0.1x0.1x0.1,all meshes (uniform resolution),0 4 0 1 0 6.5,0.923,10,40,0,2,0,10,MIRROR,0,
+WUI/vegetation_drag_1.fds,3,0.1x0.1x0.1,all meshes (uniform resolution),0 4 0 1 0 3.2,0.938,4,16,0,0,0,0,,0,SURF DEFAULT=T: SLIP (gap walls get this surface)
+WUI/vegetation_drag_2.fds,3,0.1x0.1x0.1,all meshes (uniform resolution),0 4 0 1 0 3.2,0.938,4,16,0,0,0,0,,0,SURF DEFAULT=T: SLIP (gap walls get this surface)

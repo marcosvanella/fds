@@ -10,7 +10,7 @@
 | Source pins | FireX `36975d765f` (this repository, read-only); AMReX `99ddfda` (`(local AMReX checkout)`, read-only) |
 | Status | Proposal. The AMR Chief Architect decides (with the AMReX Integration Lead). No requirement or ADR was edited. |
 
-Reading and `rg` only; nothing was built or run (the exclusive window was respected). Numbers are labelled
+Reading and `rg` only; nothing was built or run (the exclusive timing window was respected). Numbers are labelled
 **[estimate]**, **[derived]** (arithmetic from cited inputs) or **[measured]** (P2, from D-032).
 
 ## Assumptions
@@ -133,7 +133,7 @@ Cost basis:
 4. **Compatibility and gauge.**
    * Before every solve, apply D-032 (2)'s mean removal per pressure zone over gas cells only, with the exact sum.
    * The pinned cell's dropped equation is then satisfied automatically. Its residual equals the removed incompatibility (round-off).
-   * If a zone could contain more than one component (possible only for multi-seed `&ZONE`, **[VERIFY]**), remove the mean per component.
+   * If a zone could contain more than one component, remove the mean per component. **Checked:** a sealed FDS zone is always one component, since only the first `XYZ` is used (read.f90:13690) and the flood fill never crosses a gap (§5.3 of the ruling). Apply the mean per component anyway, with a setup assertion.
    * After the solve, apply the per-zone GLMAT gauge (01 REC-C3), which removes the pin's arbitrary constant.
    * The FR-039 true-residual check runs as specified, including the pinned cells' equations.
 5. **Obstructions inside the meshes:** unchanged E-1 (IBM forcing plus obstruction iteration, `VELOCITY_TOLERANCE`), exactly as in the
@@ -261,10 +261,10 @@ on the FFT-path E-1 treatment.
   The Integration Lead owns the level-0 coverage question for all fields, not just pressure **[VERIFY: AMReX AmrCore tolerance of a
   non-covering level 0]**.
 * **O3 (Pressure Lead, test).** MLMG convergence rate with large masked regions and pins on the G4 cases. MG coarsening across gap
-  walls leaks on coarse levels (03 Q5); expected to slow convergence only **[VERIFY]**.
+  walls leaks on coarse levels (03 Q5); expected to slow convergence only. **Checked by runs** (`adr/drafts/ruling-nonbox-level0.md` §5.1, §5.4). It converges with the HYPRE bottom solver on level 0 (3 iterations on `hallways` and `device_restart_a`). A pin stops geometric coarsening. Unaligned walls stall geometric MG with a-coefficient pins. The default BiCGStab bottom solver needs a > 0 in masked cells. `setNSolve` fails.
 * **O4 (Spec Lead).** Wording updates in FR-037/FR-039/D-032 (5) per §5, and R-47 status. Not edited by me.
 * **O5 (Pressure Lead).** Can a `&ZONE` span several gap-separated components (multi-seed zones)? If so, mean removal must be per
-  component inside the zone **[VERIFY read.f90 `&ZONE XYZ` handling]**.
+  component inside the zone. **Checked:** only the first `XYZ` is used (read.f90:13690), so no multi-seed zones exist. See the ruling §5.3.
 * **O6 (NFR-030).** The masked path is slower than FDS per solve by (6–18)/fill **[estimate]**. Whether NFR-030 applies to masked
   V&V cases or they get a recorded exception is a Chief Architect/Spec Lead call. Measure first, after the timing window.
 

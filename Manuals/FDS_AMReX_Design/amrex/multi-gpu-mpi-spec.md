@@ -204,7 +204,7 @@ The two routes compared below can be combined: async output works in both.
 | Writers covered | `WriteMultiLevelPlotfile`/`WriteSingleLevelPlotfile`: header job submitted (`AMReX_PlotFileUtil.cpp:198-216`), level data through `VisMF::AsyncWrite` (`:219-225`; `AMReX_VisMF.cpp:2334-2364`). Particles (`AMReX_ParticleIO.H:433-437`). `Amr`/`AmrLevel`/`StateData`/`FabSet` (`IO.rst:124-137`). Native FAB format only; `fab.format` is ignored (`IO.rst:122-123`). |
 | What is copied | `VisMF::AsyncWriteDoit` (`AMReX_VisMF.cpp:2367-2598`), on the **calling** thread: <br>1. per-FAB min/max, on the device if the data is there (`:2397-2398, 2425-2429`); <br>2. `MPI_Gatherv` of header data to the IO rank (`:2462-2464`); <br>3. a snapshot of every local FAB: device/managed data goes into a new FAB in `The_Pinned_Arena()` by device copy or `dtoh_memcpy_async` (`:2471-2481`); host data is copied into the CPU arena, or moved for rvalues (`:2482-2490`). <br>The `MFIter` destructor synchronises the GPU streams (`AMReX_MFIter.cpp:246-252`), so the thread receives only complete host memory at `Submit` (`:2494`). The thread then writes the header and the FABs (`:2574-2596`). |
 | Cost | The main thread still pays the device-to-host copy and the gather. Every pending write holds a full host (pinned) copy of the output fields. `IO.rst:140-145` warns that the extra thread can oversubscribe cores when OpenMP uses all of them. |
-| Not offered | No Smokeview or FDS-VTK writer: the only VTK-related code in `Src/` is EB→PVD (`Src/EB/AMReX_EBToPVD.*`) and SENSEI adaptors. `grep` found no facility for dedicated I/O ranks. |
+| Not offered | No Smokeview or FDS-VTK writer: the only VTK-related code in `Src/` is EB→PVD (`Src/EB/AMReX_EBToPVD.*`) and SENSEI adaptors. The only facility for separate I/O ranks is `amrex::MPMD::Copier` (`AMReX_MPMD.H:26-52`): it copies between exactly two MPMD programs, and its sends block until the receiver takes them. It's the fallback option in `fr072-output-amrex-notes.md`. |
 
 **Does it help FDS's Smokeview/VTK writers?**
 - **AMReX-native plotfiles and checkpoints:** yes, with `amrex.async_out=1` and no code change.
@@ -212,7 +212,7 @@ The two routes compared below can be combined: async output works in both.
   1. a host-side snapshot of the fields each writer reads, taken the way `VisMF` does it;
   2. writers refactored to take that snapshot as arguments, without `POINT_TO_MESH` or module state, so they cannot race the main thread;
   3. confirmation that the Fortran runtime's I/O is safe on a non-main thread. **Unverified** for gfortran and nvfortran.
-- The alternative is dedicated I/O ranks that receive snapshots over MPI and run the writers in their own process. AMReX has no support for this; it would be project work.
+- The alternative is dedicated I/O ranks that receive snapshots over MPI and run the writers in their own process. AMReX has no support for this; it would be project work, with `amrex::MPMD::Copier` (`AMReX_MPMD.H:26-52`) as the only building block. A `ParallelCopy` cannot reach ranks outside the AMReX communicator (`AMReX_FabArrayCommI.H:901-907, 974-989`).
 
 ### 5.2 Host OpenMP in a GPU build
 - `AMReX_OMP=ON` together with CUDA is allowed (`AMReXOptions.cmake:276`; `AMReXParallelBackends.cmake:48-58`).
@@ -231,16 +231,16 @@ The two routes compared below can be combined: async output works in both.
 
 | | (a) N ranks per GPU under MPS | (b) 1 rank per GPU + host threads and/or async I/O |
 |---|---|---|
-| Host work (output, setup, unported) | N-way parallel with **no code change**: each rank handles only its own boxes, as FDS does per mesh today (`main.f90:623-627`) | async: AMReX-native output overlaps compute for free (§5.1). FDS writers need snapshot + refactor. OpenMP: output/setup have no `!$OMP` today, so threading must be written |
+| Host work (output, setup, unported) | N-way parallel for setup and unported compute: each rank handles only its own boxes, as FDS does per mesh today (`main.f90:623-627`). **Not for Smokeview/VTK output in AMR mode:** writing the compute boxes each rank owns breaks FR-076/R-48 (output must not depend on which rank owns a box). Output goes through the fixed writer layout in `fr072-output-amrex-notes.md` (ADR-004) | async: AMReX-native output overlaps compute for free (§5.1). FDS writers need snapshot + refactor. OpenMP: output/setup have no `!$OMP` today, so threading must be written |
 | Thread-safety risk | none added (separate processes) | **risk to verify:** unported FDS host code relies on process-global module pointers (`POINT_TO_MESH`, `dump.f90:89`; R-26), so threading its mesh loop or running a writer concurrently with host code is unsafe until refactored. Fortran runtime I/O thread safety is unverified |
 | MPI / ghost exchange | cross-rank ghost exchanges become MPI messages, staged through pinned host memory unless GPU-aware (§4). With 1 rank they are local device copies (`FB_local_copy_gpu`, `AMReX_FBI.H:546`) | no extra MPI |
 | Box count | needs ≥ N boxes per GPU at the 16-cell box floor (guidance, `requirements.md:356`). Example: D-024 level 0 (32×32×80) gives at most 20 boxes of 16³ (derived). Smaller boxes per rank give fewer threads per kernel launch. **Assumption:** that means lower GPU utilisation | largest boxes per GPU |
 | GPU memory | one CUDA context (and MPS client storage) per rank; arena split N ways (`AMReX_Arena.cpp:427`); limit of 60 MPS clients per GPU | one context |
 | Dependencies | MPS, **unverified** on consumer GPUs (§2). **Assumption:** without MPS the kernels are time-sliced | `MPI_THREAD_MULTIPLE` only if `async_out_nfiles < ranks` |
-| Reproducibility | rank-count dependence already covered by FR-005 (iii) | thread count fixed per FR-005 (iv) |
+| Reproducibility | rank-count dependence already covered by FR-005 (iii); output bytes must not depend on rank ownership (FR-076) | thread count fixed per FR-005 (iv) |
 
 **Default hypothesis (to confirm or reject in §5.4).**
-- **Transition period, while host code is unported and FDS writers are unchanged:** route (a) with a small N (2-4) under MPS, plus `amrex.async_out=1` for AMReX-native output. (a) is the only route that parallelises unmodified serial Fortran host code without a thread-safety refactor.
+- **Transition period, while host code is unported and FDS writers are unchanged:** route (a) with a small N (2-4) under MPS, plus `amrex.async_out=1` for AMReX-native output. (a) is the only route that parallelises unmodified serial Fortran host code without a thread-safety refactor. The exception is Smokeview/VTK output, which follows FR-076 and ADR-004 in any route (a fixed writer layout filled by `ParallelCopy`, not per-rank compute boxes).
 - **Later, as kernels move to the device and output moves to snapshot-based writers:** route (b) with async output becomes the target (one context, no MPS, no extra MPI).
 - **If MPS does not work on the test machine:** measure (a) without MPS. If it still helps on output steps, keep it; otherwise use (b) with async output.
 
@@ -337,5 +337,5 @@ The class for kernel-level GPU vs CPU parity is an open question (§8).
 8. **Global-rank modulo mapping** (`GpuDevice.cpp:301`) can be unbalanced when ranks-per-node is not a multiple of GPUs-per-node. The driver should warn about or reject such layouts (FR-0xx), or set `a_device_id` itself.
 9. **No cluster is named.** Every item in §7.2 is untestable until one is available (charter Q6, R-12).
 10. **FDS host code thread safety (A-43, route b).** FDS output and setup rely on process-global module pointers (`POINT_TO_MESH`, `dump.f90:89`; `mesh.f90:505-916`). Threading them, or running a writer beside other host code, is a **risk to verify**, not a known fact. The runtime I/O thread safety of gfortran and nvfortran on a non-main thread is also unverified.
-11. **FDS writers under async output** need a host snapshot and explicit-argument refactor of `DUMP_SLCF`/`DUMP_SMOKE3D`/`DUMP_BNDF`/VTKHDF (§5.1), or dedicated I/O ranks. AMReX offers neither. The size of that work is not estimated.
+11. **FDS writers under async output** need a host snapshot and explicit-argument refactor of `DUMP_SLCF`/`DUMP_SMOKE3D`/`DUMP_BNDF`/VTKHDF (§5.1), or dedicated I/O ranks. AMReX offers no snapshot writer. For I/O ranks it offers only `amrex::MPMD::Copier` between two programs (`AMReX_MPMD.H:26-52`). The design is in `fr072-output-amrex-notes.md`. The size of that work is not estimated.
 12. **Host memory on the test machine.** Every pending async write holds a pinned host copy of the output fields (`AMReX_VisMF.cpp:2471-2481`). Route (a) multiplies per-rank host state by N. Test-machine RAM and physical core count (`<P>`) are unknown.

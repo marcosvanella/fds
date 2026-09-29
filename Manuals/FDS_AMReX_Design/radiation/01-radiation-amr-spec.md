@@ -60,12 +60,17 @@
 **Box coupling within one level** (owner decision Q12, 2026-09-26; FR-005(i) exemption for the radiation stage is being recorded by the Spec Lead; FR-005(iv) run-to-run reproducibility still holds):
 - **S-B [DECIDED, default]: FDS-style lagged box-face exchange with RADIATION_ITERATIONS.** Each box sweeps its angle subset independently, using box-face ghost intensities from the previous exchange. A per-box face buffer replaces OMESH IL_S/IL_R. The exchange is an AMReX FillBoundary-style copy of the upwind face intensities per angle, and it follows the FDS cadence (main.f90:1022-1044, 1110-1116): after each pass when K>1, otherwise at the end of the step, and only on intensity-update steps.
   - The iteration loop keeps FDS semantics. K passes per step move intensity across K box faces within the step, each pass costing a full solve.
-  - Reproducibility: for a fixed decomposition and rank count the result is deterministic (no atomics in the sweep, fixed exchange order), so FR-005(iv) holds. It changes when boxes, rank count, or load balance change; that is covered by the exemption.
+  - Reproducibility: the sweep has no atomics and the exchange is fixed, so results are run-to-run identical (FR-005(iv)). With the per-box default below they change only with the box split, which D-039 exempts.
 - **How the lag differs from FDS meshes.** In FDS, intensity loses one exchange per mesh interface crossed, and users choose few, large meshes. AMReX boxes are much smaller (floor 16, D-024; typical max_grid_size 32-64), so a ray crosses several times more interfaces over the same distance. With K=1 information needs about one update cycle per box crossed. A 64-cell path at 16³ boxes crosses about 4 faces, against 0-1 for a typical FDS mesh layout. Regrid and load balancing also move the faces, so the lag pattern shifts over time, and new faces start with no lagged value.
-  - **Mitigation [REC]: rank-local ordered sweep.** Boxes owned by the same rank are swept in upwind order in one pass (the local DAG), so only faces between ranks are lagged. That makes the lag behave like FDS, with one rank's region playing the part of one FDS mesh, while keeping the S-B exchange. With several ranks per GPU (NFR-047) the lag is per rank, not per GPU. On GPU, the hyperplane batching of §4 runs over the rank's union region.
-  - New or moved faces after a regrid or rebalance are filled from the box interior on the upwind side, or from the coarse level where it covers them, never left at zero.
-- **Iteration default [REC]:** RADIATION_ITERATIONS=1 by default, for parity with FDS cost and behaviour, together with the rank-local ordered sweep. Keep INITIAL_RADIATION_ITERATIONS=3 (read.f90:10224). Revisit the default after the V&V check runs `radiation_gas_panel` split into 16³ and 32³ boxes over 1, 2 and 4 ranks at K=1,2,3, comparing with the single-mesh result. If K=1 error exceeds tolerance, prefer raising the minimum radiation box size before raising K, since K multiplies radiation cost.
-- **S-A [ALT, optional exact mode later]: global dependency-ordered sweep across ranks.** It is worth keeping as an opt-in diagnostic and verification mode, not on the M2 critical path. It gives the decomposition-independent reference that measures the S-B lag error, and most of it is the same code as the rank-local ordered sweep plus cross-rank pipelining. Suggested timing is after M8, if the lag error or a user need justifies it.
+  - **Default [DECIDED]: fully parallel per-box sweep.** Every box sweeps independently from lagged box-face intensities, like FDS meshes. There is no ordering between boxes, on the same rank or not. Faces are double-buffered: a box reads only face values from the previous exchange, never ones written in the current pass, and one uniform exchange serves same-rank and cross-rank faces (FR-062 (a), ruling in adr/drafts/rulings-IR008-FR062.md §2). Byte identity across ranks and threads also needs particle κ and source deposition to stay deterministic in the GPU port (§4). At a fixed box layout the result is therefore independent of rank count, ranks per GPU, and which rank owns which box (D-039 exempts box-split dependence only). RADIATION_ITERATIONS tightens the coupling: K passes carry intensity across K faces within a step.
+  - New or moved faces after a regrid or rebalance are filled from the box interior on the upwind side, or from the coarse level where it covers them, never left at zero (FR-062).
+- **Cost argument (estimates, to be measured).** Total sweep work is the same for any ordering: cells × angles in the current subset. What differs is the dependency chain, which dominates on GPU because each hyperplane is a dependent step (§4).
+  - Per-box, K=1: one 16³ box has 46 planes per angle. All boxes and all angles in the subset run the same plane index together, so the chain is 46 steps per pass. It is the same on 1 rank or 100.
+  - Ordered sweep over an n×n×n block of boxes: the chain grows to about 3·16·n planes, which is 190 for n=4. That is about 4× the latency of per-box K=1 for the same work, and it also idles the GPU at the start and end of each sweep.
+  - Per-box, K=2 or 3: work is K× (a full extra solve per pass), and the chain is K×46 (92 or 138). In the latency-bound GPU regime that is still shorter than a 4³-box ordered sweep. On CPU, where work dominates, K=2 costs roughly 2× radiation time.
+  - So per-box plus iterations is the cheaper route on GPU for comparable accuracy, and it is the default. The ordered sweep is justified only if K=1..3 cannot meet the lag-error tolerance.
+- **Iteration default [REC]:** RADIATION_ITERATIONS=1 and INITIAL_RADIATION_ITERATIONS=3, matching FDS (read.f90:10224). The FR-062 lag-error check (`radiation_gas_panel` split into 16³ and 32³ boxes at K=1,2,3, against single mesh) sets the recommended K. If K=1 is not accurate enough, the options in order are: raise K; then, as an optional rank-independent mode, sweep radiation on a separate BoxArray with larger boxes (fewer lagged faces, at the cost of a ParallelCopy of κ, sources and QR each radiation step); and only last, the ordered sweep below.
+- **S-A [ALT, conditional]: dependency-ordered sweep across boxes.** Build it only if the FR-062 lag-error check shows per-box plus K=1..3 is not accurate enough. It is not on the M2 critical path. If built, it must order over all boxes (the global upwind order), never rank-locally, so that results stay rank-count independent. The single-mesh FDS run is the lag-error reference, so the check does not need S-A.
 - Both modes share one per-box sweep kernel. The driver chooses only the ordering and exchange.
 
 **Coupling between levels:**
@@ -82,7 +87,7 @@
 - **L-3 [ALT, rejected for now]: composite multi-level sweep with two-way coupling in one pass.** The DAG over all levels is complex and fits GPUs poorly.
 - **L-4 [rejected]: P1 or MLMG radiation** (as in PeleMP, which uses composite MLMG). It changes the physics, which D-003 does not allow.
 
-**Recommendation:** use S-B (with the rank-local ordered sweep) on every level plus L-2, with L-1 kept as the first increment and as a user option (FR-060 already allows "level 0 only / fixed level / all").
+**Recommendation:** use the per-box S-B sweep on every level plus L-2, with L-1 kept as the first increment and as a user option (FR-060 already allows "level 0 only / fixed level / all").
 - The RTE correction sums run over uncovered cells only, with the exact sum of FR-005(ii).
 - Q_RADI and the FR-022 budget integrate over uncovered cells only.
 
@@ -104,9 +109,9 @@
 - Kernel: hyperplane wavefront over precomputed cell lists. This can be written in either K1 (ParallelFor over a list) or K2 (`!$omp target teams loop`). It needs no atomics. UIID accumulation per angle is deterministic.
 - Occupancy: one 16³ box has 46 planes per angle, which is too small. The plan is to batch (box, angle) pairs per plane index across all boxes and all angles of the current subset (about 21 angles in gray).
 - Memory for angle-parallel sweeps: cells × angles in flight × 8 B. That is about 170 MB per 1M cells at 21 angles, and 832 MB per band for all 104 angles (wide band). Process band by band to stay within NFR-031.
-- S-B (the default) has no cross-rank serialization; only the rank-local ordered sweep serializes, and within one GPU. The optional S-A would serialize along the sweep diagonal across ranks and GPUs.
-- Wall loops are unstructured per-wall kernels. RADCAL and table setup stay on the host at init. Particle κ deposition needs atomics, so it is not bitwise.
-- With several ranks per GPU (NFR-047), more ranks mean more lagged faces under S-B. SFC load balancing that keeps neighbouring boxes on the same rank reduces them.
+- Per-box S-B (the default) has no serialization between boxes: all (box, angle) pairs at the same plane index run together. The conditional S-A would serialize along the sweep diagonal (cost argument in §2).
+- Wall loops are unstructured per-wall kernels. RADCAL and table setup stay on the host at init. Particle κ deposition: current FDS has no OpenMP atomics in part.f90 or radi.f90 (grep, source pin). A GPU port must keep the scatter deterministic (for example a sorted segmented sum, not floating-point atomics) to preserve FR-062 byte identity.
+- Several ranks per GPU (NFR-047) do not change per-box results or the lag, which depends only on the box layout.
 
 ## 5. Cost relative to the flow solve (estimates; TO MEASURE)
 
@@ -155,7 +160,7 @@
 
 **Risks (proposed)**
 - (Retired with Q1 decision: S-A GPU and many-rank scaling applies only if the optional exact mode is built.)
-- S-B lag grows with the number of lagged faces a ray crosses (small boxes, more ranks per GPU, regrid moving faces), which degrades accuracy relative to FDS multi-mesh and makes results shift with load balancing. Mitigation: rank-local ordered sweep, face refill at regrid, V&V lag-error check, RADIATION_ITERATIONS>1 as the user fallback.
+- S-B lag grows with the number of lagged faces a ray crosses (small boxes, regrid moving faces), which degrades accuracy relative to FDS multi-mesh and makes results shift with load balancing. Mitigation: face refill at regrid, the FR-062 lag-error check, RADIATION_ITERATIONS>1, then an optional larger-box radiation BoxArray; the ordered sweep last.
 - Angle-parallel GPU memory (cells × angles × bands) could exceed NFR-031.
 - Regrid loses the time-shared UIID/ILW history and causes flux transients at new fine patches.
 - Radiation host-global counters and flags block pure device kernels (R-35/R-46 class).
