@@ -192,6 +192,10 @@ K1:
 ```
 K2:
 ```fortran
+integer :: i, j, k, d, flag, i0, i1, j0, j1, k0, k1
+real(eb) :: QMAX, QC, Q_CUT, SIGN_FACTOR, VC1, VC, MASS_C, SUM_MASS_N, CONST, MASS_N(-3:3)
+i0 = lo(1); i1 = hi(1); j0 = lo(2); j1 = hi(2); k0 = lo(3); k1 = hi(3)
+#if defined(__NVCOMPILER)
 ! nvfortran 26.9 rejects has_device_addr (syntax error); ADR-001 fallback is_device_ptr on the
 ! explicit-shape dummies (OpenMP 5.1: non-c_ptr is_device_ptr items are treated as has_device_addr)
 !$omp target teams loop collapse(3) is_device_ptr(Q, RHOP, MASK, T, CF) &
@@ -226,6 +230,7 @@ do k = k0, k1
          else
             Q_CUT = QMAX; SIGN_FACTOR = -1._eb
          endif
+         VC1 = DY*DZ
 ```
 
 ## 4. Questions (answer each in one or two lines)

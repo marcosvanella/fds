@@ -1,0 +1,225 @@
+routine,file,first_line,last_line,own_lines,purity,n_loops_reaching,derived_type_dummies,pointer_or_allocatable_dummies,blocker_class_counts,first_site_per_class
+CC_SCALARS::ADD_CUTCELL_D_PBAR_DT,ccib.f90,681,705,25,impure,1,,,dt_alloc_component:8; pointer_reassign:1,dt_alloc_component@695; pointer_reassign@691
+CC_SCALARS::ADD_CUTCELL_PSUM,ccib.f90,725,742,18,impure,1,,,dt_alloc_component:3; pointer_reassign:1,dt_alloc_component@738; pointer_reassign@736
+CC_SCALARS::ADD_INPLACE_NNZ_H_WHLDOM,ccib.f90,21138,21172,35,impure,4,,,alloc:2; dt_alloc_component:20,alloc@21152; dt_alloc_component@21150
+CC_SCALARS::ADD_LINKEDCELL_D_PBAR_DT,ccib.f90,664,677,14,impure,1,,,,
+CC_SCALARS::ADD_LINKEDCELL_PSUM,ccib.f90,709,721,13,impure,1,,,,
+CC_SCALARS::CC_CUTCELL_VELOCITY,ccib.f90,3738,3796,59,impure,1,,,dt_alloc_component:18; pointer_reassign:2,dt_alloc_component@3755; pointer_reassign@3753
+CC_SCALARS::CC_DIFFUSIVE_MASS_FLUXES::GET_BBCUTFACE_RHO_D_DZDN,ccib.f90,11677,11717,41,impure,1,,,dt_alloc_component:17; pointer_reassign:2,dt_alloc_component@11686; pointer_reassign@11682
+CC_SCALARS::CC_DIFFUSIVE_MASS_FLUXES::GET_BBRCFACE_RHO_D_DZDN,ccib.f90,11619,11674,56,impure,1,,,dt_alloc_component:14; pointer_reassign:3,dt_alloc_component@11641; pointer_reassign@11624
+CC_SCALARS::CC_DIFFUSIVE_MASS_FLUXES::GET_BBREGFACE_RHO_D_DZDN,ccib.f90,11597,11617,21,impure,1,,,dt_alloc_component:5; pointer_reassign:3,dt_alloc_component@11608; pointer_reassign@11601
+CC_SCALARS::CC_DIVERGENCE_PART_1::CCSPECIES_ADVECTION,ccib.f90,8954,9495,542,impure,1,,,alloc_ptr_local:58; dt_alloc_component:82; pointer_reassign:24,alloc_ptr_local@8979; dt_alloc_component@8975; pointer_reassign@8967
+CC_SCALARS::CC_RESCALE_OMESH_STAGGERED_TO_CUTFACE::OM_CART_TO_VEL_CF,ccib.f90,13889,13895,7,impure,1,M2,M2,alloc_ptr_dummy:3; dt_alloc_component:3,alloc_ptr_dummy@13893; dt_alloc_component@13893
+CC_SCALARS::CFACE_THERMAL_GASVARS,ccib.f90,6842,6910,69,impure,1,"SF,B1",SF,alloc_ptr_dummy:3; alloc_ptr_local:16; dt_alloc_component:12; pointer_reassign:8,alloc_ptr_dummy@6884; alloc_ptr_local@6856; dt_alloc_component@6873; pointer_reassign@6856
+CC_SCALARS::GET_BOUND_VEL,ccib.f90,16187,16228,42,impure,1,,,dt_alloc_component:1; pointer_reassign:3,dt_alloc_component@16212; pointer_reassign@16217
+CC_SCALARS::GET_CCIFACE_RHOHS_LIM,ccib.f90,13553,13603,51,impure,2,,,alloc_ptr_local:12; dt_alloc_component:5; pointer_reassign:7,alloc_ptr_local@13566; dt_alloc_component@13586; pointer_reassign@13566
+CC_SCALARS::GET_CCIFACE_RHOZZ_LIM,ccib.f90,13502,13547,46,impure,5,,,alloc_ptr_local:12; dt_alloc_component:4; pointer_reassign:7,alloc_ptr_local@13514; dt_alloc_component@13532; pointer_reassign@13514
+CC_SCALARS::GET_CC_CELL_CONDUCTIVITY,ccib.f90,11171,11196,26,impure,7,,,,
+CC_SCALARS::GET_CC_CELL_DIFFUSIVITY,ccib.f90,11142,11167,26,impure,1,,,,
+CC_SCALARS::GET_CC_IROW,ccib.f90,20461,20474,14,impure,3,,,dt_alloc_component:2,dt_alloc_component@20471
+CC_SCALARS::GET_CC_MATRIXGRAPH_H,ccib.f90,20875,21134,260,impure,1,,,dt_alloc_component:34; module_global_write:12; pointer_reassign:10,dt_alloc_component@20906; module_global_write@20886; pointer_reassign@20906
+CC_SCALARS::GET_CC_UNKH,ccib.f90,20440,20456,17,impure,1,,,dt_alloc_component:1,dt_alloc_component@20453
+CC_SCALARS::GET_CFACE_OPEN_BC_COEF,ccib.f90,2047,2065,19,impure,2,,,dt_alloc_component:3,dt_alloc_component@2060
+CC_SCALARS::GET_CFACE_RAD_NVEC,ccib.f90,6768,6779,12,impure,1,CFA,,dt_alloc_component:3,dt_alloc_component@6775
+CC_SCALARS::GET_CUTCELL_FH,ccib.f90,20520,20546,27,impure,1,,,dt_alloc_component:4; pointer_reassign:1,dt_alloc_component@20534; pointer_reassign@20532
+CC_SCALARS::GET_CUTCELL_HP,ccib.f90,20479,20516,38,impure,1,,HP,alloc_ptr_dummy:2; dt_alloc_component:12; pointer_reassign:2,alloc_ptr_dummy@20497; dt_alloc_component@20491; pointer_reassign@20491
+CC_SCALARS::GET_CUTFACE_BAROCLINIC_TORQUE,ccib.f90,1770,1805,36,impure,2,CF,"CF,HP",alloc_ptr_dummy:12; dt_alloc_component:13,alloc_ptr_dummy@1784; dt_alloc_component@1785
+CC_SCALARS::GET_FH_FROM_PRHS_AND_BCS,ccib.f90,2069,2234,166,impure,1,,,alloc_ptr_local:23; dt_alloc_component:6; pointer_reassign:7,alloc_ptr_local@2107; dt_alloc_component@2093; pointer_reassign@2107
+CC_SCALARS::GET_FN_DIVERGENCE_CUTCELL,ccib.f90,16589,16651,63,impure,9,,,dt_alloc_component:18,dt_alloc_component@16610
+CC_SCALARS::GET_H_MATRIX_CC,ccib.f90,20550,20870,321,impure,1,,,alloc_ptr_local:59; dt_alloc_component:106; module_global_write:12; pointer_reassign:7,alloc_ptr_local@20584; dt_alloc_component@20584; module_global_write@20567; pointer_reassign@20584
+CC_SCALARS::GET_LHS_CUTCELL,ccib.f90,1407,1644,238,impure,6,,"HP,RHOP,P",alloc_ptr_dummy:24; dt_alloc_component:75,alloc_ptr_dummy@1437; dt_alloc_component@1427
+CC_SCALARS::GET_RCFACE_BAROCLINIC_TORQUE,ccib.f90,1809,1853,45,impure,9,,"HP,RHOP",alloc_ptr_dummy:4; dt_alloc_component:4,alloc_ptr_dummy@1835; dt_alloc_component@1838
+CC_SCALARS::GET_RHSLHS_POISSON_RC,ccib.f90,1091,1309,219,impure,2,,"HP,RHOP,P",alloc_ptr_dummy:48; dt_alloc_component:12,alloc_ptr_dummy@1115; dt_alloc_component@1177
+CC_SCALARS::GET_UVWGAS_CFACE,ccib.f90,6685,6765,81,impure,1,,"UP,VP,WP",alloc_ptr_dummy:3; dt_alloc_component:23,alloc_ptr_dummy@6715; dt_alloc_component@6699
+CC_SCALARS::GET_VELOC_DIVERGENCE_CUTCELL,ccib.f90,16521,16584,64,impure,3,,,dt_alloc_component:18,dt_alloc_component@16541
+CC_SCALARS::INSERT_SORTED_INT_REAL,ccib.f90,21175,21229,55,impure,4,,"JD,D",alloc:6; alloc_ptr_dummy:16; alloc_ptr_local:6,alloc@21194; alloc_ptr_dummy@21189; alloc_ptr_local@21194
+CC_SCALARS::NUMBER_UNKH_CUTCELLS,ccib.f90,22828,22862,35,impure,1,,,dt_alloc_component:5; pointer_reassign:2,dt_alloc_component@22842; pointer_reassign@22846
+CC_SCALARS::ROTATED_CUBE_NEUMN_FZ,ccib.f90,6567,6605,39,impure,3,,,,
+CC_SCALARS::SET_EXIMRHOZZLIM_3D,ccib.f90,8046,8099,54,impure,1,,,alloc_ptr_local:20; dt_alloc_component:6; pointer_reassign:8,alloc_ptr_local@8058; dt_alloc_component@8079; pointer_reassign@8058
+CC_SCALARS::UNSTRUCTURED_POISSON_RESIDUAL,ccib.f90,1314,1401,88,impure,2,,"HP,RHOP,P",alloc_ptr_dummy:12; dt_alloc_component:9,alloc_ptr_dummy@1339; dt_alloc_component@1342
+CC_SCALARS::UNSTRUCTURED_POISSON_RESIDUAL_RC,ccib.f90,1069,1087,19,impure,2,,"HP,RHOP,P",alloc_ptr_dummy:3,alloc_ptr_dummy@1083
+DIVG::PREDICT_NORMAL_VELOCITY,divg.f90,1324,1424,101,impure,1,,,alloc_ptr_local:135; dt_alloc_component:9; pointer_reassign:5,alloc_ptr_local@1336; dt_alloc_component@1354; pointer_reassign@1336
+DIVG::SPECIES_ADVECTION_PART_2,divg.f90,1221,1292,72,impure,1,,U_DOT_DEL_RHO_Z,alloc_ptr_dummy:6; alloc_ptr_local:55; dt_alloc_component:1; pointer_reassign:7,alloc_ptr_dummy@1235; alloc_ptr_local@1232; dt_alloc_component@1263; pointer_reassign@1232
+FIRE::CHECK_CHEMICALLY_ACTIVE_STATE,fire.f90,365,461,97,impure,2,,,io:4; module_global_write:1,io@439; module_global_write@443
+FIRE::CHECK_REACTION,fire.f90,341,362,22,impure,2,,,alloc_ptr_local:3; dt_alloc_component:1; pointer_reassign:1,alloc_ptr_local@350; dt_alloc_component@353; pointer_reassign@350
+COMP_FUNCTIONS::CURRENT_TIME,func.f90,23,30,8,impure,2,,,,
+COMP_FUNCTIONS::GET_FILE_NUMBER,func.f90,186,190,5,impure,1,,,,
+COMP_OPERATORS::EQUATE_INTEGERS,func.f90,678,686,9,impure,11,,,,
+COMP_OPERATORS::EQUATE_INTEGER_VECTORS,func.f90,688,697,10,impure,11,,,,
+COMP_OPERATORS::EQUATE_LOGICALS,func.f90,699,707,9,impure,11,,,,
+COMP_OPERATORS::EQUATE_LOGICAL_VECTORS,func.f90,709,717,9,impure,11,,,,
+COMP_OPERATORS::EQUATE_REALS,func.f90,657,665,9,impure,11,,,,
+COMP_OPERATORS::EQUATE_REAL_VECTORS,func.f90,667,676,10,impure,11,,,,
+GEOMETRY_FUNCTIONS::CIRCLE_CELL_INTERSECTION_AREA,func.f90,6253,6404,152,impure,1,,,,
+GEOMETRY_FUNCTIONS::CONE_MESH_INTERSECTION_VOLUME,func.f90,6417,6487,71,impure,1,,,alloc_ptr_local:35; pointer_reassign:1,alloc_ptr_local@6428; pointer_reassign@6428
+GEOMETRY_FUNCTIONS::GET_INTERPOLATION_WEIGHTS,func.f90,6007,6039,33,impure,4,,,,
+GEOMETRY_FUNCTIONS::GET_N_LAYER_CELLS,func.f90,5743,5784,42,impure,4,,,,
+GEOMETRY_FUNCTIONS::GET_WALL_NODE_COORDINATES,func.f90,5800,5838,39,impure,4,,,,
+GEOMETRY_FUNCTIONS::GET_WALL_NODE_WEIGHTS,func.f90,5860,5994,135,impure,4,,,,
+GEOMETRY_FUNCTIONS::INTERPOLATE_WALL_ARRAY,func.f90,6050,6067,18,impure,4,,,,
+GEOMETRY_FUNCTIONS::RANDOM_CONE,func.f90,6110,6139,30,impure,2,,,alloc_ptr_local:7; pointer_reassign:1,alloc_ptr_local@6118; pointer_reassign@6118
+GEOMETRY_FUNCTIONS::RANDOM_RECTANGLE,func.f90,6081,6094,14,impure,3,,,,
+GEOMETRY_FUNCTIONS::RANDOM_RING,func.f90,6150,6167,18,impure,2,,,alloc_ptr_local:5; pointer_reassign:1,alloc_ptr_local@6158; pointer_reassign@6158
+GEOMETRY_FUNCTIONS::RING_MESH_INTERSECTION_ARC,func.f90,6496,6517,22,impure,1,,,alloc_ptr_local:5; pointer_reassign:1,alloc_ptr_local@6506; pointer_reassign@6506
+GEOMETRY_FUNCTIONS::SEARCH_OTHER_MESHES,func.f90,5410,5446,37,impure,3,,,alloc_ptr_local:20; dt_alloc_component:4; pointer_reassign:1,alloc_ptr_local@5423; dt_alloc_component@5425; pointer_reassign@5423
+GEOMETRY_FUNCTIONS::UNIFORM_RING,func.f90,6179,6190,12,impure,2,,,,
+MATH_FUNCTIONS::BOX_MULLER,func.f90,1236,1247,12,impure,4,,,,
+MATH_FUNCTIONS::CROSS_PRODUCT,func.f90,1172,1181,10,impure,1,,,,
+MATH_FUNCTIONS::EVALUATE_RAMP,func.f90,802,857,56,impure,24,,,dt_alloc_component:3,dt_alloc_component@852
+MATH_FUNCTIONS::F_B,func.f90,1288,1296,9,impure,1,,,,
+MATH_FUNCTIONS::GET_SCALAR_FACE_VALUE,func.f90,1330,1487,132,impure,16,,"A,U,F",alloc_ptr_dummy:56,alloc_ptr_dummy@1351
+MATH_FUNCTIONS::GET_SCALAR_FACE_VALUE::MP5,func.f90,1460,1485,26,impure,17,,,,
+MATH_FUNCTIONS::INTERPOLATE1D,func.f90,1072,1098,27,impure,1,,,,
+MATH_FUNCTIONS::INTERPOLATE1D_UNIFORM,func.f90,1107,1129,23,impure,16,,,,
+MATH_FUNCTIONS::MINMOD2,func.f90,1217,1220,4,impure,17,,,,
+MATH_FUNCTIONS::MINMOD4,func.f90,1223,1228,6,impure,17,,,,
+MATH_FUNCTIONS::RANDOM_CHOICE,func.f90,1190,1214,25,impure,6,,,,
+MEMORY_FUNCTIONS::ALLOCATE_STORAGE,func.f90,3942,4384,180,impure,8,,,alloc:16; alloc_ptr_local:162; dt_alloc_component:20; pointer_reassign:10,alloc@3978; alloc_ptr_local@3968; dt_alloc_component@3979; pointer_reassign@3968
+MEMORY_FUNCTIONS::ALLOCATE_STORAGE::ALLOCATE_BOUNDARY_COORD_ARRAYS,func.f90,4110,4134,25,impure,8,,,alloc:4; dt_alloc_component:6,alloc@4122; dt_alloc_component@4115
+MEMORY_FUNCTIONS::ALLOCATE_STORAGE::ALLOCATE_BOUNDARY_ONE_D_ARRAYS,func.f90,4137,4187,51,impure,8,,,alloc:4; alloc_ptr_local:9; dt_alloc_component:7; pointer_reassign:1,alloc@4151; alloc_ptr_local@4163; dt_alloc_component@4144; pointer_reassign@4163
+MEMORY_FUNCTIONS::ALLOCATE_STORAGE::ALLOCATE_BOUNDARY_PROP1_ARRAYS,func.f90,4221,4281,61,impure,8,,,alloc:22; alloc_ptr_local:30; dt_alloc_component:34; pointer_reassign:1,alloc@4236; alloc_ptr_local@4248; dt_alloc_component@4229; pointer_reassign@4248
+MEMORY_FUNCTIONS::ALLOCATE_STORAGE::ALLOCATE_BOUNDARY_PROP2_ARRAYS,func.f90,4284,4340,57,impure,8,,,alloc:14; alloc_ptr_local:23; dt_alloc_component:27; pointer_reassign:1,alloc@4299; alloc_ptr_local@4311; dt_alloc_component@4292; pointer_reassign@4311
+MEMORY_FUNCTIONS::ALLOCATE_STORAGE::ALLOCATE_BOUNDARY_RADIA_ARRAYS,func.f90,4343,4382,40,impure,8,,,alloc:7; alloc_ptr_local:9; dt_alloc_component:18; pointer_reassign:1,alloc@4359; alloc_ptr_local@4371; dt_alloc_component@4352; pointer_reassign@4371
+MEMORY_FUNCTIONS::ALLOCATE_STORAGE::ALLOCATE_BOUNDARY_THR_D_ARRAYS,func.f90,4190,4218,29,impure,8,,,alloc:4; alloc_ptr_local:1; dt_alloc_component:7; pointer_reassign:1,alloc@4204; alloc_ptr_local@4216; dt_alloc_component@4197; pointer_reassign@4216
+MEMORY_FUNCTIONS::CHKMEMERR,func.f90,3662,3675,14,impure,1,,,io:1; shutdown_call:1; string_op:4,io@3672; shutdown_call@3673; string_op@3672
+MEMORY_FUNCTIONS::INITIALIZE_BOUNDARY_ONE_D,func.f90,4826,4904,79,impure,8,,,alloc_ptr_local:144; dt_alloc_component:76; pointer_reassign:2,alloc_ptr_local@4835; dt_alloc_component@4835; pointer_reassign@4835
+MEMORY_FUNCTIONS::INITIALIZE_BOUNDARY_PROP1,func.f90,4907,4953,47,impure,8,,,alloc_ptr_local:38; dt_alloc_component:11; pointer_reassign:3,alloc_ptr_local@4916; dt_alloc_component@4916; pointer_reassign@4916
+MEMORY_FUNCTIONS::NULLIFY_PARTICLE,func.f90,5215,5250,36,impure,6,,,alloc_ptr_local:38; dt_alloc_component:6; pointer_reassign:2,alloc_ptr_local@5221; dt_alloc_component@5222; pointer_reassign@5221
+MEMORY_FUNCTIONS::PACK_BOUNDARY_COORD,func.f90,4655,4690,36,impure,10,OS,OS,alloc_ptr_dummy:22; alloc_ptr_local:23; dt_alloc_component:23; pointer_reassign:1,alloc_ptr_dummy@4666; alloc_ptr_local@4664; dt_alloc_component@4664; pointer_reassign@4664
+MEMORY_FUNCTIONS::PACK_BOUNDARY_ONE_D,func.f90,4704,4778,75,impure,10,OS,OS,alloc_ptr_dummy:41; alloc_ptr_local:69; dt_alloc_component:72; pointer_reassign:1,alloc_ptr_dummy@4718; alloc_ptr_local@4714; dt_alloc_component@4714; pointer_reassign@4714
+MEMORY_FUNCTIONS::PACK_BOUNDARY_PROP1,func.f90,4967,5059,93,impure,10,OS,OS,alloc_ptr_dummy:47; alloc_ptr_local:48; dt_alloc_component:57; pointer_reassign:1,alloc_ptr_dummy@4982; alloc_ptr_local@4978; dt_alloc_component@4978; pointer_reassign@4978
+MEMORY_FUNCTIONS::PACK_BOUNDARY_PROP2,func.f90,5071,5117,47,impure,10,OS,OS,alloc_ptr_dummy:17; alloc_ptr_local:18; dt_alloc_component:23; pointer_reassign:1,alloc_ptr_dummy@5084; alloc_ptr_local@5082; dt_alloc_component@5082; pointer_reassign@5082
+MEMORY_FUNCTIONS::PACK_BOUNDARY_RADIA,func.f90,5128,5153,26,impure,10,OS,OS,alloc_ptr_dummy:2; alloc_ptr_local:3; dt_alloc_component:6; pointer_reassign:1,alloc_ptr_dummy@5145; alloc_ptr_local@5139; dt_alloc_component@5139; pointer_reassign@5139
+MEMORY_FUNCTIONS::PACK_CFACE,func.f90,4597,4643,47,impure,8,"OS,CFA","OS,CFA",alloc_ptr_dummy:36; alloc_ptr_local:6; dt_alloc_component:13; pointer_reassign:1,alloc_ptr_dummy@4610; alloc_ptr_local@4608; dt_alloc_component@4618; pointer_reassign@4608
+MEMORY_FUNCTIONS::PACK_PARTICLE,func.f90,4399,4467,69,impure,3,"OS,LP","OS,LP",alloc_ptr_dummy:70; alloc_ptr_local:9; dt_alloc_component:30; pointer_reassign:2,alloc_ptr_dummy@4414; alloc_ptr_local@4411; dt_alloc_component@4422; pointer_reassign@4411
+MEMORY_FUNCTIONS::PACK_THIN_WALL,func.f90,4545,4582,38,impure,9,"OS,TW","OS,TW",alloc_ptr_dummy:22; alloc_ptr_local:3; dt_alloc_component:9; pointer_reassign:1,alloc_ptr_dummy@4562; alloc_ptr_local@4558; dt_alloc_component@4567; pointer_reassign@4558
+MEMORY_FUNCTIONS::PACK_WALL,func.f90,4482,4530,49,impure,9,"OS,WC","OS,WC",alloc_ptr_dummy:36; alloc_ptr_local:6; dt_alloc_component:13; pointer_reassign:1,alloc_ptr_dummy@4499; alloc_ptr_local@4495; dt_alloc_component@4507; pointer_reassign@4495
+MEMORY_FUNCTIONS::REALLOCATE_BOUNDARY_ONE_D,func.f90,4781,4823,43,impure,10,ONE_D,ONE_D,alloc:58; alloc_ptr_dummy:118; dt_alloc_component:94,alloc@4786; alloc_ptr_dummy@4786; dt_alloc_component@4786
+MEMORY_FUNCTIONS::REALLOCATE_STORAGE_ARRAYS,func.f90,5262,5294,33,impure,3,OS,OS,alloc:9; alloc_ptr_dummy:12; alloc_ptr_local:9; dt_alloc_component:12,alloc@5271; alloc_ptr_dummy@5270; alloc_ptr_local@5271; dt_alloc_component@5270
+MEMORY_FUNCTIONS::RE_ALLOCATE_STRINGS,func.f90,3815,3830,16,impure,1,,,alloc:4; alloc_ptr_local:15; dt_alloc_component:4; pointer_reassign:1; string_op:4,alloc@3822; alloc_ptr_local@3821; dt_alloc_component@3823; pointer_reassign@3821; string_op@3822
+PHYSICAL_FUNCTIONS::CALC_EQUIV_RATIO,func.f90,2050,2071,22,impure,2,,,,
+PHYSICAL_FUNCTIONS::CUNNINGHAM,func.f90,2129,2135,7,impure,5,,,,
+PHYSICAL_FUNCTIONS::DRAG,func.f90,2074,2126,53,impure,1,,,,
+PHYSICAL_FUNCTIONS::DROPLET_H_MASS_H_HEAT_GAS,func.f90,2605,2678,74,impure,1,,,,
+PHYSICAL_FUNCTIONS::EMBER_IGNITION_MODEL,func.f90,3031,3062,32,impure,1,,,alloc_ptr_local:26; dt_alloc_component:8; pointer_reassign:4,alloc_ptr_local@3040; dt_alloc_component@3041; pointer_reassign@3040
+PHYSICAL_FUNCTIONS::FM_HEAT_FLUX_MODEL,func.f90,3615,3641,27,impure,6,,,,
+PHYSICAL_FUNCTIONS::FORCED_CONVECTION_MODEL,func.f90,3377,3409,33,impure,7,,,,
+PHYSICAL_FUNCTIONS::GET_AVERAGE_SPECIFIC_HEAT,func.f90,1805,1815,11,impure,3,,,,
+PHYSICAL_FUNCTIONS::GET_CONDUCTIVITY,func.f90,1859,1868,10,impure,15,,,,
+PHYSICAL_FUNCTIONS::GET_EMISSIVITY,func.f90,1979,1999,21,impure,12,ONE_D,ONE_D,alloc_ptr_dummy:5; alloc_ptr_local:4; dt_alloc_component:7; pointer_reassign:1,alloc_ptr_dummy@1991; alloc_ptr_local@1993; dt_alloc_component@1992; pointer_reassign@1993
+PHYSICAL_FUNCTIONS::GET_ENTHALPY,func.f90,1934,1952,19,impure,5,,,,
+PHYSICAL_FUNCTIONS::GET_EQUIL_DATA,func.f90,1659,1675,17,impure,5,,,,
+PHYSICAL_FUNCTIONS::GET_FILM_PROPERTIES,func.f90,2871,2937,67,impure,5,,,,
+PHYSICAL_FUNCTIONS::GET_MASS_FRACTION,func.f90,1579,1588,10,impure,9,,,,
+PHYSICAL_FUNCTIONS::GET_MASS_FRACTION_ALL,func.f90,1595,1607,13,impure,7,,,,
+PHYSICAL_FUNCTIONS::GET_MOLECULAR_WEIGHT,func.f90,1700,1707,8,impure,8,,,,
+PHYSICAL_FUNCTIONS::GET_MW_RATIO,func.f90,1616,1656,41,impure,1,,,,
+PHYSICAL_FUNCTIONS::GET_PARTICLE_ENTHALPY,func.f90,1875,1913,39,impure,7,,,alloc_ptr_local:30; dt_alloc_component:15; pointer_reassign:3,alloc_ptr_local@1885; dt_alloc_component@1888; pointer_reassign@1885
+PHYSICAL_FUNCTIONS::GET_REALIZABLE_MF,func.f90,1556,1571,16,impure,3,,,,
+PHYSICAL_FUNCTIONS::GET_SENSIBLE_ENTHALPY,func.f90,1786,1798,13,impure,16,,,,
+PHYSICAL_FUNCTIONS::GET_SENSIBLE_ENTHALPY_Z,func.f90,1823,1833,11,impure,14,,,,
+PHYSICAL_FUNCTIONS::GET_SPECIFIC_GAS_CONSTANT,func.f90,1714,1721,8,impure,17,,,,
+PHYSICAL_FUNCTIONS::GET_SPECIFIC_HEAT,func.f90,1729,1739,11,impure,19,,,,
+PHYSICAL_FUNCTIONS::GET_TEMPERATURE,func.f90,2004,2034,31,impure,1,,,,
+PHYSICAL_FUNCTIONS::GET_VISCOSITY,func.f90,1921,1931,11,impure,13,,,,
+PHYSICAL_FUNCTIONS::GET_VOLUME_FRACTION,func.f90,1683,1693,11,impure,1,,,,
+PHYSICAL_FUNCTIONS::GET_WIND_AT_HEIGHT,func.f90,2688,2714,27,impure,1,,,,
+PHYSICAL_FUNCTIONS::GET_Y_SURF,func.f90,2947,2982,36,impure,4,,,,
+PHYSICAL_FUNCTIONS::HEAT_TRANSFER_COEFFICIENT,func.f90,3135,3321,175,impure,6,SF,SF,alloc_ptr_dummy:29; alloc_ptr_local:78; dt_alloc_component:20; pointer_reassign:13; save_var:4,alloc_ptr_dummy@3157; alloc_ptr_local@3156; dt_alloc_component@3173; pointer_reassign@3156; save_var@3268
+PHYSICAL_FUNCTIONS::HEAT_TRANSFER_COEFFICIENT::CONSTANT_HTC,func.f90,3308,3319,12,impure,6,,,,
+PHYSICAL_FUNCTIONS::IS_REALIZABLE,func.f90,1539,1550,12,impure,2,,,,
+PHYSICAL_FUNCTIONS::LOGLAW_HEAT_FLUX_MODEL,func.f90,3591,3612,22,impure,6,,,,
+PHYSICAL_FUNCTIONS::NATURAL_CONVECTION_MODEL,func.f90,3331,3364,34,impure,6,SF,SF,alloc_ptr_dummy:2,alloc_ptr_dummy@3338
+PHYSICAL_FUNCTIONS::Q_REF_FIT,func.f90,3071,3121,51,impure,3,,,module_global_write:1,module_global_write@3084
+PHYSICAL_FUNCTIONS::RAYLEIGH_HEAT_FLUX_MODEL,func.f90,3412,3517,106,impure,6,,,,
+PHYSICAL_FUNCTIONS::SURFACE_DENSITY,func.f90,2144,2206,63,impure,1,"SF,ONE_D","SF,ONE_D",alloc_ptr_dummy:26; alloc_ptr_local:8; dt_alloc_component:19; pointer_reassign:2,alloc_ptr_dummy@2154; alloc_ptr_local@2183; dt_alloc_component@2160; pointer_reassign@2183
+PHYSICAL_FUNCTIONS::SURFACE_VELOCITY_PROFILE_FACTOR,func.f90,2726,2829,104,impure,2,"SF,VT",,dt_alloc_component:6,dt_alloc_component@2817
+TRAN::G,func.f90,6647,6676,30,impure,1,,,alloc_ptr_local:8; dt_alloc_component:5; pointer_reassign:1,alloc_ptr_local@6654; dt_alloc_component@6666; pointer_reassign@6654
+TRAN::GET_IJK,func.f90,6767,6782,16,impure,8,,,dt_alloc_component:3,dt_alloc_component@6775
+TRAN::GINV,func.f90,6722,6750,29,impure,1,,,alloc_ptr_local:7; dt_alloc_component:4; pointer_reassign:1,alloc_ptr_local@6730; dt_alloc_component@6745; pointer_reassign@6730
+TRAN::GP,func.f90,6684,6714,31,impure,1,,,alloc_ptr_local:6; dt_alloc_component:3; pointer_reassign:1,alloc_ptr_local@6691; dt_alloc_component@6702; pointer_reassign@6691
+COMPLEX_GEOMETRY::POINT_IN_POLYGON,geom.f90,293,357,65,impure,1,,,,
+COMPLEX_GEOMETRY_GRID::POINT_IN_CFACE,geom.f90,27684,27733,50,impure,1,,,alloc:2; alloc_ptr_local:17; dt_alloc_component:12; pointer_reassign:2,alloc@27702; alloc_ptr_local@27697; dt_alloc_component@27697; pointer_reassign@27697
+COMPLEX_GEOMETRY_GRID::RANDOM_CFACE_XYZ,geom.f90,27624,27681,58,impure,3,CFA,,alloc_ptr_local:10; dt_alloc_component:31; pointer_reassign:1,alloc_ptr_local@27637; dt_alloc_component@27637; pointer_reassign@27637
+HVAC_ROUTINES::HVAC_BC_IN::INITIALIZE_HVAC,hvac.f90,2372,2537,166,impure,2,,,io:2; shutdown_call:2; string_op:4,io@2390; shutdown_call@2392; string_op@2390
+INIT::INIT_WALL_CELL,init.f90,2975,3386,412,impure,2,,,alloc_ptr_local:327; dt_alloc_component:166; io:4; module_global_write:4; pointer_reassign:9; save_var:8; string_op:1,alloc_ptr_local@2995; dt_alloc_component@3005; io@3039; module_global_write@3186; pointer_reassign@2995; save_var@3170; string_op@3039
+INIT::REASSIGN_WALL_CELLS::GET_BOUNDARY_TYPE,init.f90,5061,5204,144,impure,2,,,alloc_ptr_local:42; dt_alloc_component:24; pointer_reassign:14,alloc_ptr_local@5075; dt_alloc_component@5071; pointer_reassign@5071
+INIT::REASSIGN_WALL_CELLS::REDEFINE_EDGE,init.f90,5213,5226,14,impure,1,,,,
+INIT::SET_DENSITY_AND_MASS_FRACTIONS_AT_WALL,init.f90,3519,3753,235,impure,2,,,alloc_ptr_local:232; dt_alloc_component:39; module_global_write:2; pointer_reassign:10; shutdown_call:5; string_op:5,alloc_ptr_local@3539; dt_alloc_component@3540; module_global_write@3566; pointer_reassign@3539; shutdown_call@3637; string_op@3637
+MESH_POINTERS::POINT_TO_MESH,mesh.f90,505,916,412,impure,9,,,alloc_ptr_local:403; dt_alloc_component:274; pointer_reassign:403; string_op:4,alloc_ptr_local@512; dt_alloc_component@513; pointer_reassign@512; string_op@877
+PART::GET_RVC,part.f90,5001,5013,13,impure,7,,,dt_alloc_component:7,dt_alloc_component@5007
+PART::INSERT_ALL_PARTICLES::INITIALIZE_SINGLE_PARTICLE,part.f90,1614,1788,175,impure,5,,,alloc_ptr_local:90; dt_alloc_component:24; module_global_write:2; pointer_reassign:4,alloc_ptr_local@1636; dt_alloc_component@1637; module_global_write@1642; pointer_reassign@1636
+PART::INSERT_ALL_PARTICLES::INSERT_DUCT_PARTICLES,part.f90,1487,1490,4,impure,1,,,module_global_write:1,module_global_write@1489
+PART::INSERT_ALL_PARTICLES::INSERT_SPRAY_PARTICLES,part.f90,311,598,288,impure,1,,,alloc:2; dt_alloc_component:16; io:1; module_global_write:2; pointer_reassign:7; shutdown_call:1; string_op:2,alloc@388; dt_alloc_component@405; io@544; module_global_write@318; pointer_reassign@322; shutdown_call@546; string_op@544
+PART::INSERT_ALL_PARTICLES::INSERT_VENT_PARTICLES,part.f90,603,613,11,impure,1,,,,
+PART::INSERT_ALL_PARTICLES::INSERT_VOLUMETRIC_PARTICLES,part.f90,949,1482,534,impure,1,,,alloc:3; alloc_ptr_local:12; dt_alloc_component:26; io:2; pointer_reassign:13,alloc@1163; alloc_ptr_local@1235; dt_alloc_component@965; io@1004; pointer_reassign@959
+PART::INSERT_ALL_PARTICLES::PARTICLE_FACE_INSERT,part.f90,616,944,329,impure,3,,,alloc:2; alloc_ptr_local:28; dt_alloc_component:44; pointer_reassign:28,alloc@722; alloc_ptr_local@633; dt_alloc_component@630; pointer_reassign@630
+PART::INSERT_ALL_PARTICLES::PARTICLE_SIZE_WEIGHT,part.f90,1793,1816,24,impure,5,,,dt_alloc_component:5,dt_alloc_component@1802
+PART::INSERT_ALL_PARTICLES::VOLUME_INIT_PARTICLE,part.f90,1495,1609,115,impure,3,,,alloc_ptr_local:11; dt_alloc_component:6; io:2; pointer_reassign:4; shutdown_call:2; string_op:4,alloc_ptr_local@1536; dt_alloc_component@1578; io@1515; pointer_reassign@1512; shutdown_call@1516; string_op@1515
+PART::MOVE_PARTICLES::GET_FACE_IDW,part.f90,3248,3319,72,impure,1,,,alloc_ptr_local:9; dt_alloc_component:1; pointer_reassign:6,alloc_ptr_local@3259; dt_alloc_component@3276; pointer_reassign@3259
+PART::MOVE_PARTICLES::GET_FACE_TLW,part.f90,3332,3439,108,impure,1,,,alloc_ptr_local:24; pointer_reassign:6,alloc_ptr_local@3344; pointer_reassign@3344
+PART::MOVE_PARTICLES::GET_FACE_VOLUMES,part.f90,3448,3475,28,impure,1,,,alloc_ptr_local:9; pointer_reassign:6,alloc_ptr_local@3455; pointer_reassign@3455
+PART::MOVE_PARTICLES::MOVE_IN_GAS,part.f90,2594,3056,463,impure,1,,,alloc_ptr_local:10; dt_alloc_component:10; pointer_reassign:5; save_var:31,alloc_ptr_local@2750; dt_alloc_component@2631; pointer_reassign@2713; save_var@2736
+PART::MOVE_PARTICLES::MOVE_ON_SOLID,part.f90,2583,2589,7,impure,1,,,,
+PART::MOVE_PARTICLES::SHAPE_DEFORMATION,part.f90,3214,3236,23,impure,1,,,,
+PART::MOVE_PARTICLES::VENT_PARTICLE_EXTRACTION,part.f90,3067,3189,123,impure,1,,,alloc_ptr_local:59; dt_alloc_component:2; pointer_reassign:8,alloc_ptr_local@3085; dt_alloc_component@3099; pointer_reassign@3085
+PART::MOVE_PARTICLES::WAKE_REDUCTION,part.f90,3194,3207,14,impure,1,,,,
+PART::REMOVE_OLDEST_PARTICLE,part.f90,4957,4992,36,impure,5,,,alloc_ptr_local:5; dt_alloc_component:5; pointer_reassign:1,alloc_ptr_local@4970; dt_alloc_component@4970; pointer_reassign@4970
+PART::REMOVE_PARTICLES,part.f90,4778,4948,78,impure,1,,,alloc_ptr_local:28; dt_alloc_component:3; pointer_reassign:6,alloc_ptr_local@4791; dt_alloc_component@4800; pointer_reassign@4791
+PART::REMOVE_PARTICLES::ADD_TO_PARTICLE_SEND_BUFFER,part.f90,4854,4946,93,impure,2,,,pointer_reassign:2,pointer_reassign@4864
+POIS::FSH10S,pois.f90,6207,6258,52,impure,3,,,goto:9,goto@6227
+POIS::FSH17S,pois.f90,5526,5723,198,impure,1,,,goto:5,goto@5608
+POIS::FSH18S,pois.f90,5726,5769,44,impure,3,,,,
+POIS::SSWAP,pois.f90,4469,4576,108,impure,2,,,goto:4,goto@4518
+POIS::VRADB2,pois.f90,3920,3974,55,impure,1,,,goto:3,goto@3949
+POIS::VRADB3,pois.f90,3977,4044,68,impure,1,,,,
+POIS::VRADB4,pois.f90,4047,4128,82,impure,1,,,,
+POIS::VRADB5,pois.f90,4131,4251,121,impure,1,,,,
+POIS::VRADBG,pois.f90,4254,4466,213,impure,1,,,goto:10,goto@4286
+POIS::VRADF2,pois.f90,3221,3271,51,impure,1,,,goto:3,goto@3245
+POIS::VRADF3,pois.f90,3274,3338,65,impure,1,,,,
+POIS::VRADF4,pois.f90,3341,3426,86,impure,1,,,,
+POIS::VRADF5,pois.f90,3429,3557,129,impure,1,,,,
+POIS::VRADFG,pois.f90,3560,3787,228,impure,1,,,goto:9,goto@3596
+GLOBMAT_SOLVER::COMPUTE_GUARD_CELL_INDEXES,pres.f90,3219,3233,15,PURE/ELEMENTAL,7,,,,
+GLOBMAT_SOLVER::GRADIENT_WEIGHT,pres.f90,6038,6050,13,impure,1,,,dt_alloc_component:1,dt_alloc_component@6047
+GLOBMAT_SOLVER::REG_INTERP_WALL_DISTANCES,pres.f90,3237,3261,25,impure,3,,,alloc_ptr_local:9; dt_alloc_component:9; pointer_reassign:1,alloc_ptr_local@3247; dt_alloc_component@3251; pointer_reassign@3247
+LOCMAT_SOLVER::ADD_INPLACE_NNZ_H,pres.f90,2483,2518,36,impure,3,,,,
+QREF_DATA::DEFINE_QREF_ARRAYS,prop.f90,7609,8932,1324,impure,3,,,,
+RAD::A_WSGG,radi.f90,5257,5308,52,impure,1,,,recursion:1,recursion@5257
+RAD::BLACKBODY_FRACTION,radi.f90,5146,5162,17,impure,1,,,,
+RAD::COMPUTE_RADIATION::ADD_VOLUMETRIC_HEAT_SOURCE,radi.f90,5094,5142,49,impure,1,,,alloc_ptr_local:26; dt_alloc_component:6; pointer_reassign:1,alloc_ptr_local@5102; dt_alloc_component@5119; pointer_reassign@5102
+RAD::COMPUTE_RADIATION::CALC_PARTICLE_TEMP_ORIENTATION,radi.f90,5068,5084,17,impure,2,,,,
+RAD::GET_KAPPA,radi.f90,5170,5208,39,impure,1,,,,
+RAD::KAPPA_SOOT,radi.f90,5313,5319,7,impure,1,,,,
+RAD::KAPPA_WSGG,radi.f90,5213,5252,40,impure,1,,,,
+SOOT_ROUTINES::DROPLET_SCRUBBING,soot.f90,539,596,58,impure,1,,,alloc_ptr_local:18; pointer_reassign:4,alloc_ptr_local@553; pointer_reassign@553
+MANUFACTURED_SOLUTIONS::VD2D_MMS_RHO,turb.f90,3441,3445,5,impure,4,,,,
+MANUFACTURED_SOLUTIONS::VD2D_MMS_RHO_OF_Z,turb.f90,3421,3425,5,impure,4,,,,
+MANUFACTURED_SOLUTIONS::VD2D_MMS_U,turb.f90,3447,3453,7,impure,2,,,,
+MANUFACTURED_SOLUTIONS::VD2D_MMS_U_SRC_3,turb.f90,3589,3824,236,impure,2,,,,
+MANUFACTURED_SOLUTIONS::VD2D_MMS_V,turb.f90,3455,3461,7,impure,2,,,,
+MANUFACTURED_SOLUTIONS::VD2D_MMS_V_SRC_3,turb.f90,3826,3832,7,impure,1,,,,
+MANUFACTURED_SOLUTIONS::VD2D_MMS_Z,turb.f90,3432,3439,8,impure,4,,,,
+MANUFACTURED_SOLUTIONS::VD2D_MMS_Z_SRC,turb.f90,3491,3518,28,impure,8,,,,
+TURBULENCE::EDDY_VELOCITY_CONTRIB,turb.f90,2031,2071,41,impure,1,VT,,dt_alloc_component:9,dt_alloc_component@2045
+TURBULENCE::TENSOR_DIFFUSIVITY_MODEL,turb.f90,1286,1483,198,impure,1,,,alloc_ptr_local:106; pointer_reassign:22,alloc_ptr_local@1305; pointer_reassign@1305
+TURBULENCE::WALE_VISCOSITY,turb.f90,1107,1164,58,impure,3,,,,
+TURBULENCE::WALL_MODEL,turb.f90,1167,1283,117,impure,2,,,,
+VEGE::GET_BOUNDARY_VALUES::FILL_BOUNDARY_VALUES,vege.f90,645,740,96,impure,3,,,alloc_ptr_local:10; dt_alloc_component:7; pointer_reassign:1,alloc_ptr_local@661; dt_alloc_component@689; pointer_reassign@661
+VEGE::LEVEL_SET_FIRESPREAD::IGNITE_GRID_CELL,vege.f90,563,597,35,impure,1,,,,
+VEGE::SCALAR_FACE_VALUE_LS,vege.f90,929,971,43,impure,2,,,,
+WALL_ROUTINES::ASSIGN_GHOST_VALUE,wall.f90,282,388,107,impure,1,"BC,B1","BC,B1",alloc_ptr_dummy:98; alloc_ptr_local:51; dt_alloc_component:23; pointer_reassign:8,alloc_ptr_dummy@323; alloc_ptr_local@300; dt_alloc_component@305; pointer_reassign@300
+WALL_ROUTINES::CALCULATE_RHO_D_F,wall.f90,990,1024,35,impure,2,"B1,BC","B1,BC",alloc_ptr_dummy:20; dt_alloc_component:3,alloc_ptr_dummy@1000; dt_alloc_component@1009
+WALL_ROUTINES::CALCULATE_RHO_F,wall.f90,1590,1634,45,impure,2,"BC,B1","BC,B1",alloc_ptr_dummy:27; dt_alloc_component:3,alloc_ptr_dummy@1605; dt_alloc_component@1605
+WALL_ROUTINES::CALCULATE_ZZ_F,wall.f90,1035,1460,426,impure,3,,,alloc_ptr_local:360; dt_alloc_component:122; pointer_reassign:21,alloc_ptr_local@1059; dt_alloc_component@1091; pointer_reassign@1059
+WALL_ROUTINES::CALC_DEPOSITION,wall.f90,1645,1737,93,impure,2,"BC,B1,B2","BC,B1,B2",alloc_ptr_dummy:52; alloc_ptr_local:22; dt_alloc_component:5; pointer_reassign:4,alloc_ptr_dummy@1666; alloc_ptr_local@1665; dt_alloc_component@1671; pointer_reassign@1665
+WALL_ROUTINES::CALC_HVAC_BC,wall.f90,1745,1796,52,impure,2,"BC,B1,SF","BC,B1,SF",alloc_ptr_dummy:31; dt_alloc_component:5,alloc_ptr_dummy@1759; dt_alloc_component@1759
+WALL_ROUTINES::DEPOSIT_PARTICLE_MASS,wall.f90,1468,1581,114,impure,1,"LP,LPC","LP,LPC",alloc_ptr_dummy:23; alloc_ptr_local:80; dt_alloc_component:7; pointer_reassign:5,alloc_ptr_dummy@1481; alloc_ptr_local@1481; dt_alloc_component@1514; pointer_reassign@1481
+WALL_ROUTINES::GET_TRILINEAR_WEIGHTS,wall.f90,528,589,62,impure,3,,,,
+WALL_ROUTINES::NEAR_SURFACE_GAS_VARIABLES,wall.f90,402,497,96,impure,3,"SF,BC,B1,LP,TW","SF,BC,B1,LP,TW",alloc_ptr_dummy:145; alloc_ptr_local:8; dt_alloc_component:9; pointer_reassign:4,alloc_ptr_dummy@417; alloc_ptr_local@477; dt_alloc_component@417; pointer_reassign@477
+WALL_ROUTINES::PYROLYSIS,wall.f90,3195,3605,411,impure,4,"ONE_D,B1","ONE_D,B1",alloc_ptr_dummy:10; alloc_ptr_local:80; dt_alloc_component:54; pointer_reassign:4,alloc_ptr_dummy@3459; alloc_ptr_local@3240; dt_alloc_component@3282; pointer_reassign@3240
+WALL_ROUTINES::SCALAR_TO_POINT,wall.f90,500,517,18,impure,3,,,,
+WALL_ROUTINES::SOLID_HEAT_TRANSFER,wall.f90,1809,3154,1186,impure,4,,,alloc:5; alloc_ptr_local:771; dt_alloc_component:368; io:1; pointer_reassign:46; shutdown_call:1; string_op:2,alloc@2016; alloc_ptr_local@1867; dt_alloc_component@1880; io@2669; pointer_reassign@1867; shutdown_call@2670; string_op@2669
+WALL_ROUTINES::SOLID_HEAT_TRANSFER::PERFORM_PYROLYSIS,wall.f90,2993,3152,160,impure,4,,,dt_alloc_component:15,dt_alloc_component@3008
+WALL_ROUTINES::SURFACE_HEAT_TRANSFER,wall.f90,603,980,378,impure,3,"SF,BC,B1","SF,BC,B1",alloc_ptr_dummy:344; alloc_ptr_local:76; dt_alloc_component:51; pointer_reassign:15,alloc_ptr_dummy@636; alloc_ptr_local@639; dt_alloc_component@655; pointer_reassign@639

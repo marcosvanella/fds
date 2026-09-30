@@ -4,15 +4,15 @@ Owner: Chief Architect. Scope: what still stands between ADR-001 (driver archite
 
 ADR-001's driver choice (C++ AmrCore driver) is already owner-confirmed (D-027). The only open decision inside ADR-001 is the kernel style, K1 (restricted C++) or K2 (Fortran with OpenMP `target` offload).
 
-Status as of 2026-09-26: A4, A5, B1, B2, B3, B5 (analysis), B6, C1 and C2 are done.
+Status as of 2026-09-29: A1 and A2 (S4a) are done and S4b ran; A3 (S5) is out for review (`drafts/s5-readability-review-package.md`). Also done: A4, A5, B1, B2, B3, B5 (analysis), B6, C1 and C2 are done.
 
 ## A. Blocks ADR-001 sign-off
 
 | # | Item | Owner | Needs |
 |---|---|---|---|
-| A1 | Install the NVIDIA HPC SDK (A-31) so both kernel variants compile for CUDA. Compile-only; no GPU needed. | AMReX Integration Lead, with a build chief | Spend |
-| A2 | Spike S4a (compile-only; S4b, the GPU run, does not gate): write the mass kernel as K1 and K2, compile both for CUDA, match the shimmed kernel at T1, record effort and the device-data mechanism (`has_device_addr` or fallback). Depends on A1. | AMReX Integration Lead | Spend |
-| A3 | Spike S5, the NFR-044 readability review of both variants by FDS Fortran developers; decides K1 or K2 (D-043: physics stays Fortran unless the review picks K1). Reviewers named by the owner (D-048): the project owner, the AMR Species & Combustion Lead and the FDS Legacy Mapper. The owner signs off the outcome. Depends on A2. | Owner, with the Chief Architect recording | Owner |
+| A1 | **Done (2026-09-26; NVHPC 26.9, CUDA 13.3, `docs/build/nvhpc-sdk.md`).** Install the NVIDIA HPC SDK (A-31) so both kernel variants compile for CUDA. Compile-only; no GPU needed. | AMReX Integration Lead, with a build chief | Spend |
+| A2 | **Done (S4a; `docs/amrex/s4-cuda-mass-findings.md`; K1 and K2 match at T1 and T0 on the CPU and, S4b, on an NVIDIA GPU after two K2 fixes; ADR-001 v0.5 "K2 coding rules").** Spike S4a (compile-only; S4b, the GPU run, does not gate): write the mass kernel as K1 and K2, compile both for CUDA, match the shimmed kernel at T1, record effort and the device-data mechanism (`has_device_addr` or fallback). Depends on A1. | AMReX Integration Lead | Spend |
+| A3 | **Package sent 2026-09-29; answers and owner sign-off pending.** Spike S5, the NFR-044 readability review of both variants by FDS Fortran developers; decides K1 or K2 (D-043: physics stays Fortran unless the review picks K1). Reviewers named by the owner (D-048): the project owner, the AMR Species & Combustion Lead and the FDS Legacy Mapper. The owner signs off the outcome. Depends on A2. | Owner, with the Chief Architect recording | Owner |
 | A4 | **Done (owner decision D-047, ADR-001 v0.4, NFR-043): host-allowed until Phase 11, device-capable by Phase 11.** Rule whether regrid-time side-data rebuild (wall records, particle bookkeeping) counts as part of the time step that must run on the GPU (NFR-043, D-027). Recommendation to be drafted: host-allowed through the CPU phases, device-capable by Phase 11. | Chief Architect drafts; owner confirms | Owner (yes/no), Doc |
 | A5 | **Done (ADR-001 v0.3.8).** Update ADR-001 text: Q8 item aligned with D-043; D-039 and the FR-062 ruling (independent per-box sweep, host-side exchange) in the kernel-interface section; stale "Decision needed" list cleared (Q5, Q8 answered); ADR-004 cross-reference. | Chief Architect | Doc |
 
@@ -52,6 +52,7 @@ Not required for ADR-001 sign-off: GPU test hardware (Q11 (b)) and device timing
 - Non-box level 0 (`drafts/ruling-nonbox-level0.md` §6): the padding [VERIFY] (V&V script check) and the mesh-union fallback [VERIFY] items (i)-(iv) in the Phase 2 prototype (Integration Lead, with the Pressure Solver Lead).
 - Masked level-0 branch on the GPU path (HYPRE builds are CPU-only), before the GPU phase.
 
+- Upstream-merge tooling for ported kernels (ADR-001 v0.6 merge protocol): `tools/port_rename_hunks.py`, `docs/inventory/port_rename_map.csv`, `docs/inventory/port_kernel_map.csv` and `tools/port_merge_check.py`, all needed before the first ported kernel is accepted into the branch (Legacy Mapper seeds the tables; the implementer of the first kernel writes the scripts).
 ## Critical path
 
 A1, then A2, then A3 is the only chain that needs spend and owner time; everything else in section A is writing. After A3 the Chief Architect sets ADR-001 to Accepted (writing only). Sections B and C can proceed in parallel.

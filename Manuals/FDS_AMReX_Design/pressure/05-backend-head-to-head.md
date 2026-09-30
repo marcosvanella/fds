@@ -259,8 +259,22 @@ FDS sets up the pressure matrix once per run and then re-solves it hundreds of t
   2. **hallD:** hallways refined 2.5 times, open (OPEN vent), all-gas-free boxes dropped. 84 boxes, 1,152,000 unknowns, synthetic zero-mean RHS.
   3. **sealD:** the same geometry without the vent (`hallways_sealed`). One pinned cell, RHS mean removed, 84 boxes.
 - **H CPU options:** the FDS UGLMAT set, as above.
+- **Power profile.** The owner then switched the test machine to a high-performance power profile and lifted a temporary 2.2 GHz frequency cap that had been in force during one aborted attempt. The whole matrix (CPU and GPU) was rerun after that, under the same protocol. The state recorded before the rerun was: governor `performance`, energy preference `performance`, turbo enabled, maximum performance 100%, maximum frequency at the hardware limit on every core (5.2 to 5.4 GHz on the performance cores, 3.9 GHz on the efficiency cores), and package power limits of 55 W sustained and 157 W burst. The platform-profile interface itself could not be read on this machine.
+- **Runs.** Each configuration ran once: a warm-up solve, then 200 timed solves (300 for FFT). Sealed MLMG on 1 rank used 100. The CPU runs used 8, 4 and 1 ranks on performance cores only; the GPU runs used 1 rank. Ranks were confirmed to land on performance cores. With 1 rank, Intel MPI allows any of the 8 performance cores, and the process may hop between them.
+- **Monitoring.** A background sampler logged, once per second, the clock of the pinned cores, the CPU package temperature, and the GPU clock, temperature and power. A watchdog would have stopped the matrix if package temperature stayed at or above 95 °C for 30 s. It never fired.
+- **Versions on the GPU side.** CUDA 12.9 toolkit from the NVHPC 26.9 install, compute capability 8.9 (the newer 13.3 toolkit in the same install was not used); HYPRE v2.32.0 built with `--with-cuda --with-gpu-arch=89 --enable-unified-memory`; AMReX 99ddfda with CUDA, cuFFT and HYPRE. FFT::Poisson on the GPU uses cuFFT.
+- **GPU run settings.** 1 rank, AMReX managed-memory arena (the harness's setup loops run on the host). The device is synchronized around every timed solve, and the initial guess is reset on the device.
+- **BoomerAMG options used for H on the GPU** (all on hypre's GPU-supported list):
+  - PCG outer solver, one BoomerAMG V-cycle as preconditioner, tolerance 0 for the preconditioner.
+  - Coarsening 8 (PMIS), interpolation 6 (extended+i), l1-Jacobi relaxation (18) with 1 sweep, strong threshold 0.25.
+  - GPU-specific additions: relaxation order 0, `KeepTranspose=1`, and interpolation truncated to at most 4 entries per row (the CPU runs use no truncation; FDS's `trunc_factor=0` was not carried over).
+  - Unified memory was enabled in the HYPRE build. The IJ matrix is filled on the host and then migrated to the device.
+  - This is the only difference from the CPU H settings, and it changes iteration counts slightly (mms 20 against 21 to 22, hallD 23 against 24 to 26).
+- **MLMG (Mf) on the GPU:** MLMG runs its smoothers on the device with the HYPRE bottom solver, using the same FDS bottom options as on the CPU. No fallback to MLMG's own bottom solver was needed.
 
-### CPU results: solve only (one run per configuration; median / p90 over N timed solves)
+### CPU results, before: throttled (power profile before the change)
+
+Kept as the reference. Same protocol as the new CPU table below, but the machine was on its earlier power profile and its CPU clocks fell under sustained load. One run per configuration; median and p90 over N timed solves.
 
 | Case | Backend | Ranks | Iterations | Median solve (s) | p90 (s) | N | Warm-up solve (s) | True rel. L2 | Error max / L2 | Setup (s), side note |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -289,7 +303,7 @@ FDS sets up the pressure matrix once per run and then re-solves it hundreds of t
 - For MLMG, "setup" is derived as the operator build plus the warm-up solve minus the median solve. Wherever the long series throttled, that difference goes negative, so those entries show only the operator-build part ("~").
 - In sealD, MLMG again built only **one MG level** (`mg_levels=1`, the pin blocks coarsening). Each "iteration" is therefore a full HYPRE bottom solve on the whole level.
 
-**Throttling. Pinning to performance cores did *not* remove it.**
+**Throttling in this earlier run: pinning to performance cores did not remove it.**
 
 - Pinning removed the efficiency-core stragglers seen in the earlier section.
 - Long solve series at 4 and 8 ranks, however, run into the test machine's sustained package-power and thermal limit. The CPU package read about 90 °C during the runs.
@@ -300,27 +314,146 @@ FDS sets up the pressure matrix once per run and then re-solves it hundreds of t
 - The 1-rank numbers are stable: warm-up, median and p90 agree to within 5%.
 - So on this machine the 8-rank medians are **sustained, power-limited** numbers. That is arguably the regime FDS would run in, but it is not a clean strong-scaling measurement. 4 ranks is the fastest CPU configuration for Mf and H on every case except FFT.
 
-### GPU results
+### CPU results, new: high-performance profile (median / p90 over 200 timed solves)
 
-GPU runs were still pending when these CPU results were written (see below).
+| Case | Backend | Ranks | Iterations | Median solve (s) | p90 (s) | True rel. L2 | Error max / L2 | Peak RSS max per rank (MB) |
+|---|---|---|---|---|---|---|---|---|
+| mms | FFT | 1 | 1 | 0.02228 | 0.02256 | 3.49e-13 | 8.222e-05 / 2.908e-05 | 120 |
+| mms | FFT | 4 | 1 | 0.009663 | 0.009918 | 3.49e-13 | 8.222e-05 / 2.908e-05 | 88 |
+| mms | FFT | 8 | 1 | 0.004842 | 0.004964 | 3.49e-13 | 8.222e-05 / 2.908e-05 | 147 |
+| mms | Mf | 1 | 23 | 1.083 | 1.09 | 2.56e-11 | 8.222e-05 / 2.908e-05 | 249 |
+| mms | Mf | 4 | 23 | 0.3977 | 0.4014 | 2.56e-11 | 8.222e-05 / 2.908e-05 | 113 |
+| mms | Mf | 8 | 23 | 0.327 | 0.3362 | 2.56e-11 | 8.222e-05 / 2.908e-05 | 91 |
+| mms | H | 1 | 21 | 1.055 | 1.057 | 6.86e-11 | 8.222e-05 / 2.908e-05 | 500 |
+| mms | H | 4 | 22 | 0.4345 | 0.4376 | 2.90e-11 | 8.222e-05 / 2.908e-05 | 186 |
+| mms | H | 8 | 22 | 0.3733 | 0.3898 | 3.65e-11 | 8.222e-05 / 2.908e-05 | 134 |
+| hallD | Mf | 1 | 15 | 1.239 | 1.245 | 4.22e-11 | - | 553 |
+| hallD | Mf | 4 | 15 | 0.5133 | 0.5193 | 4.22e-11 | - | 202 |
+| hallD | Mf | 8 | 15 | 0.4583 | 0.476 | 4.22e-11 | - | 149 |
+| hallD | H | 1 | 24 | 1.375 | 1.379 | 9.56e-11 | - | 622 |
+| hallD | H | 4 | 24 | 0.6037 | 0.6101 | 3.39e-11 | - | 247 |
+| hallD | H | 8 | 26 | 0.6213 | 0.6405 | 4.10e-11 | - | 199 |
+| sealD | Mf | 1 | 4 | 4.804 | 4.815 | 3.63e-12 | - | 1845 |
+| sealD | Mf | 4 | 4 | 2.347 | 2.356 | 3.62e-12 | - | 523 |
+| sealD | Mf | 8 | 4 | 2.17 | 2.203 | 3.62e-12 | - | 321 |
+| sealD | H | 1 | 25 | 1.406 | 1.41 | 8.14e-11 | - | 624 |
+| sealD | H | 4 | 26 | 0.652 | 0.659 | 6.51e-11 | - | 248 |
+| sealD | H | 8 | 27 | 0.646 | 0.681 | 4.29e-11 | - | 199 |
+
+- Every run converged. Every true relative L2 residual is at or below 1e-10.
+- The error against the exact solution is identical for all backends on mms: max 8.22e-5, L2 2.91e-5.
+- FFT is a direct solver; its "iteration" count is 1. Its true residual is about 3.5e-13, which is round-off.
+- MLMG's iteration count is the number of V-cycles, and sealD's "4" is four full HYPRE bottom solves on the whole level.
+- The CPU error and residual columns are unchanged from the earlier run, since the numerics do not depend on the clock.
+
+### Speedup from the power-profile change (CPU, median solve time)
+
+| Case | Backend | Ranks | Before, throttled (s) | New (s) | Ratio before/new |
+|---|---|---|---|---|---|
+| mms | FFT | 1 | 0.02256 | 0.02228 | 1.01 |
+| mms | FFT | 4 | 0.008562 | 0.009663 | 0.89 |
+| mms | FFT | 8 | 0.004629 | 0.004842 | 0.96 |
+| mms | Mf | 1 | 1.058 | 1.083 | 0.98 |
+| mms | Mf | 4 | 0.4021 | 0.3977 | 1.01 |
+| mms | Mf | 8 | 0.7786 | 0.327 | 2.38 |
+| mms | H | 1 | 1.052 | 1.055 | 1.00 |
+| mms | H | 4 | 0.4285 | 0.4345 | 0.99 |
+| mms | H | 8 | 0.4363 | 0.3733 | 1.17 |
+| hallD | Mf | 1 | 1.265 | 1.239 | 1.02 |
+| hallD | Mf | 4 | 0.7384 | 0.5133 | 1.44 |
+| hallD | Mf | 8 | 0.8527 | 0.4583 | 1.86 |
+| hallD | H | 1 | 1.368 | 1.375 | 0.99 |
+| hallD | H | 4 | 0.5839 | 0.6037 | 0.97 |
+| hallD | H | 8 | 0.7338 | 0.6213 | 1.18 |
+| sealD | Mf | 1 | 4.777 | 4.804 | 0.99 |
+| sealD | Mf | 4 | 2.259 | 2.347 | 0.96 |
+| sealD | Mf | 8 | 2.327 | 2.17 | 1.07 |
+| sealD | H | 1 | 1.428 | 1.406 | 1.02 |
+| sealD | H | 4 | 0.6328 | 0.652 | 0.97 |
+| sealD | H | 8 | 0.7758 | 0.646 | 1.20 |
+
+Ratios above 1 mean the new run is faster.
+
+### GPU results (1 rank, 200 timed solves; median / p90)
+
+| Case | Backend | Iterations | Median solve (s) | p90 (s) | True rel. L2 | Error max / L2 | Peak RSS (MB) |
+|---|---|---|---|---|---|---|---|
+| mms | FFT | 1 | 0.009086 | 0.009094 | 2.59e-13 | 8.222e-05 / 2.908e-05 | 771 |
+| mms | Mf | 23 | 0.1624 | 0.1627 | 2.56e-11 | 8.222e-05 / 2.908e-05 | 917 |
+| mms | H | 20 | 0.09016 | 0.09026 | 9.24e-11 | 8.222e-05 / 2.908e-05 | 1010 |
+| hallD | Mf | 15 | 0.2419 | 0.2425 | 4.22e-11 | - | 1040 |
+| hallD | H | 23 | 0.1195 | 0.1195 | 5.69e-11 | - | 1126 |
+| sealD | Mf | 4 | 0.8354 | 0.8357 | 3.62e-12 | - | 1039 |
+| sealD | H | 26 | 0.1347 | 0.1348 | 4.32e-11 | - | 1122 |
+
+- All GPU solves are stable: p90 is within 0.3% of the median.
+- GPU MLMG on sealD still builds one MG level, so its "iterations" are again whole-level HYPRE bottom solves.
+- The GPU setup (side note) is 0.07 to 0.5 s for Mf and H and 0.004 s for FFT.
+
+### GPU versus the best CPU configuration, per backend
+
+| Case | Backend | Best CPU config | Best CPU median (s) | p90 (s) | Iterations | GPU median (s) | GPU p90 (s) | GPU iterations | GPU speedup vs best CPU |
+|---|---|---|---|---|---|---|---|---|---|
+| mms | FFT | 8 ranks | 0.004842 | 0.004964 | 1 | 0.009086 | 0.009094 | 1 | 0.5x |
+| mms | Mf | 8 ranks | 0.327 | 0.3362 | 23 | 0.1624 | 0.1627 | 23 | 2.0x |
+| mms | H | 8 ranks | 0.3733 | 0.3898 | 22 | 0.09016 | 0.09026 | 20 | 4.1x |
+| hallD | Mf | 8 ranks | 0.4583 | 0.476 | 15 | 0.2419 | 0.2425 | 15 | 1.9x |
+| hallD | H | 4 ranks | 0.6037 | 0.6101 | 24 | 0.1195 | 0.1195 | 23 | 5.1x |
+| sealD | Mf | 8 ranks | 2.17 | 2.203 | 4 | 0.8354 | 0.8357 | 4 | 2.6x |
+| sealD | H | 8 ranks | 0.646 | 0.681 | 27 | 0.1347 | 0.1348 | 26 | 4.8x |
+
+### GPU versus the best CPU configuration, per case (best backend on each side)
+
+| Case | Best CPU (backend, ranks) | Median (s) | Best GPU (backend) | Median (s) | GPU speedup |
+|---|---|---|---|---|---|
+| mms | FFT, 8 ranks | 0.004842 | FFT | 0.009086 | 0.5x |
+| hallD | Mf, 8 ranks | 0.4583 | H | 0.1195 | 3.8x |
+| sealD | H, 8 ranks | 0.646 | H | 0.1347 | 4.8x |
+
+### Clock and temperature summary (per-second samples, middle 60% of each run)
+
+Clock is the mean over the pinned cores; entries are min / median / max. Package temperature is in °C. The peak column is the maximum over the whole run, including setup.
+
+| Group | Runs | CPU clock (MHz) | Package temp (°C) | Peak package temp (°C) |
+|---|---|---|---|---|
+| CPU, 8 ranks | 7 | median 3390 to 3600, min 3180 to 3430 | 69 to 72 | 71 to 74 (mms Mf: 94, one spike during setup) |
+| CPU, 4 ranks | 7 | median 4090 to 4390, min 3830 to 4150 | 73 to 77 | 76 to 82 |
+| CPU, 1 rank (sampled on the first core only) | 7 | median 5200 where the rank stayed on that core (two runs read lower; see note) | 77 to 90 | 82 to 95 |
+| GPU runs, host CPU | 7 | not meaningful (host is mostly idle, waiting on the device) | 92 | 94 (constant plateau, no watchdog trip) |
+| GPU clock and power | 7 | SM clock 2430 MHz in every run | GPU temperature 52 to 60 | GPU power 58 to 76 W |
+
+- **No CPU throttling in the solve phase.** The pinned-core clock stayed flat inside each run, at a level set by the number of active cores: about 5.2 GHz with 1 rank, 4.1 to 4.4 GHz with 4 ranks, and 3.4 to 3.7 GHz with 8 ranks. Temperature stayed well below the 95 °C stop line during CPU solves, except for brief peaks of 94 to 95 °C in the 1-rank mms Mf and hallD Mf runs and in one 8-rank setup. None lasted 30 s, so the watchdog never fired.
+- **Comparison with the earlier throttled run:** that run did not log clocks, but its warm-up solve was 3 to 4 times faster than the 200-solve median for Mf at 8 ranks. Now the warm-up and median solve times agree (mms Mf at 8 ranks: 0.23 s warm-up against 0.33 s median; the rest of the gap is the first solve including MLMG's delayed setup).
+- **1-rank runs:** the sampler follows only the first performance core, and the rank is free to hop between the 8 performance cores. Two runs (hallD Mf and sealD H) therefore show a low median clock for that core. That is the rank being elsewhere, not throttling. Their solve times (1.24 s, 1.41 s, 1.37 s) are in line with the other 1-rank runs, and their p90 is within 1% of the median.
+- **GPU runs:** the host package sits at 91 to 94 °C for the duration of GPU runs. The GPU draws 58 to 76 W and reports a steady 2430 MHz. All GPU medians are flat (p90 within 0.3%), so no throttling shows in the solve times either. The plateau at 92 °C is close to the stop line, but it never reached 95 °C for 30 s.
+
+### Conclusion on solve speed
+
+- **CPU:** the power-profile change left 1 rank unchanged (0.98 to 1.02 times, as expected) and sped up 4 and 8 ranks by up to 1.4 and 2.4 times (worst cases 0.89 and 0.96 times, which is run-to-run noise on the tiny FFT solves). The largest gains are for Mf, whose runs had been the most affected by throttling. At 8 ranks Mf is now the fastest CPU iterative backend on both open cases (mms 0.33 s against 0.37 s for H; hallD 0.46 s against 0.62 s). Sealed hallways is the exception, where H still wins by 3.4 times at 8 ranks (0.65 s against 2.17 s).
+- **FFT on the manufactured case** is in a class of its own on the CPU: 4.8 ms at 8 ranks, 68 times faster than Mf and 77 times faster than H. On the GPU it is 9.1 ms, which is slower than 8 CPU ranks, because a 100^3 transform is too small to fill the GPU. It applies only to a full box with homogeneous boundary conditions. It cannot handle masks or part-face vents, so it does not apply to hallways.
+- **GPU (one RTX-class test-machine GPU):** against the best CPU configuration it is 4 to 5 times faster for assembled HYPRE on every case (0.090 s on mms, 0.120 s on hallD, 0.135 s on sealD), and 1.9 to 2.6 times faster for MLMG. The best GPU solve is 3.8 times faster than the best CPU solve on hallD and 4.8 times on sealD. On the GPU H is now clearly ahead of Mf (1.8 times on mms, 2.0 on hallD, 6.2 on sealD), the reverse of the CPU ordering on open cases. GPU speedups are relative to 8 CPU ranks on this machine's performance cores, which run at only 3.4 to 3.7 GHz when all 8 are busy.
+- **Recommendation update (solve phase only):** MLMG with the FDS bottom (Mf) remains the CPU default for open domains, and H is needed for sealed or pure-Neumann domains. On the GPU H is the faster solver in all three cases, but it needs a separate assembly path and has a much higher setup cost when the mesh changes. The earlier setup-cost argument for Mf still stands for regridding, so the choice on GPU depends on how often the grid changes.
+
 
 ## Not yet measured
 
-Done in the 1M-unknown section: the 1e-10 hallways comparison (now at 1.15M unknowns), first-solve times, per-rank memory, the stop matched on the true residual, the GPU-readiness notes, and a recommended default backend (single level, CPU).
+Done in the sections above: the 1e-10 hallways comparison, first-solve times, per-rank memory, the true-residual-matched stop, GPU-readiness analysis, a recommended default (single level, CPU), and the solve-only CPU and GPU runs with FFT (before and after the power-profile change).
 
 Still open:
 
-- **The stairwell with the mask and all-gap boxes dropped (`ba=drop`).** This is the case A-56 asked for, and it still has not run. The drop layout is the configuration the recommendation relies on.
+- **The stairwell with the mask and all-gap boxes dropped (`ba=drop`).** This is the case A-56 asked for, and it still has not run.
 - Stairwell repeats 2 and 3, the stairwell at a 1e-12 tolerance, and Mf and H on the stairwell at 1 rank.
-- The HYPRE PCG gap between its recursive and true residuals seen on the stairwell (1.6e-10 for a 1e-10 request). It did not reproduce on mms or hallways with the v2.32.0 tag, and the cause was not investigated.
-- Iteration counts with an RHS built the way FDS builds it (hallways here used the synthetic zero-mean RHS).
-- **Composite multilevel solves.** Everything here is single level.
-- Any GPU run of either backend.
-- Scaling past 8 ranks on a node with uniform cores. On the test machine, ranks 9 to 16 run on efficiency cores.
-- Timings on a thermally stable machine. Test machine throttling moves setup times by up to about 4 times, and by more for MLMG setups that take under 0.1 s (see "Timing caveats").
-- The pure-Neumann mms at 1 and 16 ranks and with repeats (one run at 8 ranks only), plus a fix for MLMG's pin-limited level-0 coarsening on sealed domains.
-- Plain MLMG with the default bottom (M) in the full matrix (probed only).
-- The hallways manufactured-solution error (not applicable to the synthetic RHS) and a grid-convergence study for mms (one grid only).
+- The HYPRE PCG gap between its recursive and true residuals seen on the stairwell (1.6e-10 for a 1e-10 request). It did not reproduce anywhere else.
+- Iteration counts with an RHS built the way FDS builds it (all hallways runs use the synthetic zero-mean RHS).
+- **Composite multilevel solves.** Everything here is single level, for both backends.
+- **Repeats.** The solve-only tables are single runs of 200 timed solves; there is no run-to-run spread beyond the p90 within a run.
+- **GPU scaling and larger sizes.** Only 1 GPU rank at about 1M unknowns was run. Multi-GPU runs, larger grids (where the GPU advantage should grow and FFT's disadvantage shrink), and GPU memory use at scale are untested.
+- **GPU MLMG bottom-solver alternatives** (AMReX's own bottom solver instead of the HYPRE bottom) and GPU BoomerAMG variants (aggressive coarsening, multipass or two-stage interpolation, Chebyshev or two-stage Gauss-Seidel smoothing) were not tried; only one GPU option set was used.
+- Setup cost on the GPU was measured only as a side note (0.07 to 0.5 s).
+- The pure-Neumann mms at 1 and 16 ranks and with repeats (one 8-rank run only, in the setup-and-solve section), plus a fix for MLMG's pin-limited level-0 coarsening on sealed domains (sealD Mf is 3 to 6 times slower than H on both CPU and GPU).
+- Plain MLMG with the default bottom (M) in the full matrices (probed only).
+- A per-core view of the clocks for 1-rank runs (the sampler followed one core; the rank may hop between performance cores).
+- An FFT case on hallways is not meaningful (thin winding corridor covering about 14% of its bounding box) and was not run by design.
 
 ## How to resume
 

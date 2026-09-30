@@ -317,3 +317,216 @@ the C++ K1 do not.
 **Left open:** report the privatisation defect to NVIDIA with `k2_repro/mini`; decide whether a K2 coding rule
 ("no private copies of loop-invariant values in offload loops; parenthesise sums whose order matters") goes into
 the ADR; the R-39 items of §8 (removing post-K2 syncs, sync cost, profile) were not measured.
+
+## 11. S4c: K1 vs K2 performance on the cc 8.9 test-machine GPU
+
+Everything below was **run** on a cc 8.9 test-machine GPU (8 GB, 1 GPU, 1 process, clocks and thermals not locked) unless
+marked **compiled**. Harness: `amrex/s4_mass/s4_perf.cpp` (`-DS4_PERF=ON`), which calls the same production K1
+(`s4_mass_k1.H`, `--fmad=false`) and K2 (`s4_mass_k2.F90`, `-mp=gpu -gpu=cc89,nofma -Minline`) kernels on
+AMReX-arena device memory; AMReX built with `AMReX_CUDA_FASTMATH=OFF`. Logs, CSVs, scripts:
+`prototypes/s4_cuda_mass/perf/test machine/` (results in `results/perf_r3.csv`, final run) and `perf/cpu_run/` (CPU hashes).
+
+### 11.1 Method
+- One predictor stage of the mass update, single box, single level, NS=2, clip active (about 15% of cells clipped on
+  density, about 2% on the tracer species), position-hashed exact data (+, -, x only). FillBoundary and host
+  reductions are not in the timed path. Grids 64^3, 128^3, 192^3; 256^3 needs about 9 GB and was not tried.
+- Data stays on the device across the whole loop; no per-kernel maps. 10 warm-up iterations; 200 timed repetitions
+  per kernel and 100 per full stage; variants interleaved rep by rep; host clock around the call plus
+  `cudaDeviceSynchronize` (K1 additionally timed with CUDA events, `K1_ev`, which agrees within about 3 us).
+- "K2 as shipped" (`K2_ship`) = the driver's structure: one blocking target region per kernel and 10 host stream syncs
+  per stage. "K2 syncs removed" (`K2_nosync`) = same regions, no host syncs. Per-kernel K2 numbers (`K2_sync`) include
+  the region's own completion. K2 fuses DENSITY_UPDATE and SUM into one kernel, so they are one row.
+- GPU memory (nvidia-smi peak for the process, includes the 1 GiB arena and the CUDA context): 64^3 about 1156 MiB,
+  128^3 about 1306 MiB, 192^3 about 3988 MiB (of 7805 MiB usable); GPU was idle (2 MiB used) before each size.
+
+### 11.2 Results (median / p90, microseconds, **run**)
+
+| kernel | 64^3 K1 | 64^3 K2 (per-kernel, own sync) | 128^3 K1 | 128^3 K2 | 192^3 K1 | 192^3 K2 |
+|---|---|---|---|---|---|---|
+| RHO_Z_P | 45.8/46.0 | 55.3/55.6 | 475.4/486.2 | 473.3/477.0 | 1557.7/1570.1 | 1560.3/1566.6 |
+| FACE_VALUES (x3) | 619.0/619.6 | 622.7/696.6 | 4834.1/4834.9 | 4842.0/4843.7 | 16198.3/16200.2 | 16244.6/16247.8 |
+| MW_CORRECTION (x3) | 84.6/85.3 | 91.5/91.9 | 885.0/888.7 | 892.3/896.4 | 2834.3/2838.1 | 2842.3/2845.9 |
+| DENSITY_UPDATE+SUM | 150.8/152.1 | 128.1/128.6 | 1403.2/1404.2 | 1251.9/1252.8 | 4698.4/4700.8 | 4133.5/4135.3 |
+| CLIP_TERMS | 281.0/283.0 | 278.8/280.2 | 1963.8/1966.4 | 1965.0/1966.5 | 6390.1/6392.4 | 6396.2/6397.7 |
+| GATHER | 24.1/24.4 | 20.8/21.1 | 383.8/384.4 | 382.9/383.3 | 1266.7/1267.4 | 1265.7/1266.5 |
+| DENSITY_APPLY | 11.9/12.0 | 10.8/10.9 | 173.3/177.8 | 172.7/177.5 | 779.7/784.2 | 777.8/781.5 |
+| CLIP_TERMS (species 0) | 172.6/174.9 | 171.2/173.1 | 1256.2/1259.2 | 1262.8/1264.8 | 4159.1/4161.5 | 4183.5/4185.2 |
+| GATHER (species 0) | 20.8/21.1 | 18.7/18.9 | 230.9/231.3 | 224.1/224.3 | 760.5/761.1 | 737.5/738.0 |
+| SPECIES_APPLY | 13.8/14.0 | 10.4/10.6 | 322.1/324.8 | 311.0/313.3 | 998.4/1000.9 | 994.2/997.3 |
+| RENORM | 22.3/22.6 | 23.0/23.2 | 353.0/354.7 | 352.5/354.5 | 1130.4/1133.2 | 1130.0/1132.8 |
+| POST_CLIP | 69.2/69.8 | 74.2/74.8 | 541.8/543.3 | 606.6/608.0 | 1795.4/1799.6 | 2007.0/2011.2 |
+| K1-only: SPECIES_ONE | 8.4/8.7 | - | 145.7/147.0 | - | 517.1/519.6 | - |
+
+Full stage (12 kernels, K1) vs K2 variants:
+
+| full stage | 64^3 | 128^3 | 192^3 |
+|---|---|---|---|
+| K1 | 1638.4/1641.5 | 14201.5/14206.2 | 46897.8/46905.1 |
+| K2 as shipped (10 host syncs) | 1688.3/1692.2 (+3.0%) | 14170.9/14178.3 (-0.2%) | 46683.1/46697.5 (-0.5%) |
+| K2 syncs removed | 1685.8/1690.5 (+2.9%) | 14168.1/14176.8 (-0.2%) | 46679.0/46691.1 (-0.5%) |
+| K2 nowait + event bridge (11.4) | 1652.8/1657.7 (+0.9%) | 14136.8/14144.9 (-0.5%) | 46644.2/46654.8 (-0.5%) |
+
+Noise: p90 is within about 0.1-0.3% of the median for n>=128; the first sample (r1/r2, before a harness change) agrees
+with the final run within 0.1% at 64^3/128^3 and within 0.4% at 192^3 (K1 and K2 drift together). One K2 RHO_Z_P outlier
+(+15%) at 192^3 in a preliminary run did not repeat. Differences below about 0.5% on totals are not significant.
+
+Reading: K2 equals K1 at 128^3 and 192^3. At 64^3 the stage is only about 1.65 ms and the per-region host cost
+(about 4-5 us per blocking region, about 5.5 us with nowait) shows as +3%. Removing the host syncs saves only 2-4 us per
+stage. Per kernel, K2 is faster on the fused DENSITY_UPDATE+SUM (-12%), and about 1-3% faster on the small gather/apply
+kernels, and 12% slower on POST_CLIP.
+
+### 11.3 Bitwise equality (**run**)
+- K1 vs K2 (as shipped, syncs removed, nowait), 64/128/192: RZP, FX, FY, FZ, RHOS, ZZS, TMP, CTERM, CFLAG, DZZ memcmp equal.
+  The scratch array DRHO differs only in the sign of zero at some elements (293 of 287496 at 64^3; +0 vs -0, values
+  compare equal; outputs RHOS/ZZS equal). The CPU K2 (gfortran) does not show it, so it is specific to the nvfortran
+  device build; root cause not found. Checked again after the timed loops: unchanged.
+- GPU K1 hashes equal CPU K1 hashes and GPU K2 equal CPU K2 (gfortran host) hashes on every array except that DRHO
+  (99 hash pairs compared, sizes 64/128/192; 6 differences, all DRHO of K2).
+- CPU (box): K1 vs K2 (gfortran host) equal on all 11 arrays at 64/128/192 (**run**); CPU K2 T1 suite with the
+  modified K2 source (macros only, default numerics and directives unchanged): 69/69 checks, 60/60 T0 (**run**).
+  GPU T1 (`run_gpu_t1.sh --k2 --skip-amrex-build`, once, cc 8.9 test-machine GPU): K1 and K2 each 29/29 comparisons T0 bitwise,
+  36 checks passed (**run**); the 2 "FAIL" lines are the intentional control case of the suite.
+
+### 11.4 R-39: removing the post-K2 host syncs (**run**)
+- A blocking target region returns complete and runs on the OpenMP runtime's own stream (`ompx_get_cuda_stream(0,0)`;
+  nsys shows K2 kernels on a different stream from the AMReX/K1 kernels). So the 10 host `streamSynchronize` calls
+  between K2 groups are redundant when only K2 regions follow each other: **removed in `K2_nosync`, bitwise equal**.
+- They are NOT redundant at a K1/AMReX-stream -> K2 transition: the harness's alternating K1/K2 test without any
+  sync gives wrong results (the expected race; the two streams are unordered), with a sync or a device bridge it is
+  equal. At least one sync (or bridge) per K1/AMReX -> K2 hand-over is required. A stand-alone micro test
+  (`perf/micro/`) did not reproduce the failure in the unsynchronised blocking case; that discrepancy is unresolved and
+  the harness result is the one to trust.
+- `nowait` (`-DS4K2_NOWAIT`, all regions): the runtime round-robins nowait regions over a pool of streams by default
+  (32 streams seen), which ran K2 regions concurrently and gave wrong results. With `ompx_set_cuda_stream_auto(0)`
+  (or `NV_OMP_AUTO_STREAMS=FALSE`) all regions use one stream, in issue order (1 stream seen), and an event bridge
+  (`cudaEventRecord` on the AMReX stream, `cudaStreamWaitEvent` on the K2 stream, fetched with `ompx_get_cuda_stream(0,1)`
+  before the region; twice per stage) orders K2 against AMReX work. Bitwise equal, incl. a 20-repetition stress test and the alternating
+  K1/K2 test. This uses non-standard NVHPC calls.
+- The standard form `nowait depend(inout: dep)` (`-DS4K2_NOWAIT_DEPEND`) **does not compile** with nvfortran 26.9 in 5 of
+  10 kernels (rho_z_p, density_update, post_clip, clip_terms, gather):
+  `NVFORTRAN-F-0000-Internal compiler error. gen_llvm_expr(): unknown opcode (s4_mass_k2.F90: 151)`,
+  `... could not get result type from opc ...`, `fort2 TERMINATED by signal 11`. Plain `nowait` compiles for all 10.
+  `is_device_ptr` also cannot be split over two clauses (`NVFORTRAN-S-0155 Repeated clause`).
+
+### 11.5 K2 tuning and diagnosis (128^3, **run**)
+K2 is not slower in total, so tuning was only tried to look for headroom. K2/K1 total: default (collapse(3), compiler
+picks 128 threads) 1.00; `thread_limit(32)` 1.00; `thread_limit(64)` 0.995; `thread_limit(256)` 1.007;
+`num_teams(1024)` 1.047 (worse); `collapse(2)` 2.02 (CLIP_TERMS 3.5x slower); `collapse(1)` 14.1. Nothing helped beyond noise; the default is
+already best. The one K2 deficit is POST_CLIP (+12% at >=128^3): nsys median 660.7 vs 579.6 us; K2 110 registers, 128
+threads, 16384 blocks vs K1 72 registers, 256 threads, 8192 blocks (register counts from `cuobjdump`, cc 8.9; K2: rho_z_p 94,
+face_values 64, mw_correction 60, density_update 112, post_clip 110, clip_terms 72, gather 38, density_apply 38,
+species_apply 42, renorm 72; K1: 56, 50, 48, 98 (+52 SUM), 72, 54, 36, 16, 20, 52). Hardware counters (`ncu`) were not
+available (`ERR_NVGPUCTRPERM`, no admin rights), so the POST_CLIP gap is not explained at the instruction level.
+
+### 11.6 do concurrent with `cycle`: POST_CLIP (`s4_mass_k2_dc.F90`)
+- Variant A (**compiled** `-stdpar=gpu -gpu=cc89,nofma -Minline`; **run**): compiles, bitwise equal (all 11 arrays), but
+  the AMReX device pointers are treated as host data: every call uploads and downloads zzp, rhop, mask, tmp
+  (`NV_ACC_NOTIFY`). 64^3: 32995 us vs K1 70.2 us and K2 75.9 us (about 470x slower).
+- Variant B (`-acc=gpu -DS4DC_DEVICEPTR`, `!$acc data deviceptr(...)` around the same `do concurrent`, host array
+  `MWR_Z` copied in): compiles, bitwise equal at 64/128/192, no transfers of the device arrays. 64^3 77.1 us,
+  128^3 663.7 us, 192^3 2009.1 us vs K2 74.4 / 660.9 / 2006.6 us and K1 69.4 / 582.3 / 1794.7 us (all median, **run**).
+  So it matches K2 (same generated code shape: collapse(3), 128 threads), but needs OpenACC data directives beyond pure standard Fortran.
+
+### 11.7 Caveats and open items
+- The harness excludes FillBoundary, host reductions and the AMReX launch of other work; the real driver adds these
+  identically for K1 and K2. Test-machine GPU clocks/thermals were not locked; use differences below about 0.5% with care.
+- POST_CLIP gap not explained at counter level; DRHO signed-zero difference not root-caused; micro-test vs harness
+  discrepancy in the unsynchronised blocking case unresolved.
+- Ordering K2 vs AMReX streams relies on non-standard NVHPC calls; the standard `nowait depend` form ICEs in nvfortran 26.9.
+- `run_cpu_t1.sh` and `build_cpu.sh` source an env file path that does not exist on the development machine; the run here used
+  `(local GNU toolchain setup directory)/env_gnu_ompi.sh` with `/opt/nvidia` removed from `LD_LIBRARY_PATH`.
+- Not measured: 256^3, multi-level, multi-rank, real `run_gpu_t1.sh` timings beyond the pass check.
+
+## 12. S4d: DIVERGENCE_PART_1 cell nests, K1 vs K2 (ported and run on the cc 8.9 test-machine GPU)
+Scope (owner-approved): seven cell nests of `divg.f90` `DIVERGENCE_PART_1`, lines 171-181, 298-311, 435-444, 463-471, 512-522, 561-569, 646-656, with
+their three callees `GET_SENSIBLE_ENTHALPY_Z`, `GET_SPECIFIC_HEAT`, `GET_CONDUCTIVITY` (`func.f90:1823, 1729, 1859`). The wall patches, the other ~40 nests
+and the rest of the routine are NOT ported (see `s4d-divergence-part1-map.md`). Nothing needed more than the earlier estimate, so no scope was expanded.
+(The 435-444 and 463-471 nests are the callee exercisers for `GET_SPECIFIC_HEAT` / `GET_CONDUCTIVITY`; the two `DP` nests 561-569 and 646-656 are chained
+in FDS but are run here as independent kernels on independent synthetic inputs.)
+
+### 12.1 What was written (sources under `amrex/s4_mass/s4d/`, commit on branch `s4-cuda-mass`, not pushed)
+| file | role | lines |
+|---|---|---|
+| `s4d_ref.F90` | CPU reference: nest bodies copied from `divg.f90`/`func.f90`, flat explicit-shape arrays in the FDS index space `(0:IBAR+1,...)`, gfortran without fast-math and with `-ffp-contract=off` | 188 (loop and callee text copied from FDS, plus declarations) |
+| `s4d_k1.H` | K1: `amrex::ParallelFor` bodies + `AMREX_GPU_HOST_DEVICE` callee functions, tables as raw pointers (Fortran layout) | 156 |
+| `s4d_k2.F90` | K2: same bodies, `!$omp declare target` callees, `S4_LOOP`/`S4_DEV` macros of `s4_omp.inc` (offload or host from one source) | 240 |
+| `s4d_perf.cpp` | harness: synthetic generator, bitwise check CPU/K1/K2, timing | 274 |
+| `CMakeLists.txt`, `build_s4d.sh` | build reusing the existing AMReX CUDA install (not rebuilt); reference lib by gfortran-14 | 47 |
+Total 905 lines against the estimate of about 1 200 (250 F + 250 K1 + 300 K2 + 400 harness). No existing S4 file was touched.
+
+Flattening used: `CELL(CELL_INDEX(I,J,K))%SOLID` -> integer mask `SOLID(I,J,K)`; `SM%RCON` -> scalar; module tables `H_SENS_Z, CP_Z, K_RSQMW_Z (0:5000,NS)`,
+`RSQ_MW_Z(NS)` -> explicit-shape arguments (K1: raw pointers); `ALLOCATE(ZZ_GET)` per thread -> fixed local `ZZ_GET(8)`; `DOT_PRODUCT` -> explicit left-to-right
+loop in K1/K2 (gfortran's DOT_PRODUCT is that order); the N loop of 171-181, 298-311, 646-656 is one species per call (species N passed in); `KP = 0` (line 464)
+is its own kernel. The `DP` sums are parenthesised in K2 in FDS order (nvfortran reassociated the unparenthesised `DELKDELT + Q + QR` sum: 3411 of 13 824 cells
+differed in the last bit before the fix, same hazard as S4b).
+
+### 12.2 Synthetic inputs (CAVEAT: not FDS data)
+The frozen S4 inputs (`fds_sb_r_1`, `fds_g8_r_1`) hold only rho, Z, TMP, so every input here is synthetic, generated on the host by one position-hashed generator
+(`generate()` in `s4d_perf.cpp`) and shared by CPU, K1 and K2: TMP 300-1500 K (smooth field + noise, 1 % of cells on exact half-Kelvin values to hit the `NINT`
+tie path, about 1e-4 of cells above `I_MAX_TEMP = 5000` to hit the index clamp); RHOP 0.3-1.2 (light where hot); NS = 4 species, mass fractions sum to 1 by
+construction; RSUM = R0 sum(Z/MW) about 290; RHO_D about 1e-5 rho (T/300)^0.7; polynomial tables cp_n(T) = 900+260n + (0.35+0.05n) T - 1e-5(n+1) T^2, `H_SENS_Z` its integral,
+conductivity table of order 0.03-0.1 W/m/K times MW^-1/2 (all positive); about 4 % scattered solid cells plus one 3-cell-thick block; non-uniform grid metrics
+(RDX/RDXN differ, +-20 %); Q 0-1e3, QR -50-0. The three `RHO_D_DZD*` inputs of the 298-311 nest are independent random fields (not the output of 171-181), and the DP
+nests' `R_H_G`, `DEL_RHO_D_DEL_Z`, `U_DOT_DEL_RHO_Z` are independent random fields. Timing is data-independent except through the table gather pattern; a real field
+has smoother TMP (better cache behaviour of the table lookups). Compiled and run on the test machine, not on FDS data.
+
+### 12.3 Bitwise status (**run**, cc 8.9 test-machine GPU)
+K1 vs CPU reference, K2 vs CPU reference, K1 vs K2 (`memcmp` of every output array, including the sign of zero; all species N = 1..4 for the N-loop nests):
+**bitwise equal for all seven nests** at 24^3, 31x20x17 (non-cubic), 128^3 and 192^3, no +0/-0-only differences. K2 also compiled for the host with gfortran (`-fopenmp` and without) and
+one nest (298-311) run on the host: 0 differences to the reference (**run** on the development machine; the others **compiled** only).
+
+### 12.4 Timing (**run**, 100 timed reps after 10 warm-ups, median / p90 in microseconds, wall clock between device syncs, data resident)
+K1 = `amrex::ParallelFor` (`--fmad=false`); K2 = nvfortran `-mp=gpu -gpu=cc89,nofma -Minline`, with `target teams distribute parallel do collapse(3)` (the shipped choice of `s4d_k2.F90`).
+K2 with the `s4_omp.inc` form `target teams loop collapse(3)` in the last two columns (`-DS4D_TEAMS_LOOP`). Peak process GPU memory 4.2-4.4 GB (the arena was pre-sized to 4 GB; arena
+use 1.3 GB at 128^3, 4.2 GB at 192^3 incl. one full output set per implementation), so both sizes fit in 8 GB.
+| nest | 128^3 K1 med/p90 | 128^3 K2 med/p90 | K2/K1 | K2 `teams loop` med | 192^3 K1 med/p90 | 192^3 K2 med/p90 | K2/K1 | K2 `teams loop` med |
+|---|---|---|---|---|---|---|---|---|
+| 171-181 RHO_D_DZD | 381 / 384 | 385 / 389 | 1.013 | 391 | 1235 / 1237 | 1244 / 1247 | 1.008 | 1275 |
+| 298-311 H_RHO_D_DZD (3 callee calls) | 520 / 522 | 520 / 522 | 1.001 | 5088 (9.9x) | 1745 / 1749 | 1743 / 1747 | 0.999 | 17028 (9.8x) |
+| 435-444 CP_RHG (GET_SPECIFIC_HEAT) | 501 / 505 | 506 / 508 | 1.011 | 7588 (15x) | 1660 / 1664 | 1658 / 1662 | 0.999 | 25596 (15x) |
+| 463-471 CONDUCTIVITY (GET_CONDUCTIVITY + mask) | 610 / 611 | 582 / 583 | 0.954 | 11547 (19x) | 2069 / 2070 | 1844 / 1846 | 0.891 | 39044 (19x) |
+| 512-522 KDTD | 386 / 388 | 374 / 377 | 0.970 | 382 | 1237 / 1240 | 1240 / 1244 | 1.003 | 1273 |
+| 561-569 DP_KDTD | 531 / 532 | 533 / 535 | 1.003 | 532 | 1714 / 1720 | 1715 / 1721 | 1.001 | 1715 |
+| 646-656 DP_SPECIES (callee + mask) | 643 / 644 | 643 / 644 | 1.000 | 11275 (17.5x) | 2061 / 2064 | 2059 / 2061 | 0.999 | 38065 (18.5x) |
+K1 device-only time (CUDA events on the AMReX stream) is 3 us below the wall-clock K1 in every row (launch latency), so the K1/K2 comparison above is launch + execution + completion for both.
+**Success criterion (K2 within about 10 % of K1): met by all seven nests with `distribute parallel do`; K2 is equal or faster on the two heaviest table-lookup nests** (CONDUCTIVITY 4.6 % / 11 % faster, K1 uses 90 registers with 64 B stack, K2 42/40).
+The `teams loop` form fails the criterion by 10-19x on the four nests that call a `declare target` routine or use a local array.
+The arithmetic nests 171-181, 512-522, 561-569 move about 88-123 MB each at 128^3 (ghost-padded arrays, one read and one write per array) in 374-533 us, i.e. about 230 GB/s effective for K1 and K2 alike (memory bandwidth bound; hand estimate, no profiler counters).
+
+### 12.5 Diagnosis of the `teams loop` slowdown and the `private` defect (nvfortran 26.9, **run**)
+- `-Minfo=mp` reports for the four affected kernels only "Loop parallelized across teams collapse(3) ! blockidx%x" (no `threads(128)`), and the nsys trace shows block size 1
+  (128 for the fast kernels): `target teams loop` around a body with a call to a `declare target` routine or a local array runs ONE thread per team, hence 10-19x.
+  `target teams distribute parallel do collapse(3)` restores 128 threads per block. Callees are inlined with `-Minline` in both forms (SASS of the H kernel has no call except integer-division helpers), so inlining was not the cause.
+- Bitwise: with `teams loop` a `private` scalar passed as an `intent(out)` actual argument to a `declare target` callee (`H_S` in `GET_SENSIBLE_ENTHALPY_Z`) miscompiles:
+  298-311 and 646-656 return garbage (denormals) with `teams loop ... private(TMP_G,H_S)` / `private(H_S)`; without the `private` clause the results are correct under `teams loop`, but with `distribute parallel do`
+  the scalars MUST be `private` (otherwise they are shared between threads: a race). The shipped K2 therefore uses `distribute parallel do` + `private`, which is bitwise equal and full speed.
+  Minimal reproducer: `prototypes/s4_cuda_mass/s4d/priv_callee.F90` (nvfortran `-O2 -mp=gpu -gpu=cc89,nofma`; variant 1 = `teams loop` + `private(h)` + `intent(out)` actual: 4096 of 4096 wrong without `-Minline`, correct with it in the
+  small case; the full kernel is wrong with `-Minline` too). This is the same family as the S4b `private` defect (section 10).
+- The `s4_omp.inc` single-source macro is unchanged; `s4d_k2.F90` redefines `S4_LOOP` to `distribute parallel do` on offload builds (`-DS4D_TEAMS_LOOP` restores the old form) so nothing in S4/S4b/S4c changes.
+
+### 12.6 Registers per kernel (cuobjdump `--dump-resource-usage`, **compiled**, sm_89, no local memory, no spills)
+| nest | K1 REG | K2 REG (`distribute parallel do`, shipped) | K2 REG (`teams loop`) |
+|---|---|---|---|
+| 171-181 | 48 | 44 | 40 |
+| 298-311 | 38 | 45 | 38 |
+| 435-444 | 86 (stack 64 B) | 39 (stack 64 B) | 76 |
+| 463-471 zero KP | 14 | 42 | 36 |
+| 463-471 conductivity | 90 (stack 64 B) | 40 (stack 64 B) | 78 |
+| 512-522 | 40 | 42 | 38 |
+| 561-569 | 40 | 40 | 44 |
+| 646-656 | 32 | 47 | 42 |
+The stack of 64 B is `ZZ_GET(8)`. K1 runs 256-thread blocks (AMReX default), K2 128.
+
+### 12.7 What blocked or nearly blocked the port
+- Derived types: only `CELL%SOLID` (flat int mask) and `SM%RCON` (scalar) were in the chosen nests; all wall/`BOUNDARY_PROP1`/`WALL` loops stay on the host and were not touched (they are interleaved with the nests, so a real
+  integration needs a per-stage host/device sync or device wall loops: still open, see the map).
+- Allocatables / module state: tables as explicit-shape arguments and `ZZ_GET` as a fixed array worked without difficulty (three small callees, no I/O, no module writes).
+- nvfortran: (a) `teams loop` is slow with callees/local arrays and miscompiles `private` scalars passed as `intent(out)` actuals (12.5); (b) reassociation of an unparenthesised sum (fixed by parentheses, as S4b); (c) nothing else new.
+- Not done, by scope: `INTERPOLATE1D_UNIFORM`, `GET_SCALAR_FACE_VALUE`, `ENTHALPY_ADVECTION_NEW`, wall loops, MAXLOC/SUM cell nest 245-258, pressure-zone sums, CC_IBM, tensor diffusivity, MMS.
+
+### 12.8 Open items
+1. Kernels are validated on synthetic fields only; a real-input bitwise test needs the fuller restart dump listed in `s4d-divergence-part1-map.md` section 7.
+2. Each nest was timed alone (launch + execution), not as the chain FDS runs with host wall patches in between; the cost of the host/device hand-offs is not measured here.
+3. The `private`/`teams loop` defect reproducer is small but was not sent to the compiler vendor.
+4. Only one GPU (test machine, clocks 2.2-2.4 GHz, idle GPU, no throttling flag checked beyond start/end values); no second machine.
+5. Raw results: `prototypes/s4_cuda_mass/s4d/test machine/{results,logs}` (CSV, run logs, versions, nsys report); test-machine run folder `runs/s4d_perf/` (bundle `results_bundle.tgz`).

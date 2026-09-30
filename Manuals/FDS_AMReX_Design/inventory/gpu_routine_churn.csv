@@ -1,0 +1,219 @@
+routine,file,stage,n_device_loops,first_loop_line,last_loop_line,readiness_class,commits,lines_changed,commits_excl_bulk,lines_excl_bulk,commits_touching_nests,lines_in_nests,commits_touching_non_nest,lines_non_nest,nest_hunks_body_only,nest_hunks_surface,bulk_commits
+CC_SCALARS::ADD_CUTCELL_D_PBAR_DT,ccib.f90,predictor/corrector,2,694,702,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::ADD_CUTCELL_PSUM,ccib.f90,predictor/corrector,1,737,740,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CCCOMPUTE_RADIATION,ccib.f90,radiation,2,7139,7155,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_BAROCLINIC_CORRECTION,ccib.f90,pressure,4,1682,1759,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_CHECK_DIVERGENCE,ccib.f90,predictor/corrector,3,16315,16421,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_CHECK_MASS_DENSITY,ccib.f90,predictor/corrector,16,12545,13085,blocked,1,8,1,8,1,8,0,0,4,0,0
+CC_SCALARS::CC_CHECK_MASS_DENSITY::CC_CV_RHOZZ_AVERAGE,ccib.f90,predictor/corrector,3,13098,13173,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_COMPUTE_KRES,ccib.f90,predictor/corrector,1,3708,3729,blocked,1,2,1,2,1,2,0,0,1,0,0
+CC_SCALARS::CC_COMPUTE_VELOCITY_ERROR,ccib.f90,pressure,1,15668,16177,blocked,2,226,1,6,2,223,1,3,18,8,1
+CC_SCALARS::CC_COMPUTE_VISCOSITY,ccib.f90,predictor/corrector,1,5901,5929,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_CUTCELL_VELOCITY,ccib.f90,predictor/corrector,1,3755,3793,blocked,1,2,1,2,0,0,1,2,0,0,0
+CC_SCALARS::CC_DENSITY,ccib.f90,predictor/corrector,6,11773,11891,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_DIFFUSIVE_MASS_FLUXES,ccib.f90,predictor/corrector,2,11232,11589,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_DIVERGENCE_PART_1,ccib.f90,predictor/corrector,22,8383,8829,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_DIVERGENCE_PART_1::CCENTHALPY_ADVECTION,ccib.f90,predictor/corrector,11,9521,10210,blocked,2,20,2,20,1,14,2,6,0,2,0
+CC_SCALARS::CC_DIVERGENCE_PART_1::CCSPECIES_ADVECTION,ccib.f90,predictor/corrector,7,8974,9492,blocked,2,17,2,17,1,12,2,5,1,2,0
+CC_SCALARS::CC_DIVERGENCE_PART_1::CC_CONDUCTION_HEAT_FLUX,ccib.f90,predictor/corrector,12,10648,11131,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_DIVERGENCE_PART_1::CC_DIFFUSIVE_HEAT_FLUXES,ccib.f90,predictor/corrector,7,10226,10634,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_DIVERGENCE_PART_1::FIX_CC_DIFF_MASS_FLUXES,ccib.f90,predictor/corrector,5,8849,8947,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_H_INTERP,ccib.f90,exchange/communication,1,7070,7099,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_MATCH_VELOCITY,ccib.f90,predictor/corrector,1,5405,5853,blocked,1,3,1,3,1,3,0,0,0,2,0
+CC_SCALARS::CC_MATCH_VELOCITY_FLUX,ccib.f90,pressure,1,5169,5362,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_NO_FLUX,ccib.f90,pressure,3,15463,15567,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_PROJECT_VELOCITY,ccib.f90,predictor/corrector,12,2725,2989,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_RESCALE_OMESH_STAGGERED_TO_CUTFACE,ccib.f90,predictor/corrector,1,13867,13886,blocked,1,32,1,32,1,20,1,12,0,1,0
+CC_SCALARS::CC_RESTORE_UVW_UNLINKED,ccib.f90,predictor/corrector,8,3560,3685,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_RHO0W_INTERP,ccib.f90,exchange/communication,1,6995,7029,blocked,1,2,1,2,1,2,0,0,1,0,0
+CC_SCALARS::CC_ROTATED_CUBE_RHS_ZZ,ccib.f90,predictor/corrector,2,6524,6557,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_STORE_FACE_FV,ccib.f90,predictor/corrector,2,15588,15624,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_VELOCITY_BC,ccib.f90,predictor/corrector,1,13949,13968,blocked,2,32,2,32,1,18,2,14,1,1,0
+CC_SCALARS::CC_VELOCITY_CUTFACES,ccib.f90,predictor/corrector,1,6938,6952,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CC_VELOCITY_FLUX,ccib.f90,predictor/corrector,6,15064,15214,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CFACE_PREDICT_NORMAL_VELOCITY,ccib.f90,predictor/corrector,4,6003,6076,blocked,1,2,1,2,1,2,0,0,1,0,0
+CC_SCALARS::CHECK_CFLVN_LINKED_CELLS,ccib.f90,other/shared,3,864,1026,blocked,1,25,1,25,1,16,1,9,0,1,0
+CC_SCALARS::COMPUTE_LINKED_CUTFACE_BAROCLINIC,ccib.f90,pressure,3,1873,1956,blocked,1,2,1,2,0,0,1,2,0,0,0
+CC_SCALARS::COPY_CC_MUNKH_TO_UNKH,ccib.f90,pressure,2,22873,22926,blocked,2,102,0,0,2,92,1,10,7,5,2
+CC_SCALARS::COPY_CC_UNKH_TO_HS,ccib.f90,pressure,1,22940,22945,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::CUTFACE_VELOCITIES,ccib.f90,particles,4,761,820,blocked,1,2,1,2,1,2,0,0,1,0,0
+CC_SCALARS::GET_ADVDIFFVECTOR_SCALAR_3D,ccib.f90,predictor/corrector,6,13664,13848,blocked,1,18,1,18,1,16,1,2,0,2,0
+CC_SCALARS::GET_CC_MATRIXGRAPH_H,ccib.f90,pressure,5,20905,21130,blocked,3,92,2,10,3,86,1,6,5,2,1
+CC_SCALARS::GET_CFACE_OPEN_BC_COEF,ccib.f90,pressure,1,2059,2062,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_CUTCELL_DDDT,ccib.f90,predictor/corrector,2,2625,2686,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_CUTCELL_FH,ccib.f90,pressure,1,20531,20543,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_CUTCELL_HP,ccib.f90,pressure,2,20490,20511,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_EXPLICIT_ADVDIFFVECTOR_SCALAR_3D,ccib.f90,predictor/corrector,9,12086,12510,blocked,2,10,2,10,1,6,1,4,0,1,0
+CC_SCALARS::GET_FH_FROM_PRHS_AND_BCS,ccib.f90,pressure,3,2088,2231,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_FN_DIVERGENCE_CUTCELL,ccib.f90,pressure,1,16610,16647,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_H_CUTFACES,ccib.f90,pressure,1,21302,21411,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_H_GUARD_CUTCELL,ccib.f90,pressure,2,530,656,blocked,3,182,2,30,3,150,2,32,6,5,1
+CC_SCALARS::GET_H_MATRIX_CC,ccib.f90,pressure,3,20583,20868,blocked,3,294,2,47,3,269,3,25,15,6,1
+CC_SCALARS::GET_LHS_CUTCELL,ccib.f90,pressure,2,1427,1639,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_LINKED_FV,ccib.f90,pressure,8,15246,15356,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_LINKED_VELOCITIES,ccib.f90,predictor/corrector,15,3031,3532,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_M_DOT_PPP_SCALAR_3D,ccib.f90,predictor/corrector,4,12003,12037,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_PRES_CFACE_BCS,ccib.f90,pressure,1,2282,2594,blocked,1,2,1,2,1,2,0,0,1,0,0
+CC_SCALARS::GET_RCFACES_H,ccib.f90,pressure,4,21604,21915,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_RHOZZVECTOR_SCALAR_3D,ccib.f90,predictor/corrector,4,13442,13491,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_RHOZZ_CC_3D,ccib.f90,predictor/corrector,3,13201,13366,blocked,1,6,1,6,1,6,0,0,3,0,0
+CC_SCALARS::GET_SHUNN3_QZ,ccib.f90,predictor/corrector,2,6629,6653,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::GET_VELOC_DIVERGENCE_CUTCELL,ccib.f90,predictor/corrector,1,16541,16580,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::MESH_CC_EXCHANGE,ccib.f90,exchange/communication,43,4183,4983,blocked,3,254,2,169,2,249,2,5,0,11,1
+CC_SCALARS::MESH_CC_EXCHANGE::FILL_GCCUTCELL_SPECIES,ccib.f90,exchange/communication,1,5017,5104,blocked,1,60,0,0,1,54,1,6,4,4,1
+CC_SCALARS::NUMBER_UNKH_CUTCELLS,ccib.f90,pressure,3,22841,22858,blocked,1,11,0,0,1,3,1,8,0,1,1
+CC_SCALARS::PUT_RHOZZVECTOR_SCALAR_3D,ccib.f90,predictor/corrector,3,13389,13416,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::ROTATED_CUBE_RHS_ZZ,ccib.f90,predictor/corrector,1,6442,6465,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::ROTATED_CUBE_VELOCITY_FLUX,ccib.f90,predictor/corrector,2,6124,6212,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::SET_EXIMADVFLX_3D,ccib.f90,predictor/corrector,1,8011,8039,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::SET_EXIMDIFFLX_3D,ccib.f90,predictor/corrector,4,8189,8245,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::SET_EXIMRHOHSLIM_3D,ccib.f90,predictor/corrector,1,8122,8170,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::SET_EXIMRHOZZLIM_3D,ccib.f90,predictor/corrector,1,8062,8096,blocked,0,0,0,0,0,0,0,0,0,0,0
+CC_SCALARS::UNSTRUCTURED_POISSON_RESIDUAL,ccib.f90,pressure,4,1334,1382,blocked,0,0,0,0,0,0,0,0,0,0,0
+DIVG::CHECK_DIVERGENCE,divg.f90,corrector,1,1675,1711,blocked,0,0,0,0,0,0,0,0,0,0,0
+DIVG::DIVERGENCE_PART_1,divg.f90,predictor/corrector,22,93,778,blocked,2,6,2,6,1,4,1,2,2,0,0
+DIVG::DIVERGENCE_PART_2,divg.f90,predictor/corrector,5,1525,1630,blocked,1,2,1,2,1,2,0,0,1,0,0
+DIVG::ENTHALPY_ADVECTION_NEW,divg.f90,predictor/corrector,3,814,966,blocked,6,126,6,126,4,57,6,69,0,19,0
+DIVG::MERGE_PRESSURE_ZONES,divg.f90,predictor/corrector,1,1301,1319,blocked,0,0,0,0,0,0,0,0,0,0,0
+DIVG::SPECIES_ADVECTION_PART_1_NEW,divg.f90,predictor/corrector,4,995,1213,blocked,6,617,6,617,5,333,6,284,1,31,0
+DIVG::SPECIES_ADVECTION_PART_2,divg.f90,predictor/corrector,2,1237,1289,blocked,0,0,0,0,0,0,0,0,0,0,0
+FIRE::COMBUSTION_BC,fire.f90,species_combustion,1,1902,1918,blocked,0,0,0,0,0,0,0,0,0,0,0
+FIRE::COMBUSTION_GENERAL_LOAD_BALANCED,fire.f90,species_combustion,4,123,327,blocked,2,10,2,10,1,2,1,8,1,0,0
+FIRE::COMBUSTION_LOAD_BALANCED,fire.f90,species_combustion,1,63,67,blocked,1,3,1,3,1,1,1,2,1,0,0
+FIRE::CONDENSATION_EVAPORATION,fire.f90,species_combustion,2,1957,2224,blocked,1,18,1,18,1,18,0,0,9,0,0
+GEOMETRY_FUNCTIONS::BLOCK_CELL,func.f90,other/shared,1,5509,5524,blocked,0,0,0,0,0,0,0,0,0,0,0
+MATH_FUNCTIONS::GET_SCALAR_FACE_VALUE,func.f90,predictor/corrector,6,1348,1453,blocked,3,20,3,20,1,12,2,8,6,0,0
+MEMORY_FUNCTIONS::PACK_CELL,func.f90,other/shared,1,5183,5201,blocked,0,0,0,0,0,0,0,0,0,0,0
+PHYSICAL_FUNCTIONS::COMPUTE_WIND_COMPONENTS,func.f90,predictor/corrector,1,2845,2847,blocked,1,20,0,0,1,18,1,2,0,1,1
+HVAC_ROUTINES::HVAC_BC_IN,hvac.f90,other/shared,2,2341,2366,blocked,1,1,1,1,0,0,1,1,0,0,0
+INIT::CREATE_OR_REMOVE_OBST,init.f90,other/shared,1,4878,4889,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+INIT::OPEN_AND_CLOSE,init.f90,other/shared,1,4731,4835,blocked,1,2,1,2,1,2,0,0,1,0,0
+INIT::REASSIGN_WALL_CELLS,init.f90,other/shared,2,4917,5054,blocked,0,0,0,0,0,0,0,0,0,0,0
+FDS::MESH_EXCHANGE,main.f90,exchange/communication,2,3144,3970,blocked,5,217,5,217,4,206,4,11,2,43,0
+MASS::DENSITY,mass.f90,predictor/corrector,16,424,759,blocked,1,30,1,30,1,24,1,6,0,2,0
+MASS::DENSITY::CHECK_MASS_DENSITY,mass.f90,predictor/corrector,3,799,961,blocked,3,18,3,18,3,13,1,5,7,0,0
+MASS::DENSITY::CLIP_PASSIVE_SCALARS,mass.f90,predictor/corrector,1,980,987,blocked,0,0,0,0,0,0,0,0,0,0,0
+MASS::MASS_FINITE_DIFFERENCES,mass.f90,predictor/corrector,4,65,350,blocked,1,4,1,4,0,0,1,4,0,0,0
+PART::CLIP_PARTICLE_DRAG,part.f90,particles,1,4606,4617,blocked,1,18,1,18,1,6,1,12,1,0,0
+PART::INSERT_ALL_PARTICLES,part.f90,particles,2,162,294,blocked,1,6,1,6,1,6,0,0,1,0,0
+PART::INSERT_ALL_PARTICLES::INSERT_VENT_PARTICLES,part.f90,particles,2,605,611,"clean-body,has callees",0,0,0,0,0,0,0,0,0,0,0
+PART::INSERT_ALL_PARTICLES::INSERT_VOLUMETRIC_PARTICLES,part.f90,particles,2,1170,1445,blocked,9,156,9,156,4,62,7,94,15,0,0
+PART::MOVE_PARTICLES,part.f90,particles,1,1873,2566,blocked,5,61,4,58,3,50,2,11,22,0,1
+PART::PARTICLE_MASS_ENERGY_TRANSFER,part.f90,particles,4,3654,4384,blocked,3,14,2,10,1,6,2,8,3,0,1
+PART::PARTICLE_MASS_ENERGY_TRANSFER::PARTICLE_RUNNING_AVERAGES,part.f90,particles,1,4414,4571,blocked,1,6,1,6,1,6,0,0,2,0,0
+PART::PARTICLE_MOMENTUM_TRANSFER,part.f90,particles,1,4643,4763,blocked,1,144,1,144,1,121,1,23,0,1,0
+PART::REMOVE_OLDEST_PARTICLE,part.f90,particles,1,4969,4977,blocked,0,0,0,0,0,0,0,0,0,0,0
+PART::REMOVE_PARTICLES,part.f90,particles,1,4794,4845,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::FSH03S,pois.f90,pressure,2,1055,1152,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::FSH04S,pois.f90,pressure,2,1183,1195,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::FSH05S,pois.f90,pressure,1,1228,1234,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::FSH06S,pois.f90,pressure,8,1271,1334,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::FSH16S,pois.f90,pressure,3,5489,5519,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::FSH17S,pois.f90,pressure,2,5557,5721,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::FSH18S,pois.f90,pressure,5,5742,5767,blocked,1,2,1,2,1,2,0,0,1,0,0
+POIS::H2CYSS,pois.f90,pressure,11,7333,7442,blocked,1,6,1,6,0,0,1,6,0,0,0
+POIS::H2CZSS,pois.f90,pressure,12,6830,6934,blocked,1,4,1,4,0,0,1,4,0,0,0
+POIS::H3CSSS,pois.f90,pressure,17,4974,5217,blocked,1,4,1,4,0,0,1,4,0,0,0
+POIS::H3CZSS,pois.f90,pressure,16,241,407,blocked,1,4,1,4,0,0,1,4,0,0,0
+POIS::SSWAP,pois.f90,pressure,4,4530,4574,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VCOST,pois.f90,pressure,4,1504,1536,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VCOST1,pois.f90,pressure,3,1568,1589,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VCOSTA,pois.f90,pressure,3,1615,1628,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADB2,pois.f90,pressure,3,3943,3972,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADB3,pois.f90,pressure,2,4005,4042,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADB4,pois.f90,pressure,3,4074,4126,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADB5,pois.f90,pressure,2,4164,4248,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADBG,pois.f90,pressure,14,4287,4464,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADF2,pois.f90,pressure,3,3239,3269,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADF3,pois.f90,pressure,2,3299,3336,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADF4,pois.f90,pressure,3,3365,3424,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADF5,pois.f90,pressure,2,3459,3555,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRADFG,pois.f90,pressure,15,3597,3785,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRFTB1,pois.f90,pressure,3,3845,3914,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VRFTF1,pois.f90,pressure,3,1768,1834,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCOSB,pois.f90,pressure,2,1951,1958,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCOSF,pois.f90,pressure,3,2011,2025,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCOSQ,pois.f90,pressure,5,2120,2161,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCSB1,pois.f90,pressure,2,2191,2202,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCSBA,pois.f90,pressure,3,2226,2239,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCSF1,pois.f90,pressure,3,2265,2284,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCSFA,pois.f90,pressure,2,2310,2317,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSCSQ1,pois.f90,pressure,3,2346,2366,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSINT,pois.f90,pressure,3,2452,2471,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSINT1,pois.f90,pressure,2,2510,2524,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSINTA,pois.f90,pressure,3,2550,2562,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSRFTB,pois.f90,pressure,1,2658,2664,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSRTB1,pois.f90,pressure,1,2777,2781,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSRTF1,pois.f90,pressure,1,2808,2814,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSINB,pois.f90,pressure,2,2851,2858,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSINF,pois.f90,pressure,3,2912,2925,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSINQ,pois.f90,pressure,5,2977,3011,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSNB1,pois.f90,pressure,2,3041,3052,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSNBA,pois.f90,pressure,3,3074,3087,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSNF1,pois.f90,pressure,3,3115,3134,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSNFA,pois.f90,pressure,2,3160,3167,blocked,0,0,0,0,0,0,0,0,0,0,0
+POIS::VSSNQ1,pois.f90,pressure,3,3196,3216,blocked,0,0,0,0,0,0,0,0,0,0,0
+GLOBMAT_SOLVER::CHECK_UNSUPPORTED_MESH,pres.f90,pressure,1,4012,4026,blocked,4,145,2,4,1,14,4,131,0,1,2
+GLOBMAT_SOLVER::COPY_CCVAR_IN_HS,pres.f90,pressure,1,4351,4356,blocked,3,32,2,7,2,25,2,7,2,1,1
+GLOBMAT_SOLVER::COPY_H_OMESH_TO_MESH,pres.f90,pressure,2,4079,4198,blocked,3,230,1,60,3,225,2,5,21,8,2
+GLOBMAT_SOLVER::GET_BCS_H_MATRIX,pres.f90,pressure,1,4934,5009,blocked,3,17,2,14,2,11,3,6,3,2,1
+GLOBMAT_SOLVER::GET_H_MATRIX,pres.f90,pressure,1,5038,5260,blocked,6,255,4,84,5,242,3,13,33,7,2
+GLOBMAT_SOLVER::GET_H_REGFACES,pres.f90,pressure,1,5580,5601,blocked,1,3,1,3,0,0,1,3,0,0,0
+GLOBMAT_SOLVER::GET_MATRIXGRAPH_H_WHLDOM,pres.f90,pressure,4,5299,5528,blocked,5,185,3,74,4,176,3,9,21,6,2
+GLOBMAT_SOLVER::GET_MATRIX_INDEXES_H,pres.f90,pressure,1,5725,5807,blocked,1,3,1,3,0,0,1,3,0,0,0
+GLOBMAT_SOLVER::GLMAT_SOLVER,pres.f90,pressure,1,3351,3653,blocked,4,76,4,76,3,69,2,7,8,3,0
+GLOBMAT_SOLVER::GLMAT_SOLVER_SETUP,pres.f90,pressure,2,3729,3831,blocked,5,177,3,63,3,118,4,59,2,3,2
+GLOBMAT_SOLVER::PRESSURE_SOLVER_CHECK_RESIDUALS_U,pres.f90,pressure,2,5920,6024,blocked,1,2,1,2,0,0,1,2,0,0,0
+GLOBMAT_SOLVER::SET_CCVAR_CGSC_H,pres.f90,pressure,1,5863,5869,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+GLOBMAT_SOLVER::WRITE_EWC_TYPE_DIAGNOSTIC,pres.f90,pressure,1,4290,4329,blocked,3,86,2,25,2,68,2,18,11,1,1
+LOCMAT_SOLVER::ULMAT_BCS_H_MATRIX,pres.f90,pressure,1,2723,2781,blocked,0,0,0,0,0,0,0,0,0,0,0
+LOCMAT_SOLVER::ULMAT_GET_H_REGFACES,pres.f90,pressure,1,2031,2047,blocked,0,0,0,0,0,0,0,0,0,0,0
+LOCMAT_SOLVER::ULMAT_H_MATRIX,pres.f90,pressure,3,2545,2693,blocked,0,0,0,0,0,0,0,0,0,0,0
+LOCMAT_SOLVER::ULMAT_MATRIXGRAPH_H,pres.f90,pressure,11,2176,2474,blocked,0,0,0,0,0,0,0,0,0,0,0
+LOCMAT_SOLVER::ULMAT_SOLVER_SETUP,pres.f90,pressure,2,1219,1381,blocked,0,0,0,0,0,0,0,0,0,0,0
+LOCMAT_SOLVER::ULMAT_SOLVE_ZONE,pres.f90,pressure,18,1505,1994,blocked,1,55,1,55,1,39,1,16,0,1,0
+PRES::COMPUTE_VELOCITY_ERROR,pres.f90,pressure,1,839,1072,blocked,2,11,1,1,1,7,2,4,2,0,1
+PRES::PRESSURE_SOLVER_CHECK_RESIDUALS,pres.f90,pressure,3,729,787,blocked,1,5,1,5,0,0,1,5,0,0,0
+PRES::PRESSURE_SOLVER_COMPUTE_RHS,pres.f90,pressure,6,65,307,blocked,2,7,2,7,1,2,1,5,1,0,0
+PRES::PRESSURE_SOLVER_FFT,pres.f90,pressure,8,394,492,blocked,1,5,1,5,0,0,1,5,0,0,0
+PRES::TUNNEL_POISSON_SOLVER,pres.f90,pressure,5,531,596,blocked,3,44,3,44,1,36,3,8,0,2,0
+RAD::COMPUTE_RADIATION::ADD_VOLUMETRIC_HEAT_SOURCE,radi.f90,radiation,1,5101,5140,blocked,0,0,0,0,0,0,0,0,0,0,0
+RAD::COMPUTE_RADIATION::RADIATION_FVM,radi.f90,radiation,7,3886,5059,blocked,13,390,13,390,12,348,6,42,35,23,0
+RAD::INTERPOLATE_IL,radi.f90,radiation,3,3651,3695,blocked,4,124,4,124,4,93,3,31,2,4,0
+SOOT_ROUTINES::CALC_AGGLOMERATION,soot.f90,species_combustion,1,280,389,blocked,1,2,1,2,1,2,0,0,1,0,0
+SOOT_ROUTINES::SETTLING_VELOCITY,soot.f90,predictor/corrector,1,54,175,blocked,0,0,0,0,0,0,0,0,0,0,0
+SOOT_ROUTINES::SOOT_SURFACE_OXIDATION,soot.f90,species_combustion,2,412,534,blocked,1,4,1,4,1,4,0,0,2,0,0
+TURBULENCE::CALC_VARDEN_LEONARD_TERM,turb.f90,predictor/corrector,1,819,831,blocked,0,0,0,0,0,0,0,0,0,0,0
+TURBULENCE::COMPRESSION_WAVE,turb.f90,predictor/corrector,12,187,277,"ready(leaf,no blocker)",0,0,0,0,0,0,0,0,0,0,0
+TURBULENCE::FILL_EDGES,turb.f90,predictor/corrector,12,882,943,blocked,0,0,0,0,0,0,0,0,0,0,0
+TURBULENCE::SYNTHETIC_TURBULENCE,turb.f90,predictor,1,1796,1861,blocked,2,373,1,52,2,261,2,112,1,10,1
+TURBULENCE::TENSOR_DIFFUSIVITY_MODEL,turb.f90,predictor/corrector,6,1323,1479,blocked,4,464,3,144,3,140,3,324,32,0,1
+TURBULENCE::TEST_FILTER,turb.f90,predictor/corrector,6,979,1077,blocked,0,0,0,0,0,0,0,0,0,0,0
+TURBULENCE::VARDEN_DYNSMAG,turb.f90,predictor/corrector,5,501,710,blocked,1,2,1,2,1,2,0,0,1,0,0
+VEGE::GET_BOUNDARY_VALUES,vege.f90,solid_phase,3,618,639,"clean-body,has callees",0,0,0,0,0,0,0,0,0,0,0
+VEGE::GET_BOUNDARY_VALUES::FILL_BOUNDARY_VALUES,vege.f90,solid_phase,1,678,699,blocked,0,0,0,0,0,0,0,0,0,0,0
+VEGE::LEVEL_SET_ADVECT_FLUX,vege.f90,solid_phase,3,885,914,blocked,0,0,0,0,0,0,0,0,0,0,0
+VEGE::LEVEL_SET_FIRESPREAD,vege.f90,solid_phase,1,506,536,blocked,4,205,3,181,4,200,2,5,30,5,1
+VEGE::LEVEL_SET_SPREAD_RATE,vege.f90,solid_phase,1,763,857,"ready(leaf,no blocker)",1,191,1,191,1,183,1,8,22,0,0
+VELO::BAROCLINIC_CORRECTION,velo.f90,pressure,4,3254,3305,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::CHECK_STABILITY,velo.f90,other/shared,3,3059,3134,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::COMPUTE_VISCOSITY,velo.f90,predictor/corrector,10,80,363,blocked,2,125,2,125,2,113,1,12,3,2,0
+VELO::COMPUTE_VISCOSITY::COMPUTE_STRAIN_RATE,velo.f90,predictor/corrector,2,413,483,blocked,1,2,1,2,0,0,1,2,0,0,0
+VELO::MATCH_VELOCITY,velo.f90,predictor/corrector,1,2663,2853,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::MATCH_VELOCITY_FLUX,velo.f90,pressure,1,2891,3015,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::NO_FLUX,velo.f90,pressure,3,1376,1559,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::VELOCITY_BC,velo.f90,predictor/corrector,1,1858,1897,blocked,11,486,10,476,10,458,6,28,51,9,1
+VELO::VELOCITY_CORRECTOR,velo.f90,corrector,5,1724,1787,"clean-body,has callees",0,0,0,0,0,0,0,0,0,0,0
+VELO::VELOCITY_FLUX,velo.f90,predictor/corrector,5,619,830,blocked,1,4,1,4,0,0,1,4,0,0,0
+VELO::VELOCITY_FLUX::CORIOLIS_FORCE,velo.f90,predictor/corrector,5,970,1028,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::VELOCITY_FLUX::DIRECT_FORCE,velo.f90,predictor/corrector,3,896,945,"ready(leaf,no blocker)",1,6,1,6,0,0,1,6,0,0,0
+VELO::VELOCITY_FLUX::MMS_VELOCITY_FLUX,velo.f90,predictor/corrector,2,1040,1054,"clean-body,has callees",0,0,0,0,0,0,0,0,0,0,0
+VELO::VELOCITY_FLUX::PATCH_VELOCITY_FLUX,velo.f90,predictor/corrector,1,1081,1198,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::VELOCITY_FLUX_CYLINDRICAL,velo.f90,predictor/corrector,3,1243,1337,blocked,1,2,1,2,0,0,1,2,0,0,0
+VELO::VELOCITY_PREDICTOR,velo.f90,predictor,5,1603,1665,"clean-body,has callees",1,2,1,2,0,0,1,2,0,0,0
+VELO::VISCOSITY_BC,velo.f90,predictor/corrector,1,514,550,blocked,0,0,0,0,0,0,0,0,0,0,0
+VELO::WALL_VELOCITY_NO_GRADH,velo.f90,predictor/corrector,3,3347,3450,blocked,0,0,0,0,0,0,0,0,0,0,0
+WALL_ROUTINES::ASSIGN_GHOST_VALUE,wall.f90,solid_phase,1,319,339,blocked,4,112,4,112,1,1,4,111,1,0,0
+WALL_ROUTINES::HT3D_TEMPERATURE_EXCHANGE,wall.f90,solid_phase,2,3635,3717,blocked,0,0,0,0,0,0,0,0,0,0,0
+WALL_ROUTINES::SURFACE_HEAT_TRANSFER,wall.f90,solid_phase,1,888,947,blocked,15,1176,14,1174,4,164,15,1012,11,2,1
+WALL_ROUTINES::WALL_BC,wall.f90,solid_phase,6,109,271,blocked,6,35,5,34,4,15,4,20,2,5,1
