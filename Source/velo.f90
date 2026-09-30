@@ -7,6 +7,9 @@ USE PRECISION_PARAMETERS
 USE GLOBAL_CONSTANTS
 USE MESH_POINTERS
 USE COMP_FUNCTIONS, ONLY: CURRENT_TIME
+#ifdef WITH_AMREX
+USE FDS_AMREX_HOOKS, ONLY: EXTERNAL_GHOSTS_FILLED
+#endif
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
@@ -515,6 +518,9 @@ WALL_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS
    WC =>WALL(IW)
    EWC=>EXTERNAL_WALL(IW)
    IF (EWC%NOM==0) CYCLE WALL_LOOP
+#ifdef WITH_AMREX
+   IF (EXTERNAL_GHOSTS_FILLED) CYCLE WALL_LOOP  ! MU, KRES, D, DS ghost cells across a box boundary are filled externally (AMReX)
+#endif
    BC => BOUNDARY_COORD(WC%BC_INDEX)
    II  = BC%II
    JJ  = BC%JJ
@@ -1377,6 +1383,9 @@ DO IW=1,N_EXTERNAL_WALL_CELLS
    EWC=>EXTERNAL_WALL(IW)
    NOM =EWC%NOM
    IF (NOM==0) CYCLE
+#ifdef WITH_AMREX
+   IF (EXTERNAL_GHOSTS_FILLED) CYCLE  ! H/HS ghost cells across a box boundary are filled externally (AMReX/pressure step)
+#endif
    WC=>WALL(IW)
    IF (PREDICTOR) THEN
       OM_HP=>OMESH(NOM)%H
@@ -1859,6 +1868,9 @@ WALL_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS
    WC =>WALL(IW)
    EWC=>EXTERNAL_WALL(IW)
    IF (EWC%NOM==0) CYCLE WALL_LOOP
+#ifdef WITH_AMREX
+   IF (EXTERNAL_GHOSTS_FILLED) CYCLE WALL_LOOP  ! the normal-velocity ghost face across a box boundary is filled externally (AMReX)
+#endif
    IF (APPLY_TO_ESTIMATED_VARIABLES) THEN
       OM_UU => OMESH(EWC%NOM)%US
       OM_VV => OMESH(EWC%NOM)%VS
@@ -2639,6 +2651,10 @@ IF(CC_IBM) THEN
    RETURN
 ENDIF
 
+#ifdef WITH_AMREX
+IF (EXTERNAL_GHOSTS_FILLED) RETURN  ! the shared-face match of adjacent boxes is done by the driver on AMReX data
+#endif
+
 T_NOW = CURRENT_TIME()
 
 ! Assign local variable names
@@ -2879,6 +2895,10 @@ IF(CC_IBM) THEN
    CALL CC_MATCH_VELOCITY_FLUX(NM)
    RETURN
 ENDIF
+
+#ifdef WITH_AMREX
+IF (EXTERNAL_GHOSTS_FILLED) RETURN  ! the shared-face flux match of adjacent boxes is done by the driver on AMReX data
+#endif
 
 T_NOW = CURRENT_TIME()
 
