@@ -38,6 +38,7 @@
 
 #include "FdsSetup.H"
 #include "Fields.H"
+#include "GhostExchange.H"
 #include "SideData.H"
 #include "TimeStep.H"
 #include "check.H"
@@ -143,7 +144,7 @@ FILE* open_dump(const std::string& fn)
 // ------------------------------------------------------------------ tallies
 struct Tally { long records = 0, arrays = 0, elems = 0, bad = 0; };
 const char* const kTags[] = {"VISC_P", "VISC_C", "DENS_P", "DENS_C", "DENSCLIP_P", "DENSCLIP_C", "VFLUX_P", "VFLUX_C", "DIV1_P", "DIV1_C", "DIV2_P", "DIV2_C",
-                             "VPRED", "VCORR", "FLAGS", "MASK", "TDT", "LOAD"};
+                             "VPRED", "VCORR", "FLAGS", "MASK", "TDT", "LOAD", "BCCHAIN_P", "BCCHAIN_C"};
 constexpr int kNTags = sizeof(kTags) / sizeof(kTags[0]);
 Tally g_tal[kNTags];
 int tag_of(const std::string& t) { for (int i = 0; i < kNTags; ++i) if (t == kTags[i]) return i; return -1; }
@@ -161,7 +162,7 @@ int nodal_dir(const std::string& n)
 
 // Kernel-produced arrays that FDS computes in place on their own ghost strips (VELOCITY_FLUX writes FVX/FVY/FVZ at index 0 and IBP1 itself; WORK* are scratch
 // reused between kernels): they are never level-filled; a test loads them whole and compares them whole.
-bool kernel_strip_array(const std::string& n) { return n == "FVX" || n == "FVY" || n == "FVZ" || n.compare(0, 4, "WORK") == 0; }
+bool kernel_strip_array(const std::string& n) { return n == "H" || n == "HS" || n == "FVX" || n == "FVY" || n == "FVZ" || n.compare(0, 4, "WORK") == 0; }
 
 struct Region { int lb[4], ub[4]; bool empty; };
 
@@ -186,6 +187,7 @@ private:
     int m_ns, m_nt;
     std::unique_ptr<Fields> m_F;
     std::unique_ptr<SideData> m_sd;
+    std::unique_ptr<BcStep> m_bcstep;
     std::vector<BoxCtx> m_box;
     std::unique_ptr<amrex::MultiFab> m_drho_mf;
     std::unique_ptr<amrex::MultiFab> m_dzz_mf;
@@ -195,8 +197,11 @@ private:
     Region alloc_region(int nm, const Arr& a) const;
     void load(const BoxCtx& b, const Rec& r);
     void load_edges(const BoxCtx& b, const Rec& r);
+    void load_strips_only(const BoxCtx& b, const Rec& r);
     void compare(const BoxCtx& b, const Rec& r, const std::string& tag, bool use_before = false, bool owned_only = false);
     void fill_all(bool cross);
+    void ghost_diff(const BoxCtx& b, const Rec& r);
+    void bc_chain(const std::vector<Rec>& next, const std::vector<std::vector<Arr>>& pre, int code, const std::vector<int>& src_of);
     void clip_level(bool pred, double rmin, double rmax, std::vector<int>& flags);
     void mask_check(const Rec& r);
     void replay_time(const std::string& dump);
@@ -311,6 +316,50 @@ void Checker::load_edges(const BoxCtx& b, const Rec& r)
                         if (nout < 2 && !(nout == 1 && onface) && !(nout >= 1 && psolve)) continue;
                         if (i + b.off[0] < a.lb[0] || i + b.off[0] > a.ub[0] || j + b.off[1] < a.lb[1] || j + b.off[1] > a.ub[1] || k + b.off[2] < a.lb[2] || k + b.off[2] > a.ub[2]) continue;
                         double v = dval(b, a, i, j, k, l);
+                        static const char* ep = std::getenv("FDSKC_EDGEPOISON");   // diagnostic: comma list of arrays whose edge/corner (nout>=2) cells get NaN instead of the dump value; "ALL" = all
+                        static const char* sp2 = std::getenv("FDSKC_STRIPPOISON"); // same for boundary-face strips (nout==1 && onface)
+                        static const char* hp = std::getenv("FDSKC_HPOISON");      // same for H/HS ghosts
+                        auto listed = [&](const char* e) { return e && (std::string(e) == "ALL" || (std::string(",") + e + ",").find(std::string(",") + a.name + ",") != std::string::npos); };
+                        if (nout >= 2 && listed(ep)) v = std::numeric_limits<double>::quiet_NaN();
+                        if (nout == 1 && onface && listed(sp2)) v = std::numeric_limits<double>::quiet_NaN();
+                        if (nout == 1 && !onface && psolve && listed(hp)) v = std::numeric_limits<double>::quiet_NaN();
+                        int lb[4] = {i, j, k, l}, ub[4] = {i, j, k, l};
+                        long n = 0, bad = 0; int ierr = 0;
+                        fds_k_xfer(b.nm, a.name.c_str(), a.rank, lb, ub, &v, 0, &n, &bad, &ierr);
+                    }
+    }
+}
+
+void Checker::load_strips_only(const BoxCtx& b, const Rec& r)
+{
+    for (const auto& a : r.bef) {
+        if (a.rank < 3 || is_special(a.name) || a.name.compare(0, 2, "W_") == 0 || a.name.compare(0, 2, "E_") == 0 || a.name.compare(0, 4, "WORK") == 0) continue;
+        if (!m_F->has(a.name)) continue;
+        { static const char* so = std::getenv("FDSKC_STRIPONLY"); if (so && (std::string(",") + so + ",").find(std::string(",") + a.name + ",") == std::string::npos) continue; }
+        const Region al = alloc_region(b.nm, a);
+        if (al.empty) continue;
+        const Region ow = owned(b, a);
+        for (int l = al.lb[3]; l <= al.ub[3]; ++l)
+            for (int k = al.lb[2]; k <= al.ub[2]; ++k)
+                for (int j = al.lb[1]; j <= al.ub[1]; ++j)
+                    for (int i = al.lb[0]; i <= al.ub[0]; ++i) {
+                        const int c[3] = {i, j, k};
+                        int nout = 0;
+                        for (int d = 0; d < 3; ++d) if (c[d] < ow.lb[d] || c[d] > ow.ub[d]) ++nout;
+                        const int nd = nodal_dir(a.name);
+                        const bool onface = nd >= 0 && (c[nd] == 0 || c[nd] == b.vb.length(nd));   // ghost strip of a boundary-face value
+                        const bool psolve = a.name == "H" || a.name == "HS";   // H/HS ghost cells are set by the pressure step (periodic: image plus the solver's mean offset)
+                        static const char* rl = std::getenv("FDSKC_RELOAD"); const bool all1 = rl && (std::string(",") + rl + ",").find(std::string(",") + a.name + ",") != std::string::npos;
+                        if (!(nout == 1 && onface) && !(all1 && nout >= 1)) continue;
+                        if (i + b.off[0] < a.lb[0] || i + b.off[0] > a.ub[0] || j + b.off[1] < a.lb[1] || j + b.off[1] > a.ub[1] || k + b.off[2] < a.lb[2] || k + b.off[2] > a.ub[2]) continue;
+                        double v = dval(b, a, i, j, k, l);
+                        static const char* ep = std::getenv("FDSKC_EDGEPOISON");   // diagnostic: comma list of arrays whose edge/corner (nout>=2) cells get NaN instead of the dump value; "ALL" = all
+                        static const char* sp2 = std::getenv("FDSKC_STRIPPOISON"); // same for boundary-face strips (nout==1 && onface)
+                        static const char* hp = std::getenv("FDSKC_HPOISON");      // same for H/HS ghosts
+                        auto listed = [&](const char* e) { return e && (std::string(e) == "ALL" || (std::string(",") + e + ",").find(std::string(",") + a.name + ",") != std::string::npos); };
+                        if (nout >= 2 && listed(ep)) v = std::numeric_limits<double>::quiet_NaN();
+                        if (nout == 1 && onface && listed(sp2)) v = std::numeric_limits<double>::quiet_NaN();
+                        if (nout == 1 && !onface && psolve && listed(hp)) v = std::numeric_limits<double>::quiet_NaN();
                         int lb[4] = {i, j, k, l}, ub[4] = {i, j, k, l};
                         long n = 0, bad = 0; int ierr = 0;
                         fds_k_xfer(b.nm, a.name.c_str(), a.rank, lb, ub, &v, 0, &n, &bad, &ierr);
@@ -430,6 +479,136 @@ void Checker::compare(const BoxCtx& b, const Rec& r, const std::string& tag, boo
         ++fl.records; fl.arrays += 2; fl.elems += 2;
         if (fds_k_flags(b.nm) != exf) { ++fl.bad; if (g_shown++ < g_show_max) std::fprintf(stderr, "  FLAG mismatch %s: %d expected %d\n", tag.c_str(), fds_k_flags(b.nm), exf); }
         if (tag == "VPRED" && fds_k_get_restrict(b.nm) != exr) { ++fl.bad; if (g_shown++ < g_show_max) std::fprintf(stderr, "  DT_RESTRICT_COUNT mismatch\n"); }
+    }
+}
+
+// Diagnostic (FDSKC_GHOSTDIFF=1, native mode): after the level fill, count the ghost cells of every array whose value differs from what FDS holds (the dump),
+// by class: number of directions out of the valid range (1 face-neighbour, 2 edge, 3 corner) x "boundary-face strip" (nodal index 0 or n).
+void Checker::ghost_diff(const BoxCtx& b, const Rec& r)
+{
+    static int shown = 0;
+    if (shown++ > 60) return;
+    for (const auto& a : r.bef) {
+        if (a.rank < 3 || is_special(a.name) || a.name.compare(0, 2, "W_") == 0 || a.name.compare(0, 2, "E_") == 0 || !m_F->has(a.name)) continue;
+        const FieldSpec* sp = find_field(a.name);
+        if (!sp) continue;
+        amrex::MultiFab& mf = (*m_F)[a.name];
+        const int idx = b.nm - 1;
+        const amrex::FArrayBox& fab = mf[idx];
+        const amrex::Box vb = b.vb;
+        long cnt[8] = {0, 0, 0, 0, 0, 0, 0, 0}, tot[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        const int nd = nodal_dir(a.name);
+        for (int l = a.lb[3]; l <= a.ub[3]; ++l)
+            for (int k = a.lb[2]; k <= a.ub[2]; ++k)
+                for (int j = a.lb[1]; j <= a.ub[1]; ++j)
+                    for (int i = a.lb[0]; i <= a.ub[0]; ++i) {
+                        const int c[3] = {i, j, k};
+                        int nout = 0;
+                        bool onface = false;
+                        int ai[3];
+                        for (int d = 0; d < 3; ++d) {
+                            const int lo = (d == nd) ? 0 : 1, hi = vb.length(d);
+                            if (c[d] < lo || c[d] > hi) ++nout;
+                            if (d == nd && (c[d] == 0 || c[d] == hi)) onface = true;
+                            ai[d] = to_amrex(*sp, d, vb.smallEnd(d), c[d]);
+                        }
+                        if (nout == 0 && !onface) continue;
+                        const amrex::Box fb = fab.box();
+                        if (!fb.contains(amrex::IntVect(ai[0], ai[1], ai[2])) || l - 1 >= fab.nComp()) continue;
+                        const int cls = std::min(nout, 3) + (onface ? 4 : 0);
+                        const double dv = a.at(i, j, k, l), fv = fab(amrex::IntVect(ai[0], ai[1], ai[2]), l - 1);
+                        ++tot[cls];
+                        if (std::memcmp(&dv, &fv, 8) != 0 && !(std::isnan(fv))) { ++cnt[cls]; if (cls == 5 && std::getenv("FDSKC_GHOSTDIFF3") && a.name == "U") std::fprintf(stderr, "   U strip (%d,%d,%d) dump %.17g drv %.17g\n", i, j, k, dv, fv); }
+                    }
+        std::string out;
+        const char* nm_[8] = {"interior", "face-nbr", "edge", "corner", "onface", "onface+nbr", "onface+edge", "onface+corner"};
+        for (int q = 1; q < 8; ++q) if (cnt[q]) out += std::string(" ") + nm_[q] + ":" + std::to_string(cnt[q]) + "/" + std::to_string(tot[q]);
+        if (!out.empty()) std::fprintf(stderr, "  GHOSTDIFF box %d %s %s:%s\n", b.nm, r.name.c_str(), a.name.c_str(), out.c_str());
+    }
+}
+
+// BC chain (native, plain ghost modes): the state that FDS has right before the boundary-condition step of exchange `code` (3: VPRED "after" US/VS/WS, 6: VCORR "after"
+// U/V/W, i.e. before MATCH_VELOCITY) is put in the boxes (owned data + physical-side strips as in every plain load, the rest of the arrays from the next
+// record's "before" state), then exactly what MAIN_LOOP does runs: level ghost fill of the exchanged fields, OMESH fill, MATCH_VELOCITY, VELOCITY_BC. The result
+// (all of US/VS/WS, or U/V/W, ghost strips, edge and corner cells included) is compared with the "before" arrays of the NEXT record, which FDS wrote after the same steps.
+void Checker::bc_chain(const std::vector<Rec>& nx, const std::vector<std::vector<Arr>>& pre, int code, const std::vector<int>& src_of)
+{
+    const int nbox = static_cast<int>(m_box.size());
+    const char* names3[3] = {"US", "VS", "WS"};
+    const char* names6[3] = {"U", "V", "W"};
+    const char** nm3 = code == 3 ? names3 : names6;
+    Tally& tl = g_tal[tag_of(code == 3 ? "BCCHAIN_P" : "BCCHAIN_C")];
+    ++tl.records;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    for (int i = 0; i < nbox; ++i) load(m_box[i], nx[src_of[i]]);
+    for (int q = 0; q < 3; ++q) {
+        amrex::MultiFab& mf = (*m_F)[nm3[q]];
+        mf.setVal(nan);   // every velocity cell that the chain does not produce stays NaN and shows up as a difference
+        if (!m_l0.dom.periodic[q])   // the cell layers beyond a non-periodic wall in the normal direction are never written by FDS: they keep their allocation value 0
+            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                auto a = mf.array(mfi);
+                const amrex::Box fb = mfi.fabbox(), nb = amrex::convert(mfi.validbox(), amrex::IntVect(q == 0, q == 1, q == 2));
+                const amrex::Box dn = amrex::convert(m_l0.geom.Domain(), amrex::IntVect(q == 0, q == 1, q == 2));
+                amrex::LoopOnCpu(fb, [&](int i, int j, int k) {
+                    const int c[3] = {i, j, k};
+                    if ((c[q] < dn.smallEnd(q) && nb.smallEnd(q) == dn.smallEnd(q)) || (c[q] > dn.bigEnd(q) && nb.bigEnd(q) == dn.bigEnd(q))) a(i, j, k) = 0.0;
+                });
+            }
+    }
+    for (int i = 0; i < nbox; ++i) {   // pre-BC values: owned faces (0..n) from the previous record's "after"
+        const BoxCtx& b = m_box[i];
+        for (int q = 0; q < 3; ++q) {
+            const Arr* a = nullptr;
+            for (const auto& x : pre[i]) if (x.name == nm3[q]) a = &x;
+            if (!a) continue;
+            const Region ow = owned(b, *a);
+            for (int k = ow.lb[2]; k <= ow.ub[2]; ++k)
+                for (int j = ow.lb[1]; j <= ow.ub[1]; ++j)
+                    for (int ii = ow.lb[0]; ii <= ow.ub[0]; ++ii) {
+                        double v = a->at(ii + b.off[0], j + b.off[1], k + b.off[2], 1);
+                        int lb[4] = {ii, j, k, 1}, ub[4] = {ii, j, k, 1};
+                        long n = 0, bad = 0; int ierr = 0;
+                        fds_k_xfer(b.nm, nm3[q], 3, lb, ub, &v, 0, &n, &bad, &ierr);
+                    }
+        }
+    }
+    for (int i = 0; i < nbox; ++i) {
+        const Rec& r = nx[src_of[i]];
+        const Arr* iorr = r.find(r.bef, "W_IOR"); const Arr* iig = r.find(r.bef, "W_IIG"); const Arr* jjg = r.find(r.bef, "W_JJG"); const Arr* kkg = r.find(r.bef, "W_KKG"); const Arr* eij = r.find(r.bef, "E_IJKA");
+        if (iorr && eij) fds_k_match(m_box[i].nm, m_box[i].off, static_cast<int>(iorr->d.size()), iorr->d.data(), iig->d.data(), jjg->d.data(), kkg->d.data(), eij->ub[0], eij->d.data());
+    }
+    for (int q = 0; q < 3; ++q) (*m_F)[nm3[q]].FillBoundary(0, 1, (*m_F)[nm3[q]].nGrowVect(), m_l0.geom.periodicity());
+    if (!m_bcstep) m_bcstep.reset(new BcStep(m_l0, *m_F));
+    const Rec& r0 = nx[src_of[0]];
+    fds_k_state(code == 3 ? 1 : 0, 0, r0.icyc, r0.rmin, r0.rmax);
+    m_bcstep->after_exchange(code, r0.T, r0.DT);
+    for (int i = 0; i < nbox; ++i) {
+        const BoxCtx& b = m_box[i];
+        for (int q = 0; q < 3; ++q) {
+            const Arr* a = nx[src_of[i]].find(nx[src_of[i]].bef, nm3[q]);
+            if (!a) continue;
+            const Region al = alloc_region(b.nm, *a);
+            if (al.empty) continue;
+            int lb[4], ub[4];
+            for (int d = 0; d < 4; ++d) { const int sh = d < 3 ? b.off[d] : 0; lb[d] = std::max(al.lb[d], a->lb[d] - sh); ub[d] = std::min(al.ub[d], a->ub[d] - sh); }
+            std::vector<double> buf;
+            const Region ow2 = owned(b, *a);
+            for (int l = lb[3]; l <= ub[3]; ++l) for (int k = lb[2]; k <= ub[2]; ++k) for (int j = lb[1]; j <= ub[1]; ++j) for (int ii = lb[0]; ii <= ub[0]; ++ii) {
+                const double v = a->at(ii + b.off[0], j + b.off[1], k + b.off[2], l);
+                const int c[3] = {ii, j, k};
+                int nout = 0;
+                for (int d = 0; d < 3; ++d) if (c[d] < ow2.lb[d] || c[d] > ow2.ub[d]) ++nout;
+                if (nout >= 2) {   // edge and corner ghost cells: FDS leaves them at their set-up value and no kernel of the set reads them (EDGEPOISON): not compared
+                    int l1[4] = {ii, j, k, l}, u1[4] = {ii, j, k, l}; long n1 = 0, b1 = 0; int e1 = 0; double vv = v;
+                    fds_k_xfer(b.nm, nm3[q], 3, l1, u1, &vv, 0, &n1, &b1, &e1);
+                }
+                buf.push_back(v);
+            }
+            long n = 0, bad = 0; int ierr = 0;
+            fds_k_xfer(b.nm, nm3[q], 3, lb, ub, buf.data(), 1, &n, &bad, &ierr);
+            ++tl.arrays; tl.elems += n; tl.bad += bad;
+            if (bad && g_shown++ < g_show_max) std::fprintf(stderr, "  MISMATCH [rank %d box %d] BCCHAIN code %d icyc %d %s: %ld of %ld elements differ\n", amrex::ParallelDescriptor::MyProc(), b.nm, code, nx[src_of[i]].icyc, nm3[q], bad, n);
+        }
     }
 }
 
@@ -640,6 +819,7 @@ int Checker::run(const std::string& dump)
     std::vector<Rec> rec(nsrc);
     long nrec = 0;
     bool mask_done = false;
+    std::vector<std::vector<Arr>> pre_src; int pre_icyc = -1; std::string pre_kn;
     const bool poison_outer = true;
     while (true) {
         // next kernel record of every source (PASS/STEP records are skipped)
@@ -674,6 +854,26 @@ int Checker::run(const std::string& dump)
                 load(m_box[i], r);
             }
             if (m_ghost != "dump") fill_all(m_ghost == "face");
+            if (m_ghost != "dump" && std::getenv("FDSKC_GHOSTDIFF") && !m_window) for (int i = 0; i < nbox; ++i) ghost_diff(m_box[i], rec[src_of[i]]);
+            if (m_ghost != "dump" && std::getenv("FDSKC_PHYSPERTURB")) {   // diagnostic: scale by (1+1e-3) the ghost cells on non-periodic sides of the listed arrays ("ALL" = every array)
+                const std::string lst = std::string(",") + std::getenv("FDSKC_PHYSPERTURB") + ",";
+                for (const auto& sp : field_table()) {
+                    if (!m_F->has(sp.name) || kernel_strip_array(sp.name)) continue;
+                    if (lst.find(std::string(",") + sp.name + ",") == std::string::npos && lst != ",ALL,") continue;
+                    amrex::MultiFab& mf = (*m_F)[sp.name];
+                    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                        auto a = mf.array(mfi);
+                        const amrex::Box nb = amrex::convert(mfi.validbox(), amrex::IntVect(sp.nodal(0), sp.nodal(1), sp.nodal(2)));
+                        const int nc = mf.nComp();
+                        amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
+                            const int c[3] = {i, j, k};
+                            bool phys = false;
+                            for (int d = 0; d < 3; ++d) if (!m_l0.dom.periodic[d] && (c[d] < nb.smallEnd(d) || c[d] > nb.bigEnd(d))) phys = true;
+                            if (phys) for (int n = 0; n < nc; ++n) a(i, j, k, n) *= 1.001;
+                        });
+                    }
+                }
+            }
             if (m_ghost != "dump" && m_bc)   // edge/corner ghost cells and the ghost strip of boundary-face values (FDS boundary-condition step) from the dump
                 for (int i = 0; i < nbox; ++i) load_edges(m_box[i], rec[src_of[i]]);
             for (int i = 0; i < nbox; ++i) {
@@ -698,6 +898,27 @@ int Checker::run(const std::string& dump)
                     if (window) fds_k_neutralize(m_box[i].nm);
                 }
             }
+            if (m_ghost != "dump" && !m_bc && !std::getenv("FDSKC_NOBC")) {   // plain modes: the boundary-condition step of the driver (GhostExchange: FDS's own VISCOSITY_BC/VELOCITY_BC/WALL_BC on OMESH filled from the boxes)
+                const Rec& r0 = rec[0];
+                fds_k_state(r0.pred, r0.name == "DENS_P" ? 1 : r0.first, r0.icyc, r0.rmin, r0.rmax);
+                if (!m_bcstep) m_bcstep.reset(new BcStep(m_l0, *m_F));
+                if (std::getenv("FDSKC_WALLBC")) m_bcstep->replay(r0.T, r0.DT, r0.pred != 0); else m_bcstep->replay_velocity(r0.T, r0.DT, r0.pred != 0);
+                if (std::getenv("FDSKC_STRIPDUMP")) for (int i = 0; i < nbox; ++i) load_strips_only(m_box[i], rec[src_of[i]]);   // diagnostic: boundary-face strips from the dump after the replay
+                // WALL_BC also rewrites the wall arrays from the frozen interior; the dump holds the ones FDS had at this point: put them back
+                for (int i = 0; i < nbox; ++i) {
+                    const Rec& r = rec[src_of[i]];
+                    for (const auto& a : r.bef) {
+                        if (a.name.compare(0, 2, "W_") != 0 && a.name.compare(0, 2, "E_") != 0) continue;
+                        if (a.name == "E_IJKA" || a.name == "W_IIG" || a.name == "W_JJG" || a.name == "W_KKG") continue;
+                        long n = 0, bad = 0; int ierr = 0; int lb[4], ub[4];
+                        for (int q = 0; q < 4; ++q) { lb[q] = a.lb[q]; ub[q] = a.ub[q]; }
+                        std::vector<double> buf = a.d;
+                        fds_k_xfer(m_box[i].nm, a.name.c_str(), a.rank, lb, ub, buf.data(), 0, &n, &bad, &ierr);
+                    }
+                    if (window) fds_k_neutralize(m_box[i].nm);
+                }
+            }
+            if (m_ghost != "dump" && std::getenv("FDSKC_GHOSTDIFF2") && !m_window) for (int i = 0; i < nbox; ++i) ghost_diff(m_box[i], rec[src_of[i]]);
         };
         // the flags/state common to all kernels
         auto setstate = [&](const Rec& r) { fds_k_state(r.pred, r.name == "DENS_P" ? 1 : r.first, r.icyc, r.rmin, r.rmax); };   // DENS_P is dumped at FIRST_PASS only
@@ -774,6 +995,21 @@ int Checker::run(const std::string& dump)
         } else if (kn == "VCORR") {
             loadall();
             for (int i = 0; i < nbox; ++i) { const Rec& r = rec[src_of[i]]; setstate(r); fds_k_vcorr(r.T, r.DT, m_box[i].nm); compare(m_box[i], r, "VCORR"); }
+        }
+        // BC chain: needs the pre-BC arrays of the previous record and the "before" state of this one (native mode, plain ghost modes)
+        if (!window && m_ghost != "dump" && !m_bc && std::getenv("FDSKC_NOCHAIN") == nullptr) {
+            if (kn == "VPRED" || kn == "VCORR") {
+                pre_icyc = rec[0].icyc + (kn == "VCORR" ? 1 : 0); pre_kn = kn;
+                pre_src.clear();
+                for (int i = 0; i < nbox; ++i) {   // the velocity arrays after the kernel; the dump keeps only arrays the kernel changed, the others equal the "before" state
+                    std::vector<Arr> v;
+                    for (const char* nn : {"US", "VS", "WS", "U", "V", "W"}) { const Arr* a = rec[src_of[i]].find(rec[src_of[i]].aft, nn); if (!a) a = rec[src_of[i]].find(rec[src_of[i]].bef, nn); if (a) v.push_back(*a); }
+                    pre_src.push_back(v);
+                }
+            } else if ((kn == "VISC_C" && pre_kn == "VPRED" && pre_icyc == rec[0].icyc) || (kn == "VISC_P" && pre_kn == "VCORR" && pre_icyc == rec[0].icyc)) {
+                bc_chain(rec, pre_src, kn == "VISC_C" ? 3 : 6, src_of);
+                pre_kn.clear();
+            }
         }
     }
     for (FILE* f : files) std::fclose(f);

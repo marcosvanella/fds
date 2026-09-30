@@ -4,14 +4,15 @@ C++ AmrCore driver plus the Fortran `bind(C)` glue (ADR-001 Option A/C; C++ only
 (see `OWNERS.md`). Edits to existing FDS files are delivered as numbered patches in `patches/` and applied by the Chief Architect;
 everything they add is inside `#ifdef WITH_AMREX`, so `USE_AMREX=OFF` is unchanged (IR-006).
 
-## Status (S0 to S3)
+## Status (S0 to S4)
 | Step | State |
 |---|---|
 | S0 toolchain | done, section "Environment" |
 | S1 skeleton | `main.cpp`, `FdsAmr.{H,cpp}`, `fds_mesh_query.f90`, `CMakeLists.txt`; patches 0001, 0002; the skeleton runs the unchanged FDS set-up and builds the level-0 `BoxArray` for `shunn3_32` (1 box) and `shunn3_4mesh_32` (4 boxes, 4 ranks) |
 | S2 fields | `Fields.{H,cpp}` MultiFab registry (D-031 ghost widths), +1 face offset, `SideData.{H,cpp}` per-box side data, `fds_box_shim.f90` + `fds_alias.c` (FAB memory seen by Fortran with FDS bounds), IR-005 round-trip tests, IR-007 tile-race skeleton; results in "Tests (S2)" |
 | S3 kernel shim | `fds_kernels.f90` (bind(C) wrappers of the UNMODIFIED FDS kernels), `fds_density_split.f90` (generated), `fds_clip_gather.f90` (D-031 gather clip), `TimeStep.H` (T/DT replay), `tests/kernelcheck.cpp` + `tests/run_kernelcheck.sh`, scratch reference dump generator `tests/refdump/`; results in "Kernel checks (S3)"; no existing file edited (no new patch) |
-| S4 onward | not started (boundary conditions, time loop, pressure hook-up, output) |
+| S4 ghost fill and boundary conditions | `GhostExchange.{H,cpp}` (FillBoundary at the MESH_EXCHANGE codes 1/3/4/5/6, class `BcStep`), `fds_ghost_bc.f90` (OMESH fill + thin wrappers of the unmodified FDS boundary routines), `fds_amrex_hooks.f90` (hook module); patches 0003 (velo), 0004 (wall), 0005 (mesh, DRAFT); plain `--ghost=full/face` modes gated; results in "Ghost fill and boundary conditions (S4)" |
+| S5 onward | not started (time loop, dt, exact sums, pressure hook-up, output) |
 
 ## Kernel-facing file rules (M2a)
 Every file that touches kernels states in its header: (a) passive scalars (`N_TOTAL_SCALARS` beyond the tracked species) are handled by
@@ -62,6 +63,7 @@ The tree is compiled once per option set: the Fortran build takes about 4 minute
 | `SideData.{H,cpp}` | per-box side data rebuilt from FDS cell data: SOLID, face mask (valid+2), source flag; layout-independent hash |
 | `fds_box_shim.f90`, `fds_alias.c` | Fortran side of the FAB alias (bind, release, bounds, element access, explicit-shape pass test) |
 | `fds_mesh_query.f90` | read-only `bind(C)` queries of the FDS mesh data (module `FDS_MESH_QUERY`) |
+| `GhostExchange.{H,cpp}`, `fds_ghost_bc.f90`, `fds_amrex_hooks.f90` | S4: ghost fill at the exchange codes, FDS boundary routines on OMESH filled from the boxes, hook module for patches 0003-0005 |
 | `CMakeLists.txt` | included from the top-level file when `USE_AMREX=ON` (patch 0002) |
 | `patches/` | numbered patches against the reference tree, each with a `.md` note |
 | `tests/` | `env.sh`, `check_off_bitwise.sh` (IR-006), `check_setup_amr.sh` (S1); S2: `test_units.cpp` (`driver_unit_tests`, no FDS), `selftest_fds.cpp` (`fds_amr case.fds --selftest`), `check.H`, `check_inventory.py`, `run_driver_tests.sh` |
@@ -141,7 +143,7 @@ Decisions recorded at S3:
   with NaN before every kernel; all results stay bitwise equal, so no kernel reads or writes outside the FDS window.
 - Ghost values that FDS itself sets in its boundary-condition and pressure steps (strips at non-periodic domain sides, edge/corner strips, the H/HS ghost
   cells) are not produced by any S3 kernel. The `+bc` modes take exactly those from the dump; S4 (boundary conditions) and the pressure backend replace them.
-  Plain `--ghost=full` (no `+bc`) is not gated and differs from the reference only there.
+  Plain `--ghost=full` (no `+bc`) was not gated at S3; S4 gates it (next section).
 - Window mode (`--window`): a SINGLE-mesh dump is the reference for a multi-box layout. The wall of a box without counterpart in the single mesh
   (mesh-to-mesh interface) is made neutral: `BOUNDARY_TYPE=NULL_BOUNDARY`, `CELL%WALL_INDEX=0`, `UVW_SAVE` and the wall state from the gas cell. The zone sums
   DSUM/PSUM/USUM are process-global accumulators and are compared only in native mode. CFL, VN, DT_NEW and the change index of a window are the extrema over boxes.
@@ -157,6 +159,71 @@ scratch run), `shunn3_32_clip` (clip active, KVAR=3), `shunn3_4mesh_32__1mesh`, 
 the 1-mesh dump (4 ranks), the same with the clip active (4-box gather clip against the single-mesh clip). Modes `dump`, `full+bc`, `face+bc`; 1 and 4 ranks.
 Not covered: N_ZONE>0 cases (DSUM/USUM/PSUM written but not exercised), non-periodic walls with open/solid BC data beyond the uniform patches of these cases,
 the species clip with more than one tracked species (the shunn3 cases have 2 tracked species, csmag_32 one passive scalar).
+
+## Ghost fill and boundary conditions (S4)
+Scope: periodic and same-level box-to-box boundaries, uniform Cartesian metrics only (CYLINDRICAL/TRN* rejected at level-0 assembly, IR-002); passive scalars are
+carried by `Fields.cpp` (ZZ/ZZS ncomp = N_TOTAL_SCALARS) and handled in the same loops.
+
+### Exchange positions (verified against `main.f90`; the plan's line numbers were stale)
+| MESH_EXCHANGE code | Position in MAIN_LOOP | Fields filled by `FillBoundary` (`exchange_fields(code)`) | Then (`BcStep::after_exchange`) |
+|---|---|---|---|
+| 1 | after the predictor DENSITY (~838) | RHOS, ZZS, MU, KRES, D | `VISCOSITY_BC(est)` (~866) |
+| 3 | after the predictor pressure (~957) | US, VS, WS, HS | `MATCH_VELOCITY` (962), `VELOCITY_BC(est)` (969) |
+| 4 | after the corrector DENSITY (~1007) | RHO, ZZ, MU, KRES, DS | `VISCOSITY_BC` (~1014) |
+| 6 | after the corrector (~1153) | U, V, W, H | `MATCH_VELOCITY` (1168), `VELOCITY_BC(final)` (1174) |
+| 5 | in PRESSURE_ITERATION_SCHEME (~1665-1735) | FVX, FVY, FVZ, H (predictor) or HS (corrector) | `MATCH_VELOCITY_FLUX` (1686, returns for one mesh) |
+Codes 0, 2, 7-11, 14-20 do not concern M2a. `WALL_BC` is called at ~547, ~886, ~1057 (`BcStep::wall_bc`). `ghost_exchange(F, code, predictor)` is the S5 entry point.
+
+### Decision: the driver runs FDS's own boundary routines (IR-002/ADR-001 Option C, stepwise)
+The ghost values FDS writes across a box boundary are not plain copies: the shared face is `0.5*(a + ((b*dy)*dz)/(dy*dz))` (operation order matters), tangential
+strips use the `EDGE_INTERPOLATION_FACTOR` weights (1-2e-14 from the set-up rounding), MU/KRES edge cells are clamped copies, the non-periodic y ghosts of RHO/TMP/ZZ come
+from `WALL_BC` (`PBAR/(RSUM*TMP)`). Re-deriving these in C++ bit for bit was judged riskier than reusing the source. So in S4 the driver (a) fills the level ghosts with
+`FillBoundary` (periodic image and box-to-box), (b) copies each box's FAB, ghost cells included, into `OMESH(NOM)` of the boxes that need it (`fds_g_fill_om`; FABs of
+boxes of other ranks are broadcast), (c) calls the UNMODIFIED `MATCH_VELOCITY`, `VELOCITY_BC`, `VISCOSITY_BC`, `WALL_BC`. The values are FDS's own by construction.
+Cost: O(domain) broadcast per exchange and the OMESH arrays stay allocated; acceptable for M2a, to be removed by patches 0003/0004 (flag `EXTERNAL_GHOSTS_FILLED`, the
+`NOM>0` branches then skip the OMESH writes and read AMReX ghosts) in S5/S6. Item (b) of the task (no dump-supplied BC values) is met: plain modes use no dump ghost data
+except the two classes below. Limitation: the driver keeps `OMESH` and `MESHES(NM)%EXTERNAL_WALL`/`EDGE` from the FDS set-up (same-level only).
+No `pres.f90`, `init.f90`, `read.f90` change was needed. TRN* is rejected (C++ `assemble_level0`). The MPI_PROCESS message (IR-004, Q9/D-036) is a driver-side
+warning in `FdsSetup.cpp`, printed only in AMR mode with more than one rank; it cannot tell whether MPI_PROCESS was given (read.f90 is not patched), M2a keeps the FDS map.
+
+### Plain ghost modes (`--ghost=full`, `--ghost=face`, no `+bc`)
+Test design. A frozen dump is a snapshot: the boundary-face strips of US/VS/WS and U/V/W were written by VELOCITY_BC at different points of the step and from interiors
+that changed in between (DENSITY restores boundary-face values, `mass.f90` 426/598). The kernel check therefore (1) fills the level ghosts from the dump's valid cells, (2) regenerates
+the ghosts the record's kernels read with `BcStep::replay_velocity` (OMESH fill, `VISCOSITY_BC`, `VELOCITY_BC`, plus the MU/KRES edge copy `fds_g_mu_edges`), (3) reloads the wall
+arrays from the dump. H/HS (and FVX/FVY/FVZ, WORK*) are kernel-strip arrays: they are loaded whole from the dump; H/HS ghosts hold the image plus the pressure solver's mean offset
+and are produced by the pressure step (Role 2, S6).
+Results (`tests/run_kernelcheck.sh`, threads=1, 1 and 4 ranks, 7 cases x {dump, full+bc, face+bc, full, face}):
+- `dump`, `full+bc`, `face+bc`: all tags BITWISE-OK (unchanged).
+- Plain `full` and `face`: the new tags `BCCHAIN_P` / `BCCHAIN_C` are BITWISE-OK on every native case: starting from the state right before the boundary step (VPRED/VCORR "after" arrays),
+  FillBoundary + OMESH fill + `MATCH_VELOCITY` + `VELOCITY_BC` reproduce all US/VS/WS (or U/V/W) values including ghost strips of the next record (shunn3_32: 2 P + 1 C; csmag_32: 1 P;
+  4-mesh native, 4 ranks: 8 P + 4 C). This is the periodic and same-level box-to-box proof.
+- Plain `full`/`face` per-kernel tags are BITWISE-OK except VISC_P/C and VFLUX_P/C on 6 of 7 runs, where 0 to a few dozen elements out of 1.3e6 differ in the last bits (for example csmag_32: 81 elements
+  total, MU at 3 cells, STRAIN_RATE 6, FVX/FVY/FVZ 11/21/2; 4-mesh native: 108 in 1.9e6 compares). Loading the dump's boundary-face strips of U/V/W (diagnostic `FDSKC_STRIPDUMP`) removes all of
+  them: they come from the replayed strip values of a snapshot that is not the exact pre-boundary-step state, not from a wrong rule (the BCCHAIN test from the exact state is bitwise). The plain gate of `run_kernelcheck.sh` is
+  therefore: BCCHAIN bitwise, every other tag bitwise or at most `PLAIN_MAX_PPM` (default 100) parts per million differing elements. Stated openly: plain full/face per-kernel tags are NOT all bitwise.
+- `WALL_BC` replay (`FDSKC_WALLBC=1`) is NOT part of the gate: on the frozen snapshots it rewrites RHO/TMP strips (shunn3: 4096 of 5120 RHO/TMP elements differ in VFLUX_P) because the snapshot does not hold the state WALL_BC saw in the step. The
+  gated plain modes take RHO/RHOS/TMP/ZZ ghosts from the level fill (periodic image) and, on the non-periodic sides, from the dump snapshot values already in the FAB; the WALL_BC-equivalent for those sides
+  (`BcStep::wall_bc`, unmodified `WALL_BC`) is wired at its MAIN_LOOP positions (~547, ~886, ~1057) in S5 and is checked there on the time loop, not on snapshots. Limitation stated: S4 does not prove WALL_BC on snapshots.
+
+### New test tooling
+Env (kernel check): `FDSKC_GHOSTDIFF2` (per-class ghost differences against the dump), `FDSKC_GHOSTDIFF3` (print U strip values), `FDSKC_NOCHAIN` (skip BCCHAIN), `FDSKC_WALLBC=1` (replay with WALL_BC),
+`FDSKC_STRIPDUMP=1` (strips of the boundary faces from the dump after the replay), `FDSKC_STRIPONLY=<list>` and `FDSKC_RELOAD=<list>` (restrict / extend that reload), plus the S3 poison switches
+(`FDSKC_EDGEPOISON`, `FDSKC_STRIPPOISON`, `FDSKC_HPOISON`, `FDSKC_PHYSPERTURB`, `FDSKC_NOFILL`, `FDSKC_NOBC`). `FDSKC_VERBOSE=1` prints up to 8 differing elements per array.
+
+### Patches (send to the Architect)
+| Patch | File | Status |
+|---|---|---|
+| `patches/0003-velo-external-ghosts.patch` | `velo.f90` | guarded, inert (flag FALSE); OFF bitwise checked |
+| `patches/0004-wall-external-ghosts.patch` | `wall.f90` | guarded, inert; OFF bitwise checked |
+| `patches/0005-mesh-point-to-box.patch` | `mesh.f90` | DRAFT (due end of S5); not validated with oneAPI (not available here), gfortran 14.2 only |
+Each has a `.md` note with the evidence. OFF check with all of 0003-0005 applied: `shunn3_32` 1 rank 16 files, `shunn3_4mesh_32` 4 ranks 47 files, bitwise to the baseline. Toolchain: gfortran 14.2 and Open MPI 5.0.7 only; `ifx`/`ifort` are not installed.
+
+### Fortran/C++ boundary additions (S4)
+| Crossing (C symbol) | Direction | Type and layout | Owner | Lifetime | Status |
+|---|---|---|---|---|---|
+| `fds_g_fill_om(nm, nom, which, lb[3], ext[3], nc, data)` | C++ -> Fortran | block copy of box `nom`'s FAB (FDS lower bounds, extents, ncomp) into `OMESH(nom)` of box `nm`; `which` 1..20 (MU, RHO, RHOS, U, V, W, US, VS, WS, H, HS, FVX, FVY, FVZ, D, DS, KRES, Q, ZZ, ZZS); returns 0 or 1 (not a neighbour) | caller (read only) | call | S4 |
+| `fds_g_phase(pred)`, `fds_g_match(nm)`, `fds_g_match_flux(nm)`, `fds_g_velocity_bc(t, nm, est)`, `fds_g_viscosity_bc(nm, est)`, `fds_g_wall_bc(t, dt, nm)`, `fds_g_mu_edges(nm)` | C++ -> Fortran | set PREDICTOR/CORRECTOR; thin wrappers of the unmodified routines; MU/KRES edge-cell copy | caller | call | S4 |
+| `fds_hook_set_flag(flag)`, `fds_hook_set_view(nmax, nm, which, lb[4], ext[4], p)` | C++ -> Fortran | `EXTERNAL_GHOSTS_FILLED`; `BOX_VIEW` pointer views of FAB memory (`C_F_POINTER` + bounds remapping) | AMReX (FAB) | until released | S4, used by patches 0003-0005 from S5 |
 
 ### Reference dump (scratch, outside src)
 `tests/refdump/` holds the write-only generator. It is applied to an UNPATCHED copy of the FDS source (a `git archive` of the reference commit), never to this tree:

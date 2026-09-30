@@ -26,6 +26,13 @@ Level0 build_level0()
         fds_get_mesh(i + 1, m.ijk, m.xb, &m.rank, &nonuniform);
         if (nonuniform) amrex::Abort("M2a: TRNX/TRNY/TRNZ (nonuniform) meshes are not supported (IR-002)");
     }
+    // IR-004 / Q9 / D-036: in AMR mode the box-to-rank map belongs to AMReX (load balancing). The FDS input line MPI_PROCESS of the MESH namelist is read by read.f90
+    // and cannot be told apart from the default assignment here; in M2a the FDS map (MPI_PROCESS if given, else one mesh per rank in order) is taken over unchanged
+    // as the initial map, because the FDS mesh data of a box lives on the rank that set it up. The warning is printed in AMR mode only (this file is not part of
+    // the USE_AMREX=OFF build); AMReX load balancing replaces the map from M3 on.
+    if (dom.nranks > 1)
+        amrex::Print() << "WARNING: AMR mode: the box-to-rank map is owned by the AMR driver, MPI_PROCESS on MESH lines is only the initial map "
+                          "(M2a keeps it; AMReX load balancing overrides it from M3)\n";
     return assemble_level0(meshes, dom);
 }
 
