@@ -1498,6 +1498,7 @@ END TYPE CC_CV_TYPE
 
 TYPE CC_FACE_TYPE
    INTEGER :: N = 0
+   INTEGER :: N_INT = 0 !< Last interior row. Guard cut-face rows are N_INT+1:N.
    ! --- CV topology ---
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_CV_NM !< (1:N) mesh owning OWNER_CV.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_CV    !< (1:N) owner CV index; normal points owner->neighbor.
