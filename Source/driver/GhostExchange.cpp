@@ -16,6 +16,7 @@ void fds_g_wall_bc(double t, double dt, int nm);
 void fds_g_velocity_bc(double t, int nm, int est);
 void fds_g_viscosity_bc(int nm, int est);
 void fds_g_mu_edges(int nm);
+void fds_g_mu_edges_dom(int nm, int mask);
 }
 
 namespace fdsamr {
@@ -82,19 +83,78 @@ void BcStep::after_exchange(int code, double t, double dt)
     (void)dt;
     const int nbox = static_cast<int>(m_l0.ba.size());
     if (code != 1 && code != 3 && code != 4 && code != 6) return;
-    fill_omesh();
+    if (ext_ghost && (code == 3 || code == 6))   // UVW_SAVE: the face velocities before the match (DENSITY restores them at the wall faces)
+        for (int nm = 0; nm < nbox; ++nm)
+            if (local(nm)) { fds_g_phase(code == 3 ? 1 : 0); fds_p_save_uvw(nm + 1, code == 3 ? 1 : 0); }
+    if (ext_ghost && (code == 3 || code == 6)) {
+        // the periodic domain faces: FDS's MATCH_VELOCITY averages the two copies of the flow face (patch 0003 skips it, the driver does it on the AMReX data)
+        static const char* const pn[2][3] = {{"U", "V", "W"}, {"US", "VS", "WS"}};
+        for (int d = 0; d < 3; ++d)
+            if (m_l0.dom.periodic[d] && m_F.has(pn[code == 3][d])) match_periodic_faces(pn[code == 3][d], d);
+        // the ghost layer next to a matched face holds the matched value in FDS (the wall-cell loop of MATCH_VELOCITY runs before VELOCITY_BC reads it): refill
+        for (int d = 0; d < 3; ++d)
+            if (m_l0.dom.periodic[d] && m_F.has(pn[code == 3][d])) m_F.fill_ghosts(pn[code == 3][d]);
+    }
+    fill_omesh();   // after the match: FDS's MATCH_VELOCITY also writes the averaged values into OMESH, which VELOCITY_BC reads for the periodic ghosts
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
         if (code == 3 || code == 6) {
             fds_g_phase(code == 3 ? 1 : 0);
-            if (ext_ghost) fds_p_save_uvw(nm + 1, code == 3 ? 1 : 0); else fds_g_match(nm + 1);
+            if (!ext_ghost) fds_g_match(nm + 1);
         }
     }
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
         if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); fds_g_velocity_bc(t, nm + 1, code == 3 ? 1 : 0); if (iface_hook) iface_hook(false); }
-        else fds_g_viscosity_bc(nm + 1, code == 4 ? 1 : 0);
+        else {
+            fds_g_viscosity_bc(nm + 1, code == 4 ? 1 : 0);
+            // FDS ends COMPUTE_VISCOSITY with clamped copies of MU, KRES in the edge cells of the domain; the full ghost fill above replaced them by periodic images
+            const amrex::Box& b = m_l0.ba[nm];
+            const amrex::Box& d = m_l0.geom.Domain();
+            int mask = 0;
+            for (int dir = 0; dir < 3; ++dir) {
+                if (b.smallEnd(dir) == d.smallEnd(dir)) mask |= 1 << (2 * dir);
+                if (b.bigEnd(dir) == d.bigEnd(dir)) mask |= 2 << (2 * dir);
+            }
+            fds_g_mu_edges_dom(nm + 1, mask);
+        }
     }
+}
+
+void BcStep::match_periodic_faces(const std::string& name, int dir)
+{
+    amrex::MultiFab& mf = m_F[name];
+    const amrex::Box dom = m_l0.geom.Domain();
+    const int n = dom.length(dir);
+    amrex::Box p0 = amrex::surroundingNodes(dom, dir);
+    p0.setBig(dir, p0.smallEnd(dir));
+    amrex::BoxArray b0(p0);
+    b0.maxSize(32);
+    amrex::IntVect sh(0); sh[dir] = n;
+    amrex::BoxArray bn(b0);
+    bn.shift(sh);
+    amrex::DistributionMapping dm(b0);
+    amrex::MultiFab P0(b0, dm, 1, 0), PN(bn, dm, 1, 0);
+    P0.setVal(0.0); PN.setVal(0.0);
+    P0.ParallelCopy(mf, 0, 0, 1, 0, 0);
+    PN.ParallelCopy(mf, 0, 0, 1, 0, 0);
+    // FDS: DA_OTHER = 0 + A1*A2; UU_OTHER = 0 + ((OM*A1)*A2)/DA_OTHER; UU = 0.5*(UU + UU_OTHER). A1, A2: the two other cell sizes (DY,DZ / DX,DZ / DX,DY)
+    const double a1 = dir == 0 ? m_l0.dx[1] : m_l0.dx[0], a2 = dir == 2 ? m_l0.dx[1] : m_l0.dx[2];
+    const double da = 0.0 + a1 * a2;
+    for (amrex::MFIter mfi(P0); mfi.isValid(); ++mfi) {
+        auto lo = P0.array(mfi);
+        auto hi = PN.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            const int ih = i + (dir == 0 ? n : 0), jh = j + (dir == 1 ? n : 0), kh = k + (dir == 2 ? n : 0);
+            const double a = lo(i, j, k), b = hi(ih, jh, kh);
+            const double other_hi = 0.0 + ((b * a1) * a2) / da;   // what the low face sees of the high face
+            const double other_lo = 0.0 + ((a * a1) * a2) / da;   // and the other way round
+            lo(i, j, k) = 0.5 * (a + other_hi);
+            hi(ih, jh, kh) = 0.5 * (b + other_lo);
+        });
+    }
+    mf.ParallelCopy(P0, 0, 0, 1, 0, 0);
+    mf.ParallelCopy(PN, 0, 0, 1, 0, 0);
 }
 
 void BcStep::wall_bc(int predictor, double t, double dt)

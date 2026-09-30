@@ -41,3 +41,5 @@ Cost of the S4 route: one broadcast of each box's FAB to every rank that owns a 
 ## Not done here
 - The flag TRUE path is not exercised (S5). The `EDGE_LOOP` branch and the `CC_IBM` routines are untouched. `MATCH_VELOCITY` with the flag set assumes the driver
   does the shared-face match; the driver does not yet (S5).
+
+Note (S6b): "shared-face match: done by the driver on AMReX data" now covers the periodic domain faces as well (`BcStep::match_periodic_faces`, `0.5*(a + ((b*dA1)*dA2)/(dA1*dA2))`); before S6b only box interfaces were handled, which left the two copies of a periodic flow face unaveraged in a fully periodic 3-D case (csmag_32). No change to the patch itself.

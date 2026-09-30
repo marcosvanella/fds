@@ -58,6 +58,9 @@ public:
     // OMESH(NOM) of every local box from the current box data (the block copy of MESH_EXCHANGE, all registered fields). The time loop calls it after each
     // ghost_exchange(5): NO_FLUX, MATCH_VELOCITY_FLUX and COMPUTE_VELOCITY_ERROR read H/HS and FVX.. of the neighbour from OMESH.
     void exchange_om() { fill_omesh(); }
+    // The shared-face match of a periodic direction (what MATCH_VELOCITY does between the low-side and the high-side wall face of the same flow face):
+    // the face normal to `dir` at the low and at the high end of the domain hold the same flow face twice; FDS sets both to 0.5*(a + ((b*dA1)*dA2)/(dA1*dA2)). `name`: U, V, W, US, VS or WS.
+    void match_periodic_faces(const std::string& name, int dir);
 
 private:
     const Level0& m_l0;

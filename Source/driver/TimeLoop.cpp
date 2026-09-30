@@ -62,6 +62,7 @@ void fds_p_zone_get(int n, double* d, double* p, double* u);
 void fds_p_zone_set(int n, const double* d, const double* p, const double* u);
 void fds_p_wall_dump(int nm, int ofx, int ofz, int kg0);
 void fds_hook_set_flag(int flag);
+void fds_p_edge_dump(int nm, const char* fn, int nc);
 void fds_p_iface_walls(int nm, int mode, const int* edge, int all_edges);
 void fds_p_zone_terms(int nm, int* czone, double* dterm, double* pterm, int* wzone, double* wterm);
 void fds_p_zone_volume_terms(int nm, int* czone, double* vterm);
@@ -589,6 +590,7 @@ struct TimeLoop::Impl {
         for (;;) {
             ++passes;
             state(true, first_pass);
+            stage_raw(passes == 1 ? "p1_pre_dens" : "p2_pre_dens", {"RHO", "ZZ", "TMP", "U", "V", "W", "H", "HS", "MU", "KRES"});
             density(true, t, dt);
             stage(passes == 1 ? "p1_dens" : "p2_dens", {"RHOS", "ZZS"});
             stage_raw(passes == 1 ? "p1_a_dens" : "p2_a_dens", {"RHOS", "TMP"});
@@ -597,6 +599,7 @@ struct TimeLoop::Impl {
             bc.after_exchange(1, t, dt);
             stage_raw(passes == 1 ? "p1_c_visc" : "p2_c_visc", {"RHOS", "TMP"});
             stage_raw(passes == 1 ? "p1_prevflux" : "p2_prevflux", {"RHO", "RHOS", "U", "V", "W", "MU", "KRES", "H", "HS", "ZZ", "TMP"});
+            if (const char* e = std::getenv("FDSTL_EDGES")) if (std::atoi(e) == L.m_icyc && passes == 1) each_local([&](int nm) { const std::string fn = dir + "/edges_p1_b" + std::to_string(nm) + ".bin"; fds_p_edge_dump(nm, fn.c_str(), static_cast<int>(fn.size())); });
             iface(true);
             each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(t, dt, nm, 0); });
             iface(false);
@@ -640,19 +643,22 @@ struct TimeLoop::Impl {
         stage("pred_end", {"US", "WS", "RHOS"});
         ghost_exchange(F, 3);
         bc.after_exchange(3, t, dt);
+        stage("pred_match", {"US", "WS"});
 
         // ---------------- corrector
         t = time_advance(t, dt);
         state(false, first_pass);
         each_local([&](int nm) { fds_k_visc(nm, 1); fds_p_mfd(nm); });
-        stage_raw("c_pre", {"RHOS", "TMP", "RHO"});
+        stage_raw("c_pre", {"RHOS", "TMP", "RHO", "US", "VS", "WS", "H", "HS"});
         density(false, t, dt);
         stage("c_dens", {"RHO", "ZZ"});
         ghost_exchange(F, 4);
         bc.after_exchange(4, t, dt);
+        stage_raw("c_prevflux", {"RHOS", "US", "VS", "WS", "MU", "KRES", "H", "HS", "ZZS", "TMP", "RHO"});
         iface(true);
         each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(t, dt, nm, 1); });
         iface(false);
+        stage("c_vflux", {"FVX", "FVZ"});
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         bc.wall_bc(0, t, dt);

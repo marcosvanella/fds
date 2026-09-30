@@ -24,7 +24,7 @@ USE WALL_ROUTINES, ONLY: WALL_BC
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
 
-PUBLIC :: FDS_G_FILL_OM,FDS_G_PHASE,FDS_G_MATCH,FDS_G_MATCH_FLUX,FDS_G_VELOCITY_BC,FDS_G_VISCOSITY_BC,FDS_G_WALL_BC,FDS_G_MU_EDGES
+PUBLIC :: FDS_G_FILL_OM,FDS_G_PHASE,FDS_G_MATCH,FDS_G_MATCH_FLUX,FDS_G_VELOCITY_BC,FDS_G_VISCOSITY_BC,FDS_G_WALL_BC,FDS_G_MU_EDGES,FDS_G_MU_EDGES_DOM
 
 CONTAINS
 
@@ -171,5 +171,48 @@ A(IBP1,JBP1,0:KBP1) = A(IBAR,JBAR,0:KBP1)
 A(0,JBP1,0:KBP1)    = A(   1,JBAR,0:KBP1)
 END SUBROUTINE EDG
 END SUBROUTINE FDS_G_MU_EDGES
+
+!> Time-loop form of FDS_G_MU_EDGES: only the edge cells that lie on an edge of the DOMAIN are written. FDS does the clamped copy at the end of COMPUTE_VISCOSITY;
+!> the driver's full ghost fill (periodic images, box neighbours) runs after it and would replace those edge cells by the periodic/neighbour values, which FDS
+!> does not use (the edge averages of MU and KRES in VELOCITY_FLUX read them). The interface edges of a decomposed mesh are left to the ghost fill so that the
+!> result does not depend on the box layout. MASK bits: 1 low-x, 2 high-x, 4 low-y, 8 high-y, 16 low-z, 32 high-z are set when the box face lies on the domain boundary
+!> (periodic or not); a statement is applied when both sides it names are domain sides.
+SUBROUTINE FDS_G_MU_EDGES_DOM(NM,MASK) BIND(C,NAME='fds_g_mu_edges_dom')
+INTEGER(C_INT), VALUE :: NM,MASK
+TYPE(MESH_TYPE), POINTER :: M
+INTEGER :: IBAR,JBAR,KBAR,IBP1,JBP1,KBP1
+LOGICAL :: XL,XH,YL,YH,ZL,ZH
+M => MESHES(NM)
+IBAR=M%IBAR ; JBAR=M%JBAR ; KBAR=M%KBAR ; IBP1=IBAR+1 ; JBP1=JBAR+1 ; KBP1=KBAR+1
+XL=BTEST(MASK,0) ; XH=BTEST(MASK,1) ; YL=BTEST(MASK,2) ; YH=BTEST(MASK,3) ; ZL=BTEST(MASK,4) ; ZH=BTEST(MASK,5)
+CALL EDG(M%MU)
+CALL EDG(M%KRES)
+CONTAINS
+SUBROUTINE EDG(A)
+REAL(EB), INTENT(INOUT) :: A(0:,0:,0:)
+IF (XL.AND.ZL) A(   0,0:JBP1,   0) = A(   1,0:JBP1,1)
+IF (XH.AND.ZL) A(IBP1,0:JBP1,   0) = A(IBAR,0:JBP1,1)
+IF (XH.AND.ZH) A(IBP1,0:JBP1,KBP1) = A(IBAR,0:JBP1,KBAR)
+IF (XL.AND.ZH) A(   0,0:JBP1,KBP1) = A(   1,0:JBP1,KBAR)
+IF (YL.AND.ZL) A(0:IBP1,   0,   0) = A(0:IBP1,   1,1)
+IF (YH.AND.ZL) A(0:IBP1,JBP1,0)    = A(0:IBP1,JBAR,1)
+IF (YH.AND.ZH) A(0:IBP1,JBP1,KBP1) = A(0:IBP1,JBAR,KBAR)
+IF (YL.AND.ZH) A(0:IBP1,0,KBP1)    = A(0:IBP1,   1,KBAR)
+IF (XL.AND.YL) A(0,   0,0:KBP1)    = A(   1,   1,0:KBP1)
+IF (XH.AND.YL) A(IBP1,0,0:KBP1)    = A(IBAR,   1,0:KBP1)
+IF (XH.AND.YH) A(IBP1,JBP1,0:KBP1) = A(IBAR,JBAR,0:KBP1)
+IF (XL.AND.YH) A(0,JBP1,0:KBP1)    = A(   1,JBAR,0:KBP1)
+! The last four statements of FDS write the eight corner cells from the z-ghost cells A(.,.,0) and A(.,.,KBP1), which at that point of COMPUTE_VISCOSITY hold the
+! mirror of the adjacent gas cell (WALL_LOOP_2), not the periodic image that the driver has there. So a corner is the adjacent interior corner cell.
+IF (XL.AND.YL.AND.ZL) A(   0,   0,   0) = A(   1,   1,   1)
+IF (XL.AND.YL.AND.ZH) A(   0,   0,KBP1) = A(   1,   1,KBAR)
+IF (XH.AND.YL.AND.ZL) A(IBP1,   0,   0) = A(IBAR,   1,   1)
+IF (XH.AND.YL.AND.ZH) A(IBP1,   0,KBP1) = A(IBAR,   1,KBAR)
+IF (XH.AND.YH.AND.ZL) A(IBP1,JBP1,   0) = A(IBAR,JBAR,   1)
+IF (XH.AND.YH.AND.ZH) A(IBP1,JBP1,KBP1) = A(IBAR,JBAR,KBAR)
+IF (XL.AND.YH.AND.ZL) A(   0,JBP1,   0) = A(   1,JBAR,   1)
+IF (XL.AND.YH.AND.ZH) A(   0,JBP1,KBP1) = A(   1,JBAR,KBAR)
+END SUBROUTINE EDG
+END SUBROUTINE FDS_G_MU_EDGES_DOM
 
 END MODULE FDS_GHOST_BC
