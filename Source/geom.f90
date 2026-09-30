@@ -6567,7 +6567,7 @@ CASE(INTEGER_ONE) ! Geometry information for CFACE.
    CFA%CUT_FACE_IND2 = IFACE
 
    INS_INB_COND_1 : IF (IS_INB) THEN
-      B1%VEL_ERR_NEW=CF%VEL(IFACE) - 0._EB ! Assumes zero velocity of solid.
+      B1%VEL_ERR_NEW=0._EB ! Stage 1: the INB CUT_FACE%VEL is still its allocation zero, and the solid is at rest.
 
       ! Normal to cut-face:
       V2(IAXIS:KAXIS) = CF%XYZVERT(IAXIS:KAXIS,CF%CFELEM(2,IFACE))-CF%XYZCEN(IAXIS:KAXIS,IFACE)
