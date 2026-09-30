@@ -38,6 +38,12 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
     ${CMAKE_CURRENT_LIST_DIR}/GhostExchange.cpp
     ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/TimeLoop.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CommonLayer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/PressureIface.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/FFTBackend.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/MLMGBackend.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tests/selftest_fds.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tests/kernelcheck.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90
@@ -47,12 +53,13 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_alias.c
 )
 set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_amrex_hooks.f90
-    ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
     PROPERTIES COMPILE_OPTIONS "-ffree-line-length-none")
-target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend)
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 
 # C++ is the link language (C++ main; the Fortran runtime is pulled in by the gfortran libraries listed by CMake).
@@ -70,7 +77,8 @@ add_executable(driver_unit_tests
     ${CMAKE_CURRENT_LIST_DIR}/tests/test_units.cpp
     ${CMAKE_CURRENT_LIST_DIR}/FdsAmr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp)
 target_include_directories(driver_unit_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_options(driver_unit_tests PRIVATE -Wall -Wextra)
 target_link_libraries(driver_unit_tests PRIVATE AMReX::amrex MPI::MPI_CXX)

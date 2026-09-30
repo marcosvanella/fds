@@ -3,6 +3,7 @@
 // are used, nonuniform (TRN*) and cylindrical meshes are rejected.
 #include "FdsSetup.H"
 
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 
 extern "C" {
@@ -18,6 +19,9 @@ Level0 build_level0()
 {
     DomainInfo dom;
     fds_get_domain(dom.periodic, &dom.cylindrical, &dom.n_tracked, &dom.n_total, &dom.nranks);
+    // FDS sets PERIODIC_DOMAIN_X/Y/Z only on the ranks that own a mesh with a periodic vent on that axis (read.f90): the domain flag is the maximum over the ranks
+    amrex::ParallelDescriptor::ReduceIntMax(dom.periodic, 3);
+    amrex::ParallelDescriptor::ReduceIntMax(dom.cylindrical);
     const int nm = fds_get_nmeshes();
     amrex::Vector<MeshInfo> meshes(nm);
     for (int i = 0; i < nm; ++i) {

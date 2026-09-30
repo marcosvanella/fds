@@ -14,12 +14,15 @@
 #include <AMReX.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <AMReX_ParallelReduce.H>
 #include <AMReX_Print.H>
 
 #ifdef AMREX_USE_OMP
 #include <omp.h>
 #endif
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -32,6 +35,7 @@
 #include "Fields.H"
 #include "SideData.H"
 #include "check.H"
+#include "ExactSum.H"
 
 using namespace fdsamr;
 
@@ -497,6 +501,70 @@ long test_tile_race(int nranks, bool thread_sweep)
     return fdstest::report(thread_sweep ? "tile_race (IR-007 skeleton: tile sizes, box layouts, threads 1/2/4/8)" : "tile_race (IR-007 skeleton: tile sizes, box layouts; threads=1)");
 }
 
+
+// D-028 / FR-005 (v): exact fixed-point sums are independent of the box split and of the rank count. A 32 x 4 x 32 periodic level is cut into 1, 2x2, 4x4 and 8x8 boxes
+// (max_grid_size 32/16/8/4 of the 32 cells per side) and run on the ranks given; every split must return the SAME bits, equal to a serial reference that does not
+// use the box layout. Terms are values of wide dynamic range and mixed sign, so the plain double sum is order dependent (printed, not asserted).
+long test_exact_sum(int nranks)
+{
+    const int n[3] = {32, 4, 32};
+    auto term = [&](int i, int j, int k, int c) {
+        const std::uint64_t h = mix64((std::uint64_t)(i + 7) * 73856093ULL ^ (std::uint64_t)(j + 11) * 19349663ULL ^ (std::uint64_t)(k + 13) * 83492791ULL ^ ((std::uint64_t)c << 40));
+        const double m = static_cast<double>(h & 0xFFFFFFFFFFFFFULL) / 4503599627370496.0 - 0.5;   // [-0.5,0.5)
+        const int e = static_cast<int>((h >> 52) % 40) - 20;                                   // 40 binades
+        return std::ldexp(m, e);
+    };
+    // serial reference in __int128 at the documented scale, plus a long double sum for a magnitude check
+    double mx = 0.0; long double ld = 0.0L;
+    for (int k = 0; k < n[2]; ++k) for (int j = 0; j < n[1]; ++j) for (int i = 0; i < n[0]; ++i) { const double t = term(i, j, k, 0) * 0.125; mx = std::max(mx, std::abs(t)); ld += t; }
+    int ex = 0; std::frexp(mx, &ex);
+    const int sc = 62 - ex;
+    __int128 acc = 0;
+    for (int k = 0; k < n[2]; ++k) for (int j = 0; j < n[1]; ++j) for (int i = 0; i < n[0]; ++i) acc += static_cast<__int128>(std::llround(std::ldexp(term(i, j, k, 0) * 0.125, sc)));
+    const double ref = std::ldexp(static_cast<double>(acc), -sc);
+    CHECK_MSG(std::abs(ref - static_cast<double>(ld)) <= 1e-12 * std::abs(static_cast<double>(ld)) + 1e-300, "exact sum reference is close to the long double sum");
+    double naive_first = 0.0; bool naive_differs = false;
+    std::vector<double> got;
+    for (const int cuts : {1, 2, 4, 8}) {
+        Layout L{"exact", {n[0], n[1], n[2]}, {cuts, 1, cuts}, {1, 1, 1}};
+        Level0 l0 = make_level0(L, nranks);
+        amrex::MultiFab mf(l0.ba, l0.dm, 2, 0);
+        double naive = 0.0;
+        for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+            auto a = mf.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { a(i, j, k, 0) = term(i, j, k, 0); a(i, j, k, 1) = term(i, j, k, 1); naive += term(i, j, k, 0) * 0.125; });
+        }
+        amrex::ParallelAllReduce::Sum(naive, amrex::ParallelContext::CommunicatorSub());
+        if (got.empty()) naive_first = naive; else if (naive != naive_first) naive_differs = true;
+        const double ex0 = exact_sum(mf, 0, 0.125);
+        got.push_back(ex0);
+        CHECK_MSG(std::memcmp(&ex0, &ref, sizeof(double)) == 0, std::string("exact_sum equals the serial reference bitwise, cuts ") + std::to_string(cuts));
+        // group form: two groups, the second is the plain sum of component 1 with the other weight; the result of group 0 must not depend on group 1
+        std::vector<int> g; std::vector<double> v;
+        for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+            auto a = mf.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { g.push_back(0); v.push_back(a(i, j, k, 0) * 0.125); g.push_back(1); v.push_back(a(i, j, k, 1) * 1024.0); });
+        }
+        const std::vector<double> gs = exact_group_sums(2, g, v);
+        CHECK_MSG(std::memcmp(&gs[0], &ref, sizeof(double)) == 0, std::string("exact_group_sums group 0 equals the reference, cuts ") + std::to_string(cuts));
+        // cancellation: adjacent pairs (x, -x) inside and across box cuts sum to exactly 0
+        amrex::MultiFab zero(l0.ba, l0.dm, 1, 0);
+        for (amrex::MFIter mfi(zero); mfi.isValid(); ++mfi) {
+            auto a = zero.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { const double t = term(i, j, k, 1); a(i, j, k) = (i % 2 == 0) ? t : -term(i - 1, j, k, 1); });   // pairs (i even, i+1 odd) cancel exactly
+        }
+        const double zs = exact_sum(zero, 0, 1.0);
+        CHECK_MSG(zs == 0.0, std::string("exact cancellation (x + (-x) over box cuts) is exactly 0, cuts ") + std::to_string(cuts) + " got " + std::to_string(zs));
+        // mean of a known field: constant 3.0 over 32*4*32 cells of volume 2^-7 is exactly 3*4096/128 = 96
+        amrex::MultiFab cst(l0.ba, l0.dm, 1, 0);
+        cst.setVal(3.0);
+        CHECK_MSG(exact_sum(cst, 0, 0.0078125) == 96.0, std::string("sum of a constant field is exact, cuts ") + std::to_string(cuts));
+    }
+    for (std::size_t q = 1; q < got.size(); ++q) CHECK_MSG(std::memcmp(&got[0], &got[q], sizeof(double)) == 0, "exact sum bitwise equal across box splits");
+    if (amrex::ParallelDescriptor::IOProcessor()) std::printf("  exact_sum: %.17g; plain double sum %s across splits (ranks %d)\n", got[0], naive_differs ? "DIFFERS" : "happens to agree", nranks);
+    return fdstest::report("exact_sum (D-028: bitwise across box splits 32/16/8/4 cells; ranks as launched)");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -523,6 +591,7 @@ int main(int argc, char** argv)
             fails += test_sidedata(nranks);
             fails += test_registry(nranks);
             fails += test_tile_race(nranks, thread_sweep);
+            fails += test_exact_sum(nranks);
             if (amrex::ParallelDescriptor::IOProcessor()) std::printf("%s: %ld failing checks\n", fails == 0 ? "ALL PASS" : "SOME FAILED", fails);
         }
     }

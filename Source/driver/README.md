@@ -4,7 +4,7 @@ C++ AmrCore driver plus the Fortran `bind(C)` glue (ADR-001 Option A/C; C++ only
 (see `OWNERS.md`). Edits to existing FDS files are delivered as numbered patches in `patches/` and applied by the Chief Architect;
 everything they add is inside `#ifdef WITH_AMREX`, so `USE_AMREX=OFF` is unchanged (IR-006).
 
-## Status (S0 to S4)
+## Status (S0 to S5)
 | Step | State |
 |---|---|
 | S0 toolchain | done, section "Environment" |
@@ -12,7 +12,8 @@ everything they add is inside `#ifdef WITH_AMREX`, so `USE_AMREX=OFF` is unchang
 | S2 fields | `Fields.{H,cpp}` MultiFab registry (D-031 ghost widths), +1 face offset, `SideData.{H,cpp}` per-box side data, `fds_box_shim.f90` + `fds_alias.c` (FAB memory seen by Fortran with FDS bounds), IR-005 round-trip tests, IR-007 tile-race skeleton; results in "Tests (S2)" |
 | S3 kernel shim | `fds_kernels.f90` (bind(C) wrappers of the UNMODIFIED FDS kernels), `fds_density_split.f90` (generated), `fds_clip_gather.f90` (D-031 gather clip), `TimeStep.H` (T/DT replay), `tests/kernelcheck.cpp` + `tests/run_kernelcheck.sh`, scratch reference dump generator `tests/refdump/`; results in "Kernel checks (S3)"; no existing file edited (no new patch) |
 | S4 ghost fill and boundary conditions | `GhostExchange.{H,cpp}` (FillBoundary at the MESH_EXCHANGE codes 1/3/4/5/6, class `BcStep`), `fds_ghost_bc.f90` (OMESH fill + thin wrappers of the unmodified FDS boundary routines), `fds_amrex_hooks.f90` (hook module); patches 0003 (velo), 0004 (wall), 0005 (mesh, DRAFT); plain `--ghost=full/face` modes gated; results in "Ghost fill and boundary conditions (S4)" |
-| S5 onward | not started (time loop, dt, exact sums, pressure hook-up, output) |
+| S5 time loop | `TimeLoop.{H,cpp}` (MAIN_LOOP order, predictor/corrector, global DT), `ExactSum.{H,cpp}` (D-028 fixed-point sums), `fds_step.f90` (state getters and thin wrappers of the unmodified FDS routines), `main.cpp --run`, `tests/compare_run.py`; pressure through `pb::solve_pressure` (Role 2's interface, FFT backend); no existing file edited (no new patch); results in "Time loop (S5)" |
+| S6 onward | not started (full pressure hook-up: inhomogeneous boundary data, mixed faces; output) |
 
 ## Kernel-facing file rules (M2a)
 Every file that touches kernels states in its header: (a) passive scalars (`N_TOTAL_SCALARS` beyond the tracked species) are handled by
@@ -252,3 +253,71 @@ arrays : RHO RHOS TMP U V W US VS WS H HS KRES D DS DDDT MU MU_DNS RSUM FVX FVY 
          wall arrays of length NW: W_UVW_SAVE W_U_NORMAL W_U_NORMAL_S W_RHO_F W_TMP_F W_ZZ_F W_RHO_D_DZDN_F W_RHO_D_F (NW x NS) W_K_G W_Q_CON_F W_Q_LEAK
          W_IOR W_IIG W_JJG W_KKG W_U_GHOST W_V_GHOST W_W_GHOST; edge arrays: E_IJKA (NE x 4) E_OMEGA E_TAU (NE x 5, index -2..2)
 ```
+
+## Time loop (S5)
+
+Scope of `--run`: uniform Cartesian meshes, no obstructions, no particles, no radiation, periodic or Neumann-closed Poisson boundaries with homogeneous data
+(`shunn3_32`, `shunn3_4mesh_32` and the decomposition cases). Other cases are refused at start (the reason is printed). Kernel-facing rules as above: passive
+scalars are handled by `Fields.cpp`; only uniform Cartesian metrics are used (IR-002).
+
+```
+source Source/driver/tests/env.sh; mpirun -np <n> fds_amr case.fds --run [--steps N] [--outdir D] [--chid C] [--quiet]
+python3 Source/driver/tests/compare_run.py <run-dir> <baseline-dir> <chid> [--dump ref.dump]   # T/DT replay, MMS errors (T2), final fields, mass
+```
+
+`TimeLoop::advance` follows MAIN_LOOP (main.f90 predictor ~ 695-960, corrector ~ 1000-1180, current numbering): COMPUTE_VISCOSITY; per pass DENSITY (pre-clip half, level
+gather clip of D-031, post-clip half), exchange code 1, WALL_BC, DIVERGENCE_PART_1, zone sums, DIVERGENCE_PART_2, pressure scheme (BAROCLINIC, exchange of FV, NO_FLUX,
+RHS, solve, residual, velocity error and the iteration exit tests, main.f90 1649-1793), VELOCITY_PREDICTOR with CHECK_STABILITY; the pass is repeated while the
+step is restricted (the global DT decision is the MIN over boxes and ranks by an Allreduce; MAX is applied through the same path); then exchange code 3, the corrector
+chain with codes 4 and 6, the end-of-step bookkeeping, the MMS output at the first step with T >= MMS_TIMER, mass file.
+
+### Exact sums (D-028)
+`ExactSum.{H,cpp}`: terms are converted to integers at one power-of-two scale per group (derived from the global maximum term, a max reduction), added in 128-bit integers,
+combined over ranks limb-wise (integer sum reduction) and converted back once. The result depends on the multiset of terms only (not order, box split or rank count).
+Users: setup pressure-zone volume (set into FDS `P_ZONE%VOLUME`), exact vent area (diagnostic against FDS `TOTAL_FDS_AREA`: 4e-16 relative), and the DSUM/PSUM/USUM
+zone integrals each pass (`fds_p_zone_terms` returns the per-cell and per-wall terms of DIVERGENCE_PART_1 with the same expressions and skip rules; they are summed exactly
+and written back with `fds_p_zone_set`). Unit test `exact_sum` (tests/test_units.cpp, in `run_driver_tests.sh`): 32 x 4 x 32 periodic level cut 1, 2x2, 4x4, 8x8 (boxes of 32, 16, 8, 4
+cells) on 1 and 4 ranks; every split returns the same bits, equal to a serial int128 reference; the plain double sum over the same splits DIFFERS; cancellation and constant-field
+checks are exact. 20 checks on 1 rank, 80 on 4 ranks, 0 failures.
+
+### Results (shunn3_32, 1 rank, 80 steps to T = 1, threads = 1)
+* T/DT replay: all 17 rows of the baseline `_steps.csv` match (DT to the 3 printed digits, T to 7). Against the dump STEP records: **0 of 80 bitwise**; max relative DT
+  difference 5.0e-14, max relative T difference 6e-16. Cause: the FDS Crayfishpak solve is replaced by `FFT::Poisson` (H differs at ~1e-14, D-021). Pressure iteration counts equal FDS (10/10 on steps 1-2, then 7/7; passes > 1 at steps 1, 55, 57 as in the dump).
+* MMS errors at T = 0.9003 (baseline / driver): e_rho 3.3002e-02 / 3.3002e-02, e_Z 6.2455e-03 / 6.2455e-03, e_u 4.7980e-03 / 4.7980e-03, e_H 1.8152e-02 / 1.8152e-02. T2 (`e <= 1.05 e_base`) passes; the Tol_FDS part is not applicable at N = 32.
+* Final fields against the baseline restart, max |d|: U 1.3e-15, V 0, W 1.2e-15, H 1.8e-14, HS 2.2e-14, D 2.2e-14, DS 1.9e-14, RHO 7.1e-15, TMP 3.4e-13 (relative to the field maxima: 1e-12 at worst).
+* Mass: total mass 1.2 exactly (equal to the baseline). Zone-sum fixed-point versus FDS's own rank-local accumulation: 1e-13 to 2e-12 relative (FDS's accumulation is the order dependent one).
+* `shunn3_4mesh_32` (4 boxes, 1 and 4 ranks, 82 steps): the level-wide periodic FFT replaces FDS's multi-mesh interpolated-boundary iteration, so this is T2 only. Against
+  `shunn3_4mesh_32__1mesh` (MMS at T = 1): e_rho 3.2251e-02 / 3.2255e-02, e_Z 1.3710e-02 / 1.3709e-02, e_u 4.9516e-03 / 5.0145e-03, e_H 7.4672e-03 / 8.6799e-03 (driver / baseline): T2 passes.
+  Final fields differ from the single-mesh restart by up to 1e-3 (U, W), 2.7e-2 (H), T/DT differ from step 1 on (6.191e-4 against 6.188e-4); this is the different pressure coupling, not a defect of the loop. Mass is conserved exactly by the driver (the multi-mesh baseline drifts by 2.8e-5).
+
+### Decomposition independence (honest state)
+Cases `dec{1,2,4}`: the same periodic 32 x 1 x 32 problem as 1, 4 and 16 boxes (max_grid_size 32, 16, 8), ranks 1, 2, 4, all run to T = 1 (82 steps).
+* The exact sums are decomposition independent (unit test above) and the iteration counts are the same in all runs.
+* The whole run is NOT bitwise independent. Across rank counts at fixed box split the fields differ by <= 7e-13 (last-bit level: the distributed FFT sums in a layout dependent order); across box splits (1 against 4 or 16 boxes) by ~3e-5 in U, H, RHO at T = 1 (same T2 errors).
+* Stage-by-stage comparison of the first cycle (`FDSTL_STAGE=1` dumps the fields after every stage): density, species, viscosity and VELOCITY_FLUX are bitwise equal across the splits (<= 2e-16 in FVX/FVZ);
+  the first difference is in `DIVERGENCE_PART_1`: its temperature-gradient/enthalpy terms at box-interface cells read the wall arrays of the interface (`INTERPOLATED_BOUNDARY` walls with `NOM > 0`), which FDS keeps for the mesh-to-mesh coupling (UVW_SAVE, TMP_F, RHO_F, K_G from `WALL_BC`/`ASSIGN_GHOST_VALUE`), not the level neighbour values, so a 1-box level and a split level differ at the 1e-2 level in DS on the interface columns.
+  Making the interfaces no-wall faces (`FDSTL_OPEN=1`, `fds_p_open_interfaces`, the `fds_k_neutralize` of the kernel check) removes most of it in DS (from 5.7 to 0.36 max) but the NOM > 0 walls are still needed by NO_FLUX and MATCH_VELOCITY_FLUX in the pressure stage and the run then diverges from the single box by O(1): **not adopted, left as opt-in diagnostic**. The clean fix is the externally-filled mode of patches 0003/0004 (`EXTERNAL_GHOSTS_FILLED`) with the TMP/RSUM ghost recompute noted in patch 0004, plus a
+  skip of the NOM > 0 walls in DIVERGENCE_PART_1 and the wall arrays of the interface; that needs existing-file edits and is proposed for S6 (next patch number 0006), not done here.
+
+### WALL_BC wiring and validation on snapshots
+WALL_BC (unmodified) is called for every box at the positions of main.f90 (after exchange code 1 and 4 of each stage, `BcStep::wall_bc`), after the OMESH fill. On frozen snapshots
+(`run_kernelcheck.sh`'s `--ghost=full` mode with `FDSKC_WALLBC=1 FDSKC_WALLCMP=1`) the wall arrays the driver produces are compared bitwise with the dump's per record tag:
+`W_K_G`, `W_Q_CON_F`, `W_Q_LEAK`, `W_RHO_D_DZDN_F`, `W_UVW_SAVE`, `W_U_GHOST`, `W_V_GHOST`, `W_W_GHOST`, `W_U_NORMAL`, `W_U_NORMAL_S`, `W_RHO_F`, `W_TMP_F`, `W_ZZ_F` are bitwise equal in the DENS tags;
+`W_RHO_D_F` differs (16384 of 17408 elements in DENS tags; 8192 of 8704 in DIV tags), and in the DIV1/DIV2 tags `W_RHO_F` (4096 of 4352), `W_TMP_F` (256) and `W_ZZ_F` (8192 of 8704) differ.
+These are snapshot artefacts: the dump is taken after later kernels rewrote the wall arrays (RHO_D_F is an output of DENSITY/DIVERGENCE, RHO_F/TMP_F/ZZ_F are rewritten by DENSITY after WALL_BC), so WALL_BC on the frozen state is not a pure replay. The decisive validation is the running loop
+(80 steps; V identical to the baseline, U/W 1e-15, MMS equal to 5 digits).
+
+### Fortran/C++ boundary additions (S5)
+`fds_step.f90` (module `FDS_STEP`): `fds_p_params`, `fds_p_mesh_info`, `fds_p_get`, `fds_p_mfd`, `fds_p_dens(_pre)`, `fds_p_init_div`, `fds_p_zone_get/set/terms`, `fds_p_zone_volume(_terms/_set)`,
+`fds_p_vent_count/get`, `fds_p_iter_*`, `fds_p_baroclinic`, `fds_p_noflux`, `fds_p_rhs`, `fds_p_get_prhs`, `fds_p_bmax` (boundary data check, per face flags), `fds_p_h_ghost`
+(ghost assignment block of PRESSURE_SOLVER_FFT, face flag order xlo, xhi, ylo, yhi, zlo, zhi), `fds_p_resid`, `fds_p_velerr`, `fds_p_get_err`, `fds_p_set_wall_counter`, `fds_p_stop_status`,
+`fds_p_clear_attached`, `fds_p_total_iter`, `fds_p_open_interfaces` (opt-in). `FdsSetup.cpp`: `dom.periodic/cylindrical` are max-reduced over ranks (FDS sets `PERIODIC_DOMAIN_*` only on ranks that own a periodic-vent mesh).
+
+### Pressure call-through
+`TimeLoop::solve_poisson` -> `pb::solve_pressure` (FFT backend). Review and requests for Role 2 / the Architect: `notes/pressure-iface-review.md`.
+
+### Debug switches (environment variables, off by default)
+`FDSTL_DEBUG` (per-iteration errors), `FDSTL_PBV` (pressure backend verbose and residual probes), `FDSTL_ZONES` (print the zone sums), `FDSTL_STAGE=<icyc>` (per-stage field dumps of a cycle), `FDSTL_OPEN=1` (see above).
+
+### Patches (S5)
+None: no existing FDS file was edited in S5 (the OFF build is untouched; the bitwise OFF check of 0001-0005 stands). oneAPI (ifx/ifort) is not available on the box: gfortran 14.2 + Open MPI 5.0.7 only.

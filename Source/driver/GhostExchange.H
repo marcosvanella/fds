@@ -50,6 +50,9 @@ public:
     // OMESH fill, VISCOSITY_BC (both stages), VELOCITY_BC (both stages), WALL_BC (predictor, then corrector).
     void replay(double t, double dt, bool predictor);          // + WALL_BC of the record's stage
     void replay_velocity(double t, double dt, bool predictor);  // without WALL_BC
+    // OMESH(NOM) of every local box from the current box data (the block copy of MESH_EXCHANGE, all registered fields). The time loop calls it after each
+    // ghost_exchange(5): NO_FLUX, MATCH_VELOCITY_FLUX and COMPUTE_VELOCITY_ERROR read H/HS and FVX.. of the neighbour from OMESH.
+    void exchange_om() { fill_omesh(); }
 
 private:
     const Level0& m_l0;

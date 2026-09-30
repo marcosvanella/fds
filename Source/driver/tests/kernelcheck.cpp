@@ -149,6 +149,7 @@ constexpr int kNTags = sizeof(kTags) / sizeof(kTags[0]);
 Tally g_tal[kNTags];
 int tag_of(const std::string& t) { for (int i = 0; i < kNTags; ++i) if (t == kTags[i]) return i; return -1; }
 int g_shown = 0;
+std::map<std::string, std::pair<long, long>> g_wall;   // S5 WALL_BC validation: wall array name -> (elements compared, elements differing)
 const int g_show_max = std::getenv("FDSKC_SHOWALL") ? 100000 : 20;
 
 bool is_special(const std::string& n) { return n == "CLIPFL" || n == "DTRC" || n == "E_IJKA" || n == "W_IIG" || n == "W_JJG" || n == "W_KKG"; }
@@ -904,6 +905,25 @@ int Checker::run(const std::string& dump)
                 if (!m_bcstep) m_bcstep.reset(new BcStep(m_l0, *m_F));
                 if (std::getenv("FDSKC_WALLBC")) m_bcstep->replay(r0.T, r0.DT, r0.pred != 0); else m_bcstep->replay_velocity(r0.T, r0.DT, r0.pred != 0);
                 if (std::getenv("FDSKC_STRIPDUMP")) for (int i = 0; i < nbox; ++i) load_strips_only(m_box[i], rec[src_of[i]]);   // diagnostic: boundary-face strips from the dump after the replay
+                // S5 WALL_BC validation (FDSKC_WALLCMP=1 with FDSKC_WALLBC=1): the wall arrays the driver's WALL_BC produced from the frozen interior, compared bitwise with
+                // the dump's (before they are put back below)
+                if (std::getenv("FDSKC_WALLCMP") && std::getenv("FDSKC_WALLBC"))
+                    for (int i = 0; i < nbox; ++i) {
+                        const Rec& r = rec[src_of[i]];
+                        for (const auto& a : r.bef) {
+                            if (a.name.compare(0, 2, "W_") != 0) continue;
+                            if (a.name == "W_IIG" || a.name == "W_JJG" || a.name == "W_KKG" || a.name == "W_IOR") continue;
+                            long n = 0, bad = 0; int ierr = 0; int lb[4], ub[4];
+                            for (int q = 0; q < 4; ++q) { lb[q] = a.lb[q]; ub[q] = a.ub[q]; }
+                            std::vector<double> buf = a.d;
+                            fds_k_xfer(m_box[i].nm, a.name.c_str(), a.rank, lb, ub, buf.data(), 1, &n, &bad, &ierr);
+                            if (ierr == 0) {
+                                auto& t = g_wall[r0.name + " " + a.name];
+                                t.first += n; t.second += bad;
+                                if (bad) t.second += 0;
+                            }
+                        }
+                    }
                 // WALL_BC also rewrites the wall arrays from the frozen interior; the dump holds the ones FDS had at this point: put them back
                 for (int i = 0; i < nbox; ++i) {
                     const Rec& r = rec[src_of[i]];
@@ -1028,6 +1048,10 @@ int Checker::run(const std::string& dump)
             if (v[4 * i] == 0 && v[4 * i + 2] == 0) continue;
             std::printf("  %-11s %s: %ld calls, %ld array compares, %ld elements, %ld bit differences\n", kTags[i], v[4 * i + 3] == 0 ? "BITWISE-OK" : "DIFFER    ", v[4 * i], v[4 * i + 1], v[4 * i + 2], v[4 * i + 3]);
         }
+    }
+    if (!g_wall.empty() && amrex::ParallelDescriptor::IOProcessor()) {   // S5 WALL_BC validation (informational tally of the driver's own WALL_BC against the dump's wall arrays)
+        std::printf("  WALL_BC wall arrays (driver WALL_BC on the frozen state vs dump), this rank:\n");
+        for (const auto& kv : g_wall) std::printf("    %-16s %ld elements, %ld bit differences\n", kv.first.c_str(), kv.second.first, kv.second.second);
     }
     for (int i = 0; i < kNTags; ++i) fails += v[4 * i + 3];
     fdstest::counter().checks += 1;

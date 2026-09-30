@@ -17,6 +17,7 @@
 #include <string>
 
 #include "FdsSetup.H"
+#include "TimeLoop.H"
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
 int fds_selftest(const fdsamr::Level0& l0);   // tests/selftest_fds.cpp
@@ -47,6 +48,20 @@ int main(int argc, char** argv)
             if (argc > 2 && std::strcmp(argv[2], "--selftest") == 0) {
                 const int nfail = fds_selftest(l0);
                 amrex::Print() << (nfail == 0 ? "SELFTEST PASS" : "SELFTEST FAIL") << "\n";
+            }
+            if (argc > 2 && std::strcmp(argv[2], "--run") == 0) {
+                // --run [--steps N] [--outdir D] [--chid C] [--quiet]: the C++ time loop (S5)
+                fdsamr::RunOptions ro;
+                for (int i = 3; i < argc; ++i) {
+                    if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) ro.max_steps = std::atoi(argv[++i]);
+                    else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) ro.outdir = argv[++i];
+                    else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) ro.chid = argv[++i];
+                    else if (std::strcmp(argv[i], "--quiet") == 0) ro.quiet = true;
+                }
+                fdsamr::TimeLoop loop(l0, dt, ro);
+                const int nfail = loop.run();
+                amrex::Print() << (nfail == 0 ? "RUN COMPLETE" : "RUN FAILED") << ": steps = " << loop.icyc() << ", T = " << loop.time() << "\n";
+                if (nfail == 0) mode_end = 1;
             }
             if (argc > 3 && std::strcmp(argv[2], "--kernelcheck") == 0) {
                 bool window = false;
