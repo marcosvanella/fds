@@ -14,11 +14,13 @@
 #include <cstdlib>
 
 #include <cstring>
+#include <string>
 
 #include "FdsSetup.H"
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
 int fds_selftest(const fdsamr::Level0& l0);   // tests/selftest_fds.cpp
+int fds_kernelcheck(const fdsamr::Level0& l0, const std::string& dump, bool window, const std::string& ghost);   // tests/kernelcheck.cpp
 
 int main(int argc, char** argv)
 {
@@ -45,6 +47,16 @@ int main(int argc, char** argv)
             if (argc > 2 && std::strcmp(argv[2], "--selftest") == 0) {
                 const int nfail = fds_selftest(l0);
                 amrex::Print() << (nfail == 0 ? "SELFTEST PASS" : "SELFTEST FAIL") << "\n";
+            }
+            if (argc > 3 && std::strcmp(argv[2], "--kernelcheck") == 0) {
+                bool window = false;
+                std::string ghost = "dump";
+                for (int i = 4; i < argc; ++i) {
+                    if (std::strcmp(argv[i], "--window") == 0) window = true;
+                    else if (std::strncmp(argv[i], "--ghost=", 8) == 0) ghost = argv[i] + 8;
+                }
+                const int nfail = fds_kernelcheck(l0, argv[3], window, ghost);
+                amrex::Print() << (nfail == 0 ? "KERNELCHECK PASS" : "KERNELCHECK FAIL") << "\n";
             }
         }
         amrex::Finalize();

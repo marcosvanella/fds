@@ -38,11 +38,16 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
     ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tests/selftest_fds.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tests/kernelcheck.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_alias.c
 )
-set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90
+set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90
     PROPERTIES COMPILE_OPTIONS "-ffree-line-length-none")
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
