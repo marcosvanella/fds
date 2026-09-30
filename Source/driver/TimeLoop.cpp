@@ -60,7 +60,9 @@ void fds_p_dens_pre(double t, double dt, int nm);
 void fds_p_init_div();
 void fds_p_zone_get(int n, double* d, double* p, double* u);
 void fds_p_zone_set(int n, const double* d, const double* p, const double* u);
-int fds_p_open_interfaces(int nm);
+void fds_p_wall_dump(int nm, int ofx, int ofz, int kg0);
+void fds_hook_set_flag(int flag);
+void fds_p_iface_walls(int nm, int mode, const int* edge, int all_edges);
 void fds_p_zone_terms(int nm, int* czone, double* dterm, double* pterm, int* wzone, double* wterm);
 void fds_p_zone_volume_terms(int nm, int* czone, double* vterm);
 double fds_p_zone_volume(int iz);
@@ -170,9 +172,27 @@ struct TimeLoop::Impl {
         L.bind_fields(true);
         pressure_bc_map();
         zone_setup();
-        // Experiment (FDSTL_OPEN=1, off by default): turn the box interfaces into no-wall faces. It removes most of the 1-box/N-box difference of DIVERGENCE_PART_1 but the
-        // NOM>0 walls are then missed by NO_FLUX/MATCH_VELOCITY_FLUX and the pressure stage diverges; see README "Decomposition".
-        if (std::getenv("FDSTL_OPEN")) for (int i = 0; i < nbox; ++i) if (local(i)) fds_p_open_interfaces(i + 1);
+        if (const char* e = std::getenv("FDSTL_IFACE")) iface_mode = std::atoi(e);
+        L.m_bc->iface_hook = [this](bool on) { iface(on); };
+        if (const char* e = std::getenv("FDSTL_EXTGHOST")) ext_ghost = std::atoi(e) != 0;
+        fds_hook_set_flag(ext_ghost ? 1 : 0); L.m_bc->ext_ghost = ext_ghost;
+        amrex::Print() << "FDS-AMReX: EXTERNAL_GHOSTS_FILLED=" << (ext_ghost ? 1 : 0) << ", interface walls as regular faces (FDSTL_IFACE)=" << iface_mode << "\n";
+        if (iface_mode) {
+            // FDS ends its own initialisation with MATCH_VELOCITY, VISCOSITY_BC, VELOCITY_BC (main.f90 ~445-455) on the multi-mesh state, which leaves the interface-edge
+            // arrays (EDGE%OMEGA, EDGE%TAU) from the interpolation branch. Redo it here with the interfaces as regular faces, so that the first step starts from the
+            // edge data that a single mesh has (no interface edge data).
+            state(false, true);
+            each_local([&](int nm) { fds_k_visc(nm, 0); });
+            ghost_exchange(*L.m_F, 4);
+            L.m_bc->after_exchange(4, L.m_t, L.m_dt);
+            ghost_exchange(*L.m_F, 6);
+            L.m_bc->after_exchange(6, L.m_t, L.m_dt);
+            // and FDS's initial DIVERGENCE_PART_1 (main.f90 ~632, D of the first step) with the interfaces as regular faces
+            fds_p_init_div();
+            iface(true);
+            each_local([&](int nm) { fds_k_div1(L.m_t, L.m_dt, nm); });
+            iface(false);
+        }
     }
 
     // FDS Poisson boundary codes of the domain faces -> pb::BC (S5: homogeneous data only; the data is checked at every solve)
@@ -268,6 +288,22 @@ struct TimeLoop::Impl {
     double vent_rel = 0.0;
 
     // ------------------------------------------------------------ helpers
+
+    // Interface walls as no-wall faces around the kernels that would otherwise add wall-face terms for them (env FDSTL_IFACE=1: interfaces inside the level, =2 also the
+    // periodic images at the domain edge; default 1, FDSTL_IFACE=0 restores the S5 behaviour)
+    int iface_mode = 1;
+    bool ext_ghost = true;   // EXTERNAL_GHOSTS_FILLED (patches 0003/0004); FDSTL_EXTGHOST=0 returns to the OMESH-average route of FDS
+    void iface(bool on, bool all = false)
+    {
+        if (!iface_mode) return;
+        const amrex::Box dom = l0.geom.Domain();
+        each_local([&](int nm) {
+            const amrex::Box b = l0.ba[nm - 1];
+            int e[6] = {b.smallEnd(0) == dom.smallEnd(0), b.bigEnd(0) == dom.bigEnd(0), b.smallEnd(1) == dom.smallEnd(1), b.bigEnd(1) == dom.bigEnd(1), b.smallEnd(2) == dom.smallEnd(2), b.bigEnd(2) == dom.bigEnd(2)};
+            fds_p_iface_walls(nm, on ? 1 : 0, e, (iface_mode == 2 || all) ? 1 : 0);
+        });
+    }
+
     void state(bool pred, bool first) { fds_k_state(pred ? 1 : 0, first ? 1 : 0, L.m_icyc, L.m_rmin, L.m_rmax); }
     template <class F> void each_local(F f) { for (int i = 0; i < nbox; ++i) if (local(i)) f(i + 1); }
 
@@ -430,6 +466,20 @@ struct TimeLoop::Impl {
         const pb::PressureResult r = pb::solve_pressure(p, o);
         if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("pressure interface: ") + pb::to_string(r.status) + ": " + r.message);
         if (std::getenv("FDSTL_PBV")) { amrex::Print() << "  [pb] backend=" << r.backend << " res_rel2=" << r.residual_rel2 << " relmax=" << r.residual_relmax << " rhs max=" << rhs->norminf(0) << " phi max=" << phi->norminf(0); for (auto& c : r.components) amrex::Print() << " removed_mean=" << c.removed_mean << " rel=" << c.removed_rel; for (auto& w : r.warnings) amrex::Print() << " W:" << w; amrex::Print() << "\n"; }
+        if (const char* e = std::getenv("FDSTL_PDUMP")) {
+            // hand-over for the one-solve check against another Poisson solver (Role 2): the right-hand side PRHS (FDS IPS=0 layout, valid cells, I fastest) and the level solution
+            // that becomes H/HS, both in the cell layout of the level (global, written by rank 0): <outdir>/pdump_<icyc>_<P|C>_{rhs,phi}.bin (doubles), dx dy dz in pdump_dx.txt
+            if (std::atoi(e) == L.m_icyc) {
+                const FieldSpec& cs = F.spec("D");
+                const std::vector<double> a = gather_mf(*rhs, cs, 0), b = gather_mf(*phi, cs, 0);
+                if (amrex::ParallelDescriptor::MyProc() == 0) {
+                    const std::string base = dir + "/pdump_" + std::to_string(L.m_icyc) + (pred ? "_P_" : "_C_");
+                    if (std::FILE* fp = std::fopen((base + "rhs.bin").c_str(), "wb")) { std::fwrite(a.data(), sizeof(double), a.size(), fp); std::fclose(fp); }
+                    if (std::FILE* fp = std::fopen((base + "phi.bin").c_str(), "wb")) { std::fwrite(b.data(), sizeof(double), b.size(), fp); std::fclose(fp); }
+                    if (std::FILE* fp = std::fopen((dir + "/pdump_dx.txt").c_str(), "w")) { std::fprintf(fp, "%.17g %.17g %.17g\n", l0.dx[0], l0.dx[1], l0.dx[2]); std::fclose(fp); }
+                }
+            }
+        }
         const char* hn = pred ? "H" : "HS";
         amrex::MultiFab& H = F[hn];
         for (amrex::MFIter mfi(H); mfi.isValid(); ++mfi) {
@@ -541,13 +591,24 @@ struct TimeLoop::Impl {
             state(true, first_pass);
             density(true, t, dt);
             stage(passes == 1 ? "p1_dens" : "p2_dens", {"RHOS", "ZZS"});
+            stage_raw(passes == 1 ? "p1_a_dens" : "p2_a_dens", {"RHOS", "TMP"});
             ghost_exchange(F, 1);
+            stage_raw(passes == 1 ? "p1_b_fill" : "p2_b_fill", {"RHOS", "TMP"});
             bc.after_exchange(1, t, dt);
+            stage_raw(passes == 1 ? "p1_c_visc" : "p2_c_visc", {"RHOS", "TMP"});
+            stage_raw(passes == 1 ? "p1_prevflux" : "p2_prevflux", {"RHO", "RHOS", "U", "V", "W", "MU", "KRES", "H", "HS", "ZZ", "TMP"});
+            iface(true);
             each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(t, dt, nm, 0); });
+            iface(false);
             stage(passes == 1 ? "p1_vflux" : "p2_vflux", {"FVX", "FVZ", "MU"});
             fds_p_init_div();
             bc.wall_bc(1, t, dt);
+            if (std::getenv("FDSTL_WALLS") && L.m_icyc == std::atoi(std::getenv("FDSTL_WALLS")) && passes == 1)
+                each_local([&](int nm) { const amrex::Box b = l0.ba[nm - 1]; fds_p_wall_dump(nm, b.smallEnd(0), b.smallEnd(2), 5); });
+            stage_raw(passes == 1 ? "p1_prediv" : "p2_prediv", {"RHOS", "ZZS", "TMP", "RSUM", "U", "V", "W", "MU", "KRES", "D"});
+            iface(true);
             each_local([&](int nm) { fds_k_div1(t, dt, nm); });
+            iface(false);
             stage(passes == 1 ? "p1_div1" : "p2_div1", {"DS", "MU", "KRES", "TMP", "RSUM"});
             zone_sums(true);
             each_local([&](int nm) { fds_k_div2(dt, nm); });
@@ -584,18 +645,23 @@ struct TimeLoop::Impl {
         t = time_advance(t, dt);
         state(false, first_pass);
         each_local([&](int nm) { fds_k_visc(nm, 1); fds_p_mfd(nm); });
+        stage_raw("c_pre", {"RHOS", "TMP", "RHO"});
         density(false, t, dt);
         stage("c_dens", {"RHO", "ZZ"});
         ghost_exchange(F, 4);
         bc.after_exchange(4, t, dt);
+        iface(true);
         each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(t, dt, nm, 1); });
+        iface(false);
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         bc.wall_bc(0, t, dt);
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();
+        iface(true);
         each_local([&](int nm) { fds_k_div1(t, dt, nm); });
+        iface(false);
         zone_sums(false);
         each_local([&](int nm) { fds_k_div2(dt, nm); });
         state(false, first_pass);
@@ -620,8 +686,10 @@ struct TimeLoop::Impl {
     std::vector<double> gather(const std::string& name, int comp)
     {
         Fields& F = *L.m_F;
-        const FieldSpec& s = F.spec(name);
-        const amrex::MultiFab& mf = F[name];
+        return gather_mf(F[name], F.spec(name), comp);
+    }
+    std::vector<double> gather_mf(const amrex::MultiFab& mf, const FieldSpec& s, int comp)
+    {
         amrex::MultiFab tmp(l0.ba, l0.dm, 1, 0);
         for (amrex::MFIter mfi(tmp); mfi.isValid(); ++mfi) {
             auto t = tmp.array(mfi);
@@ -660,6 +728,29 @@ struct TimeLoop::Impl {
             if (amrex::ParallelDescriptor::MyProc() != 0) continue;
             std::FILE* fp = std::fopen((dir + "/stage_" + tag + "_" + f + ".bin").c_str(), "wb");
             if (fp) { std::fwrite(a.data(), sizeof(double), a.size(), fp); std::fclose(fp); }
+        }
+    }
+
+
+    // Diagnostic (FDSTL_STAGEG=<icyc>): raw FABs (valid + ghost cells, FDS/AMReX index of the box) of the named fields, one file per box, for ghost-layer comparisons across decompositions
+    void stage_raw(const char* tag, std::initializer_list<const char*> fl)
+    {
+        const char* e = std::getenv("FDSTL_STAGEG");
+        if (!e || std::atoi(e) != L.m_icyc) return;
+        Fields& F = *L.m_F;
+        for (const char* f : fl) {
+            const amrex::MultiFab& mf = F[f];
+            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                const amrex::FArrayBox& fab = mf[mfi];
+                const amrex::Box b = fab.box();
+                std::FILE* fp = std::fopen((dir + "/raw_" + tag + "_" + f + "_b" + std::to_string(mfi.index()) + ".bin").c_str(), "wb");
+                if (!fp) continue;
+                const amrex::Box v = mfi.validbox();
+                int hdr[16] = {b.smallEnd(0), b.smallEnd(1), b.smallEnd(2), b.bigEnd(0), b.bigEnd(1), b.bigEnd(2), fab.nComp(), 0, v.smallEnd(0), v.smallEnd(1), v.smallEnd(2), v.bigEnd(0), v.bigEnd(1), v.bigEnd(2), 0, 0};
+                std::fwrite(hdr, sizeof(int), 16, fp);
+                std::fwrite(fab.dataPtr(), sizeof(double), static_cast<std::size_t>(b.numPts()) * fab.nComp(), fp);
+                std::fclose(fp);
+            }
         }
     }
 

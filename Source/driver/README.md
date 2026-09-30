@@ -4,7 +4,7 @@ C++ AmrCore driver plus the Fortran `bind(C)` glue (ADR-001 Option A/C; C++ only
 (see `OWNERS.md`). Edits to existing FDS files are delivered as numbered patches in `patches/` and applied by the Chief Architect;
 everything they add is inside `#ifdef WITH_AMREX`, so `USE_AMREX=OFF` is unchanged (IR-006).
 
-## Status (S0 to S5)
+## Status (S0 to S6)
 | Step | State |
 |---|---|
 | S0 toolchain | done, section "Environment" |
@@ -13,7 +13,8 @@ everything they add is inside `#ifdef WITH_AMREX`, so `USE_AMREX=OFF` is unchang
 | S3 kernel shim | `fds_kernels.f90` (bind(C) wrappers of the UNMODIFIED FDS kernels), `fds_density_split.f90` (generated), `fds_clip_gather.f90` (D-031 gather clip), `TimeStep.H` (T/DT replay), `tests/kernelcheck.cpp` + `tests/run_kernelcheck.sh`, scratch reference dump generator `tests/refdump/`; results in "Kernel checks (S3)"; no existing file edited (no new patch) |
 | S4 ghost fill and boundary conditions | `GhostExchange.{H,cpp}` (FillBoundary at the MESH_EXCHANGE codes 1/3/4/5/6, class `BcStep`), `fds_ghost_bc.f90` (OMESH fill + thin wrappers of the unmodified FDS boundary routines), `fds_amrex_hooks.f90` (hook module); patches 0003 (velo), 0004 (wall), 0005 (mesh, DRAFT); plain `--ghost=full/face` modes gated; results in "Ghost fill and boundary conditions (S4)" |
 | S5 time loop | `TimeLoop.{H,cpp}` (MAIN_LOOP order, predictor/corrector, global DT), `ExactSum.{H,cpp}` (D-028 fixed-point sums), `fds_step.f90` (state getters and thin wrappers of the unmodified FDS routines), `main.cpp --run`, `tests/compare_run.py`; pressure through `pb::solve_pressure` (Role 2's interface, FFT backend); no existing file edited (no new patch); results in "Time loop (S5)" |
-| S6 onward | not started (full pressure hook-up: inhomogeneous boundary data, mixed faces; output) |
+| S6 decomposition independence, pressure hook-up | box-interface walls handled in the driver (`TimeLoop::iface`, `fds_p_iface_walls`), the `EXTERNAL_GHOSTS_FILLED` path (patches 0003/0004) is the default route (`fds_p_save_uvw`), TMP/RSUM exchanged with the level ghosts; `tests/run_decomp_check.sh` (cases `tests/cases/dec*.fds`); `FDS_HOOK_SET_VIEW`/`POINT_TO_BOX` unit test in `--selftest`; plain kernel-check modes regenerated bitwise (`+strips`); `FDSTL_PDUMP` hand-over for Role 2's one-solve check; no new patch (no 0006 needed); results in "Decomposition independence (S6)" |
+| S7 onward | not started (output writers, NFR-030 timing; inhomogeneous Poisson data and mixed faces: see `notes/pressure-iface-review.md`) |
 
 ## Kernel-facing file rules (M2a)
 Every file that touches kernels states in its header: (a) passive scalars (`N_TOTAL_SCALARS` beyond the tracked species) are handled by
@@ -290,14 +291,39 @@ checks are exact. 20 checks on 1 rank, 80 on 4 ranks, 0 failures.
   `shunn3_4mesh_32__1mesh` (MMS at T = 1): e_rho 3.2251e-02 / 3.2255e-02, e_Z 1.3710e-02 / 1.3709e-02, e_u 4.9516e-03 / 5.0145e-03, e_H 7.4672e-03 / 8.6799e-03 (driver / baseline): T2 passes.
   Final fields differ from the single-mesh restart by up to 1e-3 (U, W), 2.7e-2 (H), T/DT differ from step 1 on (6.191e-4 against 6.188e-4); this is the different pressure coupling, not a defect of the loop. Mass is conserved exactly by the driver (the multi-mesh baseline drifts by 2.8e-5).
 
-### Decomposition independence (honest state)
-Cases `dec{1,2,4}`: the same periodic 32 x 1 x 32 problem as 1, 4 and 16 boxes (max_grid_size 32, 16, 8), ranks 1, 2, 4, all run to T = 1 (82 steps).
-* The exact sums are decomposition independent (unit test above) and the iteration counts are the same in all runs.
-* The whole run is NOT bitwise independent. Across rank counts at fixed box split the fields differ by <= 7e-13 (last-bit level: the distributed FFT sums in a layout dependent order); across box splits (1 against 4 or 16 boxes) by ~3e-5 in U, H, RHO at T = 1 (same T2 errors).
-* Stage-by-stage comparison of the first cycle (`FDSTL_STAGE=1` dumps the fields after every stage): density, species, viscosity and VELOCITY_FLUX are bitwise equal across the splits (<= 2e-16 in FVX/FVZ);
-  the first difference is in `DIVERGENCE_PART_1`: its temperature-gradient/enthalpy terms at box-interface cells read the wall arrays of the interface (`INTERPOLATED_BOUNDARY` walls with `NOM > 0`), which FDS keeps for the mesh-to-mesh coupling (UVW_SAVE, TMP_F, RHO_F, K_G from `WALL_BC`/`ASSIGN_GHOST_VALUE`), not the level neighbour values, so a 1-box level and a split level differ at the 1e-2 level in DS on the interface columns.
-  Making the interfaces no-wall faces (`FDSTL_OPEN=1`, `fds_p_open_interfaces`, the `fds_k_neutralize` of the kernel check) removes most of it in DS (from 5.7 to 0.36 max) but the NOM > 0 walls are still needed by NO_FLUX and MATCH_VELOCITY_FLUX in the pressure stage and the run then diverges from the single box by O(1): **not adopted, left as opt-in diagnostic**. The clean fix is the externally-filled mode of patches 0003/0004 (`EXTERNAL_GHOSTS_FILLED`) with the TMP/RSUM ghost recompute noted in patch 0004, plus a
-  skip of the NOM > 0 walls in DIVERGENCE_PART_1 and the wall arrays of the interface; that needs existing-file edits and is proposed for S6 (next patch number 0006), not done here.
+### Decomposition independence (S6)
+Cases `tests/cases/dec{1,2,4}.fds` (+ `dec{2,4}_np4.fds` with `MPI_PROCESS`): the same periodic 32 x 1 x 32 problem as 1, 4 and 16 boxes; `tests/run_decomp_check.sh <build>` runs them at 1 and 4 ranks.
+
+Cause (found by stage-by-stage comparison of cycle 1, `FDSTL_STAGE=1`): FDS couples boxes through `INTERPOLATED_BOUNDARY` walls with `NOM > 0`; those walls (a) make `DIVERGENCE_PART_1`,
+`VELOCITY_FLUX` (`ENTHALPY_ADVECTION_NEW`) and `VELOCITY_BC` add wall-face terms from `B1%RHO_F`, `TMP_F`, `ZZ_F`, `UVW_SAVE` and the interface edge data (`EDGE%OMEGA/TAU`) where a single mesh has plain
+interior faces; (b) fill the TMP/RSUM ghost layer across the interface from the OMESH average (`ASSIGN_GHOST_VALUE`), which the level ghost fill does not do; (c) FDS's own set-up ends with
+MATCH_VELOCITY / VISCOSITY_BC / VELOCITY_BC / an initial DIVERGENCE_PART_1 on the multi-mesh state, which leaves interface data that a 1-box level does not have.
+
+Fix, driver only (no FDS file edited, no patch 0006):
+* `fds_p_iface_walls` (`fds_step.f90`) turns the box-interface walls into `NULL_BOUNDARY` (and `CELL%WALL_INDEX = 0`) around `VELOCITY_FLUX`, `DIVERGENCE_PART_1` and `VELOCITY_BC`, and restores them afterwards
+  (`TimeLoop::iface`; the periodic images at the domain edge stay walls, they are walls of the single mesh too). `FDSTL_IFACE=0` disables it (S5 behaviour), `=2` also converts the domain-edge images.
+* The initial state is redone with the interfaces as regular faces (`visc`, exchange codes 4 and 6 with their boundary step, initial `DIVERGENCE_PART_1`).
+* TMP and RSUM are exchanged with the level ghost fill at the codes 1 and 4.
+* `EXTERNAL_GHOSTS_FILLED` (patches 0003/0004, applied in the tree) is now set by the driver (`fds_hook_set_flag`, default on; `FDSTL_EXTGHOST=0` returns to the OMESH-average route). FDS then skips the OMESH writes
+  of ASSIGN_GHOST_VALUE, VISCOSITY_BC, VELOCITY_BC, NO_FLUX, the H ghosts and MATCH_VELOCITY(_FLUX); what MATCH_VELOCITY leaves for later routines (`UVW_SAVE`, `BOUNDARY_TYPE_PREVIOUS`) is set by
+  `fds_p_save_uvw` from the box's own face value (the two boxes share the face: the average with the neighbour is the value itself). Result: the 1-box run with the flag on equals the flag-off run to 1e-14 (last bits),
+  and the split runs equal the 1-box run as below.
+
+Results (first cycle, both passes, `FDSTL_STAGE=1`; 1 box against 4 boxes (1 and 4 ranks) and 16 boxes (1 and 4 ranks)):
+* Bitwise equal (byte-identical): RHOS, ZZS (density), FVX, FVZ, MU (VELOCITY_FLUX), MU, KRES, TMP, RSUM (after DIVERGENCE_PART_1), for pass 1 and pass 2, for every split and rank count tested.
+* DS, D, DDDT (DIVERGENCE_PART_1/2): bitwise equal for the 4-box splits; for the 16-box split one cell of 1024 differs in the last bit (4e-16 in DS, 1.3e-15 in DDDT: a summation-order effect at a box corner).
+* Pressure-dependent stages (H, HS, US, WS, U, W, and pass 2 D/DS/DDDT which read the pass-1 velocities): differ at 1e-16 (velocities) to 1e-14 (H) and in a few percent of the cells: the FFT sums in a layout dependent order (the distributed transform changes with the box split and rank count). This is the irreducible
+  part without a decomposition independent (fixed-order) Poisson solve.
+* Whole run (82 steps, T = 1): final U W H HS D DS RHO TMP ZZ of 4 and 16 boxes at 1 and 4 ranks equal the 1-box run to <= 5.7e-13 relative (before S6: 3e-5 absolute, 1e-3 relative at T = 1).
+* The S5 results stand: `shunn3_32` (1 rank, 80 steps) T/DT 17/17 rows, MMS errors equal to 5 digits (T2 pass), fields <= 1.4e-14 absolute to the baseline restart, mass exact; `shunn3_4mesh_32` (1 and 4 ranks): T2 pass
+  against `shunn3_4mesh_32__1mesh`, and now within 3e-13 of a 1-box run of the same domain (the different pressure coupling of the multi-mesh baseline remains the reason it differs from the baseline).
+
+### Plain kernel-check modes, regenerated (S6)
+The 0 to 108 last-bit differences of the plain `--ghost=full/face` modes come from the boundary-face strips of U/V/W/US/VS/WS, which a frozen snapshot cannot hold in the exact pre-boundary-step state (DENSITY restores the face values
+after the boundary step). `run_kernelcheck.sh` now also runs every plain case with those strips taken from the dump after the replay (`FDSKC_STRIPDUMP=1`, the `*+strips` runs) and requires ALL tags BITWISE (ppm gate 0):
+7 cases x {full, face}, 1 and 4 ranks, 0 bit differences in every tag (the gate of the plain runs without strips stays at `PLAIN_MAX_PPM=100`; the worst observed case there, `4mesh_native` with 482312 compared elements per tag, has VISC_P/C 32 (66 ppm), VFLUX_P 18 (37 ppm) and VFLUX_C 26 (54 ppm) differing elements, 108 in total over the four tags, each tag below 100 ppm). The 100 ppm allowance therefore only covers the snapshot strips, not a kernel defect: the same kernels are bitwise with the exact strips.
+
+Not a target case, noted for S7: `csmag_32` (3-D, PERIODIC_TEST=2, no baseline directory) runs through `--run` (2 steps, T/DT as the reference) but its H and velocities differ from the reference dump by ~1e-2 (H) / 1e-3 (U) after cycle 1: the Poisson right-hand side PRHS is the FDS one, `lap(phi) = PRHS` to 1e-12, while the reference H does not satisfy `lap(H) = PRHS` (3.5 % off), so FDS's 3-D result comes from a different operator/iteration than the plain FFT solve. Not investigated further (outside the S6 cases); use `FDSTL_PDUMP` to hand the pair to Role 2.
 
 ### WALL_BC wiring and validation on snapshots
 WALL_BC (unmodified) is called for every box at the positions of main.f90 (after exchange code 1 and 4 of each stage, `BcStep::wall_bc`), after the OMESH fill. On frozen snapshots
@@ -317,7 +343,7 @@ These are snapshot artefacts: the dump is taken after later kernels rewrote the 
 `TimeLoop::solve_poisson` -> `pb::solve_pressure` (FFT backend). Review and requests for Role 2 / the Architect: `notes/pressure-iface-review.md`.
 
 ### Debug switches (environment variables, off by default)
-`FDSTL_DEBUG` (per-iteration errors), `FDSTL_PBV` (pressure backend verbose and residual probes), `FDSTL_ZONES` (print the zone sums), `FDSTL_STAGE=<icyc>` (per-stage field dumps of a cycle), `FDSTL_OPEN=1` (see above).
+`FDSTL_DEBUG` (per-iteration errors), `FDSTL_PBV` (pressure backend verbose and residual probes), `FDSTL_ZONES` (print the zone sums), `FDSTL_STAGE=<icyc>` (per-stage field dumps of a cycle), `FDSTL_IFACE=0|1|2` (box-interface handling, default 1), `FDSTL_EXTGHOST=0|1` (EXTERNAL_GHOSTS_FILLED route, default 1), `FDSTL_STAGEG=<icyc>` (raw FAB dumps with ghosts), `FDSTL_WALLS=<icyc>` (print the wall arrays of pass 1), `FDSTL_PDUMP=<icyc>` (write `pdump_<icyc>_{P,C}_{rhs,phi}.bin` and `pdump_dx.txt`: PRHS and the level solution on the level's cell layout, I fastest, for a one-solve comparison against another Poisson solver).
 
-### Patches (S5)
-None: no existing FDS file was edited in S5 (the OFF build is untouched; the bitwise OFF check of 0001-0005 stands). oneAPI (ifx/ifort) is not available on the box: gfortran 14.2 + Open MPI 5.0.7 only.
+### Patches (S5, S6)
+None: no existing FDS file was edited in S5 or S6 (S6 needed no patch 0006: the interface handling is done in the driver around unmodified routines, the EXTERNAL_GHOSTS_FILLED route uses the applied 0003/0004; 0005 POINT_TO_BOX stays a DRAFT until a oneAPI validation and the alias route keeps working, it is used for the kernels) (the OFF build is untouched; the bitwise OFF check of 0001-0005 stands). oneAPI (ifx/ifort) is not available on the box: gfortran 14.2 + Open MPI 5.0.7 only.

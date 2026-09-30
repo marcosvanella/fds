@@ -10,7 +10,7 @@
 # (corner strips, FDS WALL_BC) taken from the dump.
 # full / face (plain, S4): no boundary-condition value from the dump; the driver runs FDS's own VISCOSITY_BC/VELOCITY_BC on the frozen state (GhostExchange).
 # A frozen snapshot cannot give the exact pre-boundary-step state (the boundary-face values are rewritten between the boundary step and the dump point), so
-# a handful of elements differ in the last bits (README, "Plain ghost modes"): the plain gate is (1) every BCCHAIN tag (the real chain, from the pre-boundary
+# a handful of elements differ in the last bits (README, "Plain ghost modes"; with the dump's boundary-face strips, the +strips runs, all tags are bitwise): the plain gate is (1) every BCCHAIN tag (the real chain, from the pre-boundary
 # state) BITWISE-OK, (2) every other tag BITWISE-OK or with at most PLAIN_MAX_PPM parts per million of its elements differing, (3) nothing else differs.
 set -u
 PLAIN_MAX_PPM=${PLAIN_MAX_PPM:-100}
@@ -56,5 +56,20 @@ for g in full face; do
   plain "4mesh_window.$g"         4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh/ref.dump" --window --ghost=$g
   plain "4mesh_window_clip.$g"    4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh_clip/ref.dump" --window --ghost=$g
 done
-[ $rc = 0 ] && echo "KERNEL CHECKS PASS: dump, full+bc, face+bc BITWISE; plain full, face: BCCHAIN bitwise, other tags within the PLAIN_MAX_PPM gate" || echo "KERNEL CHECKS: SOME DIFFER (see out.log files)"
+# plain+strips (S6): the plain modes with the boundary-face strips of U/V/W/US/VS/WS taken from the dump after the replay (FDSKC_STRIPDUMP=1). The strips are the only
+# part of the state that a frozen snapshot cannot give exactly (see README "Plain ghost modes"); with them every tag is required BITWISE (ppm gate 0).
+SAVE_PPM=$PLAIN_MAX_PPM; PLAIN_MAX_PPM=0
+for g in full face; do
+  export FDSKC_STRIPDUMP=1
+  plain "shunn3_32.$g+strips"            1 shunn3_32 shunn3_32.fds "$REF/shunn3_32/ref.dump" --ghost=$g
+  plain "csmag_32.$g+strips"             1 csmag_32 csmag_32.fds "$REF/csmag_32/ref.dump" --ghost=$g
+  plain "shunn3_32_clip.$g+strips"       1 shunn3_32_clip shunn3_32.fds "$REF/shunn3_32_clip/ref.dump" --ghost=$g
+  plain "1mesh.$g+strips"                1 shunn3_4mesh_32__1mesh shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh/ref.dump" --ghost=$g
+  plain "4mesh_native.$g+strips"         4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32/ref.dump" --ghost=$g
+  plain "4mesh_window.$g+strips"         4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh/ref.dump" --window --ghost=$g
+  plain "4mesh_window_clip.$g+strips"    4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh_clip/ref.dump" --window --ghost=$g
+  unset FDSKC_STRIPDUMP
+done
+PLAIN_MAX_PPM=$SAVE_PPM
+[ $rc = 0 ] && echo "KERNEL CHECKS PASS: dump, full+bc, face+bc BITWISE; plain full, face: BCCHAIN bitwise, other tags within the PLAIN_MAX_PPM gate; plain+strips (exact boundary-face strips): all tags BITWISE" || echo "KERNEL CHECKS: SOME DIFFER (see out.log files)"
 exit $rc

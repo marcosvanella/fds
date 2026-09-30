@@ -29,7 +29,7 @@ PRIVATE
 PUBLIC :: FDS_P_PARAMS,FDS_P_MESH_INFO,FDS_P_GET,FDS_P_MFD,FDS_P_DENS,FDS_P_DENS_PRE,FDS_P_INIT_DIV,FDS_P_ZONE_GET,FDS_P_ZONE_SET,FDS_P_ZONE_TERMS,&
           FDS_P_ZONE_VOLUME_TERMS,FDS_P_ZONE_VOLUME,FDS_P_ZONE_VOLUME_SET,FDS_P_VENT_COUNT,FDS_P_VENT_GET,FDS_P_ITER_INIT,FDS_P_ITER_INC,FDS_P_ITER_BARO,FDS_P_SET_ITER_BARO,&
           FDS_P_BAROCLINIC,FDS_P_NOFLUX,FDS_P_RHS,FDS_P_GET_PRHS,FDS_P_BMAX,FDS_P_H_GHOST,FDS_P_RESID,FDS_P_VELERR,FDS_P_GET_ERR,FDS_P_SET_WALL_COUNTER,&
-          FDS_P_STOP_STATUS,FDS_P_CLEAR_ATTACHED,FDS_P_TOTAL_ITER,FDS_P_OPEN_INTERFACES
+          FDS_P_STOP_STATUS,FDS_P_CLEAR_ATTACHED,FDS_P_TOTAL_ITER,FDS_P_IFACE_WALLS,FDS_P_WALL_DUMP,FDS_P_SAVE_UVW
 
 CONTAINS
 
@@ -453,27 +453,97 @@ INTEGER(C_INT) :: S
 S = STOP_STATUS
 END FUNCTION FDS_P_STOP_STATUS
 
-!> Box-to-box interfaces of a split (external INTERPOLATED_BOUNDARY walls with a neighbouring mesh, periodic images across boxes included) are interior faces of
-!> the level: make them no-wall faces (BOUNDARY_TYPE=NULL_BOUNDARY, the cell's face is not a wall face), exactly as the single-mesh FDS run has no wall there. Their
-!> ghost cells are then filled by the AMReX level fill, not by WALL_BC/ASSIGN_GHOST_VALUE. Returns the number of walls opened.
-FUNCTION FDS_P_OPEN_INTERFACES(NM) BIND(C,NAME='fds_p_open_interfaces') RESULT(NN)
-INTEGER(C_INT), VALUE :: NM
-INTEGER(C_INT) :: NN
+!> Interface walls as no-wall faces around a kernel (S6, decomposition independence). A box-to-box interface is an interior face of the level: in the single mesh the
+!> same face has no wall cell, so DIVERGENCE_PART_1/2 treat it as a regular face, whereas an INTERPOLATED wall adds wall-face terms from its wall arrays (RHO_F, TMP_F,
+!> ZZ_F, UVW_SAVE) that belong to the multi-mesh coupling. MODE=1: external walls of box NM with BOUNDARY_TYPE=INTERPOLATED_BOUNDARY and NOM>0 become NULL_BOUNDARY with
+!> CELL%WALL_INDEX=0; MODE=0 puts them back (the list is remembered per box). EDGE(1:6): 1 when the box face in the direction IOR=1,-1,2,-2,3,-3 lies on the level's
+!> domain boundary: ALL_EDGES=0 leaves those walls alone (a periodic image at the domain edge is a wall of the single mesh too), ALL_EDGES=1 converts them as well.
+SUBROUTINE FDS_P_IFACE_WALLS(NM,MODE,EDGE,ALL_EDGES) BIND(C,NAME='fds_p_iface_walls')
+INTEGER(C_INT), VALUE :: NM,MODE,ALL_EDGES
+INTEGER(C_INT), INTENT(IN) :: EDGE(6)
+TYPE(MESH_TYPE), POINTER :: M
+TYPE :: SAVED_T
+   INTEGER, ALLOCATABLE :: IW(:)
+END TYPE SAVED_T
+TYPE(SAVED_T), ALLOCATABLE, SAVE :: SV(:)
+INTEGER :: IW,K,KF
+IF (.NOT.ALLOCATED(SV)) ALLOCATE(SV(NMESHES))
+M => MESHES(NM)
+IF (MODE==1) THEN
+   IF (ALLOCATED(SV(NM)%IW)) RETURN
+   ALLOCATE(SV(NM)%IW(M%N_EXTERNAL_WALL_CELLS)) ; SV(NM)%IW = 0
+   K = 0
+   DO IW=1,M%N_EXTERNAL_WALL_CELLS
+      IF (M%WALL(IW)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY .OR. M%EXTERNAL_WALL(IW)%NOM<=0) CYCLE
+      ASSOCIATE (BC=>M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX))
+      SELECT CASE(BC%IOR)
+         CASE( 1) ; KF=1
+         CASE(-1) ; KF=2
+         CASE( 2) ; KF=3
+         CASE(-2) ; KF=4
+         CASE( 3) ; KF=5
+         CASE(-3) ; KF=6
+      END SELECT
+      IF (EDGE(KF)/=0 .AND. ALL_EDGES==0) CYCLE
+      K = K+1 ; SV(NM)%IW(K) = IW
+      M%WALL(IW)%BOUNDARY_TYPE = NULL_BOUNDARY
+      M%CELL(M%CELL_INDEX(BC%IIG,BC%JJG,BC%KKG))%WALL_INDEX(-BC%IOR) = 0
+      END ASSOCIATE
+   ENDDO
+ELSE
+   IF (.NOT.ALLOCATED(SV(NM)%IW)) RETURN
+   DO K=1,SIZE(SV(NM)%IW)
+      IW = SV(NM)%IW(K)
+      IF (IW==0) EXIT
+      ASSOCIATE (BC=>M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX))
+      M%WALL(IW)%BOUNDARY_TYPE = INTERPOLATED_BOUNDARY
+      M%CELL(M%CELL_INDEX(BC%IIG,BC%JJG,BC%KKG))%WALL_INDEX(-BC%IOR) = IW
+      END ASSOCIATE
+   ENDDO
+   DEALLOCATE(SV(NM)%IW)
+ENDIF
+END SUBROUTINE FDS_P_IFACE_WALLS
+
+!> What MATCH_VELOCITY leaves behind for the rest of the step when EXTERNAL_GHOSTS_FILLED is set and it returns at once: UVW_SAVE(IW) = the normal velocity of the
+!> face (the value DENSITY restores) and BOUNDARY_TYPE_PREVIOUS. The average with the neighbouring box is not formed: the faces of two boxes are the same face of
+!> the level (same data after the driver's exchange), so the average is the face value itself.
+SUBROUTINE FDS_P_SAVE_UVW(NM,PRED) BIND(C,NAME='fds_p_save_uvw')
+INTEGER(C_INT), VALUE :: NM,PRED
+TYPE(MESH_TYPE), POINTER :: M
+REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW
+INTEGER :: IW
+M => MESHES(NM)
+IF (PRED/=0) THEN ; UU => M%US ; VV => M%VS ; WW => M%WS ; ELSE ; UU => M%U ; VV => M%V ; WW => M%W ; ENDIF
+DO IW=1,M%N_EXTERNAL_WALL_CELLS
+   M%EXTERNAL_WALL(IW)%BOUNDARY_TYPE_PREVIOUS = M%WALL(IW)%BOUNDARY_TYPE
+   IF (M%WALL(IW)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY) CYCLE
+   ASSOCIATE (BC=>M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX))
+   SELECT CASE(BC%IOR)
+      CASE( 1) ; M%UVW_SAVE(IW) = UU(0,BC%JJ,BC%KK)
+      CASE(-1) ; M%UVW_SAVE(IW) = UU(M%IBAR,BC%JJ,BC%KK)
+      CASE( 2) ; M%UVW_SAVE(IW) = VV(BC%II,0,BC%KK)
+      CASE(-2) ; M%UVW_SAVE(IW) = VV(BC%II,M%JBAR,BC%KK)
+      CASE( 3) ; M%UVW_SAVE(IW) = WW(BC%II,BC%JJ,0)
+      CASE(-3) ; M%UVW_SAVE(IW) = WW(BC%II,BC%JJ,M%KBAR)
+   END SELECT
+   END ASSOCIATE
+ENDDO
+END SUBROUTINE FDS_P_SAVE_UVW
+
+!> Diagnostic: print the wall-cell data of the external walls of box NM whose ghost-side cell lies in the plane (KG0 or any when KG0<0), for decomposition comparisons
+!> (env FDSTL_WALLS). One line per wall: global cell (IIG+OFX,JJG,KKG+OFZ), IOR, type, NOM, RHO_F, TMP_F, UVW_SAVE, ZZ_F(1), U_NORMAL_S, U_NORMAL, K_G.
+SUBROUTINE FDS_P_WALL_DUMP(NM,OFX,OFZ,KG0) BIND(C,NAME='fds_p_wall_dump')
+INTEGER(C_INT), VALUE :: NM,OFX,OFZ,KG0
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: IW
 M => MESHES(NM)
-NN = 0
 DO IW=1,M%N_EXTERNAL_WALL_CELLS
-   IF (M%WALL(IW)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY .OR. M%EXTERNAL_WALL(IW)%NOM<=0) CYCLE
    ASSOCIATE (BC=>M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX),B1=>M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX))
-   NN = NN+1
-   M%WALL(IW)%BOUNDARY_TYPE = NULL_BOUNDARY
-   M%CELL(M%CELL_INDEX(BC%IIG,BC%JJG,BC%KKG))%WALL_INDEX(-BC%IOR) = 0
-   B1%RHO_F = M%RHO(BC%IIG,BC%JJG,BC%KKG)
-   B1%TMP_F = M%TMP(BC%IIG,BC%JJG,BC%KKG)
-   B1%ZZ_F(1:N_TOTAL_SCALARS) = M%ZZ(BC%IIG,BC%JJG,BC%KKG,1:N_TOTAL_SCALARS)
+   IF (KG0>=0 .AND. BC%KKG+OFZ/=KG0) CYCLE
+   WRITE(0,'(A,6(I4,1X),ES23.15,1X,ES23.15,1X,ES23.15,1X,ES23.15,1X,ES23.15,1X,ES23.15,1X,ES23.15)') 'WALLDUMP ',BC%IIG+OFX,BC%JJG,BC%KKG+OFZ,BC%IOR,M%WALL(IW)%BOUNDARY_TYPE,M%EXTERNAL_WALL(IW)%NOM, &
+      B1%RHO_F,B1%TMP_F,M%UVW_SAVE(IW),B1%ZZ_F(1),B1%U_NORMAL_S,B1%U_NORMAL,B1%K_G
    END ASSOCIATE
 ENDDO
-END FUNCTION FDS_P_OPEN_INTERFACES
+END SUBROUTINE FDS_P_WALL_DUMP
 
 END MODULE FDS_STEP

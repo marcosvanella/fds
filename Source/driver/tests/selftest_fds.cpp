@@ -9,6 +9,8 @@
 //            Fortran equals the value written at the AMReX index to_amrex(I,J,K); writes from Fortran land in the FAB.
 //   pass     the aliased array passed to an explicit-shape dummy (how the kernels use it) hits the right element.
 //   strided  INFO: whether a strided window of a larger FAB (RHO/RHOS ng=3 seen with the FDS ng=2 bounds) is honoured by gfortran.
+//   view     FDS_HOOK_SET_VIEW + POINT_TO_BOX (patch 0005) on FAB data: after POINT_TO_BOX(NM) the MESH_POINTERS pointer of every viewed field has the FDS bounds, reads the
+//            FAB element of the same cell, writes land in the FAB, and its address is the FAB element (no copy); a field without a view keeps the POINT_TO_MESH target.
 //   side     SideData built from the FDS CELL data (fds_get_cell_walls): counts and the layout-independent hash (compared across
 //            runs by run_driver_tests.sh: shunn3_32 on 1 rank vs shunn3_4mesh_32 on 4 ranks must print the same hash).
 #include <AMReX.H>
@@ -32,6 +34,9 @@ int fds_shim_release(int nm, const char* name);
 int fds_shim_bounds(int nm, const char* name, int* lb, int* ub, int* rnk, int* alloc);
 int fds_shim_access(int nm, const char* name, int i, int j, int k, int n, double* val, int doset);
 int fds_shim_pass_test(int nm, const char* name, double mark, void** addr);
+int fds_hook_set_view(int nmax, int nm, int which, const int* lb, const int* ext, void* p);
+int fds_shim_bv_access(int nm, int which, int i, int j, int k, int n, double* val, int doset, int* lb, int* ub, void** addr);
+int fds_shim_bv_is_mesh(int nm, int which);
 }
 
 namespace {
@@ -60,6 +65,63 @@ int fds_selftest(const Level0& l0)
     Fields F(l0, ns);
     const int me = amrex::ParallelDescriptor::MyProc();
     long n_bounds_checked = 0, n_bounds_skipped = 0;
+
+
+    // ---- view: FDS_HOOK_SET_VIEW / POINT_TO_BOX on FAB data (run first: the FDS arrays are still the FDS allocations) ----
+    {
+        static const char* vn[22] = {"U", "V", "W", "US", "VS", "WS", "D", "DS", "H", "HS", "KRES", "FVX", "FVY", "FVZ", "RHO", "RHOS", "MU", "TMP", "Q", "RSUM", "ZZ", "ZZS"};
+        const int nbox = static_cast<int>(l0.ba.size());
+        for (int w = 1; w <= 22; ++w) {
+            const std::string name = vn[w - 1];
+            if (!F.has(name)) continue;
+            amrex::MultiFab& mf = F[name];
+            const FieldSpec& s = F.spec(name);
+            const int fid = fid_of(name);
+            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                const int nm = mfi.index() + 1;
+                const amrex::Box cb = l0.ba[mfi.index()];
+                amrex::FArrayBox& fab = mf[mfi];
+                const FdsBounds nb = fds_bounds(s, cb);
+                const bool four = s.per_scalar;
+                auto a = fab.array();
+                for (int n = 0; n < fab.nComp(); ++n)
+                    amrex::LoopOnCpu(fab.box(), [&](int i, int j, int k) { a(i, j, k, n) = val(fid, i, j, k, n); });
+                double dummy = 0.0; int lb0[4], ub0[4]; void* ad0 = nullptr;
+                // before the view is set: the pointer is the POINT_TO_MESH one (a view-less field) -> bv_access reports the MESHES(NM) array bounds (ierr 0 when allocated)
+                if (w == 1 || w == 7 || w == 9 || w == 15 || w == 18) CHECK_MSG(fds_shim_bv_is_mesh(nm, w) == 1, name + " without a view keeps the POINT_TO_MESH target");
+                (void)dummy; (void)lb0; (void)ub0; (void)ad0;
+                int lb[4] = {nb.lb[0], nb.lb[1], nb.lb[2], 1};
+                int ext[4] = {nb.ext[0], nb.ext[1], nb.ext[2], fab.nComp()};
+                CHECK_MSG(fds_hook_set_view(nbox, nm, w, lb, ext, fab.dataPtr()) == 0, name);
+                if (w == 1 || w == 7 || w == 9 || w == 15 || w == 18) CHECK_MSG(fds_shim_bv_is_mesh(nm, w) == 0, name + " with a view is the box data");
+                bool ok = true, addr_ok = true;
+                int rb[4], ru[4];
+                for (int n = 1; n <= fab.nComp() && ok; ++n)
+                    for (int K = nb.lb[2]; K < nb.lb[2] + nb.ext[2]; ++K)
+                        for (int J = nb.lb[1]; J < nb.lb[1] + nb.ext[1]; ++J)
+                            for (int I = nb.lb[0]; I < nb.lb[0] + nb.ext[0]; ++I) {
+                                double v = 0; void* ad = nullptr;
+                                const int ierr = fds_shim_bv_access(nm, w, I, J, K, n, &v, 0, rb, ru, &ad);
+                                const int ai = to_amrex(s, 0, cb.smallEnd(0), I), aj = to_amrex(s, 1, cb.smallEnd(1), J), ak = to_amrex(s, 2, cb.smallEnd(2), K);
+                                if (ierr != 0 || v != val(fid, ai, aj, ak, n - 1)) { ok = false; break; }
+                                if (ad != static_cast<void*>(&a(ai, aj, ak, n - 1))) addr_ok = false;
+                            }
+                CHECK_MSG(ok, name + " POINT_TO_BOX pointer reads the FAB element of the same cell");
+                CHECK_MSG(addr_ok, name + " POINT_TO_BOX pointer element address is the FAB element (no copy)");
+                for (int d = 0; d < 3; ++d) CHECK_MSG(rb[d] == nb.lb[d] && ru[d] == nb.lb[d] + nb.ext[d] - 1, name + " POINT_TO_BOX pointer has the FDS bounds");
+                if (four) CHECK_MSG(rb[3] == 1 && ru[3] == fab.nComp(), name + " 4th bounds");
+                // write through the pointer (corner of the allocation and an interior element), read from the FAB
+                const int pr[2][3] = {{nb.lb[0], nb.lb[1], nb.lb[2]}, {nb.lb[0] + nb.ext[0] - 1, nb.lb[1] + nb.ext[1] - 1, nb.lb[2] + nb.ext[2] - 1}};
+                for (int p = 0; p < 2; ++p) {
+                    double wv = -777.0 - p; void* ad = nullptr;
+                    const int nn = four ? fab.nComp() : 1;
+                    fds_shim_bv_access(nm, w, pr[p][0], pr[p][1], pr[p][2], nn, &wv, 1, rb, ru, &ad);
+                    CHECK_MSG(fab(amrex::IntVect(to_amrex(s, 0, cb.smallEnd(0), pr[p][0]), to_amrex(s, 1, cb.smallEnd(1), pr[p][1]), to_amrex(s, 2, cb.smallEnd(2), pr[p][2])), nn - 1) == wv,
+                              name + " write through POINT_TO_BOX pointer lands in the FAB");
+                }
+            }
+        }
+    }
 
     for (const auto& s : field_table()) {
         if (!F.has(s.name)) continue;

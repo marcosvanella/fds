@@ -22,6 +22,7 @@
 #ifndef FDS_GHOSTEXCHANGE_H_
 #define FDS_GHOSTEXCHANGE_H_
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,10 @@ void ghost_exchange(Fields& F, int code, bool predictor = true);
 class BcStep {
 public:
     BcStep(const Level0& l0, Fields& F);
+    // Optional hook called with true/false around the velocity boundary routines: the driver uses it to turn box-interface walls into no-wall faces while
+    // VELOCITY_BC runs (its edge loop would otherwise use the OMESH interpolation branch instead of the regular edge formulas of the single mesh).
+    bool ext_ghost = false;   // EXTERNAL_GHOSTS_FILLED mode (patches 0003/0004): MATCH_VELOCITY is skipped by FDS, the driver saves the face velocities instead
+    std::function<void(bool)> iface_hook;
     void after_exchange(int code, double t, double dt);
     void wall_bc(int predictor, double t, double dt);   // WALL_BC of the stage (all local boxes)
     // Kernel-check replay: the box data is ALREADY matched (a frozen dump state), so MATCH_VELOCITY is not run again; the ghost-producing routines only:

@@ -11,6 +11,7 @@ extern "C" {
 int fds_g_fill_om(int nm, int nom, int which, const int* lb, const int* ext, int nc, const double* data);
 void fds_g_phase(int pred);
 void fds_g_match(int nm);
+void fds_p_save_uvw(int nm, int pred);
 void fds_g_wall_bc(double t, double dt, int nm);
 void fds_g_velocity_bc(double t, int nm, int est);
 void fds_g_viscosity_bc(int nm, int est);
@@ -22,8 +23,10 @@ namespace fdsamr {
 std::vector<std::string> exchange_fields(int code, bool predictor)
 {
     switch (code) {
-    case 1: return {"RHOS", "ZZS", "MU", "KRES", "D"};
-    case 4: return {"RHO", "ZZ", "MU", "KRES", "DS"};
+    // TMP and RSUM: the ghost layer of a cell across a box interface. FDS gets them from WALL_BC/ASSIGN_GHOST_VALUE (OMESH average, patch 0004: skipped when the ghosts
+    // are filled externally); the driver fills them from the neighbouring box like the other scalars and keeps the interface walls out of WALL_BC (TimeLoop::iface).
+    case 1: return {"RHOS", "ZZS", "MU", "KRES", "D", "TMP", "RSUM"};
+    case 4: return {"RHO", "ZZ", "MU", "KRES", "DS", "TMP", "RSUM"};
     case 3: return {"US", "VS", "WS", "HS"};
     case 6: return {"U", "V", "W", "H"};
     case 5: return {"FVX", "FVY", "FVZ", predictor ? "H" : "HS"};
@@ -84,12 +87,12 @@ void BcStep::after_exchange(int code, double t, double dt)
         if (!local(nm)) continue;
         if (code == 3 || code == 6) {
             fds_g_phase(code == 3 ? 1 : 0);
-            fds_g_match(nm + 1);
+            if (ext_ghost) fds_p_save_uvw(nm + 1, code == 3 ? 1 : 0); else fds_g_match(nm + 1);
         }
     }
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
-        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); fds_g_velocity_bc(t, nm + 1, code == 3 ? 1 : 0); }
+        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); fds_g_velocity_bc(t, nm + 1, code == 3 ? 1 : 0); if (iface_hook) iface_hook(false); }
         else fds_g_viscosity_bc(nm + 1, code == 4 ? 1 : 0);
     }
 }
