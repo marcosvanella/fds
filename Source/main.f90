@@ -12,6 +12,7 @@
 !> \param DT_OUT Initial time step from READ_DATA (passed out to the driver)
 SUBROUTINE FDS_SETUP(MODE,FNAME,DT_OUT) BIND(C,NAME='fds_setup')
 USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_DOUBLE,C_CHAR,C_NULL_CHAR,C_INT
+USE FDS_AMREX_HOOKS, ONLY: OUT_T,OUT_DT,OUT_ICYC,STEP_OUTPUTS_PATCHED
 #else
 PROGRAM FDS
 #endif
@@ -116,6 +117,29 @@ INTEGER :: ERROR
 #endif
 
 #ifdef WITH_AMREX
+IF (MODE==3) THEN
+   ! End-of-step outputs for the C++ driver: the same calls, in the same order, as the end of MAIN_LOOP (UPDATE_GLOBAL_OUTPUTS per mesh,
+   ! EXCHANGE_GLOBAL_OUTPUTS, UPDATE_CONTROLS, DUMP_GLOBAL_OUTPUTS, WRITE_DIAGNOSTICS). The driver has set T, DT, ICYC (FDS_HOOK_SET_STEP)
+   ! and advanced the fields; the slice/boundary/particle dumps of MAIN_LOOP are outside the M2a scope and are not called.
+   T    = OUT_T
+   DT   = OUT_DT
+   ICYC = OUT_ICYC
+   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+      CALL UPDATE_GLOBAL_OUTPUTS(T,DT,NM)
+   ENDDO
+   CALL EXCHANGE_GLOBAL_OUTPUTS
+   CALL UPDATE_CONTROLS(T,DT,CTRL_STOP_STATUS,.FALSE.)
+   CALL DUMP_GLOBAL_OUTPUTS
+   LO10 = INT(LOG10(REAL(MAX(1,ABS(ICYC)),EB)))
+   DIAGNOSTICS = MOD(ICYC,10**LO10)==0 .OR. MOD(ICYC,DIAGNOSTICS_INTERVAL)==0 .OR. T>=T_END
+   CALL WRITE_STRINGS
+   IF (DIAGNOSTICS) THEN
+      IF (.NOT.SUPPRESS_DIAGNOSTICS .AND. N_MPI_PROCESSES>1) CALL EXCHANGE_DIAGNOSTICS
+      IF (MY_RANK==0) CALL WRITE_DIAGNOSTICS(T,DT)
+   ENDIF
+   DT_OUT = DT
+   RETURN
+ENDIF
 IF (MODE>0) THEN
    IF (MODE==2) STOP_STATUS = SETUP_ONLY_STOP
    CALL END_FDS
@@ -731,6 +755,7 @@ ENDIF
 ! Set-up is complete. The C++ driver owns the time loop, so return here. The FDS time loop below is not executed in this build.
 
 DT_OUT = DT
+STEP_OUTPUTS_PATCHED = .TRUE.   ! patch 0006: FDS_SETUP(MODE=3) is available
 RETURN
 #endif
 
