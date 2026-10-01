@@ -4860,16 +4860,16 @@ INTEGER, INTENT(IN) :: CODE
 ! Local Variables:
 INTEGER :: NM,NOM,RNODE,SNODE,IERR
 INTEGER :: II1,JJ1,KK1,NCELL,ICC,ICC1,NQT2,JCC,LL,NN
-INTEGER :: I,J,K,II,JJ,KK,IFC,ICF,X1AXIS,ICF1,JCF,ICV,IF_,IG
+INTEGER :: I,J,K,II,JJ,KK,IFC,ICF,X1AXIS,ICF1,JCF,ICV,IG
 TYPE (MESH_TYPE), POINTER :: M,M1
 TYPE (OMESH_TYPE), POINTER :: M2,M3
 TYPE (CC_FV_TYPE), POINTER :: FV
 REAL(EB), POINTER, DIMENSION(:,:,:) :: UP,UP2,VP,VP2,WP,WP2
 LOGICAL, SAVE :: INITIALIZE_CC_SCALARS_FORC=.TRUE.
-LOGICAL :: USE_FV,USE_FV_FACE
+LOGICAL :: USE_FV
 
 INTEGER :: EP,INPE,INT_NPE_LO,INT_NPE_HI,VIND,ICELL,IEDGE,IFEP
-REAL(EB) :: TNOW,TINTP,VAL_FN,VAL_VEL,VAL_VELS
+REAL(EB) :: TNOW,TINTP
 
 ! On the end-of-step (CODE=6) exchange, move the gas-side state of cross-mesh BACK CFACEs.
 IF (CODE==6) CALL EXCHANGE_BACK_CFACE_DATA
@@ -5077,9 +5077,8 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
    M =>MESHES(NM)
    FV=>M%FV
-   ! CV pack is on whenever CV thermo is allocated; FACE/PKG112 stays IDENTITY.
+   ! CV pack is on whenever CV thermo is allocated.
    USE_FV = ALLOCATED(FV%CV%RHO)
-   USE_FV_FACE = FV_FACE_IN_USE(NM)
    RECEIVING_MESH_LOOP_2: DO NOM=1,NMESHES
 
       M1=>MESHES(NOM)
@@ -5166,27 +5165,14 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
                   LL = LL + 1
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     VAL_FN = FV%FACE%FN(IF_)
-                  ELSE
-                     VAL_FN = CF%FN(JCF)
-                  ENDIF
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_FN
+                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_FN)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A
          ELSE
             PACK_REAL_SEND_PKG112A2: DO ICF1=1,M3%NICF_S(1)
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     CF%FN_OMESH(JCF) = FV%FACE%FN(IF_)
-                  ELSE
-                     CF%FN_OMESH(JCF) = CF%FN(JCF)
-                  ENDIF
+                  CF%FN_OMESH(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_FN)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A2
          ENDIF
@@ -5202,14 +5188,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
                   LL = LL + 1
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     VAL_VELS = FV%FACE%VELS(IF_)
-                  ELSE
-                     VAL_VELS = CF%VELS(JCF)
-                  ENDIF
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_VELS
+                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = CF%VEL_LNK(JCF)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A3
@@ -5217,13 +5196,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             PACK_REAL_SEND_PKG112A4: DO ICF1=1,M3%NICF_S(1)
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     CF%VELS_OMESH(JCF) = FV%FACE%VELS(IF_)
-                  ELSE
-                     CF%VELS_OMESH(JCF) = CF%VELS(JCF)
-                  ENDIF
+                  CF%VELS_OMESH(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
                   CF%VEL_LNK_OMESH(JCF) = CF%VEL_LNK(JCF)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A4
@@ -5367,27 +5340,14 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
                   LL = LL + 1
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     VAL_FN = FV%FACE%FN(IF_)
-                  ELSE
-                     VAL_FN = CF%FN(JCF)
-                  ENDIF
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_FN
+                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_FN)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B
          ELSE
             PACK_REAL_SEND_PKG112B2: DO ICF1=1,M3%NICF_S(1)
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     CF%FN_OMESH(JCF) = FV%FACE%FN(IF_)
-                  ELSE
-                     CF%FN_OMESH(JCF) = CF%FN(JCF)
-                  ENDIF
+                  CF%FN_OMESH(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_FN)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B2
          ENDIF
@@ -5403,14 +5363,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
                   LL = LL + 1
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     VAL_VEL = FV%FACE%VEL(IF_)
-                  ELSE
-                     VAL_VEL = CF%VEL(JCF)
-                  ENDIF
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = VAL_VEL
+                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL)
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = CF%VEL_LNK(JCF)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B3
@@ -5418,13 +5371,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             PACK_REAL_SEND_PKG112B4: DO ICF1=1,M3%NICF_S(1)
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
-                  IF_=0
-                  IF (USE_FV_FACE) IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-                  IF (IF_>0) THEN
-                     CF%VEL_OMESH(JCF) = FV%FACE%VEL(IF_)
-                  ELSE
-                     CF%VEL_OMESH(JCF) = CF%VEL(JCF)
-                  ENDIF
+                  CF%VEL_OMESH(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL)
                   CF%VEL_LNK_OMESH(JCF) = CF%VEL_LNK(JCF)
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B4
