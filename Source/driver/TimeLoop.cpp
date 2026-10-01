@@ -11,13 +11,16 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_ParallelReduce.H>
 #include <AMReX_Print.H>
+#include <AMReX_Utility.H>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
+#include <sstream>
 #include <initializer_list>
 
 #include "ExactSum.H"
@@ -37,6 +40,10 @@ void fds_k_vcorr(double t, double dt, int nm);
 void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);
 void fds_k_set_flags(int nm, int f);
 void fds_g_match_flux(int nm);
+// end-of-step FDS outputs (patch 0006: fds_setup(mode=3) -> UPDATE_GLOBAL_OUTPUTS, EXCHANGE/DUMP_GLOBAL_OUTPUTS, WRITE_DIAGNOSTICS) and the hook module
+void fds_setup(int mode, const char* fname, double* dt_out);
+int fds_hook_step_outputs();
+void fds_hook_set_step(double t, double dt, int icyc);
 // D-031 gather clip (fds_clip_gather.f90)
 void fds_clip_density(const int* qlo, const int* qhi, const int* mlo, const int* mhi, const int* llo, const int* lhi, const int* dlo, const int* dhi,
                       const int* vlo, const int* vhi, const double* rhop, const int* mask, const double* dx, const double* dy, const double* dz, double rmin,
@@ -56,6 +63,7 @@ void fds_p_params(int* ip, double* rp);
 void fds_p_mesh_info(int nm, int* ip, double* rp);
 void fds_p_get(int nm, const char* name, double* buf, long ntot, int* ierr);
 void fds_p_mfd(int nm);
+void fds_p_zero_dot();
 void fds_p_dens_pre(double t, double dt, int nm);
 void fds_p_init_div();
 void fds_p_zone_get(int n, double* d, double* p, double* u);
@@ -119,6 +127,9 @@ struct TimeLoop::Impl {
     std::string dir;
     std::vector<std::string> log_steps;
     std::vector<std::string> log_mass;
+    // M2a measurements (NFR-030, A-22): wall seconds of this rank; the reported values are the maximum over ranks
+    double t_loop = 0, t_pres = 0, t_solve = 0, t_out = 0;
+    bool fds_outputs = false;       // FDS's own CHID_devc/_hrr/_mass/_steps/.out writers are driven (main.f90 patch 0006 present)
 
     explicit Impl(TimeLoop& l) : L(l), l0(l.m_l0) { std::memset(IP, 0, sizeof IP); std::memset(RP, 0, sizeof RP); }
     bool local(int i) const { return is_local(l0, i); }
@@ -173,6 +184,8 @@ struct TimeLoop::Impl {
         L.bind_fields(true);
         pressure_bc_map();
         zone_setup();
+        fds_outputs = fds_hook_step_outputs() != 0 && std::getenv("FDSTL_NO_FDS_OUTPUTS") == nullptr;
+        amrex::Print() << "FDS-AMReX: FDS output writers (devc/hrr/mass/steps/out) " << (fds_outputs ? "driven through fds_setup(mode=3)" : "not available (main.f90 patch 0006 absent or FDSTL_NO_FDS_OUTPUTS set)") << "\n";
         if (const char* e = std::getenv("FDSTL_IFACE")) iface_mode = std::atoi(e);
         L.m_bc->iface_hook = [this](bool on) { iface(on); };
         if (const char* e = std::getenv("FDSTL_EXTGHOST")) ext_ghost = std::atoi(e) != 0;
@@ -427,6 +440,12 @@ struct TimeLoop::Impl {
 
     void solve_poisson(bool pred)
     {
+        const double ts0 = amrex::second();
+        solve_poisson_impl(pred);
+        t_solve += amrex::second() - ts0;
+    }
+    void solve_poisson_impl(bool pred)
+    {
         Fields& F = *L.m_F;
         for (amrex::MFIter mfi(*rhs); mfi.isValid(); ++mfi) {
             const int nm = mfi.index() + 1;
@@ -618,7 +637,7 @@ struct TimeLoop::Impl {
             stage(passes == 1 ? "p1_div" : "p2_div", {"D", "DS", "DDDT"});
             state(true, first_pass);
             bool took = L.m_hook && L.m_hook(true, passes);
-            if (!took) rec.it_pred = pressure_scheme(true, t, dt, rec.perr_pred, rec.verr_pred);
+            if (!took) { const double tp0 = amrex::second(); rec.it_pred = pressure_scheme(true, t, dt, rec.perr_pred, rec.verr_pred); t_pres += amrex::second() - tp0; }
             // velocity predictor of every box, then the global DT decision (MIN over boxes and ranks)
             stage(passes == 1 ? "p1_press" : "p2_press", {"H", "FVX", "FVZ"});
             std::vector<double> dn(nbox, 0.0);
@@ -647,6 +666,7 @@ struct TimeLoop::Impl {
 
         // ---------------- corrector
         t = time_advance(t, dt);
+        fds_p_zero_dot();   // MAIN_LOOP: Q_DOT = 0, M_DOT = 0 after T = T + DT
         state(false, first_pass);
         each_local([&](int nm) { fds_k_visc(nm, 1); fds_p_mfd(nm); });
         stage_raw("c_pre", {"RHOS", "TMP", "RHO", "US", "VS", "WS", "H", "HS"});
@@ -673,7 +693,7 @@ struct TimeLoop::Impl {
         state(false, first_pass);
         {
             bool took = L.m_hook && L.m_hook(false, 1);
-            if (!took) rec.it_corr = pressure_scheme(false, t, dt, rec.perr_corr, rec.verr_corr);
+            if (!took) { const double tp0 = amrex::second(); rec.it_corr = pressure_scheme(false, t, dt, rec.perr_corr, rec.verr_corr); t_pres += amrex::second() - tp0; }
         }
         stage("c_press", {"HS", "DS"});
         each_local([&](int nm) { fds_k_vcorr(t, dt, nm); });
@@ -791,10 +811,54 @@ struct TimeLoop::Impl {
     {
         log_steps.push_back([&] { char b[256]; std::snprintf(b, sizeof b, "%d,%.17E,%.17E,%d,%d,%d,%.6E,%.6E,%.6E,%.6E,%.3E", r.step, L.m_t, r.dt, r.passes, r.it_pred, r.it_corr, r.perr_pred, r.verr_pred, r.perr_corr, r.verr_corr, r.zone_rel); return std::string(b); }());
         log_mass.push_back(mass_row(L.m_t));
+        if (fds_outputs) {
+            // FDS's own writers (CHID_devc.csv, _hrr.csv, _mass.csv, _steps.csv, _cpu.csv and the .out step block) on the box data; main.f90 patch 0006
+            const double to0 = amrex::second();
+            fds_hook_set_step(L.m_t, r.dt, L.m_icyc);
+            double dtd = 0.0;
+            fds_setup(3, "", &dtd);
+            t_out += amrex::second() - to0;
+        }
         if (!mms_done && (IP[6] == 7 || IP[6] == 11) && L.m_t >= RP[2]) { write_mms(L.m_t); mms_done = true; }
         if (!L.m_o.quiet)
             amrex::Print() << "step " << r.step << " T=" << L.m_t << " DT=" << r.dt << " passes=" << r.passes << " iters=" << r.it_pred << "/" << r.it_corr << " perr=" << r.perr_corr
                            << " verr=" << r.verr_corr << " zone_rel=" << r.zone_rel << "\n";
+    }
+
+    // NFR-030 / A-22 / NFR-031 measurements, one file per run (rank 0): wall seconds are the maximum over ranks, memory is summed over ranks.
+    static double proc_status_kb(const char* key)
+    {
+        std::ifstream f("/proc/self/status");
+        std::string line;
+        const std::string k = std::string(key) + ":";
+        while (std::getline(f, line))
+            if (line.compare(0, k.size(), k) == 0) return std::atof(line.c_str() + k.size());
+        return -1.0;
+    }
+    void write_perf()
+    {
+        double mx[4] = {t_loop, t_pres, t_solve, t_out};
+        amrex::ParallelAllReduce::Max(mx, 4, amrex::ParallelContext::CommunicatorSub());
+        double mem[3] = {proc_status_kb("VmHWM"), proc_status_kb("VmRSS"), static_cast<double>(L.m_F->bytes())};
+        amrex::ParallelAllReduce::Sum(mem, 3, amrex::ParallelContext::CommunicatorSub());
+        double hwm_max = proc_status_kb("VmHWM");
+        amrex::ParallelAllReduce::Max(hwm_max, amrex::ParallelContext::CommunicatorSub());
+        if (amrex::ParallelDescriptor::MyProc() != 0) return;
+        const amrex::Box dom = l0.geom.Domain();
+        std::FILE* f = std::fopen((dir + "/" + L.m_o.chid + "_driver_perf.csv").c_str(), "w");
+        if (!f) return;
+        std::fprintf(f, "ranks,boxes,nx,ny,nz,steps,t_loop_s,t_pressure_s,t_poisson_solve_s,t_fds_outputs_s,f_pres,f_solve,peak_rss_sum_kb,peak_rss_max_kb,rss_end_sum_kb,field_bytes_sum\n");
+        std::fprintf(f, "%d,%d,%d,%d,%d,%d,%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%.0f,%.0f,%.0f,%.0f\n", amrex::ParallelDescriptor::NProcs(), nbox, dom.length(0), dom.length(1),
+                     dom.length(2), L.m_icyc, mx[0], mx[1], mx[2], mx[3], mx[0] > 0 ? mx[1] / mx[0] : 0.0, mx[0] > 0 ? mx[2] / mx[0] : 0.0, mem[0], hwm_max, mem[1], mem[2]);
+        std::fclose(f);
+        // manifest of the field dump (the _final_<FIELD>.bin files below)
+        std::ofstream m(dir + "/" + L.m_o.chid + "_final_manifest.txt");
+        m << "# field dump for comparison: <chid>_final_<NAME>.bin, float64 little-endian, valid cells of the whole level, FDS order (I fastest, then J, then K)\n"
+          << "# face fields (U,V,W): index I is the high face of cell I; ZZ<n>: scalar n of ZZ (ZZ1 .. ZZ" << ns << ")\n"
+          << "nx=" << dom.length(0) << "\nny=" << dom.length(1) << "\nnz=" << dom.length(2) << "\nT=" << std::setprecision(17) << L.m_t << "\nstep=" << L.m_icyc << "\n"
+          << "fields=U,V,W,H,HS,US,VS,WS,D,DS,RHO,TMP";
+        for (int c = 0; c < ns; ++c) m << ",ZZ" << (c + 1);
+        m << "\n";
     }
 
     void finish()
@@ -815,6 +879,7 @@ struct TimeLoop::Impl {
                 std::fclose(f);
             }
         }
+        write_perf();
         // final fields (valid cells, FDS order, float64, written by rank 0) for the comparison with the baseline restart file
         static const char* const names[] = {"U", "V", "W", "H", "HS", "US", "VS", "WS", "D", "DS", "RHO", "TMP"};
         for (const char* nme : names) {
@@ -880,7 +945,7 @@ void TimeLoop::bind_fields(bool copy_setup_state)
     }
 }
 
-bool TimeLoop::advance() { return m->advance(); }
+bool TimeLoop::advance() { const double t0 = amrex::second(); const bool ok = m->advance(); m->t_loop += amrex::second() - t0; return ok; }
 
 int TimeLoop::run()
 {
@@ -888,7 +953,10 @@ int TimeLoop::run()
     int fails = 0;
     for (;;) {
         if (m_o.max_steps >= 0 && m_icyc >= m_o.max_steps) break;
-        if (!m->advance()) { ++fails; amrex::Print() << "time loop: STOP (instability or non-finite DT) at step " << m_icyc << "\n"; break; }
+        const double tl0 = amrex::second();
+        const bool adv_ok = m->advance();
+        m->t_loop += amrex::second() - tl0;
+        if (!adv_ok) { ++fails; amrex::Print() << "time loop: STOP (instability or non-finite DT) at step " << m_icyc << "\n"; break; }
         if (m_t >= m->tc.t_end && m_icyc > 0) break;
     }
     m->finish();
