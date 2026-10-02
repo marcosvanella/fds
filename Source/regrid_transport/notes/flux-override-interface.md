@@ -26,9 +26,9 @@ Per box and per direction d in {x,y,z}, a face-centred array, scalar index n = 1
   Mass_Chapter.tex:234). Our override must give the same numbers (fine face flux with the coarse value injected as ghost, species-sum
   fix as wall.f90:955-959). That FDS branch reads `OMESH` data the AMReX port does not fill, so Role 1 bypasses it at level interfaces. (`DIF_FX` in the registry already exists; confirm it holds
   these values and is filled in AMR mode without `STORE_SPECIES_FLUX` side effects.)
-- **HEAT (optional, later)**: FDS does not match conduction `KDTDX` at refined interfaces (skipped for INTERPOLATED faces, divg.f90:~540)
-  and forms the enthalpy diffusion flux as face enthalpy x the overwritten species flux (divg.f90:~303). Phase 3 reproduces FDS: no
-  HEAT override. If wanted later: `KDTDX` and `H_RHO_D_DZDX` per species n at the same positions. Not needed for mass and species.
+- **No heat override in Phase 3** (ruling 2026-10-02 (b) 3): FDS does not match conduction `KDTDX` at refined interfaces (skipped for
+  INTERPOLATED faces, divg.f90:~540) and forms the enthalpy diffusion flux as face enthalpy x the overwritten species flux
+  (divg.f90:~303). We reproduce FDS; only ADV and DIF exist.
 
 Indexing. FDS face I in direction x is the HIGH face of cell I, valid I = 0..IBAR, with J = 1..JBAR, K = 1..KBAR (analogous for y, z).
 In the registry's AMReX index (Fields.H index map) the same face is face `a = lo_x + I`, the LOW face of cell `a`; the array is nodal
@@ -38,7 +38,7 @@ BoxArray and DistributionMapping as the level; shared faces between two boxes of
 ## 3. Override input (Role 3 provides, Role 1 applies)
 A sparse face list per box (the interface is a surface, so a mask array would be mostly empty):
 ```
-struct FluxOverride {            // one set per box, per stage kind (ADV, DIF, later HEAT)
+struct FluxOverride {            // one set per box, per stage kind (ADV, DIF)
   int dir;                       // 0,1,2: direction of the face normal
   std::vector<std::array<int,3>> face;   // AMReX face index (low face of cell a), box-local list, sorted by (k,j,i)
   std::vector<double> value;     // size face.size()*nscal, face-major: value[f*nscal + n-1]
@@ -49,13 +49,23 @@ the tangential ones), `val(N_TOTAL_SCALARS, n_ovr)`. Each entry replaces the sta
 in the list lies in the box's valid face range and on a coarse-fine interface (the list holds coarse faces only).
 
 ## 4. When it is applied
+**Hook split (ruling 2026-10-02 (b) 2).** The override needs the fine fluxes before the coarse divergence is formed, so a stage is three
+phases, each over all levels before the next: (1) compute face values and fluxes on every level; (2) Role 3 reads them and sets the
+overrides, finest level first; (3) form the flux divergence and update cells on every level, finest first. `RegridInterface.H`:
+`compute_stage_fluxes`, `set_flux_override`, `apply_flux_divergence`. For DIF the divergence in phase 3 is `DEL_RHO_D_DEL_Z`, formed
+in `divg.f90` after the species-sum and wall corrections; for ADV it is the mass update in `DENSITY`. `MATCH_VELOCITY` is not called
+at level interfaces and the advective value uses the single interface-face velocity.
 - **ADV**: in the mass update after `MASS_FINITE_DIFFERENCES` and before the divergence of the flux inside `DENSITY` (predictor and
   corrector). The kernel replaces `FX*UU` by `val` at listed faces; the `R(I)`, `RDX`, `RRN` factors are unchanged.
 - **DIF**: in `divg.f90`, after the species-sum correction (line ~249) and the wall corrections (~200-225), before `DEL_RHO_D_DEL_Z`
   (~411) is formed. Because every fine face has species sum zero there, the overwritten coarse face also has it.
-- **HEAT**: before `DP` collects `DIV_DIFF_HEAT_FLUX` (~394) and `DELKDELT` (~564).
 - The override must be set before the stage and cleared (or replaced) at the next stage. The covered coarse cells are replaced by the
   average-down afterwards; the overwrite only has to be right for the uncovered coarse cells next to the interface.
+
+## 4a. After a regrid
+New fine interface faces take the coarse face value, interior fine faces use `FaceDivFree`; no 0.5-blend. The post-regrid projection is
+off by default. `run_divergence_part1(level)` runs on every new level and `max_divergence_error(level)` (max |div u - D|) is
+reported after each regrid.
 
 ## 5. Bitwise-unchanged guarantee
 With `n_ovr = 0` for every box and direction, the kernels must give results bitwise identical to the current ones (same operation

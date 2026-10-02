@@ -40,9 +40,11 @@ public:
     virtual void clear_level(int level) = 0;
 };
 
-enum class FluxKind { Adv, Dif, Heat };
+// No heat-flux override in Phase 3 (ruling 2026-10-02 (b) 3): conduction stays unmatched as in FDS.
+enum class FluxKind { Adv, Dif };
 
 // One override list per box and direction (shapes and units: notes/flux-override-interface.md). Empty list = no change, bitwise.
+// The advective value is the product face value x the single interface-face velocity; MATCH_VELOCITY is not called at level interfaces.
 struct FluxOverride {
     int dir = 0;                              // normal direction 0,1,2
     int nscal = 0;                            // values per face
@@ -50,16 +52,26 @@ struct FluxOverride {
     std::vector<double> value;                // face.size()*nscal, face-major
 };
 
-// Role 1 implements this for the kernel loop.
+// Role 1 implements this for the kernel loop. One stage is three phases, each run over all levels before the next (ruling 2026-10-02 (b) 2):
+//   phase 1  compute_stage_fluxes(level)      for every level: face values and face fluxes (ADV, DIF), no divergence yet;
+//   phase 2  Role 3 reads stage_flux(), builds the overrides finest level first and calls set_flux_override();
+//   phase 3  apply_flux_divergence(level)     for every level, finest first: cell update (DENSITY part) and DEL_RHO_D_DEL_Z with the overrides.
+// With no overrides set, the three phases together must give the current one-call result bitwise.
 class FluxAccess {
 public:
     virtual ~FluxAccess() = default;
+    virtual void compute_stage_fluxes(int level, bool predictor) = 0;
+    virtual void apply_flux_divergence(int level, bool predictor) = 0;
     // Stage face fluxes of a level: nodal in `dir`, component n-1 = scalar n, no ghost layer, same BoxArray/DistributionMapping as the level.
     virtual const amrex::MultiFab& stage_flux(int level, FluxKind kind, int dir) const = 0;
-    // Replaces the override lists for the next stage on `level` (all boxes owned by this rank); an empty vector clears them.
+    // Replaces the override lists for the next phase 3 on `level` (all boxes owned by this rank); an empty vector clears them.
     virtual void set_flux_override(int level, FluxKind kind, const std::vector<std::vector<FluxOverride>>& per_local_box) = 0;
     // Smallest stable dt on this rank for `level`; Role 3 / TimeLoop reduce it over levels and ranks.
     virtual double local_dt(int level) const = 0;
+    // Regrid support: run DIVERGENCE_PART_1 on a level (needed on new levels), and report max |div u - D| over the valid cells of that
+    // level on this rank (diagnostic printed after every regrid; the post-regrid projection itself is off by default).
+    virtual void run_divergence_part1(int level) = 0;
+    virtual double max_divergence_error(int level) const = 0;
 };
 
 }  // namespace fdsrt
