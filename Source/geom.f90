@@ -19663,7 +19663,7 @@ INTEGER, ALLOCATABLE, DIMENSION(:,:) :: F_IJKFACE,F_NBR_IJK
 REAL(EB), ALLOCATABLE, DIMENSION(:) :: F_AREA
 REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: F_XYZCEN,F_NVEC
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: F_BARRIER
-LOGICAL :: EMIT
+LOGICAL :: EMIT,BUILD_INTERIOR
 INTEGER :: N_BARRIER
 LOGICAL, SAVE :: THIN_BARRIER_WARNED=.FALSE.
 
@@ -19675,212 +19675,220 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    M%FV%FACE%N_INT = 0
    IF (ALLOCATED(M%FV%CV%FACE_PTR))  DEALLOCATE(M%FV%CV%FACE_PTR)
    IF (ALLOCATED(M%FV%CV%FACE_LIST)) DEALLOCATE(M%FV%CV%FACE_LIST)
-   IF (.NOT.ALLOCATED(M%FV%GCELL%CELL_TYPE)) CYCLE
+   ! A mesh with guard cut faces but no interior control volumes still needs tail rows.
+   ! N_INT stays 0, so the interior walks never see them. The guard fill below is the only copy.
+   BUILD_INTERIOR = ALLOCATED(M%FV%GCELL%CELL_TYPE) .AND. M%FV%GCELL%N_INT>=1 .AND. &
+                    ALLOCATED(M%FV%CV%GCELL_TO_CV)
    N_INT = M%FV%GCELL%N_INT
-   IF (N_INT < 1) CYCLE
-   IF (.NOT.ALLOCATED(M%FV%CV%GCELL_TO_CV)) CYCLE
-
-   ! Reverse lookups: regular GCELL by host cell, cut GCELL by (ICC,JCC) via a small CSR table.
-   ALLOCATE(REG_G_AT(1:M%IBAR,1:M%JBAR,1:M%KBAR)); REG_G_AT = 0
-   ALLOCATE(PIECE_PTR(1:M%N_CUTCELL_MESH+1)); PIECE_PTR(1) = 1
-   DO ICC=1,M%N_CUTCELL_MESH
-      PIECE_PTR(ICC+1) = PIECE_PTR(ICC) + M%CUT_CELL(ICC)%NCELL
-   ENDDO
-   ALLOCATE(PIECE_IG(1:MAX(1,PIECE_PTR(M%N_CUTCELL_MESH+1)-1))); PIECE_IG = 0
-   MAXF = 6
-   DO IG=1,N_INT
-      IF (M%FV%GCELL%CELL_TYPE(IG) == CC_GCELL_CUT) THEN
-         ICC = M%FV%GCELL%ICC(IG); JCC = M%FV%GCELL%JCC(IG)
-         PIECE_IG(PIECE_PTR(ICC)+JCC-1) = IG
-         MAXF = MAX(MAXF,M%CUT_CELL(ICC)%CCELEM(1,JCC))
-      ELSE
-         I = M%FV%GCELL%IJK(IAXIS,IG); J = M%FV%GCELL%IJK(JAXIS,IG); K = M%FV%GCELL%IJK(KAXIS,IG)
-         IF (I>=1.AND.I<=M%IBAR .AND. J>=1.AND.J<=M%JBAR .AND. K>=1.AND.K<=M%KBAR) REG_G_AT(I,J,K) = IG
-      ENDIF
-   ENDDO
-   ALLOCATE(REG_GHOST_AT(1:M%IBAR,1:M%JBAR,1:M%KBAR)); REG_GHOST_AT = 0
-   DO IG=N_INT+M%FV%GCELL%N_CUT_GHOST+1,M%FV%GCELL%N
-      I = M%FV%GCELL%IJK(IAXIS,IG); J = M%FV%GCELL%IJK(JAXIS,IG); K = M%FV%GCELL%IJK(KAXIS,IG)
-      IF (I>=1.AND.I<=M%IBAR .AND. J>=1.AND.J<=M%JBAR .AND. K>=1.AND.K<=M%KBAR) REG_GHOST_AT(I,J,K) = IG
-   ENDDO
-
-   ALLOCATE(F_FTYPE(MAXF),F_ICF(MAXF),F_JFC(MAXF),F_X1AXIS(MAXF),F_KIND(MAXF),F_NBR_TYPE(MAXF), &
-            F_NBR_ICC(MAXF),F_NBR_JCC(MAXF),F_AREA(MAXF),F_IWC(MAXF),F_BARRIER(MAXF))
-   ALLOCATE(F_IJKFACE(IAXIS:KAXIS,MAXF),F_NBR_IJK(IAXIS:KAXIS,MAXF),F_XYZCEN(IAXIS:KAXIS,MAXF),F_NVEC(IAXIS:KAXIS,MAXF))
-
-   ! Guard cut-face pieces have no interior GCELL, so the emit below never sees them.
-   ! Their rows are a tail, N_INT+1:N, the same split GCELL uses.
-   ! Interior pieces that the emit also skips (solid on every side, FC would stay 0)
-   ! take the same tail, after the guard rows.
    N_GUARD_FACE = 0
-   MAX_NF = 1
    IF (ALLOCATED(M%CUT_FACE) .AND. M%N_GCCUTFACE_MESH>0) THEN
       DO ICF=M%N_CUTFACE_MESH+1,M%N_CUTFACE_MESH+M%N_GCCUTFACE_MESH
          N_GUARD_FACE = N_GUARD_FACE + M%CUT_FACE(ICF)%NFACE
       ENDDO
    ENDIF
-   IF (ALLOCATED(M%CUT_FACE)) THEN
-      DO ICF=1,M%N_CUTFACE_MESH
-         MAX_NF = MAX(MAX_NF,M%CUT_FACE(ICF)%NFACE)
-      ENDDO
-   ENDIF
-   ALLOCATE(PIECE_SEEN(MAX_NF,MAX(1,M%N_CUTFACE_MESH)))
-   PIECE_SEEN = .FALSE.
+   IF (BUILD_INTERIOR) THEN
 
-   ! PASS 1 counts the emitted faces; PASS 2 fills the SoA rows with the identical emit logic.
-   N_BARRIER = 0
-   DO PASS=1,2
-      NFACE = 0
+      ! Reverse lookups: regular GCELL by host cell, cut GCELL by (ICC,JCC) via a small CSR table.
+      ALLOCATE(REG_G_AT(1:M%IBAR,1:M%JBAR,1:M%KBAR)); REG_G_AT = 0
+      ALLOCATE(PIECE_PTR(1:M%N_CUTCELL_MESH+1)); PIECE_PTR(1) = 1
+      DO ICC=1,M%N_CUTCELL_MESH
+         PIECE_PTR(ICC+1) = PIECE_PTR(ICC) + M%CUT_CELL(ICC)%NCELL
+      ENDDO
+      ALLOCATE(PIECE_IG(1:MAX(1,PIECE_PTR(M%N_CUTCELL_MESH+1)-1))); PIECE_IG = 0
+      MAXF = 6
       DO IG=1,N_INT
-         CALL CC_GRID_ENUMERATE_GCELL_FACES(NM,IG,MAXF,NF,F_FTYPE,F_ICF,F_JFC,F_X1AXIS,F_IJKFACE,F_AREA, &
-                                            F_XYZCEN,F_NVEC,F_KIND,F_NBR_TYPE,F_NBR_ICC,F_NBR_JCC,F_NBR_IJK, &
-                                            F_IWC,F_BARRIER)
-         DO IF_=1,NF
-            ! Resolve neighbor GCELL (mesh-local); 0 = boundary/wall/region boundary/remote.
-            IG_N = 0
-            SKIP_FACE = .FALSE.
-            SELECT CASE(F_NBR_TYPE(IF_))
-            CASE(CC_GCELL_REG)
-               IN = F_NBR_IJK(IAXIS,IF_); JN = F_NBR_IJK(JAXIS,IF_); KN = F_NBR_IJK(KAXIS,IF_)
-               IF (IN>=1.AND.IN<=M%IBAR .AND. JN>=1.AND.JN<=M%JBAR .AND. KN>=1.AND.KN<=M%KBAR) IG_N = REG_G_AT(IN,JN,KN)
-            CASE(CC_GCELL_CUT)
-               ICC = F_NBR_ICC(IF_); JCC = F_NBR_JCC(IF_)
-               IF (JCC >= 1) THEN
-                  ! Authoritative cut neighbor from a cut-cell CFGAS face.
-                  IF (ICC>=1 .AND. ICC<=M%N_CUTCELL_MESH) THEN
-                     IF (JCC<=M%CUT_CELL(ICC)%NCELL) IG_N = PIECE_IG(PIECE_PTR(ICC)+JCC-1)
-                  ELSE IF (ICC > M%N_CUTCELL_MESH .AND. ICC <= M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH) THEN
-                     IF (ALLOCATED(M%CUT_CELL(ICC)%IG) .AND. JCC<=M%CUT_CELL(ICC)%NCELL) &
-                        IG_N = M%CUT_CELL(ICC)%IG(JCC)
-                  ENDIF
-               ELSE
-                  ! Regular-side -> cut Cartesian face: the cut side owns it whenever the neighbor cut
-                  ! cell has any surviving gas piece; otherwise this regular face abuts solid (wall).
-                  IF (ICC>=1 .AND. ICC<=M%N_CUTCELL_MESH) THEN
-                     DO JCC2=1,M%CUT_CELL(ICC)%NCELL
-                        IF (PIECE_IG(PIECE_PTR(ICC)+JCC2-1) >= 1) THEN
-                           SKIP_FACE = .TRUE.; EXIT
-                        ENDIF
-                     ENDDO
-                  ENDIF
-               ENDIF
-            END SELECT
-            ! A regular GCELL face can be tagged as a legacy region boundary even though its adjacent
-            ! regular gas cell is also present in the FV inventory. Resolve that neighbor from the FV
-            ! reverse map so the two outward representations are canonically deduplicated.
-            IF (IG_N == 0 .AND. F_FTYPE(IF_) == CC_FTYPE_RGGAS .AND. .NOT.F_BARRIER(IF_)) THEN
-               IN = F_NBR_IJK(IAXIS,IF_); JN = F_NBR_IJK(JAXIS,IF_); KN = F_NBR_IJK(KAXIS,IF_)
-               IF (IN>=1 .AND. IN<=M%IBAR .AND. JN>=1 .AND. JN<=M%JBAR .AND. KN>=1 .AND. KN<=M%KBAR) THEN
-                  IG_N = REG_G_AT(IN,JN,KN)
-                  IF (IG_N >= 1) F_KIND(IF_) = CC_FACE_KIND_GAS
-               ENDIF
-            ENDIF
-            ! Legacy RCGAS metadata can also occur on both sides of a full Cartesian face between
-            ! adjacent cut cells. If the neighboring cut cell has one FV gas piece, resolve it
-            ! unambiguously and let the normal canonical-owner rule emit that face once.
-            IF (IG_N == 0 .AND. F_FTYPE(IF_) == CC_FTYPE_RCGAS .AND. .NOT.F_BARRIER(IF_)) THEN
-               N_MATCH = 0; IG_MATCH = 0
-               DO IG2=1,N_INT
-                  IF (M%FV%GCELL%CELL_TYPE(IG2) /= CC_GCELL_CUT) CYCLE
-                  IF (ANY(M%FV%GCELL%IJK(IAXIS:KAXIS,IG2) /= F_NBR_IJK(IAXIS:KAXIS,IF_))) CYCLE
-                  N_MATCH = N_MATCH + 1; IG_MATCH = IG2
-               ENDDO
-               IF (N_MATCH == 1) IG_N = IG_MATCH
-            ENDIF
-            IF (SKIP_FACE) CYCLE
-
-            ! An unresolved gas neighbor inside this mesh is not a physical boundary: it is the
-            ! structured Cartesian row immediately outside the configured identity-scope FV halo.
-            IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE<=CC_CV_SCOPE_IDENTITY .AND. IG_N==0 .AND. &
-                F_KIND(IF_)==CC_FACE_KIND_GAS .AND. F_NBR_TYPE(IF_)==CC_GCELL_REG) THEN
-               IF (CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,F_NBR_IJK(IAXIS:KAXIS,IF_))) &
-                  F_KIND(IF_)=CC_FACE_KIND_COUPLING
-            ENDIF
-            IF (F_KIND(IF_)==CC_FACE_KIND_COUPLING .AND. IG_N==0) THEN
-               IN = F_NBR_IJK(IAXIS,IF_); JN = F_NBR_IJK(JAXIS,IF_); KN = F_NBR_IJK(KAXIS,IF_)
-               IF (IN>=1.AND.IN<=M%IBAR .AND. JN>=1.AND.JN<=M%JBAR .AND. KN>=1.AND.KN<=M%KBAR) &
-                  IG_N = REG_GHOST_AT(IN,JN,KN)
-            ENDIF
-            IF (F_KIND(IF_)==CC_FACE_KIND_COUPLING .AND. IG_N==0) THEN
-               WRITE(LU_ERR,'(A,I0,A,3I6)') &
-                  'ERROR: CC_IBM: COUPLING face has no REG ghost GCELL: mesh ',NM, &
-                  ' NBR_IJK=',F_NBR_IJK(IAXIS,IF_),F_NBR_IJK(JAXIS,IF_),F_NBR_IJK(KAXIS,IF_)
-               STOP_STATUS=SETUP_STOP
-               DEALLOCATE(F_FTYPE,F_ICF,F_JFC,F_X1AXIS,F_KIND,F_NBR_TYPE,F_NBR_ICC,F_NBR_JCC,F_AREA,F_IWC,F_BARRIER)
-               DEALLOCATE(F_IJKFACE,F_NBR_IJK,F_XYZCEN,F_NVEC)
-               DEALLOCATE(REG_G_AT,REG_GHOST_AT,PIECE_PTR,PIECE_IG,PIECE_SEEN)
-               RETURN
-            ENDIF
-
-            ! Emission: cut<->regular faces are owned by the cut (RCGAS) side; regular-regular and
-            ! cut-cut gas faces are emitted once from the smaller-key canonical owner; every
-            ! boundary/wall/region-boundary face is emitted from its single active side.
-            IF (IG_N >= 1 .AND. IG_N <= N_INT) THEN
-               IF (F_FTYPE(IF_) == CC_FTYPE_RCGAS .AND. M%FV%GCELL%CELL_TYPE(IG_N) == CC_GCELL_REG) THEN
-                  EMIT = .TRUE.
-               ELSE
-                  EMIT = CC_GRID_GCELL_KEY_LESS(NM,IG,IG_N)
-               ENDIF
-            ELSE
-               EMIT = .TRUE.   ! IG_N==0 or IG_N>N_INT (ghost neighbor)
-            ENDIF
-            IF (.NOT.EMIT) CYCLE
-            IF (F_ICF(IF_)>=1 .AND. F_ICF(IF_)<=M%N_CUTFACE_MESH) THEN
-               IF (F_JFC(IF_)>=1 .AND. F_JFC(IF_)<=M%CUT_FACE(F_ICF(IF_))%NFACE) &
-                  PIECE_SEEN(F_JFC(IF_),F_ICF(IF_)) = .TRUE.
-            ENDIF
-
-            NFACE = NFACE + 1
-            IF (PASS == 2) THEN
-               IF (F_BARRIER(IF_)) N_BARRIER = N_BARRIER + 1
-               IFACE_LOC = NFACE
-               OC = M%FV%CV%GCELL_TO_CV(IG)
-               NC = 0
-               NBR_CV_NM = 0
-               IF (IG_N >= 1) THEN
-                  NC = M%FV%CV%GCELL_TO_CV(IG_N)
-                  NBR_CV_NM = M%FV%CV%GCELL_TO_CV_NM(IG_N)
-               ENDIF
-               M%FV%FACE%OWNER_CV_NM(IFACE_LOC) = M%FV%CV%GCELL_TO_CV_NM(IG)
-               M%FV%FACE%OWNER_CV(IFACE_LOC)    = OC
-               M%FV%FACE%NBR_CV_NM(IFACE_LOC) = NBR_CV_NM
-               M%FV%FACE%NBR_CV(IFACE_LOC)      = NC
-               M%FV%FACE%OWNER_GCELL(IFACE_LOC) = IG
-               M%FV%FACE%NBR_GCELL(IFACE_LOC)   = IG_N
-               IF (NC >= 1 .AND. NC == OC .AND. &
-                   M%FV%FACE%NBR_CV_NM(IFACE_LOC) == M%FV%FACE%OWNER_CV_NM(IFACE_LOC)) THEN
-                  M%FV%FACE%ROLE(IFACE_LOC) = CC_FACE_ROLE_INTERNAL
-               ELSE
-                  M%FV%FACE%ROLE(IFACE_LOC) = CC_FACE_ROLE_EXTERNAL
-               ENDIF
-               M%FV%FACE%KIND(IFACE_LOC)   = F_KIND(IF_)
-               M%FV%FACE%FTYPE(IFACE_LOC)  = F_FTYPE(IF_)
-               M%FV%FACE%SRC_ICF(IFACE_LOC)= F_ICF(IF_)
-               M%FV%FACE%SRC_JCF(IFACE_LOC)= F_JFC(IF_)
-               M%FV%FACE%IWC(IFACE_LOC)    = F_IWC(IF_)
-               M%FV%FACE%X1AXIS(IFACE_LOC) = F_X1AXIS(IF_)
-               M%FV%FACE%IJK_FACE(IAXIS:KAXIS,IFACE_LOC) = F_IJKFACE(IAXIS:KAXIS,IF_)
-               M%FV%FACE%NBR_IJK(IAXIS:KAXIS,IFACE_LOC) = F_NBR_IJK(IAXIS:KAXIS,IF_)
-               M%FV%FACE%AREA(IFACE_LOC)   = F_AREA(IF_)
-               M%FV%FACE%NVEC(IAXIS:KAXIS,IFACE_LOC)   = F_NVEC(IAXIS:KAXIS,IF_)
-               M%FV%FACE%XYZCEN(IAXIS:KAXIS,IFACE_LOC) = F_XYZCEN(IAXIS:KAXIS,IF_)
-            ENDIF
-         ENDDO
-      ENDDO
-      IF (PASS == 1) THEN
-         N_ORPHAN = 0
-         IF (ALLOCATED(M%CUT_FACE)) THEN
-            DO ICF=1,M%N_CUTFACE_MESH
-               DO JCF=1,M%CUT_FACE(ICF)%NFACE
-                  IF (.NOT.PIECE_SEEN(JCF,ICF)) N_ORPHAN = N_ORPHAN + 1
-               ENDDO
-            ENDDO
+         IF (M%FV%GCELL%CELL_TYPE(IG) == CC_GCELL_CUT) THEN
+            ICC = M%FV%GCELL%ICC(IG); JCC = M%FV%GCELL%JCC(IG)
+            PIECE_IG(PIECE_PTR(ICC)+JCC-1) = IG
+            MAXF = MAX(MAXF,M%CUT_CELL(ICC)%CCELEM(1,JCC))
+         ELSE
+            I = M%FV%GCELL%IJK(IAXIS,IG); J = M%FV%GCELL%IJK(JAXIS,IG); K = M%FV%GCELL%IJK(KAXIS,IG)
+            IF (I>=1.AND.I<=M%IBAR .AND. J>=1.AND.J<=M%JBAR .AND. K>=1.AND.K<=M%KBAR) REG_G_AT(I,J,K) = IG
          ENDIF
-         M%FV%FACE%N_INT = NFACE
-         M%FV%FACE%N = NFACE + N_GUARD_FACE + N_ORPHAN
-         CALL CC_GRID_ALLOCATE_FACE(M,M%FV%FACE%N)
+      ENDDO
+      ALLOCATE(REG_GHOST_AT(1:M%IBAR,1:M%JBAR,1:M%KBAR)); REG_GHOST_AT = 0
+      DO IG=N_INT+M%FV%GCELL%N_CUT_GHOST+1,M%FV%GCELL%N
+         I = M%FV%GCELL%IJK(IAXIS,IG); J = M%FV%GCELL%IJK(JAXIS,IG); K = M%FV%GCELL%IJK(KAXIS,IG)
+         IF (I>=1.AND.I<=M%IBAR .AND. J>=1.AND.J<=M%JBAR .AND. K>=1.AND.K<=M%KBAR) REG_GHOST_AT(I,J,K) = IG
+      ENDDO
+
+      ALLOCATE(F_FTYPE(MAXF),F_ICF(MAXF),F_JFC(MAXF),F_X1AXIS(MAXF),F_KIND(MAXF),F_NBR_TYPE(MAXF), &
+               F_NBR_ICC(MAXF),F_NBR_JCC(MAXF),F_AREA(MAXF),F_IWC(MAXF),F_BARRIER(MAXF))
+      ALLOCATE(F_IJKFACE(IAXIS:KAXIS,MAXF),F_NBR_IJK(IAXIS:KAXIS,MAXF),F_XYZCEN(IAXIS:KAXIS,MAXF),F_NVEC(IAXIS:KAXIS,MAXF))
+
+      ! Guard cut-face pieces have no interior GCELL, so the emit below never sees them.
+      ! Their rows are a tail, N_INT+1:N, the same split GCELL uses.
+      ! Interior pieces that the emit also skips (solid on every side, FC would stay 0)
+      ! take the same tail, after the guard rows.
+      MAX_NF = 1
+      IF (ALLOCATED(M%CUT_FACE)) THEN
+         DO ICF=1,M%N_CUTFACE_MESH
+            MAX_NF = MAX(MAX_NF,M%CUT_FACE(ICF)%NFACE)
+         ENDDO
       ENDIF
-   ENDDO
+      ALLOCATE(PIECE_SEEN(MAX_NF,MAX(1,M%N_CUTFACE_MESH)))
+      PIECE_SEEN = .FALSE.
+
+      ! PASS 1 counts the emitted faces; PASS 2 fills the SoA rows with the identical emit logic.
+      N_BARRIER = 0
+      DO PASS=1,2
+         NFACE = 0
+         DO IG=1,N_INT
+            CALL CC_GRID_ENUMERATE_GCELL_FACES(NM,IG,MAXF,NF,F_FTYPE,F_ICF,F_JFC,F_X1AXIS,F_IJKFACE,F_AREA, &
+                                               F_XYZCEN,F_NVEC,F_KIND,F_NBR_TYPE,F_NBR_ICC,F_NBR_JCC,F_NBR_IJK, &
+                                               F_IWC,F_BARRIER)
+            DO IF_=1,NF
+               ! Resolve neighbor GCELL (mesh-local); 0 = boundary/wall/region boundary/remote.
+               IG_N = 0
+               SKIP_FACE = .FALSE.
+               SELECT CASE(F_NBR_TYPE(IF_))
+               CASE(CC_GCELL_REG)
+                  IN = F_NBR_IJK(IAXIS,IF_); JN = F_NBR_IJK(JAXIS,IF_); KN = F_NBR_IJK(KAXIS,IF_)
+                  IF (IN>=1.AND.IN<=M%IBAR .AND. JN>=1.AND.JN<=M%JBAR .AND. KN>=1.AND.KN<=M%KBAR) IG_N = REG_G_AT(IN,JN,KN)
+               CASE(CC_GCELL_CUT)
+                  ICC = F_NBR_ICC(IF_); JCC = F_NBR_JCC(IF_)
+                  IF (JCC >= 1) THEN
+                     ! Authoritative cut neighbor from a cut-cell CFGAS face.
+                     IF (ICC>=1 .AND. ICC<=M%N_CUTCELL_MESH) THEN
+                        IF (JCC<=M%CUT_CELL(ICC)%NCELL) IG_N = PIECE_IG(PIECE_PTR(ICC)+JCC-1)
+                     ELSE IF (ICC > M%N_CUTCELL_MESH .AND. ICC <= M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH) THEN
+                        IF (ALLOCATED(M%CUT_CELL(ICC)%IG) .AND. JCC<=M%CUT_CELL(ICC)%NCELL) &
+                           IG_N = M%CUT_CELL(ICC)%IG(JCC)
+                     ENDIF
+                  ELSE
+                     ! Regular-side -> cut Cartesian face: the cut side owns it whenever the neighbor cut
+                     ! cell has any surviving gas piece; otherwise this regular face abuts solid (wall).
+                     IF (ICC>=1 .AND. ICC<=M%N_CUTCELL_MESH) THEN
+                        DO JCC2=1,M%CUT_CELL(ICC)%NCELL
+                           IF (PIECE_IG(PIECE_PTR(ICC)+JCC2-1) >= 1) THEN
+                              SKIP_FACE = .TRUE.; EXIT
+                           ENDIF
+                        ENDDO
+                     ENDIF
+                  ENDIF
+               END SELECT
+               ! A regular GCELL face can be tagged as a legacy region boundary even though its adjacent
+               ! regular gas cell is also present in the FV inventory. Resolve that neighbor from the FV
+               ! reverse map so the two outward representations are canonically deduplicated.
+               IF (IG_N == 0 .AND. F_FTYPE(IF_) == CC_FTYPE_RGGAS .AND. .NOT.F_BARRIER(IF_)) THEN
+                  IN = F_NBR_IJK(IAXIS,IF_); JN = F_NBR_IJK(JAXIS,IF_); KN = F_NBR_IJK(KAXIS,IF_)
+                  IF (IN>=1 .AND. IN<=M%IBAR .AND. JN>=1 .AND. JN<=M%JBAR .AND. KN>=1 .AND. KN<=M%KBAR) THEN
+                     IG_N = REG_G_AT(IN,JN,KN)
+                     IF (IG_N >= 1) F_KIND(IF_) = CC_FACE_KIND_GAS
+                  ENDIF
+               ENDIF
+               ! Legacy RCGAS metadata can also occur on both sides of a full Cartesian face between
+               ! adjacent cut cells. If the neighboring cut cell has one FV gas piece, resolve it
+               ! unambiguously and let the normal canonical-owner rule emit that face once.
+               IF (IG_N == 0 .AND. F_FTYPE(IF_) == CC_FTYPE_RCGAS .AND. .NOT.F_BARRIER(IF_)) THEN
+                  N_MATCH = 0; IG_MATCH = 0
+                  DO IG2=1,N_INT
+                     IF (M%FV%GCELL%CELL_TYPE(IG2) /= CC_GCELL_CUT) CYCLE
+                     IF (ANY(M%FV%GCELL%IJK(IAXIS:KAXIS,IG2) /= F_NBR_IJK(IAXIS:KAXIS,IF_))) CYCLE
+                     N_MATCH = N_MATCH + 1; IG_MATCH = IG2
+                  ENDDO
+                  IF (N_MATCH == 1) IG_N = IG_MATCH
+               ENDIF
+               IF (SKIP_FACE) CYCLE
+
+               ! An unresolved gas neighbor inside this mesh is not a physical boundary: it is the
+               ! structured Cartesian row immediately outside the configured identity-scope FV halo.
+               IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE<=CC_CV_SCOPE_IDENTITY .AND. IG_N==0 .AND. &
+                   F_KIND(IF_)==CC_FACE_KIND_GAS .AND. F_NBR_TYPE(IF_)==CC_GCELL_REG) THEN
+                  IF (CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,F_NBR_IJK(IAXIS:KAXIS,IF_))) &
+                     F_KIND(IF_)=CC_FACE_KIND_COUPLING
+               ENDIF
+               IF (F_KIND(IF_)==CC_FACE_KIND_COUPLING .AND. IG_N==0) THEN
+                  IN = F_NBR_IJK(IAXIS,IF_); JN = F_NBR_IJK(JAXIS,IF_); KN = F_NBR_IJK(KAXIS,IF_)
+                  IF (IN>=1.AND.IN<=M%IBAR .AND. JN>=1.AND.JN<=M%JBAR .AND. KN>=1.AND.KN<=M%KBAR) &
+                     IG_N = REG_GHOST_AT(IN,JN,KN)
+               ENDIF
+               IF (F_KIND(IF_)==CC_FACE_KIND_COUPLING .AND. IG_N==0) THEN
+                  WRITE(LU_ERR,'(A,I0,A,3I6)') &
+                     'ERROR: CC_IBM: COUPLING face has no REG ghost GCELL: mesh ',NM, &
+                     ' NBR_IJK=',F_NBR_IJK(IAXIS,IF_),F_NBR_IJK(JAXIS,IF_),F_NBR_IJK(KAXIS,IF_)
+                  STOP_STATUS=SETUP_STOP
+                  DEALLOCATE(F_FTYPE,F_ICF,F_JFC,F_X1AXIS,F_KIND,F_NBR_TYPE,F_NBR_ICC,F_NBR_JCC,F_AREA,F_IWC,F_BARRIER)
+                  DEALLOCATE(F_IJKFACE,F_NBR_IJK,F_XYZCEN,F_NVEC)
+                  DEALLOCATE(REG_G_AT,REG_GHOST_AT,PIECE_PTR,PIECE_IG,PIECE_SEEN)
+                  RETURN
+               ENDIF
+
+               ! Emission: cut<->regular faces are owned by the cut (RCGAS) side; regular-regular and
+               ! cut-cut gas faces are emitted once from the smaller-key canonical owner; every
+               ! boundary/wall/region-boundary face is emitted from its single active side.
+               IF (IG_N >= 1 .AND. IG_N <= N_INT) THEN
+                  IF (F_FTYPE(IF_) == CC_FTYPE_RCGAS .AND. M%FV%GCELL%CELL_TYPE(IG_N) == CC_GCELL_REG) THEN
+                     EMIT = .TRUE.
+                  ELSE
+                     EMIT = CC_GRID_GCELL_KEY_LESS(NM,IG,IG_N)
+                  ENDIF
+               ELSE
+                  EMIT = .TRUE.   ! IG_N==0 or IG_N>N_INT (ghost neighbor)
+               ENDIF
+               IF (.NOT.EMIT) CYCLE
+               IF (F_ICF(IF_)>=1 .AND. F_ICF(IF_)<=M%N_CUTFACE_MESH) THEN
+                  IF (F_JFC(IF_)>=1 .AND. F_JFC(IF_)<=M%CUT_FACE(F_ICF(IF_))%NFACE) &
+                     PIECE_SEEN(F_JFC(IF_),F_ICF(IF_)) = .TRUE.
+               ENDIF
+
+               NFACE = NFACE + 1
+               IF (PASS == 2) THEN
+                  IF (F_BARRIER(IF_)) N_BARRIER = N_BARRIER + 1
+                  IFACE_LOC = NFACE
+                  OC = M%FV%CV%GCELL_TO_CV(IG)
+                  NC = 0
+                  NBR_CV_NM = 0
+                  IF (IG_N >= 1) THEN
+                     NC = M%FV%CV%GCELL_TO_CV(IG_N)
+                     NBR_CV_NM = M%FV%CV%GCELL_TO_CV_NM(IG_N)
+                  ENDIF
+                  M%FV%FACE%OWNER_CV_NM(IFACE_LOC) = M%FV%CV%GCELL_TO_CV_NM(IG)
+                  M%FV%FACE%OWNER_CV(IFACE_LOC)    = OC
+                  M%FV%FACE%NBR_CV_NM(IFACE_LOC) = NBR_CV_NM
+                  M%FV%FACE%NBR_CV(IFACE_LOC)      = NC
+                  M%FV%FACE%OWNER_GCELL(IFACE_LOC) = IG
+                  M%FV%FACE%NBR_GCELL(IFACE_LOC)   = IG_N
+                  IF (NC >= 1 .AND. NC == OC .AND. &
+                      M%FV%FACE%NBR_CV_NM(IFACE_LOC) == M%FV%FACE%OWNER_CV_NM(IFACE_LOC)) THEN
+                     M%FV%FACE%ROLE(IFACE_LOC) = CC_FACE_ROLE_INTERNAL
+                  ELSE
+                     M%FV%FACE%ROLE(IFACE_LOC) = CC_FACE_ROLE_EXTERNAL
+                  ENDIF
+                  M%FV%FACE%KIND(IFACE_LOC)   = F_KIND(IF_)
+                  M%FV%FACE%FTYPE(IFACE_LOC)  = F_FTYPE(IF_)
+                  M%FV%FACE%SRC_ICF(IFACE_LOC)= F_ICF(IF_)
+                  M%FV%FACE%SRC_JCF(IFACE_LOC)= F_JFC(IF_)
+                  M%FV%FACE%IWC(IFACE_LOC)    = F_IWC(IF_)
+                  M%FV%FACE%X1AXIS(IFACE_LOC) = F_X1AXIS(IF_)
+                  M%FV%FACE%IJK_FACE(IAXIS:KAXIS,IFACE_LOC) = F_IJKFACE(IAXIS:KAXIS,IF_)
+                  M%FV%FACE%NBR_IJK(IAXIS:KAXIS,IFACE_LOC) = F_NBR_IJK(IAXIS:KAXIS,IF_)
+                  M%FV%FACE%AREA(IFACE_LOC)   = F_AREA(IF_)
+                  M%FV%FACE%NVEC(IAXIS:KAXIS,IFACE_LOC)   = F_NVEC(IAXIS:KAXIS,IF_)
+                  M%FV%FACE%XYZCEN(IAXIS:KAXIS,IFACE_LOC) = F_XYZCEN(IAXIS:KAXIS,IF_)
+               ENDIF
+            ENDDO
+         ENDDO
+         IF (PASS == 1) THEN
+            N_ORPHAN = 0
+            IF (ALLOCATED(M%CUT_FACE)) THEN
+               DO ICF=1,M%N_CUTFACE_MESH
+                  DO JCF=1,M%CUT_FACE(ICF)%NFACE
+                     IF (.NOT.PIECE_SEEN(JCF,ICF)) N_ORPHAN = N_ORPHAN + 1
+                  ENDDO
+               ENDDO
+            ENDIF
+            M%FV%FACE%N_INT = NFACE
+            M%FV%FACE%N = NFACE + N_GUARD_FACE + N_ORPHAN
+            CALL CC_GRID_ALLOCATE_FACE(M,M%FV%FACE%N)
+         ENDIF
+      ENDDO
+   ELSE
+      IF (N_GUARD_FACE < 1) CYCLE
+      N_BARRIER = 0
+      M%FV%FACE%N = N_GUARD_FACE
+      CALL CC_GRID_ALLOCATE_FACE(M,N_GUARD_FACE)
+   ENDIF
 
    ! Thin obstructions are the one documented departure from scope-0 legacy identity: the legacy
    ! cut-cell layer has no notion of WALL%THIN and lets flux through, the FV layer blocks it.
@@ -19916,25 +19924,27 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
    ! Interior pieces the gas-cell emit never sees. Same tail as the guard rows:
    ! no CV, so 1:N_INT walks skip them, and the piece's FC points here.
-   DO ICF=1,M%N_CUTFACE_MESH
-      DO JCF=1,M%CUT_FACE(ICF)%NFACE
-         IF (PIECE_SEEN(JCF,ICF)) CYCLE
-         IFACE_LOC = IFACE_LOC + 1
-         IF (M%CUT_FACE(ICF)%STATUS==CC_GASPHASE) THEN
-            M%FV%FACE%FTYPE(IFACE_LOC) = CC_FTYPE_CFGAS
-         ELSE
-            M%FV%FACE%FTYPE(IFACE_LOC) = CC_FTYPE_CFINB
-         ENDIF
-         M%FV%FACE%SRC_ICF(IFACE_LOC) = ICF
-         M%FV%FACE%SRC_JCF(IFACE_LOC) = JCF
-         IF (ALLOCATED(M%CUT_FACE(ICF)%UNKF)) M%FV%FACE%UNKF(IFACE_LOC) = M%CUT_FACE(ICF)%UNKF(JCF)
-         M%FV%FACE%IWC(IFACE_LOC) = M%CUT_FACE(ICF)%IWC
-         M%FV%FACE%X1AXIS(IFACE_LOC) = M%CUT_FACE(ICF)%IJK(KAXIS+1)
-         M%FV%FACE%IJK_FACE(IAXIS:KAXIS,IFACE_LOC) = M%CUT_FACE(ICF)%IJK(IAXIS:KAXIS)
-         M%FV%FACE%AREA(IFACE_LOC) = M%CUT_FACE(ICF)%AREA(JCF)
-         M%FV%FACE%XYZCEN(IAXIS:KAXIS,IFACE_LOC) = M%CUT_FACE(ICF)%XYZCEN(IAXIS:KAXIS,JCF)
+   IF (BUILD_INTERIOR) THEN
+      DO ICF=1,M%N_CUTFACE_MESH
+         DO JCF=1,M%CUT_FACE(ICF)%NFACE
+            IF (PIECE_SEEN(JCF,ICF)) CYCLE
+            IFACE_LOC = IFACE_LOC + 1
+            IF (M%CUT_FACE(ICF)%STATUS==CC_GASPHASE) THEN
+               M%FV%FACE%FTYPE(IFACE_LOC) = CC_FTYPE_CFGAS
+            ELSE
+               M%FV%FACE%FTYPE(IFACE_LOC) = CC_FTYPE_CFINB
+            ENDIF
+            M%FV%FACE%SRC_ICF(IFACE_LOC) = ICF
+            M%FV%FACE%SRC_JCF(IFACE_LOC) = JCF
+            IF (ALLOCATED(M%CUT_FACE(ICF)%UNKF)) M%FV%FACE%UNKF(IFACE_LOC) = M%CUT_FACE(ICF)%UNKF(JCF)
+            M%FV%FACE%IWC(IFACE_LOC) = M%CUT_FACE(ICF)%IWC
+            M%FV%FACE%X1AXIS(IFACE_LOC) = M%CUT_FACE(ICF)%IJK(KAXIS+1)
+            M%FV%FACE%IJK_FACE(IAXIS:KAXIS,IFACE_LOC) = M%CUT_FACE(ICF)%IJK(IAXIS:KAXIS)
+            M%FV%FACE%AREA(IFACE_LOC) = M%CUT_FACE(ICF)%AREA(JCF)
+            M%FV%FACE%XYZCEN(IAXIS:KAXIS,IFACE_LOC) = M%CUT_FACE(ICF)%XYZCEN(IAXIS:KAXIS,JCF)
+         ENDDO
       ENDDO
-   ENDDO
+   ENDIF
 
    ! Cache reverse provenance once so runtime CUT_FACE producer loops can address the
    ! canonical FACE SoA without repeated searches. FACE%UNKF waits for face linking
@@ -19947,9 +19957,11 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       IF (ICF<1) CYCLE
       M%CUT_FACE(ICF)%FC(JCC)=IF_
    ENDDO
-   DEALLOCATE(F_FTYPE,F_ICF,F_JFC,F_X1AXIS,F_KIND,F_NBR_TYPE,F_NBR_ICC,F_NBR_JCC,F_AREA,F_IWC,F_BARRIER)
-   DEALLOCATE(F_IJKFACE,F_NBR_IJK,F_XYZCEN,F_NVEC)
-   DEALLOCATE(REG_G_AT,REG_GHOST_AT,PIECE_PTR,PIECE_IG,PIECE_SEEN)
+   IF (BUILD_INTERIOR) THEN
+      DEALLOCATE(F_FTYPE,F_ICF,F_JFC,F_X1AXIS,F_KIND,F_NBR_TYPE,F_NBR_ICC,F_NBR_JCC,F_AREA,F_IWC,F_BARRIER)
+      DEALLOCATE(F_IJKFACE,F_NBR_IJK,F_XYZCEN,F_NVEC)
+      DEALLOCATE(REG_G_AT,REG_GHOST_AT,PIECE_PTR,PIECE_IG,PIECE_SEEN)
+   ENDIF
 
 ENDDO
 

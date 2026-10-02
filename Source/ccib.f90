@@ -2067,10 +2067,11 @@ END FUNCTION FV_CV_PUBLISHED_ROW
 
 LOGICAL FUNCTION FV_FACE_IN_USE(NM)
 ! Face momentum store selector: .TRUE. when the solver keeps VEL, VELS, FN and FN_B of mesh NM on
-! FV%FACE (IDENTITY scope, FV solver on, FACE table built). Otherwise the legacy face arrays hold them.
+! FV%FACE (IDENTITY scope, FV solver on, and an interior FACE row). A table of only guard-tail
+! rows has N_INT=0: storage and the accessor use it, and the solver stays on the legacy branches.
 INTEGER, INTENT(IN) :: NM
 FV_FACE_IN_USE=CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY .AND. &
-               ALLOCATED(MESHES(NM)%FV%FACE%FTYPE)
+               ALLOCATED(MESHES(NM)%FV%FACE%FTYPE) .AND. MESHES(NM)%FV%FACE%N_INT>0
 END FUNCTION FV_FACE_IN_USE
 
 
