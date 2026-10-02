@@ -36,7 +36,11 @@ END TYPE BOX_VIEW_TYPE
 
 TYPE(BOX_VIEW_TYPE), ALLOCATABLE, TARGET, PUBLIC, SAVE :: BOX_VIEW(:)
 
-PUBLIC :: FDS_HOOK_SET_FLAG,FDS_HOOK_SET_VIEW,FDS_HOOK_SET_STEP,FDS_HOOK_STEP_OUTPUTS
+PUBLIC :: FDS_HOOK_SET_FLAG,FDS_HOOK_SET_VIEW,FDS_HOOK_SET_STEP,FDS_HOOK_STEP_OUTPUTS,FDS_HOOK_FINE_ABORT,FDS_HOOK_FINE_GUARD,FDS_HOOK_SET_FINE_READY
+
+!> D-056 (option B): the set of kernel wrappers (fds_kernels.f90 entry names) that may run on a fine-level mesh number (NM > NMESHES). Empty until patch 0007 is validated and the
+!> kernels are switched to POINT_TO_BOX: every wrapper aborts on a fine number now. Set by FDS_HOOK_FINE_READY (also callable from the draft driver file fds_fine_mesh_b.f90).
+LOGICAL, SAVE :: FINE_READY = .FALSE.
 
 CONTAINS
 
@@ -104,5 +108,37 @@ SELECT CASE(WHICH)
 END SELECT
 IERR = 0
 END FUNCTION FDS_HOOK_SET_VIEW
+
+!> Declare (FLAG/=0) that the kernel wrappers may run on fine-level mesh numbers (only after patch 0007 is validated and the kernels call POINT_TO_BOX; off by default).
+SUBROUTINE FDS_HOOK_SET_FINE_READY(FLAG) BIND(C,NAME='fds_hook_set_fine_ready')
+
+INTEGER(C_INT), VALUE :: FLAG
+
+FINE_READY = (FLAG/=0)
+
+END SUBROUTINE FDS_HOOK_SET_FINE_READY
+
+!> Stop the run with a clear message: mesh number NM is not a level-0 FDS mesh and WHERE would read MESHES(NM) (D-056 option B).
+SUBROUTINE FDS_HOOK_FINE_ABORT(WHERE,NM)
+
+CHARACTER(*), INTENT(IN) :: WHERE
+INTEGER, INTENT(IN) :: NM
+
+WRITE(0,'(A,A,A,I0,A)') 'fds_amr ERROR in ',TRIM(WHERE),': mesh number ',NM,' is not a level-0 FDS mesh. Boxes of refinement level > 0 are fine-level mesh objects (D-056 option B, ' // &
+   'FINE_LEVEL(:), patch 0007) and must be reached through POINT_TO_BOX; this routine reads MESHES(NM) and has not been made fine-ready.'
+ERROR STOP 1
+
+END SUBROUTINE FDS_HOOK_FINE_ABORT
+
+!> Guard at the entry of every kernel wrapper: a fine-level mesh number (NM > NMESHES) aborts with a clear message unless fine boxes have been declared ready (FINE_READY).
+SUBROUTINE FDS_HOOK_FINE_GUARD(WHERE,NM,NMESHES_L0)
+
+CHARACTER(*), INTENT(IN) :: WHERE
+INTEGER(C_INT), INTENT(IN) :: NM
+INTEGER, INTENT(IN) :: NMESHES_L0
+
+IF (NM>NMESHES_L0 .AND. .NOT.FINE_READY) CALL FDS_HOOK_FINE_ABORT(WHERE,INT(NM))
+
+END SUBROUTINE FDS_HOOK_FINE_GUARD
 
 END MODULE FDS_AMREX_HOOKS

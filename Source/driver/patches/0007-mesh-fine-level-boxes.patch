@@ -1,0 +1,158 @@
+diff --git a/Source/mesh.f90 b/Source/mesh.f90
+index 172704f..0d77c4c 100644
+--- a/Source/mesh.f90
++++ b/Source/mesh.f90
+@@ -363,7 +363,7 @@ MODULE MESH_POINTERS
+ USE PRECISION_PARAMETERS
+ USE MESH_VARIABLES
+ #ifdef WITH_AMREX
+-USE FDS_AMREX_HOOKS, ONLY: BOX_VIEW
++USE FDS_AMREX_HOOKS, ONLY: BOX_VIEW,BOX_VIEW_TYPE,FDS_HOOK_FINE_ABORT
+ #endif
+ IMPLICIT NONE (TYPE,EXTERNAL)
+ 
+@@ -502,6 +502,20 @@ INTEGER, POINTER, DIMENSION(:) :: ALL_SLICE_TOPOLOGIES
+ LOGICAL, POINTER, DIMENSION(:) :: EMPTY_UNIQUE_SLICE, UNIQUE_SLICE_IS_SL3D, UNIQUE_SLICE_IN_DOMAIN
+ INTEGER, POINTER :: N_UNIQUE_SLCF
+ 
++#ifdef WITH_AMREX
++!> Fine-level mesh objects of the AMReX driver (D-056 option B): the mesh objects of the boxes of refinement level L>=1 live here, in a second array owned by the driver
++!> and indexed by level, NOT in MESHES. A box of level L has the FDS mesh number NM = FINE_LEVEL(L)%NM0 + IB (IB = 1..N_BOXES), which is always larger than SIZE(MESHES):
++!> MESHES, PROCESS, OMESH, the MPI maps and the level-0 mesh-count loops are untouched. BOX(IB) holds what POINT_TO_MESH_OBJECT needs (metrics, CELL/WALL tables, box state
++!> arrays); VIEW(IB) holds the pointer views of the AMReX data of the box (as BOX_VIEW(NM) does for level 0). The driver allocates and fills the array (driver file
++!> fds_fine_mesh.f90); no FDS routine does.
++TYPE FINE_LEVEL_TYPE
++   INTEGER :: NM0=0, N_BOXES=0
++   TYPE(MESH_TYPE), ALLOCATABLE :: BOX(:)
++   TYPE(BOX_VIEW_TYPE), ALLOCATABLE :: VIEW(:)
++END TYPE FINE_LEVEL_TYPE
++TYPE(FINE_LEVEL_TYPE), ALLOCATABLE, TARGET, SAVE :: FINE_LEVEL(:)
++#endif
++
+ CONTAINS
+ 
+ 
+@@ -512,7 +526,23 @@ SUBROUTINE POINT_TO_MESH(NM)
+ INTEGER, INTENT(IN) ::  NM
+ TYPE (MESH_TYPE), POINTER :: M
+ 
++#ifdef WITH_AMREX
++! A fine-level mesh number (D-056) must not index MESHES: stop with a clear message (a routine that runs on a fine box has to call POINT_TO_BOX).
++IF (NM>SIZE(MESHES) .OR. NM<1) CALL FDS_HOOK_FINE_ABORT('POINT_TO_MESH',NM)
++#endif
+ M=>MESHES(NM)
++#ifdef WITH_AMREX
++CALL POINT_TO_MESH_OBJECT(M)
++
++END SUBROUTINE POINT_TO_MESH
++
++
++!> \brief The body of POINT_TO_MESH for a given mesh object (the statements that follow are unchanged): used by POINT_TO_MESH for MESHES(NM) and by POINT_TO_BOX for a fine-level box.
++SUBROUTINE POINT_TO_MESH_OBJECT(M)
++
++TYPE (MESH_TYPE), POINTER, INTENT(IN) :: M
++
++#endif
+ U=>M%U
+ V=>M%V
+ W=>M%W
+@@ -916,42 +946,70 @@ ALL_SLICE_TOPOLOGIES => M%ALL_SLICE_TOPOLOGIES
+ ALL_SLICE_QUANTITIES => M%ALL_SLICE_QUANTITIES
+ UNIQUE_SLICE_IN_DOMAIN => M%UNIQUE_SLICE_IN_DOMAIN
+ 
++#ifdef WITH_AMREX
++END SUBROUTINE POINT_TO_MESH_OBJECT
++#else
+ END SUBROUTINE POINT_TO_MESH
++#endif
+ 
+ #ifdef WITH_AMREX
+ !> \brief Alternative to POINT_TO_MESH for the AMReX driver: the module pointers of the mesh arrays that the driver owns (the arrays of BOX_VIEW) point at the
+-!> AMReX data of box NM instead of MESHES(NM)%X. Everything else is pointed exactly as POINT_TO_MESH does (POINT_TO_MESH is called first), so a routine that
+-!> calls POINT_TO_BOX(NM) in place of POINT_TO_MESH(NM) sees the box data for the listed arrays and the unchanged FDS data for the rest. Only pointer
+-!> assignment is used (BOX_VIEW(NM) is built by FDS_HOOK_SET_VIEW with C_F_POINTER and pointer bounds remapping: standard Fortran 2008).
++!> AMReX data of box NM instead of MESHES(NM)%X. Everything else is pointed exactly as POINT_TO_MESH does, so a routine that calls POINT_TO_BOX(NM) in place of
++!> POINT_TO_MESH(NM) sees the box data for the listed arrays and the unchanged FDS data for the rest. Only pointer assignment is used (the views are built by
++!> FDS_HOOK_SET_VIEW with C_F_POINTER and pointer bounds remapping: standard Fortran 2008).
++!> D-056 option B: for NM > SIZE(MESHES) (a box of refinement level L>=1) the mesh object is FINE_LEVEL(L)%BOX(IB) and the views are FINE_LEVEL(L)%VIEW(IB), with
++!> NM = FINE_LEVEL(L)%NM0 + IB; a number that belongs to no level stops the run with a message. For NM <= SIZE(MESHES) the behaviour is that of patch 0005.
+ SUBROUTINE POINT_TO_BOX(NM)
+ 
+ INTEGER, INTENT(IN) :: NM
+-
+-CALL POINT_TO_MESH(NM)
+-IF (.NOT.ALLOCATED(BOX_VIEW)) RETURN
+-IF (NM<1 .OR. NM>SIZE(BOX_VIEW)) RETURN
+-IF (ASSOCIATED(BOX_VIEW(NM)%U))    U    => BOX_VIEW(NM)%U
+-IF (ASSOCIATED(BOX_VIEW(NM)%V))    V    => BOX_VIEW(NM)%V
+-IF (ASSOCIATED(BOX_VIEW(NM)%W))    W    => BOX_VIEW(NM)%W
+-IF (ASSOCIATED(BOX_VIEW(NM)%US))   US   => BOX_VIEW(NM)%US
+-IF (ASSOCIATED(BOX_VIEW(NM)%VS))   VS   => BOX_VIEW(NM)%VS
+-IF (ASSOCIATED(BOX_VIEW(NM)%WS))   WS   => BOX_VIEW(NM)%WS
+-IF (ASSOCIATED(BOX_VIEW(NM)%D))    D    => BOX_VIEW(NM)%D
+-IF (ASSOCIATED(BOX_VIEW(NM)%DS))   DS   => BOX_VIEW(NM)%DS
+-IF (ASSOCIATED(BOX_VIEW(NM)%H))    H    => BOX_VIEW(NM)%H
+-IF (ASSOCIATED(BOX_VIEW(NM)%HS))   HS   => BOX_VIEW(NM)%HS
+-IF (ASSOCIATED(BOX_VIEW(NM)%KRES)) KRES => BOX_VIEW(NM)%KRES
+-IF (ASSOCIATED(BOX_VIEW(NM)%FVX))  FVX  => BOX_VIEW(NM)%FVX
+-IF (ASSOCIATED(BOX_VIEW(NM)%FVY))  FVY  => BOX_VIEW(NM)%FVY
+-IF (ASSOCIATED(BOX_VIEW(NM)%FVZ))  FVZ  => BOX_VIEW(NM)%FVZ
+-IF (ASSOCIATED(BOX_VIEW(NM)%RHO))  RHO  => BOX_VIEW(NM)%RHO
+-IF (ASSOCIATED(BOX_VIEW(NM)%RHOS)) RHOS => BOX_VIEW(NM)%RHOS
+-IF (ASSOCIATED(BOX_VIEW(NM)%MU))   MU   => BOX_VIEW(NM)%MU
+-IF (ASSOCIATED(BOX_VIEW(NM)%TMP))  TMP  => BOX_VIEW(NM)%TMP
+-IF (ASSOCIATED(BOX_VIEW(NM)%Q))    Q    => BOX_VIEW(NM)%Q
+-IF (ASSOCIATED(BOX_VIEW(NM)%RSUM)) RSUM => BOX_VIEW(NM)%RSUM
+-IF (ASSOCIATED(BOX_VIEW(NM)%ZZ))   ZZ   => BOX_VIEW(NM)%ZZ
+-IF (ASSOCIATED(BOX_VIEW(NM)%ZZS))  ZZS  => BOX_VIEW(NM)%ZZS
++INTEGER :: LEV,IB
++TYPE (BOX_VIEW_TYPE), POINTER :: BV
++TYPE (MESH_TYPE), POINTER :: MF
++
++BV => NULL()
++IF (NM>SIZE(MESHES)) THEN
++   IB = 0
++   IF (ALLOCATED(FINE_LEVEL)) THEN
++      DO LEV=1,SIZE(FINE_LEVEL)
++         IF (NM>FINE_LEVEL(LEV)%NM0 .AND. NM<=FINE_LEVEL(LEV)%NM0+FINE_LEVEL(LEV)%N_BOXES) THEN
++            IB = NM-FINE_LEVEL(LEV)%NM0
++            MF => FINE_LEVEL(LEV)%BOX(IB)
++            CALL POINT_TO_MESH_OBJECT(MF)
++            IF (ALLOCATED(FINE_LEVEL(LEV)%VIEW)) BV => FINE_LEVEL(LEV)%VIEW(IB)
++            EXIT
++         ENDIF
++      ENDDO
++   ENDIF
++   IF (IB==0) CALL FDS_HOOK_FINE_ABORT('POINT_TO_BOX',NM)
++ELSE
++   CALL POINT_TO_MESH(NM)
++   IF (ALLOCATED(BOX_VIEW)) THEN
++      IF (NM>=1 .AND. NM<=SIZE(BOX_VIEW)) BV => BOX_VIEW(NM)
++   ENDIF
++ENDIF
++IF (.NOT.ASSOCIATED(BV)) RETURN
++IF (ASSOCIATED(BV%U)) U    => BV%U
++IF (ASSOCIATED(BV%V)) V    => BV%V
++IF (ASSOCIATED(BV%W)) W    => BV%W
++IF (ASSOCIATED(BV%US)) US   => BV%US
++IF (ASSOCIATED(BV%VS)) VS   => BV%VS
++IF (ASSOCIATED(BV%WS)) WS   => BV%WS
++IF (ASSOCIATED(BV%D)) D    => BV%D
++IF (ASSOCIATED(BV%DS)) DS   => BV%DS
++IF (ASSOCIATED(BV%H)) H    => BV%H
++IF (ASSOCIATED(BV%HS)) HS   => BV%HS
++IF (ASSOCIATED(BV%KRES)) KRES => BV%KRES
++IF (ASSOCIATED(BV%FVX)) FVX  => BV%FVX
++IF (ASSOCIATED(BV%FVY)) FVY  => BV%FVY
++IF (ASSOCIATED(BV%FVZ)) FVZ  => BV%FVZ
++IF (ASSOCIATED(BV%RHO)) RHO  => BV%RHO
++IF (ASSOCIATED(BV%RHOS)) RHOS => BV%RHOS
++IF (ASSOCIATED(BV%MU)) MU   => BV%MU
++IF (ASSOCIATED(BV%TMP)) TMP  => BV%TMP
++IF (ASSOCIATED(BV%Q)) Q    => BV%Q
++IF (ASSOCIATED(BV%RSUM)) RSUM => BV%RSUM
++IF (ASSOCIATED(BV%ZZ)) ZZ   => BV%ZZ
++IF (ASSOCIATED(BV%ZZS)) ZZS  => BV%ZZS
+ 
+ END SUBROUTINE POINT_TO_BOX
+ #endif
