@@ -23,3 +23,9 @@ the preprocessor output with the macro undefined is unchanged). `git apply --che
 
 ## Not done here
 No oneAPI validation. Slice/boundary/particle files and restart files are not written by the driver.
+
+## Re-check on the committed tree (after the Architect applied 0006)
+`git archive` of the repository HEAD (with 0001 to 0006 applied, no `WITH_AMREX`), built out of tree with the reference options, `tests/check_off_bitwise.sh`:
+`shunn3_32` 1 rank PASS (16 files), `shunn3_4mesh_32` 4 ranks PASS (47 files), `shunn3_4mesh_32__glmat` 4 ranks PASS (47 files), `csmag_32` 1 rank PASS (21 files),
+`csmag_32__fishpak_bc000` 1 rank PASS (21 files), all bitwise identical to the baseline; the result for the first two is the same as before the merge of the
+newer FireX commit (radi.f90 only).
