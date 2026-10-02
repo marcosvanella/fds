@@ -26,12 +26,12 @@
 #include <string>
 #include <vector>
 
+#include "ExchangeFields.H"
 #include "Fields.H"
 
 namespace fdsamr {
 
-// Fields moved by MESH_EXCHANGE code `code` (1, 3, 4, 5 or 6), as registered names. Empty for any other code. `predictor` selects H or HS for code 5.
-std::vector<std::string> exchange_fields(int code, bool predictor = true);
+// exchange_fields(code, predictor) (fields moved by MESH_EXCHANGE code 1, 3, 4, 5 or 6) is in ExchangeFields.H (pure, usable without the driver).
 
 // FillBoundary of exchange_fields(code): faces, edges, corners, periodic images. Physical-boundary ghosts are not touched.
 // H/HS are exchanged like FDS does (their ghosts hold the pressure solver's boundary values, which belong to the pressure backend: S6).

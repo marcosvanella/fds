@@ -59,7 +59,7 @@ target_sources(fds PRIVATE
 )
 set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_amrex_hooks.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
-    PROPERTIES COMPILE_OPTIONS "-ffree-line-length-none")
+    PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 
@@ -68,7 +68,7 @@ target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 option(FDS_AMR_FINE_B_DRAFT "Build the fine-level mesh object draft (needs patch 0007)" OFF)
 if (FDS_AMR_FINE_B_DRAFT)
     target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90)
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90 PROPERTIES COMPILE_OPTIONS "-ffree-line-length-none")
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90 PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
     target_compile_definitions(fds PRIVATE FDS_FINE_B_DRAFT)
 endif()
 

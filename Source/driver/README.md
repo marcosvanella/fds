@@ -49,6 +49,8 @@ cmake -S <patched-tree> -B <build-dir> $FDS_CMAKE_COMMON                 # USE_A
 cmake -S <patched-tree> -B <build-dir> $FDS_CMAKE_COMMON -DUSE_AMREX=ON  # AMReX driver, executable <build-dir>/fds_amr
 cmake --build <build-dir> -j4
 ```
+**Intel oneAPI builds** (ifx 2026.1, Intel MPI; validation of patches 0005 and 0006 by the Intel Build Chief, whose own README is outside this repository). Facts to follow, as reported to the project: (1) configure with `-DCMAKE_CXX_FLAGS=-fp-model=precise`, otherwise the unit test `tile_race` fails one check (the C++ floating-point contraction differs); (2) use `mpiicpx` as the C++ compiler wrapper (with `mpiifx` for Fortran); (3) do not pass `--oversubscribe` to `mpirun`/`mpiexec` under Intel MPI (the test scripts in `tests/` pass it for Open MPI and must be adapted); (4) `-ffree-line-length-none` is set for the driver Fortran files only when the Fortran compiler is GNU (generator expression in `CMakeLists.txt`). Not tested on this box (no oneAPI here).
+
 `FDS_CMAKE_COMMON` = the reference options (`Release`, GNU `-O3`, OpenMP on) with the offline HYPRE/SUNDIALS copies
 (`-DUSE_SYSTEM_HYPRE=ON -DUSE_SYSTEM_SUNDIALS=ON`) and fixed date/version strings. The reference binary was built with the FetchContent
 copy of the same HYPRE commit; a scratch rebuild of the unpatched tree with these options reproduces the baseline output bitwise (see 0001 note).

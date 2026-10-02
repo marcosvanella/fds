@@ -49,7 +49,6 @@ public:
 
 private:
     amrex::iMultiFab m_mask;
-    const Level0& m_l0;
 };
 
 }  // namespace fdsamr

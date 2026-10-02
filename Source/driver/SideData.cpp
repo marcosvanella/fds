@@ -18,7 +18,7 @@ inline std::uint64_t mix(std::uint64_t x)
 }  // namespace
 
 SideData::SideData(const Level0& l0, const CellWallProvider& provider)
-    : m_mask(l0.ba, l0.dm, kMaskNComp, amrex::IntVect(kMaskNG)), m_l0(l0)
+    : m_mask(l0.ba, l0.dm, kMaskNComp, amrex::IntVect(kMaskNG))
 {
     m_mask.setVal(0);
     const amrex::Box dom = l0.geom.Domain();
