@@ -1073,6 +1073,9 @@ TYPE OMESH_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:) :: CCHALO_VOLUME         !< Replica cut-cell volume, filled at setup.
    REAL(EB), ALLOCATABLE, DIMENSION(:) :: CCHALO_RHO, CCHALO_RHOS, CCHALO_TMP, CCHALO_RSUM, CCHALO_D, CCHALO_DS
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: CCHALO_ZZ, CCHALO_ZZS !< (1:N_TOTAL_SCALARS,1:NICC_R(2)), same order as FV%CV%ZZ.
+   ! PKG112 receive store: one row per received cut-face piece (NICF_R(2)), unpack slot order.
+   REAL(EB), ALLOCATABLE, DIMENSION(:) :: CFHALO_VEL, CFHALO_VELS, CFHALO_VEL_LNK, CFHALO_FN !< (1:NICF_R(2)).
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: CFHALO_ROW0 !< Copy ICF -> first row; 0 = not received.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: UNKZ_CT_S, UNKZ_CC_S, UNKZ_CT_R, UNKZ_CC_R
    INTEGER, ALLOCATABLE, DIMENSION(:,:,:) :: MUNKH,GSCH,EWC_TYPE
 
@@ -1329,10 +1332,6 @@ TYPE CC_CUTFACE_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::     TMP_FACE !< Gas phase cut-face temperature array. (1:NFACE)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) ::   RHO_D_DZDN !< Diffusive mass flux for species and cut-faces.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: H_RHO_D_DZDN !< Heat flux due to diffusive mass flux for species and cut-faces.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::    VEL_OMESH !< OMESH Corrector velocity normal to cut-faces of MESHES(NOM).
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::   VELS_OMESH !< OMESH Predictor velocity normal to cut-faces. (1:NFACE)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::VEL_LNK_OMESH !< OMESH Linked velocities.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::     FN_OMESH !< OMESH Momentum RHS.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:,:)::         JDH !< Index matrix per cutface in H Poisson matrix.
    REAL(EB) :: FV=0._EB,FV_B=0._EB                       !< Momentum RHS and baroclinic torque in Cartesian face.
    REAL(EB) :: ALPHA_CF=1._EB                            !< Area fraction for all gas cut-faces in a given cartesian face.
