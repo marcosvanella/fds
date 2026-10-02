@@ -31,6 +31,7 @@ extern "C" {
 int fds_shim_bind(int nm, const char* name, void* base, const int* lb, const int* ext, const long* stride);
 void fds_k_state(int pred, int first, int icyc, double rmin, double rmax);
 void fds_k_visc(int nm, int est);
+void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* data, int mode, long* ncnt, long* nbad, int* ierr);
 void fds_k_dens_post(double t, double dt, int nm);
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
@@ -97,6 +98,8 @@ int fds_p_stop_status();
 }
 
 namespace fdsamr {
+
+extern double g_prof[4];   // wall seconds of the ghost-layer machinery (Fields.cpp), written by write_perf when FDSTL_PROFILE is set
 
 namespace {
 inline bool is_local(const Level0& l0, int i) { return l0.dm[i] == amrex::ParallelDescriptor::MyProc(); }
@@ -609,6 +612,11 @@ struct TimeLoop::Impl {
         for (;;) {
             ++passes;
             state(true, first_pass);
+            if (passes == 1) {
+                stage_scratch("p1_mfd", {{"FX", 4}, {"FY", 4}, {"FZ", 4}});
+                stage_scratch("static", {{"RDX", 1}, {"RDY", 1}, {"RDZ", 1}, {"RDXN", 1}, {"RDYN", 1}, {"RDZN", 1}, {"R", 1}, {"RRN", 1}});
+                stage_scratch("static", {{"MU_RSQMW_Z", 2}, {"K_RSQMW_Z", 2}, {"CP_Z", 2}, {"H_SENS_Z", 2}, {"RSQ_MW_Z", 1}, {"MWR_Z", 1}, {"MW", 1}}, true);
+            }
             stage_raw(passes == 1 ? "p1_pre_dens" : "p2_pre_dens", {"RHO", "ZZ", "TMP", "U", "V", "W", "H", "HS", "MU", "KRES"});
             density(true, t, dt);
             stage(passes == 1 ? "p1_dens" : "p2_dens", {"RHOS", "ZZS"});
@@ -632,6 +640,8 @@ struct TimeLoop::Impl {
             each_local([&](int nm) { fds_k_div1(t, dt, nm); });
             iface(false);
             stage(passes == 1 ? "p1_div1" : "p2_div1", {"DS", "MU", "KRES", "TMP", "RSUM"});
+            if (passes == 1) stage_scratch("p1_div1", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"WORK7", 3}, {"WORK8", 3}, {"WORK9", 3},
+                                                       {"SWORK1", 4}, {"SWORK2", 4}, {"SWORK3", 4}, {"SWORK4", 4}, {"DEL_RHO_D_DEL_Z", 4}});
             zone_sums(true);
             each_local([&](int nm) { fds_k_div2(dt, nm); });
             stage(passes == 1 ? "p1_div" : "p2_div", {"D", "DS", "DDDT"});
@@ -780,6 +790,33 @@ struct TimeLoop::Impl {
         }
     }
 
+    // Diagnostic (FDSTL_STAGES=<icyc>): Fortran-side scratch arrays that are not registered (FX FY FZ, WORK1..9, SWORK1..4, DEL_RHO_D_DEL_Z), the mesh metrics and the species tables,
+    // read through fds_k_xfer (mode 3) with the box's own allocation bounds. One file per box and array: scr_<tag>_<name>_b<box>.bin = int32 header[16] {rank, lb[4], ub[4], 0..}
+    // followed by float64 data (first index fastest); the tables and metrics are written once per run under the tag "static" (box 0 only for the tables).
+    void stage_scratch(const char* tag, std::initializer_list<std::pair<const char*, int>> names, bool tables = false)
+    {
+        const char* e = std::getenv("FDSTL_STAGES");
+        if (!e || std::atoi(e) != L.m_icyc) return;
+        for (const auto& nr : names)
+            each_local([&](int nm) {
+                if (tables && nm != 1) return;
+                int lb[4] = {1, 1, 1, 1}, ub[4] = {1, 1, 1, 1}, ierr = 0; long n = 0, bad = 0;
+                fds_k_xfer(nm, nr.first, nr.second, lb, ub, nullptr, 2, &n, &bad, &ierr);
+                if (ierr != 0) return;
+                std::size_t cnt = 1;
+                for (int d = 0; d < nr.second; ++d) cnt *= static_cast<std::size_t>(ub[d] - lb[d] + 1);
+                std::vector<double> buf(cnt);
+                fds_k_xfer(nm, nr.first, nr.second, lb, ub, buf.data(), 3, &n, &bad, &ierr);
+                if (ierr != 0) return;
+                int hdr[16] = {nr.second, lb[0], lb[1], lb[2], lb[3], ub[0], ub[1], ub[2], ub[3], 0, 0, 0, 0, 0, 0, 0};
+                std::FILE* fp = std::fopen((dir + "/scr_" + tag + "_" + nr.first + "_b" + std::to_string(nm - 1) + ".bin").c_str(), "wb");
+                if (!fp) return;
+                std::fwrite(hdr, sizeof(int), 16, fp);
+                std::fwrite(buf.data(), sizeof(double), cnt, fp);
+                std::fclose(fp);
+            });
+    }
+
     void write_mms(double t)
     {
         const std::vector<double> rho = gather("RHO", 0), z = gather("ZZ", 1), u = gather("U", 0), w = gather("W", 0), h = gather("H", 0);
@@ -839,6 +876,8 @@ struct TimeLoop::Impl {
     {
         double mx[4] = {t_loop, t_pres, t_solve, t_out};
         amrex::ParallelAllReduce::Max(mx, 4, amrex::ParallelContext::CommunicatorSub());
+        double pr[4] = {g_prof[0], g_prof[1], g_prof[2], g_prof[3]};
+        amrex::ParallelAllReduce::Max(pr, 4, amrex::ParallelContext::CommunicatorSub());
         double mem[3] = {proc_status_kb("VmHWM"), proc_status_kb("VmRSS"), static_cast<double>(L.m_F->bytes())};
         amrex::ParallelAllReduce::Sum(mem, 3, amrex::ParallelContext::CommunicatorSub());
         double hwm_max = proc_status_kb("VmHWM");
@@ -851,6 +890,14 @@ struct TimeLoop::Impl {
         std::fprintf(f, "%d,%d,%d,%d,%d,%d,%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%.0f,%.0f,%.0f,%.0f\n", amrex::ParallelDescriptor::NProcs(), nbox, dom.length(0), dom.length(1),
                      dom.length(2), L.m_icyc, mx[0], mx[1], mx[2], mx[3], mx[0] > 0 ? mx[1] / mx[0] : 0.0, mx[0] > 0 ? mx[2] / mx[0] : 0.0, mem[0], hwm_max, mem[1], mem[2]);
         std::fclose(f);
+        if (std::getenv("FDSTL_PROFILE")) {   // diagnostic: where the ghost-layer wall time goes (max over ranks)
+            std::FILE* pf = std::fopen((dir + "/" + L.m_o.chid + "_driver_profile.txt").c_str(), "w");
+            if (pf) {
+                std::fprintf(pf, "t_loop %.6f\nt_pressure %.6f\nt_poisson_solve %.6f\nt_fds_outputs %.6f\nghost_fill_boundary %.6f\nfill_omesh %.6f\nmatch_periodic_faces %.6f\nfds_bc_routines %.6f\n",
+                             mx[0], mx[1], mx[2], mx[3], pr[0], pr[1], pr[2], pr[3]);
+                std::fclose(pf);
+            }
+        }
         // manifest of the field dump (the _final_<FIELD>.bin files below)
         std::ofstream m(dir + "/" + L.m_o.chid + "_final_manifest.txt");
         m << "# field dump for comparison: <chid>_final_<NAME>.bin, float64 little-endian, valid cells of the whole level, FDS order (I fastest, then J, then K)\n"

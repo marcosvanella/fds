@@ -5,6 +5,7 @@
 #include <AMReX_BLassert.H>
 #include <AMReX_IntVect.H>
 #include <AMReX_Print.H>
+#include <AMReX_ParallelDescriptor.H>
 
 namespace fdsamr {
 
@@ -121,10 +122,16 @@ const amrex::MultiFab& Fields::operator[](const std::string& name) const
 
 const FieldSpec& Fields::spec(const std::string& name) const { return *find_field(name); }
 
+// Wall seconds of the ghost-layer machinery, summed per kind (diagnostic: written to <chid>_driver_profile.txt when FDSTL_PROFILE is set; no effect on results).
+// 0 Fields::fill_ghosts (FillBoundary), 1 BcStep::fill_omesh (OMESH broadcast + copy), 2 BcStep::match_periodic_faces, 3 FDS boundary routines called from after_exchange
+double g_prof[4] = {0, 0, 0, 0};
+
 void Fields::fill_ghosts(const std::string& name) const
 {
+    const double t0 = amrex::second();
     amrex::MultiFab& mf = const_cast<amrex::MultiFab&>((*this)[name]);
     mf.FillBoundary(0, mf.nComp(), mf.nGrowVect(), m_l0.geom.periodicity(), /*cross=*/false);
+    g_prof[0] += amrex::second() - t0;
 }
 
 long Fields::bytes() const

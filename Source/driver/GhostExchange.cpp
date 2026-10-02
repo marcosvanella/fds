@@ -5,7 +5,9 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
 
+#include <cstdlib>
 #include <map>
+#include <string>
 
 extern "C" {
 int fds_g_fill_om(int nm, int nom, int which, const int* lb, const int* ext, int nc, const double* data);
@@ -16,8 +18,20 @@ void fds_g_wall_bc(double t, double dt, int nm);
 void fds_g_velocity_bc(double t, int nm, int est);
 void fds_g_viscosity_bc(int nm, int est);
 void fds_g_mu_edges(int nm);
-void fds_g_mu_edges_dom(int nm, int mask);
+void fds_g_mu_edges_dom(int nm, int mask, int which);
 }
+
+namespace {
+// Fault injection for the regression tests (tests/run_periodic_regression.sh): FDSTL_SKIP_FIX=match,mu,kres (any subset, comma separated) switches the named periodic-case fix
+// off again. Never set in production runs; the regression test sets each in turn and requires the csmag_32 periodic comparison to FAIL, so a fix cannot silently disappear.
+bool skip_fix(const char* name)
+{
+    const char* e = std::getenv("FDSTL_SKIP_FIX");
+    if (!e) return false;
+    const std::string s = std::string(",") + e + ",";
+    return s.find(std::string(",") + name + ",") != std::string::npos;
+}
+}  // namespace
 
 namespace fdsamr {
 
@@ -47,6 +61,11 @@ BcStep::BcStep(const Level0& l0, Fields& F) : m_l0(l0), m_F(F) {}
 
 bool BcStep::local(int i) const { return m_l0.dm[i] == amrex::ParallelDescriptor::MyProc(); }
 
+extern double g_prof[4];   // Fields.cpp
+namespace {
+struct ProfScope { int k; double t0; explicit ProfScope(int kk) : k(kk), t0(amrex::second()) {} ~ProfScope() { g_prof[k] += amrex::second() - t0; } };
+}
+
 namespace {
 // OMESH array index of FDS_G_FILL_OM
 const std::vector<std::pair<const char*, int>> kOm = {{"MU", 1}, {"RHO", 2}, {"RHOS", 3}, {"U", 4}, {"V", 5}, {"W", 6}, {"US", 7}, {"VS", 8}, {"WS", 9}, {"H", 10}, {"HS", 11},
@@ -56,6 +75,7 @@ const std::vector<std::pair<const char*, int>> kOm = {{"MU", 1}, {"RHO", 2}, {"R
 // OMESH(NOM) of every local box NM from the native FAB of every box NOM (the owner broadcasts its FAB when NOM is on another rank)
 void BcStep::fill_omesh()
 {
+    const double tp0 = amrex::second();
     const int nbox = static_cast<int>(m_l0.ba.size());
     for (const auto& kv : kOm) {
         if (!m_F.has(kv.first)) continue;
@@ -76,6 +96,7 @@ void BcStep::fill_omesh()
                 if (local(nm)) fds_g_fill_om(nm + 1, nom + 1, kv.second, nb.lb, nb.ext, nc, buf.data());
         }
     }
+    g_prof[1] += amrex::second() - tp0;
 }
 
 void BcStep::after_exchange(int code, double t, double dt)
@@ -90,12 +111,13 @@ void BcStep::after_exchange(int code, double t, double dt)
         // the periodic domain faces: FDS's MATCH_VELOCITY averages the two copies of the flow face (patch 0003 skips it, the driver does it on the AMReX data)
         static const char* const pn[2][3] = {{"U", "V", "W"}, {"US", "VS", "WS"}};
         for (int d = 0; d < 3; ++d)
-            if (m_l0.dom.periodic[d] && m_F.has(pn[code == 3][d])) match_periodic_faces(pn[code == 3][d], d);
+            if (m_l0.dom.periodic[d] && m_F.has(pn[code == 3][d]) && !skip_fix("match")) match_periodic_faces(pn[code == 3][d], d);
         // the ghost layer next to a matched face holds the matched value in FDS (the wall-cell loop of MATCH_VELOCITY runs before VELOCITY_BC reads it): refill
         for (int d = 0; d < 3; ++d)
             if (m_l0.dom.periodic[d] && m_F.has(pn[code == 3][d])) m_F.fill_ghosts(pn[code == 3][d]);
     }
     fill_omesh();   // after the match: FDS's MATCH_VELOCITY also writes the averaged values into OMESH, which VELOCITY_BC reads for the periodic ghosts
+    ProfScope prof_bc(3);
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
         if (code == 3 || code == 6) {
@@ -116,13 +138,15 @@ void BcStep::after_exchange(int code, double t, double dt)
                 if (b.smallEnd(dir) == d.smallEnd(dir)) mask |= 1 << (2 * dir);
                 if (b.bigEnd(dir) == d.bigEnd(dir)) mask |= 2 << (2 * dir);
             }
-            fds_g_mu_edges_dom(nm + 1, mask);
+            const int which = (skip_fix("mu") ? 0 : 1) | (skip_fix("kres") ? 0 : 2);   // bit 0: MU, bit 1: KRES
+            if (which) fds_g_mu_edges_dom(nm + 1, mask, which);
         }
     }
 }
 
 void BcStep::match_periodic_faces(const std::string& name, int dir)
 {
+    const double tp0 = amrex::second();
     amrex::MultiFab& mf = m_F[name];
     const amrex::Box dom = m_l0.geom.Domain();
     const int n = dom.length(dir);
@@ -155,6 +179,7 @@ void BcStep::match_periodic_faces(const std::string& name, int dir)
     }
     mf.ParallelCopy(P0, 0, 0, 1, 0, 0);
     mf.ParallelCopy(PN, 0, 0, 1, 0, 0);
+    g_prof[2] += amrex::second() - tp0;
 }
 
 void BcStep::wall_bc(int predictor, double t, double dt)

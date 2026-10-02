@@ -44,6 +44,7 @@ FAIL = none.
 | 2.13 | NFR-030 measured (not required), f_pres (A-22) | measured | section 5 |
 | 2.14 | Roadmap: FR-005 (i) and (iv) on the same cases | PARTIAL | (i): reduction-free stages byte-identical across box split and rank count (2.5). (iv): two identical runs per case give byte-identical field dumps at a fixed rank count and one thread. Not tested by Role 1: thread-count independence (only 1 thread built and run), three repeats, 2 and 8 ranks. Verification is by the V&V lead |
 | 2.15 | Periodic only; no walls, combustion, radiation, particles | PASS | `check_scope()` in `TimeLoop.cpp` refuses cases outside the scope (OBST, reactions, radiation, particles, HVAC, other pressure solvers, ...) |
+| 2.16 | Regression cases for the three periodic-only driver bugs | PASS | `tests/run_periodic_regression.sh`: `periodic_face_match` (domain-face velocity match), `mu_edge_corner` (MU in domain edge/corner cells), `kres_edge_corner` (KRES likewise). Each: positive leg (fix on: invariant holds, and on the single-box baseline the whole run matches the reference restart to the csmag gates) and negative leg (env `FDSTL_SKIP_FIX=match|mu|kres` switches the fix off: the invariant is violated, 720/392/392 cells on 1 rank, 128/408/408 on 4 ranks with 2x2x1 boxes; with the fix off the whole-run comparison also fails for match and mu, while KRES in edge cells reaches no field of this case, so its stage invariant is the test). Both at 1 and 4 ranks. |
 
 ## 3. Out of the demo (must stay refused or absent)
 
@@ -77,7 +78,7 @@ was 0.58 to 0.72 (1-minute average, below the NFR-030 limit of 1) and about 9 GB
 - Wall time is the whole process (set-up, time loop, end), so set-up (0.3 to 0.4 s of FDS initialisation, from wall minus loop time) is a large part of the short runs. The time-loop-only driver time is in `<chid>_driver_perf.csv`.
 - f_pres = driver time in `pressure_scheme` (RHS, boundary terms, solve, velocity-error evaluation, ghost fills, all iterations) divided by the time-loop time. The FFT solve itself is the "Poisson solve share" column. FDS's own `_cpu.csv` PRES share of the baseline is 0.09 (`shunn3_32`) and 0.02 (`shunn3_4mesh_32`) of the total time; it covers only FDS's solver call, so it does not compare directly with f_pres.
   The two definitions differ; the high f_pres is dominated by the pressure iteration loop (baroclinic term, no-flux, RHS, velocity-error checks and ghost exchanges run per iteration, and these cases take several iterations per solve).
-- NFR-030 (<= 1.25 x baseline, proposed): 3 of 4 rows are within it, the 4-rank 4-mesh row (1.49) is over it. The 4-rank result is dominated by MPI start-up and 4 ranks sharing 8 cores for a 1 s run. Not an NFR-030 verdict (see above).
+- NFR-030 (<= 1.25 x baseline, proposed): 3 of 4 rows are within it, the 4-rank 4-mesh row (1.49) is over it. Profile hint (opt-in `FDSTL_PROFILE=1`, `<chid>_driver_profile.txt`, `shunn3_4mesh_32`, 4 ranks, median of 3, loop 0.79 s on a machine with load about 2, so indicative only): the extra time sits in the OMESH fill (`BcStep::fill_omesh`: every registered field of every box is broadcast to all ranks and block-copied into FDS's OMESH arrays at each boundary step and pressure iteration), 0.50 s of the 0.79 s loop; ghost fills (`FillBoundary`) 0.013 s, periodic face match 0.009 s, FDS boundary routines 0.017 s, pressure solve incl. FFT plan rebuild per call 0.04 s, FDS output writers 0.008 s. The same OMESH fill is 0.37 to 0.42 s of the 1.2 to 1.3 s loop with 1 rank (and 16 s of 58 s for a 128^3 single box), so it is the first thing to remove (broadcast only the strips a neighbour reads; patches 0003/0004 are the hook). Not an NFR-030 verdict (see above).
 - NFR-031 (peak RSS <= 1.3 x baseline, proposed, Phase 2+): the driver peaks at 1.30 to 1.46 x the FDS OFF build per rank (largest descendant `maxrss` of the whole process). The driver holds AMReX, the field MultiFabs with ghost cells (7.1 MB on `csmag_32`, 0.9 to 1.1 MB on the 2-D cases) and, in addition, the FDS set-up state that the S2 alias does not replace (the driver copies the set-up values into the FABs and re-points the descriptors; whether the original arrays are released
   was not measured). The breakdown of the excess was not measured; the numbers are a note, not a pass. To be re-measured with a per-allocation count.
 - Reproduce: `tests/run_perf.sh <driver-build> <OFF-fds-build> <work> 3`.
@@ -87,7 +88,7 @@ was 0.58 to 0.72 (1-minute average, below the NFR-030 limit of 1) and about 9 GB
 | Group | PASS | PARTIAL | NOT YET | FAIL |
 |---|---|---|---|---|
 | Case table (10 items) | 10 (1.1 to 1.10; 1.9 by Role 2; 1.5 plain input is a T2-form pass, see its note) | 0 | 0 | 0 |
-| In the demo (15 items) | 13 (incl. 2.11 for all five baselines) | 1 (2.14: thread-count independence and repeat runs not tested here) | 0 | 0 |
+| In the demo (16 items) | 14 (incl. 2.11 for all five baselines, 2.16) | 1 (2.14: thread-count independence and repeat runs not tested here) | 0 | 0 |
 | Measured only | 2.13 | | | |
 | Other people (5 items) | 4.1, 4.2, 4.3 done | 0 | 4.4 oneAPI | 4.5 for decision |
 

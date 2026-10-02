@@ -176,17 +176,18 @@ END SUBROUTINE FDS_G_MU_EDGES
 !> the driver's full ghost fill (periodic images, box neighbours) runs after it and would replace those edge cells by the periodic/neighbour values, which FDS
 !> does not use (the edge averages of MU and KRES in VELOCITY_FLUX read them). The interface edges of a decomposed mesh are left to the ghost fill so that the
 !> result does not depend on the box layout. MASK bits: 1 low-x, 2 high-x, 4 low-y, 8 high-y, 16 low-z, 32 high-z are set when the box face lies on the domain boundary
-!> (periodic or not); a statement is applied when both sides it names are domain sides.
-SUBROUTINE FDS_G_MU_EDGES_DOM(NM,MASK) BIND(C,NAME='fds_g_mu_edges_dom')
-INTEGER(C_INT), VALUE :: NM,MASK
+!> (periodic or not); a statement is applied when both sides it names are domain sides. WHICH bit 0 = MU, bit 1 = KRES (both normally; one is dropped only by the fault-injection
+!> switch FDSTL_SKIP_FIX of the regression test).
+SUBROUTINE FDS_G_MU_EDGES_DOM(NM,MASK,WHICH) BIND(C,NAME='fds_g_mu_edges_dom')
+INTEGER(C_INT), VALUE :: NM,MASK,WHICH
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: IBAR,JBAR,KBAR,IBP1,JBP1,KBP1
 LOGICAL :: XL,XH,YL,YH,ZL,ZH
 M => MESHES(NM)
 IBAR=M%IBAR ; JBAR=M%JBAR ; KBAR=M%KBAR ; IBP1=IBAR+1 ; JBP1=JBAR+1 ; KBP1=KBAR+1
 XL=BTEST(MASK,0) ; XH=BTEST(MASK,1) ; YL=BTEST(MASK,2) ; YH=BTEST(MASK,3) ; ZL=BTEST(MASK,4) ; ZH=BTEST(MASK,5)
-CALL EDG(M%MU)
-CALL EDG(M%KRES)
+IF (BTEST(WHICH,0)) CALL EDG(M%MU)
+IF (BTEST(WHICH,1)) CALL EDG(M%KRES)
 CONTAINS
 SUBROUTINE EDG(A)
 REAL(EB), INTENT(INOUT) :: A(0:,0:,0:)
