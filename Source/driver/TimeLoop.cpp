@@ -6,6 +6,7 @@
 //  (b) Only uniform Cartesian metrics are used (R(I)/RRN(I) dropped); CYLINDRICAL and TRN* meshes are rejected (IR-002), the pressure call-through assumes IPS=0.
 #include "TimeLoop.H"
 #include "LevelRegistry.H"
+#include "PressureBcMap.H"
 
 #include <AMReX_BLassert.H>
 #include <AMReX_ParallelContext.H>
@@ -269,26 +270,18 @@ struct TimeLoop::Impl {
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] codes before reduce %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), code[0], code[1], code[2], code[3], code[4], code[5]);
         for (int f = 0; f < 6; ++f) all_max(code[f]);
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] codes %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), code[0], code[1], code[2], code[3], code[4], code[5]);
+        DirBc dm[3];
         for (int d = 0; d < 3; ++d) {
             const int n = dom.length(d);
             solve_dir[d] = !(d == 1 && IP[20] && n == 1);   // TWO_D: no y solve
-            const bool per = l0.dom.periodic[d] != 0;
-            const int lo = code[d], hi = code[3 + d];
-            if (lo < 0 || hi < 0) die("no box found at a domain face (pressure boundary map)");
-            if (per) {
-                // a periodic level direction: the level-wide Poisson problem is periodic whatever the per-mesh FDS code is (single mesh: code 0; several meshes: the
-                // mesh-to-mesh interpolated boundaries that the level solve replaces)
-                bc_type[d] = bc_type[3 + d] = static_cast<int>(pb::BC::Periodic);
-                continue;
-            }
-            if (lo == 0 || hi == 0) {
-                if (n != 1) die("FDS pressure code 0 (periodic) on a non-periodic domain direction with more than one cell (inconsistent, S6)");
-                bc_type[d] = bc_type[3 + d] = static_cast<int>(pb::BC::Neumann);   // one cell: the Neumann and periodic operators coincide
-                continue;
-            }
-            if (lo > 4 || hi > 4) die("pressure boundary code 5/6 (cylindrical axis) is outside the S5 scope");
-            bc_type[d] = static_cast<int>((lo == 1 || lo == 2) ? pb::BC::Dirichlet : pb::BC::Neumann);
-            bc_type[3 + d] = static_cast<int>((hi == 1 || hi == 4) ? pb::BC::Dirichlet : pb::BC::Neumann);
+            dm[d] = map_pressure_bc_direction(d, code[d], code[3 + d], n, l0.dom.periodic[d] != 0, !solve_dir[d]);   // PressureBcMap.H (thin-direction rules, S9)
+            if (!dm[d].error.empty()) die(dm[d].error);
+        }
+        if (!solve_dir[1]) ignored_direction_follows_open(dm[1], dm[0], dm[2]);
+        for (int d = 0; d < 3; ++d) {
+            if (!dm[d].note.empty() && !L.m_o.quiet) amrex::Print() << "driver set-up: " << dm[d].note << "\n";
+            bc_type[d] = static_cast<int>(dm[d].lo);
+            bc_type[3 + d] = static_cast<int>(dm[d].hi);
         }
     }
 
@@ -675,7 +668,6 @@ struct TimeLoop::Impl {
         double& dt = L.m_dt;
 
         // ---------------- predictor
-                stage_solid("static");
         state(true, true);
         for_levels([&](int) { s_visc_mfd(true); });
         first_pass = true;
@@ -687,6 +679,7 @@ struct TimeLoop::Impl {
             if (passes == 1) {
                 stage_scratch("p1_mfd", {{"FX", 4}, {"FY", 4}, {"FZ", 4}});
                 stage_scratch("static", {{"RDX", 1}, {"RDY", 1}, {"RDZ", 1}, {"RDXN", 1}, {"RDYN", 1}, {"RDZN", 1}, {"R", 1}, {"RRN", 1}});
+                stage_solid("static");
                 stage_scratch("static", {{"MU_RSQMW_Z", 2}, {"K_RSQMW_Z", 2}, {"CP_Z", 2}, {"H_SENS_Z", 2}, {"RSQ_MW_Z", 1}, {"MWR_Z", 1}, {"MW", 1}}, true);
             }
             stage_raw(passes == 1 ? "p1_pre_dens" : "p2_pre_dens", {"RHO", "ZZ", "TMP", "U", "V", "W", "H", "HS", "MU", "KRES"});
@@ -869,6 +862,17 @@ struct TimeLoop::Impl {
                 std::size_t cnt = 1;
                 for (int d = 0; d < nr.second; ++d) cnt *= static_cast<std::size_t>(ub[d] - lb[d] + 1);
                 std::vector<double> buf(cnt);
+                fds_k_xfer(nm, nr.first, nr.second, lb, ub, buf.data(), 3, &n, &bad, &ierr);
+                if (ierr != 0) return;
+                int hdr[16] = {nr.second, lb[0], lb[1], lb[2], lb[3], ub[0], ub[1], ub[2], ub[3], 0, 0, 0, 0, 0, 0, 0};
+                std::FILE* fp = std::fopen((dir + "/scr_" + tag + "_" + nr.first + "_b" + std::to_string(nm - 1) + ".bin").c_str(), "wb");
+                if (!fp) return;
+                std::fwrite(hdr, sizeof(int), 16, fp);
+                std::fwrite(buf.data(), sizeof(double), cnt, fp);
+                std::fclose(fp);
+            });
+    }
+
     // FDSTL_STAGES: CELL%SOLID of every local box (SideData component 0, built from the FDS cells at set-up) as scr_<tag>_SOLID_b<box>.bin in the same layout as stage_scratch:
     // header int32[16] = {3, lb[4], ub[4], 0...} with the FDS index range 0..IBP1, 0..JBP1, 0..KBP1 (the valid cells and one ghost layer), then float64 (0 or 1), I fastest.
     // Ghost layer: SideData's fill (neighbour box value or periodic image; 0 at a closed domain edge), not FDS's own CELL(0,..)%SOLID.
@@ -893,17 +897,6 @@ struct TimeLoop::Impl {
             std::fwrite(buf.data(), sizeof(double), buf.size(), fp);
             std::fclose(fp);
         }
-    }
-
-                fds_k_xfer(nm, nr.first, nr.second, lb, ub, buf.data(), 3, &n, &bad, &ierr);
-                if (ierr != 0) return;
-                int hdr[16] = {nr.second, lb[0], lb[1], lb[2], lb[3], ub[0], ub[1], ub[2], ub[3], 0, 0, 0, 0, 0, 0, 0};
-                std::FILE* fp = std::fopen((dir + "/scr_" + tag + "_" + nr.first + "_b" + std::to_string(nm - 1) + ".bin").c_str(), "wb");
-                if (!fp) return;
-                std::fwrite(hdr, sizeof(int), 16, fp);
-                std::fwrite(buf.data(), sizeof(double), cnt, fp);
-                std::fclose(fp);
-            });
     }
 
     void write_mms(double t)

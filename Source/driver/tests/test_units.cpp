@@ -37,6 +37,7 @@
 #include "check.H"
 #include "ExactSum.H"
 #include "LevelRegistry.H"
+#include "PressureBcMap.H"
 
 using namespace fdsamr;
 
@@ -701,6 +702,40 @@ long test_levels(int nranks)
     return fdstest::report("levels (S9: registry make/remake/clear, covered mask, layout SideData, uncovered exact sums; ranks as launched)");
 }
 
+// S9 thin-direction check: FDS pressure codes -> pb::BC strings (PressureBcMap.H). amrex::FFT::Poisson ignores a one-cell direction, so a Dirichlet face there must not be passed on.
+long test_pressure_bc_map(int)
+{
+    auto str = [](int d, int lo, int hi, int n, bool per, bool ign) { const DirBc m = map_pressure_bc_direction(d, lo, hi, n, per, ign); return m.error.empty() ? bc_string(m) : std::string("ERR"); };
+    // thick directions: code -> string
+    CHECK_MSG(str(0, 3, 3, 32, false, false) == "NN", "closed N-N");
+    CHECK_MSG(str(0, 1, 1, 32, false, false) == "DD", "open D-D");
+    CHECK_MSG(str(2, 2, 2, 32, false, false) == "DN", "code 2 = D low, N high");
+    CHECK_MSG(str(2, 4, 4, 32, false, false) == "ND", "code 4 = N low, D high");
+    CHECK_MSG(str(0, 0, 0, 32, true, false) == "PP", "level periodic");
+    CHECK_MSG(str(1, 0, 0, 32, false, false) == "ERR", "code 0 on a thick non-periodic direction is refused");
+    CHECK_MSG(str(0, 5, 5, 32, false, false) == "ERR" && str(0, -1, -1, 32, false, false) == "ERR", "codes 5/6 and missing faces are refused");
+    // one-cell y of a TWO_D case: FDS has no y operator, every code maps to Neumann (no coupling), periodic stays periodic
+    for (int c = 1; c <= 4; ++c) CHECK_MSG(str(1, c, c, 1, false, true) == "NN", std::string("TWO_D y, code ") + std::to_string(c) + " -> NN");
+    CHECK_MSG(str(1, 0, 0, 1, true, true) == "PP" && str(1, 0, 0, 1, false, true) == "NN", "TWO_D y periodic -> PP, code 0 -> NN");
+    CHECK_MSG(!map_pressure_bc_direction(1, 1, 1, 1, false, true).note.empty(), "the Dirichlet-to-Neumann change in the ignored direction is reported");
+    // one-cell x or z (FDS solves it with the Dirichlet term): Neumann/periodic exact, Dirichlet refused
+    CHECK_MSG(str(0, 3, 3, 1, false, false) == "NN" && str(2, 0, 0, 1, false, false) == "NN" && str(0, 0, 0, 1, true, false) == "PP", "one-cell x/z: N and P are exact");
+    for (int c : {1, 2, 4}) CHECK_MSG(str(2, c, c, 1, false, false) == "ERR" && str(0, c, c, 1, false, false) == "ERR", std::string("one-cell x/z with code ") + std::to_string(c) + " (Dirichlet face) is refused");
+    // ignored (TWO_D y) direction follows an all-open pair of solved directions, otherwise stays Neumann; periodic is never changed
+    {
+        auto dd = [](int c) { return map_pressure_bc_direction(0, c, c, 32, false, false); };
+        DirBc y = map_pressure_bc_direction(1, 3, 3, 1, false, true);
+        CHECK_MSG(ignored_direction_follows_open(y, dd(1), dd(1)) && bc_string(y) == "DD" && !y.note.empty(), "TWO_D, x and z both D-D: y takes D (six uniform open faces for the selector)");
+        DirBc y2 = map_pressure_bc_direction(1, 3, 3, 1, false, true);
+        CHECK_MSG(!ignored_direction_follows_open(y2, dd(1), dd(4)) && bc_string(y2) == "NN", "TWO_D, z only half open: y stays N");
+        DirBc y3 = map_pressure_bc_direction(1, 3, 3, 1, false, true);
+        CHECK_MSG(!ignored_direction_follows_open(y3, dd(3), dd(3)) && bc_string(y3) == "NN", "TWO_D, closed box: y stays N");
+        DirBc y4 = map_pressure_bc_direction(1, 0, 0, 1, true, true);
+        CHECK_MSG(!ignored_direction_follows_open(y4, dd(1), dd(1)) && bc_string(y4) == "PP", "periodic ignored direction is never changed");
+    }
+    return fdstest::report("pressure_bc_map (S9 thin-direction rules: FDS codes -> FFT boundary strings)");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -729,6 +764,7 @@ int main(int argc, char** argv)
             fails += test_tile_race(nranks, thread_sweep);
             fails += test_exact_sum(nranks);
             fails += test_levels(nranks);
+            fails += test_pressure_bc_map(nranks);
             if (amrex::ParallelDescriptor::IOProcessor()) std::printf("%s: %ld failing checks\n", fails == 0 ? "ALL PASS" : "SOME FAILED", fails);
         }
     }

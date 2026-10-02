@@ -1,0 +1,287 @@
+case,twod,cells,fds_codes_low_faces,x,y,z,driver_status
+Adaptive_Mesh_Refinement/ns2d_16_emb_1to1_refinement.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Adaptive_Mesh_Refinement/ns2d_16_emb_1to2_refinement.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Adaptive_Mesh_Refinement/ns2d_16_int_1to2_refinement.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Adaptive_Mesh_Refinement/random_meshes.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Atmospheric_Effects/lee_waves.fds,1,200x1x50,"1,3,4",DD,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Atmospheric_Effects/stack_effect.fds,1,300x1x100,"2,3,1",DN,NN,DD,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p25.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p5.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta0p75.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_MultiCFDStep_Methane_grimech30_Zeta1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p25.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p5.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta0p75.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_Zeta1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p00001.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p0001.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p001.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p01.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/EDC_OneCFDStep_Methane_grimech30_taumix0p1.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Ethylene_TianfengLu_T1100K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_Smooke_T1100K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_TianfengLu_T1100K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1000K_Phi0p6.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1000K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1000K_Phi1p4.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1100K_Phi0p6.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1100K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1100K_Phi1p4.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1200K_Phi0p6.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1200K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T1200K_Phi1p4.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T900K_Phi0p6.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T900K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Methane_grimech30_T900K_Phi1p4.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Propane_USC_T1100K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_Propane_Z66_T1100K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Chemistry/ign_delay_nHeptane_Chalmers_T1100K_Phi1p0.fds,1,5x1x5,"3,3,3",NN,NN,NN,ok
+Complex_Geometry/geom_channel.fds,1,12x1x9,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Complex_Geometry/geom_channel2.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Complex_Geometry/geom_channel_tmp.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Complex_Geometry/geom_channel_tmp2.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Complex_Geometry/geom_poiseuille_N10a_theta0_stm.fds,1,4x1x12,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N10na_theta0_stm.fds,1,4x1x12,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N10nah_theta0_stm.fds,1,4x1x12,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N20a_theta0_stm.fds,1,4x1x24,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N20na_theta0_stm.fds,1,4x1x24,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N20nah_theta0_stm.fds,1,4x1x24,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N40a_theta0_stm.fds,1,4x1x48,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N40na_theta0_stm.fds,1,4x1x48,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N40nah_theta0_stm.fds,1,4x1x48,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N80a_theta0_stm.fds,1,4x1x96,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N80na_theta0_stm.fds,1,4x1x96,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/geom_poiseuille_N80nah_theta0_stm.fds,1,4x1x96,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/rotated_cube_0deg_128_obs.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_128_stm.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_256_obs.fds,1,256x1x256,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_256_stm.fds,,,,,,,"set-up did not finish in 90 s on the box (same input family as the 256_obs case: PP,NN,PP)"
+Complex_Geometry/rotated_cube_0deg_320_obs.fds,1,320x1x320,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_320_stm.fds,1,320x1x320,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_32_obs.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_32_stm.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_384_obs.fds,1,384x1x384,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_384_stm.fds,1,384x1x384,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_64_obs.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_0deg_64_stm.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_27deg_128_stm.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_27deg_256_stm.fds,1,256x1x256,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_27deg_320_stm.fds,1,320x1x320,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_27deg_32_stm.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_27deg_384_stm.fds,1,384x1x384,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_27deg_64_stm.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_45deg_128_stm.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_45deg_256_stm.fds,1,256x1x256,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_45deg_320_stm.fds,1,320x1x320,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_45deg_32_stm.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_45deg_384_stm.fds,1,384x1x384,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/rotated_cube_45deg_64_stm.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Complex_Geometry/saad_CC_explicit_512_cfl_p0625.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/saad_CC_explicit_512_cfl_p125.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/saad_CC_explicit_512_cfl_p25.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Complex_Geometry/shunn3_128_cc_exp_chm.fds,1,128x1x128,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_128_cc_exp_gdv.fds,1,128x1x128,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_256_cc_exp_chm.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_256_cc_exp_gdv.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_320_cc_exp_chm.fds,1,320x1x320,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_320_cc_exp_gdv.fds,1,320x1x320,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_32_cc_exp_chm.fds,1,32x1x32,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_32_cc_exp_gdv.fds,1,32x1x32,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_384_cc_exp_chm.fds,1,384x1x384,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_384_cc_exp_gdv.fds,1,384x1x384,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_64_cc_exp_chm.fds,1,64x1x64,"0,0,0",PP,NN,PP,ok
+Complex_Geometry/shunn3_64_cc_exp_gdv.fds,1,64x1x64,"0,0,0",PP,NN,PP,ok
+Energy_Budget/energy_budget_dns_100.fds,1,50x1x50,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Energy_Budget/energy_budget_tmix.fds,1,11x1x11,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Energy_Budget/test_hrr_2d_cyl.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Fires/box_burn_away_2D.fds,1,10x1x10,"3,3,3",NN,NN,NN,ok
+Fires/box_burn_away_2D_residue.fds,1,10x1x10,"3,3,3",NN,NN,NN,ok
+Fires/tmp_lower_limit_default.fds,1,80x1x100,"1,3,1",DD,DD,DD,"ok (all six faces open; y takes D, see note)"
+Fires/tmp_lower_limit_simple.fds,1,40x1x50,"1,3,4",DD,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Fires/tunnel_const_gamma.fds,1,100x1x4,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Fires/tunnel_linear_cp.fds,1,100x1x4,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Flowfields/blasius_128.fds,1,192x1x128,"1,3,3",DD,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Flowfields/blasius_16.fds,1,24x1x16,"1,3,3",DD,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Flowfields/blasius_32.fds,1,48x1x32,"1,3,3",DD,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Flowfields/blasius_64.fds,1,96x1x64,"1,3,3",DD,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Flowfields/cyl_test_1.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Flowfields/cyl_test_2.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Flowfields/cyl_test_3.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Flowfields/cyl_test_4.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Flowfields/divergence_test_2.fds,1,9x1x9,"3,3,3",NN,NN,NN,ok
+Flowfields/divergence_test_3.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Flowfields/helium_2d_isothermal.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Flowfields/hot_layer_360.fds,1,5x1x360,"3,3,4",NN,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Flowfields/mwtest_cfl.fds,1,6x1x20,"3,3,4",NN,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+HVAC/leak_enthalpy.fds,1,20x1x10,"3,3,3",NN,NN,NN,ok
+Heat_Transfer/insulated_steel_pipe_2d.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Miscellaneous/devc_interpolation_temperature.fds,1,5x1x5,"1,3,3",PP,NN,NN,ok
+Miscellaneous/devc_interpolation_velocity.fds,1,5x1x5,"1,3,3",PP,NN,NN,ok
+NS_Analytical_Solution/ns2d_16.fds,1,16x1x16,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/ns2d_16_nupt1.fds,1,16x1x16,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/ns2d_32.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/ns2d_32_nupt1.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/ns2d_64.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/ns2d_64_nupt1.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/ns2d_8.fds,1,8x1x8,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/ns2d_8_nupt1.fds,1,8x1x8,"1,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/vort2d_160.fds,1,160x1x160,"0,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/vort2d_320.fds,1,320x1x320,"0,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/vort2d_40.fds,1,40x1x40,"0,3,1",PP,NN,PP,ok
+NS_Analytical_Solution/vort2d_80.fds,1,80x1x80,"0,3,1",PP,NN,PP,ok
+Pressure_Effects/pressure_rise.fds,1,60x1x20,"4,3,3",NN,NN,NN,ok
+Pressure_Solver/dancing_eddies_1mesh.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/dancing_eddies_default.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/dancing_eddies_embed.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Pressure_Solver/dancing_eddies_tight.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/dancing_eddies_tight_no_precon.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/dancing_eddies_uglmat_hypre.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/dancing_eddies_uglmat_pardiso.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/dancing_eddies_uglmat_refine.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Pressure_Solver/dancing_eddies_ulmat.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/dancing_eddies_ulmat_hypre.fds,1,300x1x40,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/obst_activation_default.fds,1,64x1x16,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/obst_activation_default_gases.fds,1,64x1x16,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/obst_activation_ulmat.fds,1,64x1x16,"4,3,3",ND,NN,NN,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/pressure_iteration2d_default.fds,1,32x1x32,"4,3,4",ND,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pressure_Solver/pressure_iteration2d_uglmat.fds,1,32x1x32,"4,3,4",ND,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pyrolysis/anca-couce-fig1_10K.fds,,,,,,,FDS stops before the time loop (TGA-only run)
+Pyrolysis/anca-couce-fig1_2p5K.fds,,,,,,,FDS stops before the time loop (TGA-only run)
+Pyrolysis/anca-couce-fig1_5K.fds,,,,,,,FDS stops before the time loop (TGA-only run)
+Pyrolysis/anca-couce-fig2_10K.fds,,,,,,,FDS stops before the time loop (TGA-only run)
+Pyrolysis/anca-couce-fig2_2p5K.fds,,,,,,,FDS stops before the time loop (TGA-only run)
+Pyrolysis/anca-couce-fig2_5K.fds,,,,,,,FDS stops before the time loop (TGA-only run)
+Pyrolysis/birch_tga_1step_2.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/birch_tga_1step_20.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/cable_11_insulation_mcc.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/cable_11_jacket_mcc.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/cable_23_insulation_mcc.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/cable_23_jacket_mcc.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/cable_701_insulation_mcc.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/cable_701_jacket_mcc.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/pyrolysis_1.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/pyrolysis_2.fds,1,3x1x4,"3,3,3",NN,NN,NN,ok
+Pyrolysis/spyro_cone_demo.fds,1,4x1x4,"3,3,4",NN,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pyrolysis/spyro_cone_demo_2.fds,1,4x1x4,"3,3,4",NN,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Pyrolysis/spyro_cone_demo_3.fds,1,3x1x3,"3,3,3",NN,NN,NN,ok
+Pyrolysis/tga_analysis.fds,,,,,,,FDS stops before the time loop (TGA-only run)
+Pyrolysis/tga_sample.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Radiation/check_kappa.fds,,,,,,,refused at level-0 assembly (mesh overlap / refined meshes / corner not on the level-0 lattice / unequal cell sizes)
+Radiation/droplet_absorption_cyl.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Radiation/plate_view_factor_2D_100.fds,1,20x1x10,"3,3,3",NN,NN,NN,ok
+Radiation/plate_view_factor_2D_30.fds,1,20x1x10,"3,3,3",NN,NN,NN,ok
+Radiation/plate_view_factor_2D_60.fds,1,20x1x10,"3,3,3",NN,NN,NN,ok
+Radiation/plate_view_factor_cyl_100.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Radiation/plate_view_factor_cyl_30.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Radiation/plate_view_factor_cyl_60.fds,,,,,,,refused at level-0 assembly: CYLINDRICAL mesh (IR-002)
+Radiation/radiation_plane_layer_1_3.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_1_4.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_2_3.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_2_4.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_3_3.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_3_4.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_4_3.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_4_4.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_5_3.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_5_4.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_6_3.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_plane_layer_6_4.fds,1,20x1x20,"3,3,3",NN,NN,NN,ok
+Radiation/radiation_shield.fds,1,100x1x10,"3,3,3",NN,NN,NN,ok
+Scalar_Analytical_Solution/compression_wave_FL0_128.fds,1,128x1x128,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL0_16.fds,1,16x1x16,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL0_32.fds,1,32x1x32,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL0_64.fds,1,64x1x64,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL2_128.fds,1,128x1x128,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL2_16.fds,1,16x1x16,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL2_32.fds,1,32x1x32,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL2_64.fds,1,64x1x64,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL4_128.fds,1,128x1x128,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL4_16.fds,1,16x1x16,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL4_32.fds,1,32x1x32,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/compression_wave_FL4_64.fds,1,64x1x64,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/move_slug.fds,1,80x1x80,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/move_slug_fl1.fds,1,80x1x80,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/move_slug_left.fds,1,80x1x80,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL0_128.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL0_16.fds,1,16x1x16,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL0_32.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL0_64.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL2_128.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL2_16.fds,1,16x1x16,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL2_32.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL2_64.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL4_128.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL4_16.fds,1,16x1x16,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL4_32.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/pulsating_FL4_64.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/saad_512_cfl_1.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Scalar_Analytical_Solution/saad_512_cfl_p0625.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Scalar_Analytical_Solution/saad_512_cfl_p125.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Scalar_Analytical_Solution/saad_512_cfl_p25.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Scalar_Analytical_Solution/saad_512_cfl_p5.fds,1,512x1x4,"1,3,3",PP,NN,NN,ok
+Scalar_Analytical_Solution/shunn3_128.fds,1,128x1x128,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_256.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_256_cfl_1.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_256_cfl_p0625.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_256_cfl_p125.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_256_cfl_p25.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_256_cfl_p5.fds,1,256x1x256,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_32.fds,1,32x1x32,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_4mesh_128.fds,1,128x1x128,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_4mesh_256.fds,1,256x1x256,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_4mesh_32.fds,1,32x1x32,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_4mesh_512.fds,1,512x1x512,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_4mesh_64.fds,1,64x1x64,"1,3,1",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_512.fds,1,512x1x512,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_64.fds,1,64x1x64,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_FavreZ_32.fds,1,32x1x32,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/shunn3_FavreZ_64.fds,1,64x1x64,"0,0,0",PP,NN,PP,ok
+Scalar_Analytical_Solution/soborot_charm_cos_wave_128.fds,1,128x1x128,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_charm_cos_wave_16.fds,1,16x1x16,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_charm_cos_wave_32.fds,1,32x1x32,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_charm_cos_wave_64.fds,1,64x1x64,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_charm_square_wave_128.fds,1,128x1x128,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_charm_square_wave_16.fds,1,16x1x16,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_charm_square_wave_32.fds,1,32x1x32,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_charm_square_wave_64.fds,1,64x1x64,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_godunov_square_wave_128.fds,1,128x1x128,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_godunov_square_wave_16.fds,1,16x1x16,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_godunov_square_wave_32.fds,1,32x1x32,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_godunov_square_wave_64.fds,1,64x1x64,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_128.fds,1,128x1x128,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_16.fds,1,16x1x16,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_32.fds,1,32x1x32,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_cos_wave_64.fds,1,64x1x64,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_square_wave_128.fds,1,128x1x128,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_square_wave_128_1mesh.fds,1,128x1x128,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_square_wave_16.fds,1,16x1x16,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_square_wave_32.fds,1,32x1x32,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Scalar_Analytical_Solution/soborot_superbee_square_wave_64.fds,1,64x1x64,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Species/bound_test_1.fds,1,4x1x4,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Species/bound_test_2.fds,1,4x1x4,"0,0,0",ERROR,NN,ERROR,driver aborts: FDS pressure code 0 on a non-periodic direction (no pressure solve set up by FDS)
+Species/hrrpuv_reac_soot.fds,1,20x1x20,"1,3,4",DD,NN,ND,pb::select_backend refuses mixed open/closed faces (read from PressureIface.cpp, not run end to end)
+Species/pvc_combustion.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_EDC_1step_CH4_nonmix.fds,1,10x1x10,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_EDC_O2lim_2fuel_lump.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_EDC_O2lim_2fuel_prim.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_EDC_flim_2step.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_arrhenius_equilibrium.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_arrhenius_equilibrium_cvode.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_arrhenius_jones_lindstedt.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_arrhenius_jones_lindstedt_cvode.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_lumped_two_air.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_lumped_two_air_2.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/reactionrate_series_reaction.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+Species/species_props.fds,1,44x1x4,"3,3,3",NN,NN,NN,ok
+Turbulence/yplus_16.fds,1,8x1x16,"1,3,3",PP,NN,NN,ok
+Turbulence/yplus_32.fds,1,8x1x32,"1,3,3",PP,NN,NN,ok
+Turbulence/yplus_8.fds,1,8x1x8,"1,3,3",PP,NN,NN,ok
+WUI/Needle_TGA_A.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+WUI/Needle_TGA_B.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+WUI/Needle_TGA_C.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+WUI/Needle_TGA_D.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+WUI/Needle_TGA_E.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+WUI/Needle_TGA_F.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok
+WUI/Needle_TGA_G.fds,1,4x1x4,"3,3,3",NN,NN,NN,ok

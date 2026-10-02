@@ -63,6 +63,15 @@ set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_C
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 
+# D-056 option B DRAFT (patch 0007, mesh.f90): needs the patch applied to the tree; OFF by default and not used for physics. Adds draft/fds_fine_mesh_b.f90 and the
+# `--fine-b-selftest` / `--fine-b-abort N` modes of fds_amr.
+option(FDS_AMR_FINE_B_DRAFT "Build the fine-level mesh object draft (needs patch 0007)" OFF)
+if (FDS_AMR_FINE_B_DRAFT)
+    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90)
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90 PROPERTIES COMPILE_OPTIONS "-ffree-line-length-none")
+    target_compile_definitions(fds PRIVATE FDS_FINE_B_DRAFT)
+endif()
+
 # C++ is the link language (C++ main; the Fortran runtime is pulled in by the gfortran libraries listed by CMake).
 set_target_properties(fds PROPERTIES LINKER_LANGUAGE CXX OUTPUT_NAME fds_amr)
 target_link_libraries(fds PRIVATE AMReX::amrex MPI::MPI_CXX)
@@ -81,7 +90,7 @@ add_executable(driver_unit_tests
     ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp
     ${CMAKE_CURRENT_LIST_DIR}/LevelRegistry.cpp)
-target_include_directories(driver_unit_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
+target_include_directories(driver_unit_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend)
 target_compile_options(driver_unit_tests PRIVATE -Wall -Wextra)
 target_link_libraries(driver_unit_tests PRIVATE AMReX::amrex MPI::MPI_CXX)
 if (USE_OPENMP)

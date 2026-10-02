@@ -6,6 +6,8 @@
 //
 // Kernel-facing rules (M2a): (a) passive scalars are handled by Fields.cpp (S2); (b) only uniform Cartesian metrics are used.
 #include <AMReX.H>
+#include <AMReX_ParallelDescriptor.H>
+#include <AMReX_ParallelReduce.H>
 #include <AMReX_Print.H>
 
 #include <mpi.h>
@@ -17,9 +19,54 @@
 #include <string>
 
 #include "FdsSetup.H"
+#include "PressureBcMap.H"
 #include "TimeLoop.H"
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
+extern "C" void fds_p_params(int* ip, double* rp);
+extern "C" void fds_p_mesh_info(int nm, int* mi, double* r);
+extern "C" void fds_k_visc(int nm, int est);
+#ifdef FDS_FINE_B_DRAFT
+extern "C" int fds_fine_b_selftest();
+extern "C" void fds_fine_b_abort_test(int kind);
+#endif
+
+namespace {
+// --pressure-bc: one line "PBC ..." with the FDS pressure codes of the level's domain faces and the strings the driver passes per direction (PressureBcMap.H), no time loop.
+void print_pressure_bc(const fdsamr::Level0& l0, const char* name)
+{
+    int ip[32] = {0}; double rp[8] = {0};
+    fds_p_params(ip, rp);
+    int code[6] = {-1, -1, -1, -1, -1, -1};
+    const amrex::Box dom = l0.geom.Domain();
+    for (int i = 0; i < static_cast<int>(l0.ba.size()); ++i) {
+        if (l0.dm[i] != amrex::ParallelDescriptor::MyProc()) continue;
+        int mi[16]; double r[4];
+        fds_p_mesh_info(i + 1, mi, r);
+        const amrex::Box vb = l0.ba[i];
+        for (int d = 0; d < 3; ++d) {
+            if (vb.smallEnd(d) == dom.smallEnd(d)) code[d] = mi[3 + d];
+            if (vb.bigEnd(d) == dom.bigEnd(d)) code[3 + d] = mi[3 + d];
+        }
+    }
+    for (int f = 0; f < 6; ++f) amrex::ParallelAllReduce::Max(code[f], amrex::ParallelContext::CommunicatorSub());
+    std::string line = std::string("PBC ") + name + " twod=" + std::to_string(ip[20]) + " n=" + std::to_string(dom.length(0)) + "x" + std::to_string(dom.length(1)) + "x" + std::to_string(dom.length(2)) +
+                       " codes=" + std::to_string(code[0]) + "," + std::to_string(code[1]) + "," + std::to_string(code[2]);
+    fdsamr::DirBc dm[3];
+    for (int d = 0; d < 3; ++d) {
+        const bool ign = (d == 1 && ip[20] && dom.length(1) == 1);
+        dm[d] = fdsamr::map_pressure_bc_direction(d, code[d], code[3 + d], dom.length(d), l0.dom.periodic[d] != 0, ign);
+    }
+    if (dm[1].error.empty() && dm[0].error.empty() && dm[2].error.empty() && ip[20] && dom.length(1) == 1) fdsamr::ignored_direction_follows_open(dm[1], dm[0], dm[2]);
+    for (int d = 0; d < 3; ++d) {
+        const fdsamr::DirBc& m = dm[d];
+        line += std::string(" ") + "xyz"[d] + "=" + (m.error.empty() ? fdsamr::bc_string(m) : std::string("ERROR"));
+        if (!m.error.empty()) line += " [" + m.error + "]";
+        if (!m.note.empty()) line += " [" + m.note + "]";
+    }
+    amrex::Print() << line << "\n";
+}
+}  // namespace
 int fds_selftest(const fdsamr::Level0& l0);   // tests/selftest_fds.cpp
 int fds_kernelcheck(const fdsamr::Level0& l0, const std::string& dump, bool window, const std::string& ghost);   // tests/kernelcheck.cpp
 
@@ -45,6 +92,23 @@ int main(int argc, char** argv)
             fdsamr::Level0 l0 = fdsamr::build_level0();
             fdsamr::print_level0(l0);
             amrex::Print() << "FDS-AMReX: initial dt from FDS set-up = " << dt << "\n";
+            if (argc > 2 && std::strcmp(argv[2], "--pressure-bc") == 0) print_pressure_bc(l0, argv[1]);
+            if (argc > 2 && std::strcmp(argv[2], "--fine-guard-test") == 0) {
+                // D-056: a kernel wrapper called with a fine-level mesh number (above NMESHES) must stop the run with a clear message (non-zero exit); this call does not return
+                amrex::Print() << "FINE-GUARD-TEST: calling fds_k_visc with mesh number 1000000\n";
+                fds_k_visc(1000000, 0);
+                amrex::Print() << "FINE-GUARD-TEST FAIL: returned\n";
+            }
+#ifdef FDS_FINE_B_DRAFT
+            if (argc > 2 && std::strcmp(argv[2], "--fine-b-selftest") == 0) {
+                const int nfail = fds_fine_b_selftest();
+                amrex::Print() << (nfail == 0 ? "FINE-B SELFTEST PASS" : "FINE-B SELFTEST FAIL") << "\n";
+            }
+            if (argc > 3 && std::strcmp(argv[2], "--fine-b-abort") == 0) {
+                fds_fine_b_abort_test(std::atoi(argv[3]));
+                amrex::Print() << "FINE-B ABORT TEST: returned\n";
+            }
+#endif
             if (argc > 2 && std::strcmp(argv[2], "--selftest") == 0) {
                 const int nfail = fds_selftest(l0);
                 amrex::Print() << (nfail == 0 ? "SELFTEST PASS" : "SELFTEST FAIL") << "\n";
