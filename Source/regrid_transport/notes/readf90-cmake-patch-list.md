@@ -11,12 +11,13 @@ lengths, non-power-of-2 blocking factors, blocking factors that grow faster than
 1. `Source/read.f90`, behind `#ifdef WITH_AMREX`: FDS stops on an unknown namelist group, so `&AMR` and `&AMR_REGION` must be
    skipped by the FDS namelist reader (as other groups it does not read), otherwise every AMR input is rejected before the C++
    parser runs. Exact place: where the reader dispatches on the group name. The C++ side then reads the same input file text.
-2. `Source/read.f90` (or the set-up entry): hand the input file name or text to the C++ driver so that `parse_amr_params` can run
-   at set-up. Alternative with no Fortran change: the C++ driver reads the file itself (path is already known to FDS_SETUP).
+2. No Fortran change (ruling of 2026-10-02): the C++ driver reads the input file itself and calls `parse_amr_params`, then
+   `build_hierarchy_from_meshes` with the mesh list from the FDS set-up (`MeshInput` = ijk, xb, rank per mesh).
 3. Top-level `CMakeLists.txt`, inside the `USE_AMREX` block: `add_subdirectory(Source/regrid_transport)` and link
    `fds_regrid_transport` into the `fds` target (include path and static library are already provided by that directory).
-4. Decision needed: when an input has finer `&MESH` entries but no `&AMR` line, is AMR mode inferred (MAX_LEVEL from the
-   mesh cell sizes) or is that an error naming the missing line? The unmodified `ns2d_16_int_1to2_refinement` input has no `&AMR`.
+4. Decided (ruling of 2026-10-02): finer `&MESH` entries without an `&AMR` line are an error naming the missing line and a mesh
+   pair; AMR mode is never inferred. Implemented in `group_meshes`. Consequence: the unmodified `ns2d_16_int_1to2_refinement`
+   input needs an `&AMR MAX_LEVEL=1 /` line (the test case in `tests/cases/` has it).
 
 ## Tests
-`ctest` in this directory: `regrid_transport_amr_input` (pure C++, no AMReX).
+`ctest` in this directory: `regrid_transport_amr_input`, `regrid_transport_hierarchy` (pure C++, no AMReX).

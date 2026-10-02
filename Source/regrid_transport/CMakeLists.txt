@@ -11,8 +11,8 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     include(CTest)
 endif()
 
-# AMReX-independent part: &AMR parser (R0).
-add_library(fds_regrid_transport_core STATIC AmrInput.cpp)
+# AMReX-independent part: &AMR parser (R0), IR-002 grouping, input checks, static hierarchy (R1).
+add_library(fds_regrid_transport_core STATIC AmrInput.cpp Hierarchy.cpp)
 target_include_directories(fds_regrid_transport_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fds_regrid_transport_core PRIVATE -Wall -Wextra)
 
@@ -26,4 +26,10 @@ if (BUILD_TESTING)
     target_link_libraries(test_amr_input PRIVATE fds_regrid_transport_core)
     target_compile_options(test_amr_input PRIVATE -Wall -Wextra)
     add_test(NAME regrid_transport_amr_input COMMAND test_amr_input)
+
+    add_executable(test_hierarchy tests/test_hierarchy.cpp)
+    target_link_libraries(test_hierarchy PRIVATE fds_regrid_transport_core)
+    target_include_directories(test_hierarchy PRIVATE tests)
+    target_compile_options(test_hierarchy PRIVATE -Wall -Wextra)
+    add_test(NAME regrid_transport_hierarchy COMMAND test_hierarchy ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases)
 endif()

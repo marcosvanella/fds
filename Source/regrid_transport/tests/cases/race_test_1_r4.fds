@@ -1,0 +1,7 @@
+! Mesh lines of Verification/Thread_Check/race_test_1.fds with mesh 3 remeshed to IJK=24,24,16 (level-0 domain 34x18x32, five 4:1 interfaces)
+&MESH IJK=14,18,32, XB=-0.85,-0.15,-0.45, 0.45, 0.00, 1.60 /
+&MESH IJK=14,18,32, XB= 0.85, 0.15,-0.45, 0.45, 0.00, 1.60 /
+&MESH IJK=24,24,16, XB=-0.15, 0.15,-0.15, 0.15, 0.00, 0.20 /
+&MESH IJK= 6, 6,28, XB=-0.15, 0.15,-0.15, 0.15, 0.20, 1.60 /
+&MESH IJK= 6, 6,32, XB=-0.15, 0.15,-0.45,-0.15, 0.00, 1.60 /
+&MESH IJK= 6, 6,32, XB=-0.15, 0.15, 0.15, 0.45, 0.00, 1.60 /
