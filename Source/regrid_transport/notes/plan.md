@@ -44,7 +44,7 @@ Who owns the AmrCore subclass is an Architect decision; my proposal is Role 3 (s
 - **Static two-level equivalence (FR-016, scalars only).** Ghost fill of transported fields against baseline on frozen data, as in R2. Velocity and H are excluded by spec.
 - **Hierarchy.** Dump versus input; nesting, blocking factor, region clipping; decomposition independence (FR-015); tag criterion unit cases (FR-011); input rejection cases (FR-010, FR-004, IR-003).
 - **Realizability** (FR-025, with Role 4): bounds and sum of Y after fill, regrid, average-down and reflux, in debug builds.
-All tests are scripts under `Source/regrid_transport/tests/`, run on the 8-core box at 1 and 4 ranks, one thread.
+All tests are scripts under `Source/regrid_transport/tests/`, run on the shared test machine at 1 and 4 ranks, one thread.
 
 ## 7. Risks
 Diffusive flux extraction needs a kernel-side change (R3). AMReX `FillPatch` and `average_down` assume a uniform grid index map; FDS face indexing is offset by one (Fields.H index map), so every call goes through a thin, unit-tested adapter. 2-D inputs need `ref_ratio_vect` with 1 in the single-cell direction and a y blocking factor of 1 (FR-010, provisional). Regrid rebuild cost is unmeasured (R-26). Prescribed velocity in Phase 3 means the transport tests do not exercise a projection at the interface: that is Phase 4.
