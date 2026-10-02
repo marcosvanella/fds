@@ -65,3 +65,8 @@ Open risks:
 4. FDS's diffusion lag means regrid needs one extra divg pass.
 5. Energy is not a conserved state in FDS; "energy conservation" is only via D consistency, not required by FR-020/021.
 6. Not verified: stencil widths of CHARM/SUPERBEE limiters, exact `FaceDivFree` behaviour, radiation exchange at level jumps, cylindrical geometry, wall state.
+
+## Addendum (after reading FDS `MATCH_VELOCITY`, `UVW_SAVE`, `COARSE_MESH_IF`): see `docs/role3-fds-mesh-interface-note.md`
+- FDS matches interface velocity by averaging (`velo.f90:2630`) and keeps the unmatched value in `UVW_SAVE` for scalar transport and the DIVG boundary terms (`mass.f90:421-434`, `divg.f90:933,1260`). Our composite path has one face velocity, so both coincide; the K2 kernels keep working if `UVW_SAVE` is set to it.
+- FDS already overwrites the coarse **diffusive species** flux with the fine area-weighted sum (`wall.f90:891-958`). It does **not** overwrite the advective flux, nor conduction. Section 1's "no reflux" decision stands; the advective overwrite is new, the diffusive one reproduces FDS.
+- Section 2, face velocity: new fine faces on the interface take the coarse value (injection), interior faces `FaceDivFree`; the post-regrid projection is optional because `DDDT` (`divg.f90:1612-1632`) already absorbs divergence error at the next solve (default off in Phase 3).

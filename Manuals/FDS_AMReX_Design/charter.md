@@ -1,6 +1,6 @@
 # FDS-AMR project charter
 
-Owner: Spec & Program Lead · Status: draft v0.4.29 (2026-10-02; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
+Owner: Spec & Program Lead · Status: draft v0.4.30 (2026-10-02; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
 
 ## 1. Problem statement
 
@@ -46,7 +46,7 @@ Give FDS block-structured AMR through AMReX: a hierarchy of properly nested unif
 - No AMD (HIP) or Intel (SYCL) GPU support. NVIDIA is the only GPU target; AMD is out of scope, not deferred (owner decision, 2026-09-25, relayed by the Chief Architect; D-027). A second OpenMP-offload compiler (ifx) is optional and non-gating (NFR-045).
 - No stretched grids (`TRNX/TRNY/TRNZ`) in AMR mode. AMR mode uses only uniform grids on each level; stretched cases stay FDS-only (decided: owner decision, 2026-09-25, relayed by the Chief Architect; D-030, IR-002).
 - No AMR support for `CYLINDRICAL` meshes; they are rejected in AMR mode. ASSUMPTION, awaiting the project owner under Q4 (11 Verification inputs affected; FR-006).
-- No subcycling in time in the first multi-level phase (ADR-002 leaning; still open).
+- No subcycling in time: one global `dt`, set by the finest grid, on all meshes and levels, and no subcycling-ready data model (owner ruling 2026-10-02, D-050). Reopening it needs a new ADR.
 - No changes to the Smokeview source. Output that follows refinement is out of scope; Smokeview output uses static output meshes fixed at setup (D-045).
 - No upstream contribution process to FireX or firemodels/fds is assumed for now: the code lives in the project fork, and going upstream (FireX or `firemodels/fds` master) is decided later (Q3, decided for now, upstream open-later; owner decision, 2026-09-25). The upstream path is kept possible by the guiding constraint in §7. Rebase policy: D-034 (Q10 answered).
 

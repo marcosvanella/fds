@@ -1,6 +1,6 @@
 # FDS-AMR roadmap
 
-Owner: Spec & Program Lead · Status: draft v0.4.29 (2026-10-02; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
+Owner: Spec & Program Lead · Status: draft v0.4.30 (2026-10-02; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
 
 No calendar dates are set. Durations are **estimates** in elapsed working weeks for the current team on the current box. Confidence is low until Phase 1 closes; they are re-estimated at every milestone. Requirement IDs refer to requirements.md; risk IDs to risks.md.
 
@@ -40,7 +40,7 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
   - Every `MESH_TYPE` field (mesh.f90:16-354) has a mapping target, or is marked "stays per-box Fortran" or "removed".
   - IR-005 interface spec reviewed; NFR-021 pins recorded.
   - Baseline built from FireX `36975d765f` with gfortran/OpenMPI (Release and Debug delivered 2026-09-25) and oneAPI (restored 2026-09-25, A-18 closed; FireX Intel Release delivered 2026-09-25 at `-O2`, G0 PASS; Intel Debug pending); anchor cases (requirements §2.3) run and stored (A-08). Inventory re-anchored on FireX (A-13).
-  - P1 and P2 report against their pass criteria. ADR-002 S1 result recorded and Phase 6 scope set by D-007. G1 result recorded for FR-040 (D-009).
+  - P1 and P2 report against their pass criteria. ADR-002 S1 result recorded (it feeds NFR-032; Phase 6 scope is set by D-050). G1 result recorded for FR-040 (D-009).
   - Q10 (rebase policy, commit authorization for branch `AMReX`, now `FDS-AMReX`, D-037) answered: done 2026-09-25 (D-034). The V&V Lead has confirmed or adjusted the milestone re-pin plan (A-42).
   - Rank-to-GPU and MPI configuration spec in `docs/amrex/` delivered (A-43, NFR-047).
 - **Owners:** AMR Chief Architect (lead), FDS Legacy Mapper, AMReX Integration Lead, AMR Pressure Solver Lead, AMR V&V Lead.
@@ -60,17 +60,17 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 ### Phase 3: Multi-level infrastructure, no physics subsystems
 - **Objective:** static and dynamic hierarchies with conservative scalar transport. Gas phase only: no OBST, particles or radiation; velocity from a simplified projection or a prescribed field, as the Pressure Lead chooses.
 - **Entry:** M2.
-- **Deliverables:** `&AMR` namelist (IR-003); tagging (FR-011); regridding with conservative transfer (FR-012); flux registers / refluxing for scalars (FR-024); composite mass/species budget diagnostic; rejection of unsupported features (FR-004, FR-044).
+- **Deliverables:** `&AMR` namelist (IR-003); tagging (FR-011); regridding with conservative transfer (FR-012); interface flux overwrite for scalars (FR-024, D-050); composite mass/species budget diagnostic; rejection of unsupported features (FR-004, FR-044).
 - **Exit criteria:** FR-004, FR-010..013, FR-015, FR-020, FR-021, FR-024, FR-025, FR-044, IR-002..004, NFR-035 (distribution independence of the load-balance weights).
 - **Owners:** AMR Chief Architect (lead), AMReX Integration Lead, AMR Species & Combustion Lead (species transport; joined 2026-09-25), V&V Lead.
-- **Dependencies:** ADR-002 (time-stepping), R-04 mitigation design.
+- **Dependencies:** ADR-002 (time-stepping: single global `dt`, the minimum over all levels and ranks, same in both stages, D-050), R-04 mitigation design.
 - **Estimate:** 4–8 weeks.
 
 ### Phase 4: Composite pressure solve
-- **Objective:** replace per-mesh FFT plus interface iteration with a composite solve across levels at both pressure solves per step. Following the ADR-002 leaning: one global dt, no subcycling, MLMG (or HYPRE) composite solve.
+- **Objective:** replace per-mesh FFT plus interface iteration with a composite solve across levels at both pressure solves per step. Per D-050: one global dt (minimum over all levels and ranks), no subcycling, MLMG (or HYPRE) composite solve.
 - **Entry:** M3; ADR-002 accepted.
 - **Deliverables:** composite Poisson operator and BCs; replacement for `PRESSURE_ITERATION_SCHEME` in AMR mode; composite divergence check; single-zone background pressure on composite volume.
-- **Exit criteria:** FR-014, FR-022 (gas), FR-023, FR-030..034 (FR-034 multi-zone with leakage included, per the FR-034 ruling, final), FR-036. Conservation check: if FR-014/022/023 fail or pass only marginally, the cause is fixed within Phase 4. No sync projection is needed under a global dt, so this is not an R-05 trigger; R-05's gate is now the Phase 6 subcycling decision (Pressure Lead, 2026-09-25). **R-26 shim-exit review** if ADR-001 adopts the shim: a kernel-extraction date is set, and the regrid rebuild measured in P3/Phase 3 is ≤ 10% of step time.
+- **Exit criteria:** FR-014, FR-022 (gas), FR-023, FR-030..034 (FR-034 multi-zone with leakage included, per the FR-034 ruling, final), FR-036. Conservation check: if FR-014/022/023 fail or pass only marginally, the cause is fixed within Phase 4. No sync projection is needed under a global dt, so this is not an R-05 trigger; R-05's gate is now the Phase 6 sync-correction decision (subcycling is ruled out, D-050) (Pressure Lead, 2026-09-25). **R-26 shim-exit review** if ADR-001 adopts the shim: a kernel-extraction date is set, and the regrid rebuild measured in P3/Phase 3 is ≤ 10% of step time.
 - **Owners:** AMR Pressure Solver Lead (lead), V&V Lead.
 - **Dependencies:** ADR-002, ADR-003 (solid treatment in the operator).
 - **Estimate:** 4–8 weeks.
@@ -84,16 +84,13 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 - **Dependencies:** ADR-003.
 - **Estimate:** 4–8 weeks.
 
-### Phase 6: Synchronization corrections and (conditional) subcycling
-- **Objective:** coarse-fine synchronization corrections (divergence/flux consistency beyond Phase 3-4, background-pressure dP0/dt correction for multi-zone) and, **depending on ADR-002 S1**, time subcycling (D-007, proposed; final scope needs the project owner):
-  - S1 work ratio ≤ 1.5×: **sync corrections only**; subcycling moves to "Out of roadmap".
-  - 1.5× < ratio ≤ 3×: 6a sync corrections; 6b subcycling optional, with go/no-go at M5 on the re-measured NFR-032 projection. ADR-002 Option C data model kept from Phase 3.
-  - Ratio > 3×: subcycling pulled forward. Option C data model mandatory from Phase 3; Phase 6 starts at M4, in parallel with Phase 5, and is a precondition for NFR-032.
-- **Entry:** M5 (ratio ≤ 3×) or M4 (ratio > 3×). R-05 applies only once subcycling is scheduled.
-- **Deliverables:** sync-projection design ADR (ADR-002 follow-on); subcycled advance; dP0/dt correction for multi-zone background pressure.
-- **Exit criteria:** FR-034 (dP0/dt sync); new sync/subcycling requirements added to requirements.md at Phase 6 entry; if subcycling is scheduled, FR-014/020..023 still pass with subcycling on and the measured speed-up vs global dt is reported (target TBD(Pressure Lead)).
-- **Owners:** AMR Pressure Solver Lead (lead), Chief Architect, AMR Solid Phase Lead (per-level wall cadence under subcycling, FR-047; FR-041b if scheduled), V&V Lead.
-- **Dependencies:** Phase 4; ADR-002 S1 result (A-19). Scope per D-007.
+### Phase 6: Synchronization corrections (no subcycling)
+- **Objective:** coarse-fine synchronization corrections beyond Phases 3-4 (divergence and flux consistency, and the background-pressure dP0/dt correction for multi-zone), only as far as the Phase 3-5 results show they are needed. Subcycling is not planned: the owner ruled one global `dt` on all levels and no subcycling-ready data model (D-050, which supersedes D-007); reopening it needs a new ADR.
+- **Entry:** M5. R-05 (sync error) is the gate for starting this phase; it applies to sync corrections only if a new ADR reopens subcycling.
+- **Deliverables:** sync-correction design note if FR-014/022/023 or FR-034 results require it; dP0/dt correction for multi-zone background pressure (FR-034).
+- **Exit criteria:** FR-034 (dP0/dt sync, if needed); FR-014/020..023 still pass.
+- **Owners:** AMR Pressure Solver Lead (lead), Chief Architect, V&V Lead.
+- **Dependencies:** Phase 4; D-050.
 - **Estimate:** 4–8 weeks.
 
 ### Phase 7: Particles
@@ -144,7 +141,7 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 | M3 | Multi-level transport | FR-004, FR-010..013, FR-015, FR-020, FR-021, FR-024, FR-025 | 4–8 wk |
 | M4 | Composite pressure | FR-014, FR-023, FR-030..034, FR-036; conservation check; R-26 shim-exit review (kernel-extraction date set, or regrid rebuild ≤ 10% of step time) if ADR-001 adopts the shim | 4–8 wk |
 | M5 | Walls/obstructions | FR-035, FR-040, FR-041a, FR-042, FR-043, FR-045..047; Phase 6b go/no-go if S1 ratio is 1.5-3× | 4–8 wk |
-| M6 | Sync corrections (+ subcycling per D-007) | FR-034 (sync), Phase 6 requirements | 4–8 wk |
+| M6 | Sync corrections (no subcycling, D-050) | FR-034 (sync), Phase 6 requirements | 4–8 wk |
 | M7 | Particles | FR-050..052 | 3–6 wk (overlaps) |
 | M8 | Radiation | FR-060, FR-063 | 3–6 wk (overlaps) |
 | M9 | Output/restart | FR-070..074, FR-076, FR-077, FR-080, FR-081 | 3–6 wk |
@@ -154,6 +151,6 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 Critical path (estimate): M0 → M1 → M2 → M3 → M4 → M5 → M9 → M10 → M11. Phases 6-8 can run in parallel after M5 if staffing allows. Summing the phase estimates on the critical path, with Phases 6-8 overlapping, gives roughly 7-14 months of elapsed time (**estimate, low confidence**). That figure excludes Phase 11 (GPU porting, D-027), which is TBD until ADR-001 S4 and adds substantially to scope. It will be re-estimated at M1.
 
 ## Out of roadmap (future, not planned)
-Complex geometry (CC_IBM/`&GEOM`) and HT3D under AMR (deferred, not dropped: owner decision, D-033; for complex geometry EB is not presumed, and the path stays open between EB and FDS-style cut cells on an assembled-matrix AMG solver, D-046 (b)); stretched grids (out of scope in every mode: owner decision, stretched cases stay FDS-only, D-030); cylindrical meshes in AMR mode (deferred, not dropped: owner decision 2026-09-26, D-042; uniform mode keeps them); `TUNNEL_PRECONDITIONER` in AMR mode (out: accepted, warned and ignored, D-041); subcycling, if S1 ≤ 1.5× (D-007); cross-level wall-state transfer until scheduled (FR-041b). Output that follows refinement, or Smokeview changes to support it (D-045).
+Complex geometry (CC_IBM/`&GEOM`) and HT3D under AMR (deferred, not dropped: owner decision, D-033; for complex geometry EB is not presumed, and the path stays open between EB and FDS-style cut cells on an assembled-matrix AMG solver, D-046 (b)); stretched grids (out of scope in every mode: owner decision, stretched cases stay FDS-only, D-030); cylindrical meshes in AMR mode (deferred, not dropped: owner decision 2026-09-26, D-042; uniform mode keeps them); `TUNNEL_PRECONDITIONER` in AMR mode (out: accepted, warned and ignored, D-041); subcycling (ruled out, D-050; reopening needs a new ADR); cross-level wall-state transfer until scheduled (FR-041b). Output that follows refinement, or Smokeview changes to support it (D-045).
 
 In scope but not yet placed in a phase: HVAC and level-set wildfire with refinement (D-033). FR-006 covers them until dedicated FRs are written; phase placement TBD (Spec Lead with Chief Architect). Thin obstructions sit in Phase 5 (FR-040) and pressure ZONEs in Phases 4/6 (FR-034).
