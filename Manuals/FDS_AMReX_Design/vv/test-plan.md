@@ -4,6 +4,8 @@ Owner: AMR V&V Lead · Status: **draft for review by the project owner**, 2026-0
 
 **v0.4.9 (2026-10-02)** (1) adds the GPU bitwise gate for the generated GPU kernels: gate row G15 in §5, new §5.10, tooling entry in §8 and files in §11. (2) applies the FR-005 (iii) test rule (requirements v0.4.31, D-053): new §5.11 gives every decomposition-invariance test (box split, rank count, thread count) its exact fixed-point sum switch setting, and the rows of G11, §5.3, G13, G14, §7 (FR-005, FR-062, FR-070, FR-076, NFR-010/011/012) carry it. MP5 `DIVG` GPU acceptance is tolerance-only until upstream patches 0001 and 0002 land (NFR-043). No other section changes. v0.4.8 is archived at `docs/vv/archive/test-plan_v0.4.8.md`.
 
+**v0.4.9 addendum (2026-10-02).** §5.8 gets a one-line note on the 23 inputs that are FDS-only in AMR mode (no pressure solve, Chief Architect ruling); detail in `case_inventory.md` §9, column `amr_mode_status` in `case_inventory.csv` and `scope_case_list.csv`. No other change; the version number is unchanged. The text before this edit is archived at `docs/vv/archive/test-plan_v0.4.9_pre-amr-mode-status.md`.
+
 **v0.4.8 (2026-09-26)** adds §5.9, the gas-gap face checks for the non-box level-0 ruling (N1-N3), with the vent list in `docs/vv/gap_face_vents.csv`. v0.4.7 is archived at `docs/vv/archive/test-plan_v0.4.7.md`.
 
 **v0.4.7 (2026-09-26)** updates the tier sizes and runtimes to `case_inventory` v0.3: Tier 1 is 39 runs and about 17 min, measured, within the 30 min G2 budget; Tier 2 is 127 runs and at least 89 min. It also corrects the §5.8 wording on TUNNEL_PRECONDITIONER: the feature is OUT in AMR mode, but its inputs run with the keyword ignored. v0.4.6 is archived at `docs/vv/archive/test-plan_v0.4.6.md`.
@@ -283,6 +285,8 @@ Every AMReX timing run (NFR-030, ADR-002 S1 / D-007) records and reports the fol
 ### 5.8 Scope suite (requirement FR-006 from spec v0.4.10)
 
 > **v0.4.6 note:** Q4 is answered. VARIABLE_THICKNESS cases are IN (D-038). The TUNNEL_PRECONDITIONER feature is OUT in AMR mode (D-041), but inputs that set it still run: the keyword is accepted, warned and ignored, so those cases stay in the suite and are compared T2 against baseline, and `tunnel_demo` stays as an MLMG regression and timing case. Cylindrical cases are DEFERRED in AMR mode and kept in uniform mode (D-042). The CSV counts below predate these rulings and are refreshed at the A-46 rerun.
+
+> **FDS-only inputs (no pressure solve in AMR mode):** 23 inputs (the 21 `soborot_*` and `Species/bound_test_1`, `_2`) have FDS pressure code 0 on non-periodic directions and are refused by the AMR driver (Chief Architect ruling). They keep `cls = IN` in the CSV, carry `amr_mode_status = FDS-only, no pressure solve in AMR mode`, run as FDS baselines only, and are excluded from AMR pass/fail counts and AMR-failure denominators (`case_inventory.md` §9).
 
 FR-006 (D-033, A-41) requires the AMReX code to run the FDS Verification inputs that cover in-scope features. The scope is:
 - deferred, not dropped (FR-044): GEOM/CC_IBM and HT3D;
