@@ -291,7 +291,7 @@ Grouping group_meshes(const std::vector<MeshInput>& meshes, const AmrParams& p, 
     if (!g.gap_boxes.empty()) {
         long long cells = 0;
         for (const auto& b : g.gap_boxes) cells += b.numPts();
-        rep.error("level 0 is not a box: " + std::to_string(cells) + " level-0 cells lie under no &MESH; non-box level 0 (gap cells) is not supported before M2");
+        rep.error("level 0 is not a box: " + std::to_string(cells) + " level-0 cells lie under no &MESH; non-box level 0 (gap cells, domain padding of ruling N1a) is not supported before M2");
         return g;
     }
     g.ok = true;
@@ -442,9 +442,10 @@ bool build_static_hierarchy(const Grouping& g, const AmrParams& p, Hierarchy& h,
         for (int f = l + 1; f <= h.top; ++f) {
             IVec r;
             for (int d = 0; d < 3; ++d) r[d] = g.cum_ratio[f][d] / g.cum_ratio[l][d];
-            for (int m : g.meshes_of_level[f]) L.taggable.push_back(coarsen(g.box_of_mesh[m], r));
+            for (int m : g.meshes_of_level[f]) L.taggable.push_back({coarsen(g.box_of_mesh[m], r), m, -1});
         }
-        for (const auto& rg : p.regions) {
+        for (size_t k = 0; k < p.regions.size(); ++k) {
+            const auto& rg = p.regions[k];
             int cap = rg.level < 0 ? p.max_level : rg.level;
             if (cap < l + 1) continue;
             IBox b;
@@ -453,8 +454,17 @@ bool build_static_hierarchy(const Grouping& g, const AmrParams& p, Hierarchy& h,
                 b.lo[d] = static_cast<int>(std::floor((rg.xb[2 * d] - g.dom_lo[d]) / L.dx[d] + kTol));
                 b.hi[d] = static_cast<int>(std::ceil((rg.xb[2 * d + 1] - g.dom_lo[d]) / L.dx[d] - kTol)) - 1;
             }
-            b = intersect(b, L.domain);
-            if (!b.empty()) L.taggable.push_back(b);
+            // Snap outward to the blocking factor of level l+1 (measured in level l+1 cells), then back to level l cells.
+            const IVec rr = g.ref_ratio[l + 1];
+            IBox s = coarsen(snap(refine(b, rr), h.levels[l + 1].blocking_factor), rr);
+            s = intersect(s, L.domain);
+            if (s.empty()) continue;
+            if (!(s == intersect(b, L.domain)))
+                rep.warn("WARNING: &AMR_REGION " + str(static_cast<int>(k) + 1) + " snapped outward to the blocking factor on level " + str(l + 1) +
+                         ": level-" + str(l) + " cells (" + str(b.lo[0]) + "," + str(b.lo[1]) + "," + str(b.lo[2]) + ")-(" + str(b.hi[0]) + "," + str(b.hi[1]) + "," +
+                         str(b.hi[2]) + ") became (" + str(s.lo[0]) + "," + str(s.lo[1]) + "," + str(s.lo[2]) + ")-(" + str(s.hi[0]) + "," + str(s.hi[1]) + "," +
+                         str(s.hi[2]) + "); the snapped box is the refinable region");
+            L.taggable.push_back({s, -1, static_cast<int>(k)});
         }
     }
     if (h.max_level > 0 && h.levels[0].taggable.empty())
@@ -533,6 +543,17 @@ void dump_hierarchy(std::ostream& os, const Hierarchy& h)
             else os << "added\n";
         }
     }
+    for (int l = 0; l < h.max_level; ++l) {  // effective refinable region (IR-008), after snapping of declared boxes
+        const Level& L = h.levels[l];
+        std::snprintf(buf, sizeof buf, "REGION level %d boxes=%d\n", l, static_cast<int>(L.taggable.size()));
+        os << buf;
+        for (const RegionBox& rb : L.taggable) {
+            std::snprintf(buf, sizeof buf, "  (%d,%d,%d)-(%d,%d,%d) ", rb.box.lo[0], rb.box.lo[1], rb.box.lo[2], rb.box.hi[0], rb.box.hi[1], rb.box.hi[2]);
+            os << buf;
+            if (rb.mesh >= 0) os << "finer mesh " << rb.mesh + 1 << "\n";
+            else os << "region " << rb.region + 1 << " (snapped)\n";
+        }
+    }
 }
 
 long long TagClipper::clip_tags(int lev, std::vector<IVec>& tags)
@@ -542,8 +563,10 @@ long long TagClipper::clip_tags(int lev, std::vector<IVec>& tags)
     std::vector<IVec> keep;
     for (const IVec& t : tags) {
         bool in = false;
-        for (const IBox& b : ok)
+        for (const RegionBox& rb : ok) {
+            const IBox& b = rb.box;
             if (t[0] >= b.lo[0] && t[0] <= b.hi[0] && t[1] >= b.lo[1] && t[1] <= b.hi[1] && t[2] >= b.lo[2] && t[2] <= b.hi[2]) { in = true; break; }
+        }
         if (in) keep.push_back(t);
         else ++removed;
     }

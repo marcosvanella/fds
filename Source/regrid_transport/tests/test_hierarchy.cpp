@@ -100,7 +100,7 @@ int main(int argc, char** argv)
         check_nesting(bad, r2);
         CHECK(r2.has_error_containing("overlap"));
         // refinable region: finer mesh footprint, tags outside discarded and counted once per level (IR-008)
-        const IBox& tg = h.levels[0].taggable[0];
+        const IBox& tg = h.levels[0].taggable[0].box;
         CHECK(h.levels[0].taggable.size() == 1 && tg.lo[0] == 4 && tg.hi[0] == 11 && tg.lo[2] == 4 && tg.hi[2] == 11 && tg.hi[1] == 0);
         TagClipper tc(h);
         std::vector<IVec> tags{{5, 0, 5}, {0, 0, 0}, {11, 0, 11}, {12, 0, 4}};
@@ -112,7 +112,37 @@ int main(int argc, char** argv)
         AmrParams p = amr("&AMR MAX_LEVEL=1 /\n&AMR_REGION XB=0,3,-0.05,0.05,0,3 /");
         Hierarchy h;
         CHECK(build_hierarchy_from_meshes(ns2d, p, {true, false, true}, h, r));
-        CHECK(h.levels[0].taggable.size() == 2 && h.levels[0].taggable[1].lo[0] == 0 && h.levels[0].taggable[1].hi[0] == 7);
+        CHECK(h.levels[0].taggable.size() == 2 && h.levels[0].taggable[1].box.lo[0] == 0 && h.levels[0].taggable[1].box.hi[0] == 7);
+    }
+    {   // declared region not aligned with the blocking factor: snapped outward with a warning; the snapped box is the effective region
+        Report r;
+        AmrParams p = amr("&AMR MAX_LEVEL=1 /\n&AMR_REGION XB=0,2,-0.05,0.05,0,2 /");  // level-0 cells 0..5 -> level-1 cells 0..11 -> bf 8 -> 0..15 -> 0..7
+        Hierarchy h;
+        CHECK(build_hierarchy_from_meshes(ns2d, p, {true, false, true}, h, r));
+        CHECK(h.levels[0].taggable.size() == 2);
+        const IBox& e = h.levels[0].taggable[1].box;
+        CHECK(h.levels[0].taggable[1].region == 0 && e.lo[0] == 0 && e.hi[0] == 7 && e.lo[2] == 0 && e.hi[2] == 7 && e.hi[1] == 0);
+        bool warned = false;
+        for (auto& w : r.warnings) warned = warned || (w.find("&AMR_REGION 1 snapped outward") != std::string::npos);
+        CHECK(warned);
+        std::ostringstream os;
+        dump_hierarchy(os, h);
+        CHECK(os.str().find("REGION level 0 boxes=2") != std::string::npos);
+        CHECK(os.str().find("(0,0,0)-(7,0,7) region 1 (snapped)") != std::string::npos);
+        CHECK(os.str().find("(4,0,4)-(11,0,11) finer mesh 13") != std::string::npos);
+        // an aligned region gives no warning
+        Report r2;
+        AmrParams p2 = amr("&AMR MAX_LEVEL=1 /\n&AMR_REGION XB=0,3,-0.05,0.05,0,3 /");
+        Hierarchy h2;
+        CHECK(build_hierarchy_from_meshes(ns2d, p2, {true, false, true}, h2, r2));
+        for (auto& w : r2.warnings) CHECK(w.find("snapped") == std::string::npos);
+    }
+    {   // level-0 meshes need not be multiples of the blocking factor (4x4 meshes with bf 8), a box domain is never padded
+        Report r;
+        Hierarchy h;
+        AmrParams p = amr("&AMR MAX_LEVEL=1 /");
+        CHECK(build_hierarchy_from_meshes(ns2d, p, {true, false, true}, h, r));
+        CHECK(h.levels[0].grids[0].box.length(0) == 4 && h.levels[0].domain.hi[0] == 15);
     }
     {   // finer meshes without an &AMR line: error naming the missing line and the mesh pair; never inferred
         Report r;

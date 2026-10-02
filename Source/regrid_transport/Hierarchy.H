@@ -58,6 +58,14 @@ struct GridBox {
     int mesh = -1;
 };
 
+// A box of the refinable region (IR-008) on one level, with its origin: a finer &MESH footprint (`mesh` >= 0, 0-based) or a declared
+// &AMR_REGION (`region` >= 0, 0-based). Declared boxes are stored after snapping outward to the blocking factor (the effective region).
+struct RegionBox {
+    IBox box;
+    int mesh = -1;
+    int region = -1;
+};
+
 struct Level {
     int level = 0;
     IBox domain;
@@ -67,7 +75,7 @@ struct Level {
     IVec max_grid_size{1, 1, 1};
     double dx[3] = {0, 0, 0};
     std::vector<GridBox> grids;
-    std::vector<IBox> taggable;  // refinable region on this level (IR-008): cells that may be tagged for refinement to level+1
+    std::vector<RegionBox> taggable;  // effective refinable region on this level (IR-008): cells that may be tagged for refinement to level+1
 };
 
 struct Hierarchy {
@@ -85,7 +93,10 @@ struct Hierarchy {
 // Builds the static hierarchy (R1) from a successful grouping: level-0 boxes are the level-0 meshes (unchanged, in input order)
 // plus the part of the domain that lies under finer meshes; level l >= 1 boxes are the meshes of that level plus the boxes needed
 // for proper nesting of level l+1 (snapped outward to the blocking factor), cut to MAX_GRID_SIZE. Runs the blocking-factor checks
-// (level-0 domain divisible by BLOCKING_FACTOR; level l >= 1 mesh edges aligned with it) and check_nesting().
+// (level-0 domain divisible by BLOCKING_FACTOR; level l >= 1 mesh edges aligned with it) and check_nesting(). Level-0 boxes are the
+// meshes as given and need not be multiples of the blocking factor. A box domain is never padded (ruling N1a applies to non-box level 0
+// only, which is rejected before M2). Declared &AMR_REGION boxes are snapped outward to the blocking factor of the level they refine
+// into, with a warning; the snapped boxes are the effective refinable region and are what the dump reports.
 bool build_static_hierarchy(const Grouping& g, const AmrParams& p, Hierarchy& out, Report& rep);
 
 // FR-013 assertions on a hierarchy: grids inside the domain and disjoint, level 0 tiles the domain, level l >= 1 grids aligned with
