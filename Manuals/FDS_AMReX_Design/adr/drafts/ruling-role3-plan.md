@@ -31,3 +31,17 @@ Role 3 note: `docs/role3-numeric-scheme-note.md`. Reflux is dropped from R3; it 
 8. **`&AMR_REGION LEVEL`** = finest level allowed in that box (default `MAX_LEVEL`). Approved.
 9. **Names.** `FACE_LINEAR`/`FACE_CONSERVATIVE` stay placeholders. Send the list of new namelist parameters and values to the Spec Lead, who owns the input names (IR-003).
 10. **Patch list items 1 and 3** stay unapplied until R1 needs them in the driver build.
+
+
+## Update 2026-10-02 (c): R4 design note rulings (D-058)
+
+The R4 design note (tagging, dynamic regrid, data transfer) is accepted as the plan for R4, with these rulings on its six questions.
+
+1. **Criteria.** Phase 3: temperature, density, species, HRRPUV and user boxes; vorticity next; OBST/VENT distance in Phase 5. Parameter names stay working names until the User Guide draft (IR-003).
+2. **Initial hierarchy at t = 0.** Evaluate the input's initial conditions directly on each new level (repeat tag, make level, fill, until the finest allowed level), not interpolation from the coarse level, so features smaller than a coarse cell are resolved. After the last level is built, average down once so every covered coarse cell holds the fine average. The conservation budget (1e-12 per regrid) starts after that average-down. Role 1 provides the "initial fields on level L" entry point; in Phase 3 the prescribed analytic fields serve it. Interpolation from the coarse level remains the path for every regrid after t = 0.
+3. **Tag criterion.** Accept undivided differences with `TAG_KEEP` hysteresis. No scaled gradient in Phase 3; it can be added later as an option if a case needs it.
+4. **Interface asks.** Approved: `begin_regrid()` / `end_regrid()` on the registry (Role 1), the registry building `Fields` on an arbitrary BoxArray and DistributionMapping at run time (fine-level mesh objects: D-056, option B), and a "hierarchy changed, rebuild" entry point on the pressure backend that keeps no pointers to old MultiFabs (Role 2).
+5. **FaceDivFree.** Verify ratio 4, 2-D and the single-cell direction first (it is test 4 and needs no Role 1 work). If it does not support a case, that case uses coarse injection plus the post-regrid projection, recorded in the design note as a limitation, with max abs(div u - D) printed after each regrid. In a single-cell direction the refinement ratio is 1 in that direction (2-D refinement is in-plane only).
+6. **Species realizability.** Clipping is conservative: if the limited interpolation would give a negative or out-of-range value, the children of that parent are rescaled so their sum still equals the parent. The conservation budget therefore holds by construction. Every clip is counted (FR-025); the test on positive fields requires a count of zero, and a nonzero count in a case is reported as a warning with the level and the number of cells.
+
+Also accepted from the note: finer `&MESH` boxes are force-tagged so a regrid never drops them; `RemakeLevel` called on a level whose grids are unchanged must be a bitwise copy (test it).
