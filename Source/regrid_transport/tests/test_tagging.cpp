@@ -54,7 +54,7 @@ long mismatches(const amrex::TagBoxArray& tags, const std::function<bool(int, in
     long bad = 0;
     for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
         auto a = tags.const_array(mfi);
-        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if ((a(i, j, k) != 0) != ref(i, j, k)) ++bad; });
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { { if ((a(i, j, k) != 0) != ref(i, j, k)) ++bad; if (a(i, j, k) != 0 && a(i, j, k) != amrex::TagBox::SET) ++bad; } });   // a set tag must be TagBox::SET: only those seed AMReX's buffer()
     }
     amrex::ParallelAllReduce::Sum(bad, amrex::ParallelContext::CommunicatorSub());
     return bad;

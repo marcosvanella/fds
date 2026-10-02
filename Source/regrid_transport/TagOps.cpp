@@ -3,6 +3,9 @@
 
 #include <AMReX_ParallelDescriptor.H>
 
+// rt_tag_kernels.F90 writes the literal 2 (RT_TAG_SET): AMReX's buffer() only grows from tags equal to TagBox::SET
+static_assert(amrex::TagBox::SET == 2 && amrex::TagBox::CLEAR == 0, "TagBox values assumed by rt_tag_kernels.F90");
+
 namespace {
 struct Lay {
     int lo[3], hi[3];   // bounds of the whole array (valid + ghosts)

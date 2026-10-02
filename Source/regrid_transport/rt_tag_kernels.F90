@@ -3,7 +3,7 @@
 ! (RT_OFFLOAD defined, or nvfortran -mp=gpu): `target teams distribute parallel do` with the device data given by is_device_ptr / has_device_addr, no map
 ! of the big arrays (the AMReX arena owns them). The offload build is NOT tested here (no GPU compiler run); the host path is.
 !
-! A tag is one byte (AMReX TagBox: 0 = clear, 1 = set). The kernels only SET tags (logical OR of the criteria); they never clear one.
+! A tag is one byte (AMReX TagBox: CLEAR = 0, BUF = 1, SET = 2; only SET cells seed the tag buffer, so the value written here must be SET; TagOps.cpp static_asserts it). The kernels only SET tags (logical OR of the criteria); they never clear one.
 !   rt_tag_cells    : threshold or undivided-difference criterion on one cell field, with TAG_KEEP hysteresis from a "covered by the finer level" mask
 !   rt_tag_box      : sets all tags inside an index box (user boxes, static finer &MESH footprints)
 !   rt_tag_copy_box : dst = src inside an index box (used to clip tags to the refinable region)
@@ -13,6 +13,7 @@ use, intrinsic :: iso_c_binding, only: c_int, c_double, c_signed_char, c_long
 implicit none
 private
 integer, parameter :: eb = c_double
+integer(c_signed_char), parameter :: RT_TAG_SET = 2_c_signed_char   ! amrex::TagBox::SET
 public :: rt_tag_cells, rt_tag_box, rt_tag_copy_box, rt_tag_count
 
 #if defined(RT_OFFLOAD) || defined(__NVCOMPILER_OPENMP_GPU)
@@ -103,7 +104,7 @@ do i = lo(1), hi(1)
       end if
       hit = best > te
    end if
-   if (hit) tag(i,j,k) = 1_c_signed_char
+   if (hit) tag(i,j,k) = RT_TAG_SET
 end do
 end do
 end do
@@ -117,7 +118,7 @@ integer :: i, j, k
 do k = max(lo(3), blo(3)), min(hi(3), bhi(3))
 do j = max(lo(2), blo(2)), min(hi(2), bhi(2))
 do i = max(lo(1), blo(1)), min(hi(1), bhi(1))
-   tag(i,j,k) = 1_c_signed_char
+   tag(i,j,k) = RT_TAG_SET
 end do
 end do
 end do
