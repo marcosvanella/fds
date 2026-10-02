@@ -45,3 +45,9 @@ The R4 design note (tagging, dynamic regrid, data transfer) is accepted as the p
 6. **Species realizability.** Clipping is conservative: if the limited interpolation would give a negative or out-of-range value, the children of that parent are rescaled so their sum still equals the parent. The conservation budget therefore holds by construction. Every clip is counted (FR-025); the test on positive fields requires a count of zero, and a nonzero count in a case is reported as a warning with the level and the number of cells.
 
 Also accepted from the note: finer `&MESH` boxes are force-tagged so a regrid never drops them; `RemakeLevel` called on a level whose grids are unchanged must be a bitwise copy (test it).
+
+## Update 2026-10-02 (d): shared coarse ghost cells at corners (D-059)
+
+In AMReX a covered coarse cell that is the ghost of two fine-patch faces (a patch corner, or a patch thinner than 4 coarse cells) holds one value, while FDS gives each mesh its own array. In the FR-016 comparison 4 of 16 corner-zone KRES cells differ; everything else agrees (fine side bitwise, coarse side to 3e-15 relative).
+
+Ruling: **accept as a documented Phase 3 limitation (option a)**; per-face ghost storage (option b) is not built. Conditions: (1) the driver counts the covered cells that serve two or more faces and prints the count at each regrid; (2) the FR-016 report lists the corner-zone differences as the accepted exception, with the cause; (3) the blob tests (2-D and 3-D, patches with corners) must show mass and species conservation at round-off and no difference above round-off in the result against the uniform-fine run attributable to corner cells; (4) if any case at the Phase 3 gate shows an effect beyond round-off, the limitation is reopened and option (b) is costed for the fine kernels. The limitation is listed in the Phase 3 acceptance notes.
