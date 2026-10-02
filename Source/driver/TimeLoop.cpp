@@ -675,6 +675,7 @@ struct TimeLoop::Impl {
         double& dt = L.m_dt;
 
         // ---------------- predictor
+                stage_solid("static");
         state(true, true);
         for_levels([&](int) { s_visc_mfd(true); });
         first_pass = true;
@@ -868,6 +869,32 @@ struct TimeLoop::Impl {
                 std::size_t cnt = 1;
                 for (int d = 0; d < nr.second; ++d) cnt *= static_cast<std::size_t>(ub[d] - lb[d] + 1);
                 std::vector<double> buf(cnt);
+    // FDSTL_STAGES: CELL%SOLID of every local box (SideData component 0, built from the FDS cells at set-up) as scr_<tag>_SOLID_b<box>.bin in the same layout as stage_scratch:
+    // header int32[16] = {3, lb[4], ub[4], 0...} with the FDS index range 0..IBP1, 0..JBP1, 0..KBP1 (the valid cells and one ghost layer), then float64 (0 or 1), I fastest.
+    // Ghost layer: SideData's fill (neighbour box value or periodic image; 0 at a closed domain edge), not FDS's own CELL(0,..)%SOLID.
+    void stage_solid(const char* tag)
+    {
+        const char* e = std::getenv("FDSTL_STAGES");
+        if (!e || std::atoi(e) != L.m_icyc) return;
+        const amrex::iMultiFab& m = L.m_sd->mask();
+        for (amrex::MFIter mfi(m); mfi.isValid(); ++mfi) {
+            const amrex::Box vb = mfi.validbox();
+            const auto a = m.const_array(mfi);
+            const int n[3] = {vb.length(0) + 2, vb.length(1) + 2, vb.length(2) + 2};
+            std::vector<double> buf(static_cast<std::size_t>(n[0]) * n[1] * n[2]);
+            std::size_t q = 0;
+            for (int k = 0; k < n[2]; ++k)
+                for (int j = 0; j < n[1]; ++j)
+                    for (int i = 0; i < n[0]; ++i) buf[q++] = a(vb.smallEnd(0) - 1 + i, vb.smallEnd(1) - 1 + j, vb.smallEnd(2) - 1 + k, 0);
+            int hdr[16] = {3, 0, 0, 0, 1, n[0] - 1, n[1] - 1, n[2] - 1, 1, 0, 0, 0, 0, 0, 0, 0};
+            std::FILE* fp = std::fopen((dir + "/scr_" + tag + "_SOLID_b" + std::to_string(mfi.index()) + ".bin").c_str(), "wb");
+            if (!fp) continue;
+            std::fwrite(hdr, sizeof(int), 16, fp);
+            std::fwrite(buf.data(), sizeof(double), buf.size(), fp);
+            std::fclose(fp);
+        }
+    }
+
                 fds_k_xfer(nm, nr.first, nr.second, lb, ub, buf.data(), 3, &n, &bad, &ierr);
                 if (ierr != 0) return;
                 int hdr[16] = {nr.second, lb[0], lb[1], lb[2], lb[3], ub[0], ub[1], ub[2], ub[3], 0, 0, 0, 0, 0, 0, 0};
