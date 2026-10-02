@@ -6,7 +6,7 @@ Status as of 2026-10-02, from the latest reports (re-check with the role before 
 
 | Role | State | Ready work, in order | Blocked or waiting on |
 |---|---|---|---|
-| Role 1, Data Layout | busy | (1) decision on fine-level mesh objects: option B ruled (D-056); (2) flux read-out and override hooks (design due 6 Oct); (3) W1/W2 wall-state seam; (4) kernel loops on level 1 once the fine-level mesh objects exist (about 9-14 Oct) | oneAPI validation of patch 0005 and 0006 |
+| Role 1, Data Layout | busy | (1) decision on fine-level mesh objects: option B ruled (D-056); (2) flux read-out and override hooks (design due 6 Oct); (3) W1/W2 wall-state seam; (4) kernel loops on level 1 once the fine-level mesh objects exist (about 9-14 Oct) | nothing (oneAPI validation of 0005 and 0006 passed) |
 | Role 2, Pressure Backend | busy | (1) M2 plan; (2) 2-D case boundary mapping check for the FFT backend (D-057); (3) HYPRE backend per ADR-002 v1.1 | A-56 comparison from the Pressure Lead |
 | Role 3, Regrid and Transport | partly free | (1) R2 AmrCore subclass (waits on Role 1 items 1-5, now delivered); (2) fine-face and ghost-fill unit tests against the interface header; (3) overwrite averaging code (area-sum of fine fluxes) as a stand-alone tested function | flux hook design from Role 1 (6 Oct) for end-to-end use |
 | Integration Lead | busy | WP1 remaining non-wall kernels on real fields; review of the flux hook; CUDA AMReX install with FFT and MPI (standing approval for test-machine runs) | WP3 generator coverage (Legacy Mapper and generator engineers) |
@@ -21,4 +21,4 @@ Status as of 2026-10-02, from the latest reports (re-check with the role before 
 | GPU Wall Loops Engineer | busy | wall loops with the Solid and Species conditions (SP2 per-target gather, SP4 scratch sums, S2 guarded assertion); O3 (L1402) | none |
 | GPU Mesh Data Loops Engineer | busy | `PATCH_VELOCITY_FLUX` (L1390) first, then O2 edge and exchange loops that remain (D-055) | exchange-buffer layout for later items |
 | GNU Build Chief | check | keep the Release and Debug reference binaries current for V&V (Debug rebuild is blocking `patch_check.sh`) | none |
-| Intel Build Chief | ready | oneAPI validation of patches 0005 and 0006 on the test machine (standing approval for runs) | none; this unblocks D-056 |
+| Intel Build Chief | validation done | next: kernelcheck, decomposition check and csmag check under oneAPI; same-compiler baseline for the output gate; CMake fix for the Intel flag warning | none |
