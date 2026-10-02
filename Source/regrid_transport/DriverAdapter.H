@@ -4,6 +4,7 @@
 #ifndef FDSRT_DRIVERADAPTER_H_
 #define FDSRT_DRIVERADAPTER_H_
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -15,9 +16,25 @@ namespace fdsrt {
 // True for a field the R2a transfers handle: cell-centred and not H/HS (pressure ghosts are the pressure backend's).
 bool is_transfer_scalar(const fdsamr::Fields& F, const std::string& name);
 
-// The hook to install with TimeLoop::set_cf_ghost_hook(level, hook) for every level > 0. For each field of the request: fill nlayers (default 2) ghost layers
-// of that field on the level from level-1, piecewise-constant (fill_cf_ghosts_pc). Level 0 and a missing coarser level: no-op.
-fdsamr::CfGhostHook make_cf_ghost_hook(fdsamr::LevelRegistry& reg, int nlayers = 2);
+// Equation of state for the ghost cells of TMP and RSUM (FDS: GET_SPECIFIC_GAS_CONSTANT, PBAR_P). Optional: without it TMP and RSUM ghosts are injected/averaged
+// (documented fallback in LevelOps.H). pbar gets the level and the (ghost) cell.
+struct ThermoProvider {
+    int n_tracked = 0;
+    std::function<double(const double* zz)> rsum;
+    std::function<double(int level, const amrex::IntVect& cell)> pbar;
+};
+
+// Totals of what the hook did (for logs and tests).
+struct CfHookStats {
+    long fine_ghost_cells = 0, covered_cells = 0, conflicts = 0, calls = 0;
+};
+
+// The hook to install with TimeLoop::set_cf_ghost_hook(level, hook) for every level > 0. FDS ghost rules of LevelOps.H, in this order, for the fields of the request:
+//  1. volume average-down of the present fields into the covered cells of level-1 (so layers >= 3 are consistent),
+//  2. covered coarse cells next to a face, layers 1 and 2, by the FDS rule (fine -> coarse), then the same-level ghost refresh of those coarse fields,
+//  3. fine ghost cells, layers 1 and 2, by the FDS rule (coarse -> fine).
+// Cell-centred scalars only: RHO/RHOS+ZZ/ZZS, TMP, RSUM, MU, KRES, D, DS; H/HS and the face fields are skipped. Level 0 and a missing coarser level: no-op.
+fdsamr::CfGhostHook make_cf_ghost_hook(fdsamr::LevelRegistry& reg, const ThermoProvider& th = ThermoProvider(), CfHookStats* stats = nullptr);
 
 // Fine -> coarse volume average of the given fields (all transfer scalars if names is empty) for levels top-1 .. 0, finest first, so that data propagates
 // through the whole hierarchy. Covered coarse cells only.
