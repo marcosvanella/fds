@@ -1,6 +1,6 @@
 # 01 — Species & Combustion on AMReX: spec outline
 
-Owner: AMR Species & Combustion Lead · Status: **DRAFT (lean outline, low-spend mode)**, 2026-09-25 · Nothing here is approved.
+Owner: AMR Species & Combustion Lead · Status: **DRAFT (lean outline)**, updated for D-050 (single global dt, no subcycling; coarse-fine conservation by interface flux overwrite, FR-025) · Nothing here is approved.
 Reference tree: this repository (FireX `36975d765f`), read-only. Line numbers are from that tree. Read first: `docs/README.md` (D-022, D-023), `requirements.md` (FR-016, FR-020/021/024), ADR-002 v0.2.
 Scope for this pass: key citations, design direction, open questions, and candidate verification cases. There is no exhaustive survey yet. Items marked *(unread)* are pointers only.
 
@@ -26,20 +26,20 @@ The key property is that everything in `COMBUSTION_MODEL` is **cell-local**. Its
 
 **Data layout.** `rho*Y` (the conserved variable) and `Y` are stored as `MultiFab` components with `N_TRACKED_SPECIES` components each. Passive scalars, including `ZETA`, are stored as extra components. The lumped-to-primitive matrix (`Z2Y`) and the property tables are read-only device data.
 
-**Refluxing (D-023).** Register the **species face fluxes** in an `amrex::FluxRegister`. There is no separate density flux, because density is the species sum (`mass.f90:509`). Refluxing all tracked species therefore makes density conservative automatically and keeps the sum of `Y` equal to 1 without a separate step. After reflux and `average_down`, recompute `rho = SUM(rhoY)` and then `Y = rhoY/rho`. The FDS velocity restore (`mass.f90:424-436`) and ghost averaging (`wall.f90:319-339`) are **not** ported (D-023). The `M_DOT_PPP` and `Q_Z` terms are volume sources, so they need no reflux. Acceptance follows FR-020/021/024: round-off conservation.
+**Coarse-fine conservation (D-023, D-050, FR-025).** Conservation is by **interface flux overwrite**, not a flux register or reflux: per stage, the coarse face flux at a coarse-fine interface is replaced by the area-sum of the fine face fluxes. Apply it to the **species face fluxes** (`rho*Y_n`). There is no separate density flux, because density is the species sum (`mass.f90:509`), so overwriting all tracked species fluxes keeps density conservative and keeps the sum of `Y` equal to 1 without a separate step. After the overwrite and `average_down`, recompute `rho = SUM(rhoY)` and then `Y = rhoY/rho`. The FDS velocity restore (`mass.f90:424-436`) and ghost averaging (`wall.f90:319-339`) are **not** ported (D-023). The `M_DOT_PPP` and `Q_Z` terms are volume sources and need no interface treatment. The overwrite must use the same face fluxes that the coarse update used (same limiter, same stage), so that round-off conservation (FR-020/021/024) holds.
 
 **Realizability under interpolation and averaging.**
 - `average_down` of `rhoY` with volume weights, followed by division by the averaged `rho`, gives a convex combination of fine-cell `Y`. It therefore stays inside 0..1 and sums to 1. No clipping is needed there.
 - For coarse-to-fine fill (FillPatch and regrid), interpolate `rhoY` and `rho` conservatively, using `cell_cons_interp` with the min/max limiter, which is local extrema preserving per component. Then set `rho` to the sum of the interpolated `rhoY`. Open issue: per-component limiting can leave a sum-of-`Y` error at round-off level. The plan is to apply a `GET_REALIZABLE_MF`-style correction only in newly created fine cells and log how often it fires.
-- `CHECK_MASS_DENSITY` redistributes mass across box boundaries through its stencil. On AMReX that needs ghost cells and a rule at coarse-fine faces. Options are (a) restrict redistribution to within one level, with a local clip plus a reflux-consistent correction, or (b) replace it with a flux limiter in the advection stencil, so that clipping becomes a diagnostic only. *Decision needed.*
+- `CHECK_MASS_DENSITY` redistributes mass across box boundaries through its stencil. On AMReX that needs ghost cells and a rule at coarse-fine faces. Options are (a) restrict redistribution to within one level, with a local clip plus a correction that is consistent with the interface flux overwrite, or (b) replace it with a flux limiter in the advection stencil, so that clipping becomes a diagnostic only. *Decision needed.*
 
 **Source terms per box and per level.** Chemistry is a `ParallelFor` over the valid cells of each box on each level. Cells covered by a finer level are masked out and then overwritten by `average_down`. The FDS rank-to-rank cell shuffle (`fire.f90:186-236`) is replaced by AMReX load balancing, with a **chemistry cost `MultiFab`** (for example the CVODE step count per cell, from the previous step) feeding `DistributionMapping::makeKnapSack` or SFC. The owner allows this.
 
-**Time stepping (ADR-002).**
-- FDS calls combustion once per step, after the corrector (`main.f90:973`).
-- With subcycling, each level integrates its chemistry over its own `dt_l`, at the same point in its step. The level's `Q` and `D_SOURCE` then feed that level's divergence.
-- With a single global `dt`, there is one chemistry call per level per step.
-- Either way, refluxing happens after the fine-level substeps, before `average_down`, and before the next coarse divergence. Also open is whether coarse chemistry in the region covered by the fine level is skipped or recomputed after averaging (the proposal is to skip it).
+**Time stepping (ADR-002 v1.2, D-050).** One global `dt` on all levels, no subcycling, and no subcycling-ready data model.
+- FDS calls combustion once per step, after the corrector (`main.f90:973`). Each level does the same at the same `dt`, so there is one chemistry call per level per step.
+- A level's `Q` and `D_SOURCE` feed that level's divergence. The interface flux overwrite happens per stage, before the update that uses the coarse flux, and `average_down` follows before the next divergence.
+- Chemistry in coarse cells covered by a finer level is skipped (proposal), and those cells are overwritten by `average_down`.
+- No chemistry sub-stepping across levels is needed, which removes the old open question about level-local time integration. Per-cell chemistry sub-iterations inside `COMBUSTION_MODEL` stay as in FDS.
 
 ## 3. Refinement tagging (proposal)
 Tag a cell if any of these holds (thresholds are inputs):
@@ -71,11 +71,11 @@ From `Verification/` (directories confirmed present):
 
 ## 6. Open questions and risks
 1. **(Chief Architect)** `CHECK_MASS_DENSITY` redistribution across box and level boundaries: keep it level-local, or replace it with a limiter (§2)?
-2. **(Chief Architect / Integration)** Skip chemistry under covered cells, and where combustion sits in the subcycled step (§2)?
+2. **(Chief Architect / Integration)** Confirm skipping chemistry in cells covered by a finer level (§2).
 3. **(Integration / Build)** SUNDIALS CUDA build and batched linear solver availability; interop with OpenMP-offload Fortran (§4).
 4. **(V&V)** Location of `species_conservation_*`; acceptance criteria for AMR flame cases.
 5. **(Chief Architect)** Scope couplings not yet read: HVAC species transport, species/mass bookkeeping in pressure zones (`divg.f90:1496-1499` uses zone pressures), level-set wildfire versus combustion, and `STORE_SPECIES_FLUX` (A-34).
 - **Proposed risk (ID TBD):** device-side stiff chemistry (CVODE batched or custom) may be unavailable or slow for the chosen kernel style, which would block "full step on GPU" for finite-rate cases. Mitigation: an early spike, and the explicit paths first.
-- **Proposed risk (ID TBD):** per-cell clipping after interpolation or regrid breaks FR-020/021/024 round-off conservation. Mitigation: convex averaging, limited conservative interpolation, and counting any clip that fires.
-- **Proposed requirement (ID TBD):** mass fractions stay in 0..1 and sum to 1 within round-off after every FillPatch, regrid, `average_down` and reflux. Verification: a check each step in debug builds.
+- **Proposed risk (ID TBD):** per-cell clipping after interpolation or regrid breaks FR-020/021/024 round-off conservation (note: conservation is by interface flux overwrite, FR-025). Mitigation: convex averaging, limited conservative interpolation, and counting any clip that fires.
+- **Proposed requirement (ID TBD):** mass fractions stay in 0..1 and sum to 1 within round-off after every FillPatch, regrid, `average_down` and interface flux overwrite. Verification: a check each step in debug builds.
 - **Proposed requirement (ID TBD):** the chemistry cost estimate feeds AMReX load balancing, and results do not depend on the distribution (FR-005).

@@ -10,6 +10,13 @@ Proposed changes to upstream FDS source (FireX or master) that come out of the A
 5. A target line: **FireX**, **master**, or **both**. Master is merged into FireX periodically, so write the patch to apply cleanly to both and say which one it was tested against.
 6. Name: `NNNN-short-name.patch` (four-digit sequence), and add a row to the index below in the same change.
 
+## Standard behavior-unchanged check (V&V Lead proposal, accepted as the default)
+1. Control build: the reference GNU Release binary `vv-runs/refbin/gnu_ompi_firex-36975d7/fds`. Patched build: the same FireX source plus the patch, same flags, HYPRE and toolchain. Compare patched against control, never against older recorded baselines. A master-targeted patch is also built once on master against a master control.
+2. Cases (about 5 minutes): ns2d_16 on 1 rank, obst_activation_default on 4 ranks, shunn3_4mesh_32 on 4 ranks, csmag_32 on 1 rank, plus one case that exercises the changed lines, with a coverage line in the report. A patch that touches shared code also runs the Tier 1 set (39 runs, about 17 minutes).
+3. Pass criterion: bitwise (`cmp`-identical outputs apart from wall-clock and CPU columns and timing lines), run with `SIG_FIGS=17`. A patch declared to change results states which outputs change and why, and gets a stated tolerance metric instead.
+4. Loop or bounds patches: one extra run of the exercising case on a `-fcheck=all` build, which must be clean.
+The V&V Lead is writing `vv-runs/tools/patch_check.sh` so each patch can cite the command and its output.
+
 ## Index
 | No. | File | Target | Source file(s) | Summary | Behavior-unchanged check | Author | State (proposed / reviewed / committed upstream by owner) |
 |---|---|---|---|---|---|---|---|
@@ -22,9 +29,9 @@ Each blocked-loop family is signed off by a domain lead before its rewrite becom
 
 | Family | Reviewer | Status |
 |---|---|---|
-| Zone sums with a pressure-zone index (`USUM(IPZ)`, `DSUM`, `PSUM`) | Pressure Solver Lead | requested 2026-10-02 |
+| Zone sums with a pressure-zone index (`USUM(IPZ)`, `DSUM`, `PSUM`) (P1), `CONNECTED_ZONES` (P2), solid-cell DP correction L0394 (P3), `LOG_INTWC` (P4) | Pressure Solver Lead | signed off 2026-10-02: P1 accept under D-053 (measure the single-thread device add pass before making it the GPU default; privatise `IPZ`; only uncovered cells and owned faces under AMR; HVAC `U_NORMAL` final first), P2 accept, P3 accept with change (two-pass CSR gather in ascending wall index; `BOUNDARY_PROP1(WC%BC_INDEX)` vs `B1_INDEX` is a candidate upstream patch, debug assert until then), P4 accept |
 | `DELTA_RHO_ZZ` scatter, species and combustion loops | Species & Combustion Lead | requested 2026-10-02 |
 | Solid-phase counters and wall loops (`CELL_COUNTER` and similar) | Solid Phase Lead | requested 2026-10-02 |
 | `CHECK_MASS_DENSITY` species clipping loop, two-pass split (patch 0003) | Species & Combustion Lead | sign-off request written (`0003-mass-check-density-two-pass.signoff.md`), not yet sent |
 | Radiation loops | Radiation Lead | requested 2026-10-02 |
-| `CHECK_STABILITY` reductions and other cross-cutting reductions | V&V Lead | requested 2026-10-02 |
+| `CHECK_STABILITY` (V1) and `CHECK_DIVERGENCE` (V2) reductions | V&V Lead | signed off 2026-10-02: V1 accept (merge per-box results by value, then larger global K,J,I; device `**ONTH` last-bit difference accepted if the location matches for distinct maxima; tie test without `pow`), V2 accept (run still stops on NaN through the existing check; minimum keeps first-wins, smaller global index; test for it), OpenMP merge not translated, accept |

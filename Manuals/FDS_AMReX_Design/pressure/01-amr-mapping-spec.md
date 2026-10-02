@@ -187,11 +187,11 @@ levels are advanced with different time steps**. The coarse face velocities used
 time-averaged fine face velocities. With **B-1 there is no such mismatch**:
 * one composite solve per half-step enforces the divergence constraint on the composite grid;
 * `average_down_faces` (§C.2) makes the coarse C/F face velocities equal to the fine averages at the same time level;
-* same-time flux replacement (FR-024; a "reflux" with no time integration) keeps the scalars conservative;
+* interface flux overwrite (D-050, FR-024: the coarse face flux is replaced by the area sum of the fine face fluxes, per stage; there is no flux register, no reflux and no fine-level substep) keeps the scalars conservative;
 * the zone integrals are formed once per step over uncovered cells (§C.3).
 
 So under B-1, no sync projection is needed for correctness. PeleLMeX (no subcycling) has none. **R-05 is therefore
-mainly a subcycling risk** (Phase 6). Under B-1 the remaining C/F risk is the ordinary C/F discretisation error of the
+mainly a subcycling risk**. Owner ruling D-050 fixes one global δt on all levels with no subcycling, so the R-05 gate applies only if a later ADR reopens subcycling; Phase 6 is sync corrections only (a dP̄₀/dt correction only if Phase 4 shows it is needed). Under B-1 the remaining C/F risk is the ordinary C/F discretisation error of the
 composite operator and of the scalar fluxes. It is measured by the R-05 trigger ("interface-adjacent divergence
 residual > 10× interior"), which should read ≈ solver tolerance everywhere under B-1. **[REC-B3]** Keep the R-05 gate
 at M4 as a check on this argument, using diagnostics (i) and (iii) of §H.
@@ -253,7 +253,7 @@ discriminating test (§H).
   must equal the average of the fine D. Otherwise the coarse-level smoother sees an inconsistent RHS, and the
   convergence of the composite solve degrades (the residual on covered cells is not used, but the coarse-level
   correction is).
-* **Reflux of scalar fluxes.** Needed for conservation of ρ, ρY and energy across C/F boundaries (`FluxRegister`). This is
+* **Interface flux overwrite of scalar fluxes (D-050; replaces reflux).** Needed for conservation of ρ, ρY and energy across C/F boundaries: the coarse face flux is overwritten by the area sum of the fine face fluxes at each stage, with no `FluxRegister`. This is
   outside the pressure step, but D and the zone integrals assume conservative transport.
 
 ### C.3 Zone integrals over uncovered cells
