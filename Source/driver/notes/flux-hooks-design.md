@@ -9,7 +9,7 @@ the ruling "no heat override in phase 3". Line numbers are those of `Source/mass
 | Kind | Quantity (unit kg/(m2 s) of rho*Z_n) | Where it exists in FDS | Hook |
 |---|---|---|---|
 | ADV | stage product `FX(I,J,K,n)*UU(I,J,K)` (and `FY*VV`, `FZ*WW`), faces I = 0..IBAR | not stored (inline in the mass update, `mass.f90` 448-450 predictor and 625-627 corrector); `ADV_FX` exists only with `STORE_SPECIES_FLUX` and after the corrector holds the stage average (`mass.f90` 654) | driver side only: the density kernel is the driver's generated copy `fds_density_split.f90` (`tools/gen_density_split.py`), so the hook is a change of the generator, **no patch of `mass.f90`** |
-| DIF | `RHO_D_DZDX/Y/Z(I,J,K,n)` (`SWORK1..3`) after the species-sum fix (`divg.f90` ~249) and the wall corrections (~196-225), i.e. exactly what the divergence reads (`DEL_RHO_D_DEL_Z`, ~411) | `DIF_FX` exists only with `STORE_SPECIES_FLUX` (`divg.f90` 269-278, 336-349) and holds the NEGATIVE of `RHO_D_DZDX` | **guarded patch 0008** (`divg.f90`, one call under `#ifdef WITH_AMREX`) |
+| DIF | `RHO_D_DZDX/Y/Z(I,J,K,n)` (`SWORK1..3`) after the species-sum fix (`divg.f90` ~249) and the wall corrections (~196-225), i.e. exactly what the divergence reads (`DEL_RHO_D_DEL_Z`, ~411) | `DIF_FX` exists only with `STORE_SPECIES_FLUX` (`divg.f90` 269-278, 336-349) and holds the NEGATIVE of `RHO_D_DZDX` | **guarded patch 0009** (`divg.f90`, one call under `#ifdef WITH_AMREX`) |
 | heat | enthalpy diffusion flux `H_S*RHO_D_DZDX` (`divg.f90` ~303) and conduction `KDTDX` (~516) | formed inside the species loop after the species flux | no override now (RO §2, ruling): see section 7 |
 
 Sign and unit convention of the read-out and of the override value: the value the divergence loop reads (`RHO_D_DZDX` itself, not `DIF_FX`). ADV is the product with the
@@ -31,7 +31,7 @@ same BoxArray and DistributionMapping as the level), allocated on first use of `
 `FluxAccess` is implemented by a `TimeLoop` adapter (`FluxStages`, new, over the existing per-level stage entry points). For stage `predictor`:
 1. `compute_stage_fluxes(level, predictor)` for every level:
    - ADV: after `stage_mfd` (FX computed by the existing `MASS_FINITE_DIFFERENCES` call) a new generated entry `DENSITY_ADV_READOUT(NM)` builds the same `UU,VV,WW` as `DENSITY_PRE_CLIP` (including the `UVW_SAVE` restore) and writes `FX*UU` etc. into the registered ADV arrays through the hook module. It reads only; the cell update does not run.
-   - DIF: `stage_divergence1` as today, with the hook (patch 0008) in READ mode: at the hook point the hook copies `RHO_D_DZDX..Z(0:IBAR,..,1:N_TOTAL_SCALARS)` of the box into the registered DIF arrays and returns. The rest of `DIVERGENCE_PART_1` runs as at level 0.
+   - DIF: `stage_divergence1` as today, with the hook (patch 0009) in READ mode: at the hook point the hook copies `RHO_D_DZDX..Z(0:IBAR,..,1:N_TOTAL_SCALARS)` of the box into the registered DIF arrays and returns. The rest of `DIVERGENCE_PART_1` runs as at level 0.
 2. Role 3 reads `stage_flux` and calls `set_flux_override(level, kind, per_local_box)` (coarse faces only, `FluxOverride` of RO §3), finest first. The driver stores the lists in a hook-module table indexed by box (Fortran view `n_ovr`, `idx(3,n_ovr)`, `val(N_TOTAL_SCALARS, n_ovr)`; index conversion `I = a - lo_x` for the normal direction, `J = b - lo_y + 1` tangential, done once at `set_flux_override`). Every entry is range-checked (inside `0..IBAR`, `1..JBAR`, `1..KBAR`; a ghost face is an error).
 3. `apply_flux_divergence(level, predictor)` for every level, finest first:
    - ADV: the density update of `DENSITY_PRE_CLIP`/`DENSITY_POST_CLIP`. With `n_ovr(box) = 0` the generated code is the present loop text, unchanged (the loop is selected by `IF (N_ADV_OVR>0)`); with overrides a second copy of the loop reads a per-face product array that equals `FX*UU` except at the listed faces (a separate loop because a materialised product need not round like the inline expression if the compiler contracts to FMA; the empty-set path is therefore the original loop and bitwise unchanged by construction).
@@ -49,19 +49,20 @@ Level order in the driver: phase 1 runs coarse to fine (any order, no dependency
 
 ## 5. Bitwise-unchanged guarantee and tests
 - T1 (empty set): a run of the driver with the adapter's three phases and no overrides is bitwise equal to the same run without the adapter (final fields and step logs, `bitcmp.sh` style), 1 and 4 ranks, `dec2`, `dec4`, a case with `STORE_SPECIES_FLUX` off.
-- T1b: `USE_AMREX=OFF` with patch 0008: `check_off_bitwise.sh` (the macro is undefined, so the preprocessed source is unchanged apart from blank lines).
+- T1b: `USE_AMREX=OFF` with patch 0009: `check_off_bitwise.sh` (the macro is undefined, so the preprocessed source is unchanged apart from blank lines).
 - T2 (no-op override): an override list that carries the kernel's own values (read from phase 1) at the box-box faces of one level must reproduce the empty-set result bitwise (ADV and DIF), 1 and 4 ranks. Tests the index conversion and the second loop copy of the density update.
 - T3 (re-run): `DIVERGENCE_PART_1` run twice per stage gives bitwise the same fields as once (needed for the DIF phase 3).
 - T4: read-out content: `stage_flux(ADV)` equals `FX*UU` recomputed on the C++ side from `FX` (read through `fds_k_xfer` mode 3) and `U`; `stage_flux(DIF)` equals `-DIF_FX` of a run with `STORE_SPECIES_FLUX` on (reference only; that run is not the production configuration).
 - T5: sum rule: for the DIF read-out the sum over the tracked species of each face is zero to rounding (species-sum fix), so a conservative override keeps it.
 
 ## 6. Patches and files
+- 0008: kernel files route `POINT_TO_MESH` to `POINT_TO_BOX` (fine-level boxes, D-056 option B); not a flux patch, listed because it took the number that this note first gave to the DIF hook, which is therefore **0009**.
 - 0007: DRAFT grown `POINT_TO_BOX` (D-056 option B), `patches/0007-*.md`; not part of this task, listed because the fine-level hook needs boxes of level > 0.
-- 0008: `divg.f90`, one `#ifdef WITH_AMREX` block in `DIVERGENCE_PART_1` after the species-sum correction (`CALL FDS_HOOK_DIF_FLUX(NM, PREDICTOR, ...)`, plus a `USE FDS_AMREX_HOOKS` line). The hook returns at once when the box has no registered DIF array and no override: with the macro undefined the patch changes nothing.
+- 0009: `divg.f90`, one `#ifdef WITH_AMREX` block in `DIVERGENCE_PART_1` after the species-sum correction (`CALL FDS_HOOK_DIF_FLUX(NM, PREDICTOR, ...)`, plus a `USE FDS_AMREX_HOOKS` line). The hook returns at once when the box has no registered DIF array and no override: with the macro undefined the patch changes nothing.
 - Driver files: `fds_flux_hooks.f90` (hook module: registered views, override tables, READ/OVERRIDE state), `tools/gen_density_split.py` (read-out entry and the override copy of the update loop), `FluxStages.{H,cpp}` (adapter over `TimeLoop` stage entries, implements `FluxAccess`), `LevelRegistry` (StageFlux arrays), tests T1-T5.
 
 ## 7. Heat flux, second step
 Only if the V&V lead later asks for matching of conduction or of `h x F` per fine face: a second hook at `divg.f90` ~303 (the `H_RHO_D_DZDX` arrays, `WORK5..7`) with a `FluxKind::HEAT` and the same list structure, and at ~516 for `KDTDX` (`WORK1`). Not designed further: the ruling is that heat follows FDS.
 
 ## 8. Dates (calendar days, estimates, not commitments)
-Design (this note) 6 October. ADV read-out and override with T1, T2, T4 (driver side only): 12 October, behind the level > 0 kernel work of D-056 which has priority. Patch 0008, DIF read-out and override with T1b, T2, T3, T5: 14 October. The real 2-level exercise waits for Role 3's `set_flux_override` calls and for oneAPI validation of 0005/0007 for fine boxes; at level 0 the tests above run with fake overrides.
+Design (this note) 6 October. ADV read-out and override with T1, T2, T4 (driver side only): 12 October, behind the level > 0 kernel work of D-056 which has priority. Patch 0009, DIF read-out and override with T1b, T2, T3, T5: 14 October. The real 2-level exercise waits for Role 3's `set_flux_override` calls and for oneAPI validation of 0005/0007 for fine boxes; at level 0 the tests above run with fake overrides.

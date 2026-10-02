@@ -34,7 +34,8 @@ inline DirBc map_pressure_bc_direction(int dir, int code_lo, int code_hi, int nc
     if (code_lo < 0 || code_hi < 0) { r.error = "no box found at a domain face (pressure boundary map)"; return r; }
     if (level_periodic) { r.lo = r.hi = pb::BC::Periodic; return r; }   // level-wide periodic whatever the per-mesh code (several meshes: the mesh-to-mesh interpolated boundaries the level solve replaces)
     if (code_lo == 0 || code_hi == 0) {
-        if (ncell != 1) { r.error = "FDS pressure code 0 (periodic) on a non-periodic domain direction " + d + " with more than one cell (inconsistent, S6)"; return r; }
+        if (ncell != 1) { r.error = "FDS reports pressure code 0 (periodic) on the non-periodic domain direction " + d + " with " + std::to_string(ncell) + " cells: this is the case type with no pressure solve "
+                                  "(prescribed velocity, PERIODIC_TEST=13, the soborot_* and Species/bound_test_* inputs). No pressure solve is supported in AMR mode: the case is refused (Architect decision, 23 such verification inputs)"; return r; }
         r.lo = r.hi = pb::BC::Neumann;   // one cell: the Neumann and periodic operators coincide
         return r;
     }

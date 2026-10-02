@@ -29,6 +29,7 @@ USE PRECISION_PARAMETERS
 USE GLOBAL_CONSTANTS
 USE MESH_POINTERS
 USE COMP_FUNCTIONS, ONLY: CURRENT_TIME
+USE FDS_BOX_OBJ, ONLY: HAS_M_DOT_PPP
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
@@ -49,5 +50,9 @@ post += ['', 'CASE(.FALSE.) PREDICTOR_STEP  ! CORRECTOR step', '']
 post += L(704, 768)
 post += ['', 'CONTAINS', ''] + L(966, 989) + ['', 'END SUBROUTINE DENSITY_POST_CLIP', '', 'END MODULE FDS_DENSITY_SPLIT', '']
 out = os.path.join(here, '..', 'fds_density_split.f90')
-open(out, 'w').write(HDR + '\n'.join(pre + post))
+txt = HDR + '\n'.join(pre + post)
+# D-056 option B: the copy finds its box through POINT_TO_BOX (level 0: same as POINT_TO_MESH) and reads M_DOT_PPP from the mesh object of the box (level 0 or fine level)
+assert txt.count('CALL POINT_TO_MESH(NM)') == 2 and txt.count('ALLOCATED(MESHES(NM)%M_DOT_PPP)') == 2
+txt = txt.replace('CALL POINT_TO_MESH(NM)', 'CALL POINT_TO_BOX(NM)').replace('ALLOCATED(MESHES(NM)%M_DOT_PPP)', 'HAS_M_DOT_PPP(NM)')
+open(out, 'w').write(txt)
 print('wrote', os.path.normpath(out))

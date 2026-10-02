@@ -36,11 +36,22 @@ END TYPE BOX_VIEW_TYPE
 
 TYPE(BOX_VIEW_TYPE), ALLOCATABLE, TARGET, PUBLIC, SAVE :: BOX_VIEW(:)
 
-PUBLIC :: FDS_HOOK_SET_FLAG,FDS_HOOK_SET_VIEW,FDS_HOOK_SET_STEP,FDS_HOOK_STEP_OUTPUTS,FDS_HOOK_FINE_ABORT,FDS_HOOK_FINE_GUARD,FDS_HOOK_SET_FINE_READY
+PUBLIC :: FDS_HOOK_SET_FLAG,FDS_HOOK_SET_VIEW,FDS_HOOK_SET_STEP,FDS_HOOK_STEP_OUTPUTS,FDS_HOOK_FINE_ABORT,FDS_HOOK_FINE_GUARD,FDS_HOOK_SET_FINE_READY,FDS_HOOK_SHADOW,SHADOW_PROC,SHADOW_IF,FDS_HOOK_BIND_VIEW,FDS_HOOK_L0_ONLY
 
 !> D-056 (option B): the set of kernel wrappers (fds_kernels.f90 entry names) that may run on a fine-level mesh number (NM > NMESHES). Empty until patch 0007 is validated and the
 !> kernels are switched to POINT_TO_BOX: every wrapper aborts on a fine number now. Set by FDS_HOOK_FINE_READY (also callable from the draft driver file fds_fine_mesh_b.f90).
 LOGICAL, SAVE :: FINE_READY = .FALSE.
+
+!> Shadow hook (fine-level box test, D-056 option B): when a procedure is registered (draft file fds_fine_box_b.f90, option FDS_AMR_FINE_B_DRAFT), every kernel wrapper calls it before (PHASE=0)
+!> and after (PHASE=1) the kernel on a level-0 box, so that the same kernel can be run on a fine-level copy through POINT_TO_BOX and compared. Not registered in a normal run.
+ABSTRACT INTERFACE
+   SUBROUTINE SHADOW_IF(PHASE,KIND,NM,T,DT,EST,DTNEW,ICHG)
+      IMPORT :: EB
+      INTEGER, INTENT(IN) :: PHASE,KIND,NM,EST,ICHG
+      REAL(EB), INTENT(IN) :: T,DT,DTNEW
+   END SUBROUTINE SHADOW_IF
+END INTERFACE
+PROCEDURE(SHADOW_IF), POINTER, SAVE :: SHADOW_PROC => NULL()
 
 CONTAINS
 
@@ -71,43 +82,54 @@ INTEGER(C_INT), VALUE :: NMAX,NM,WHICH
 INTEGER(C_INT), INTENT(IN) :: LB(4),EXT(4)
 TYPE(C_PTR), VALUE :: P
 INTEGER(C_INT) :: IERR
-REAL(EB), POINTER, DIMENSION(:) :: FLAT
 IERR = 1
 IF (.NOT.ALLOCATED(BOX_VIEW)) ALLOCATE(BOX_VIEW(NMAX))
 IF (NM<1 .OR. NM>SIZE(BOX_VIEW)) RETURN
+IERR = FDS_HOOK_BIND_VIEW(BOX_VIEW(NM),WHICH,LB,EXT,P)
+END FUNCTION FDS_HOOK_SET_VIEW
+
+!> The body of FDS_HOOK_SET_VIEW for any view object V: BOX_VIEW(NM) of a level-0 box, FINE_LEVEL(L)%VIEW(IB) of a fine-level box (draft/fds_fine_box_b.f90). 0, or 1 for an unknown WHICH.
+FUNCTION FDS_HOOK_BIND_VIEW(V,WHICH,LB,EXT,P) RESULT(IERR)
+TYPE(BOX_VIEW_TYPE), INTENT(INOUT) :: V
+INTEGER(C_INT), VALUE :: WHICH
+INTEGER(C_INT), INTENT(IN) :: LB(4),EXT(4)
+TYPE(C_PTR), VALUE :: P
+INTEGER(C_INT) :: IERR
+REAL(EB), POINTER, DIMENSION(:) :: FLAT
+IERR = 1
 IF (WHICH<1 .OR. WHICH>22) RETURN
 IF (WHICH>=21) THEN
    CALL C_F_POINTER(P,FLAT,[INT(EXT(1))*EXT(2)*EXT(3)*EXT(4)])
-   IF (WHICH==21) BOX_VIEW(NM)%ZZ (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1,LB(4):LB(4)+EXT(4)-1) => FLAT
-   IF (WHICH==22) BOX_VIEW(NM)%ZZS(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1,LB(4):LB(4)+EXT(4)-1) => FLAT
+   IF (WHICH==21) V%ZZ (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1,LB(4):LB(4)+EXT(4)-1) => FLAT
+   IF (WHICH==22) V%ZZS(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1,LB(4):LB(4)+EXT(4)-1) => FLAT
    IERR = 0
    RETURN
 ENDIF
 CALL C_F_POINTER(P,FLAT,[INT(EXT(1))*EXT(2)*EXT(3)])
 SELECT CASE(WHICH)
-   CASE( 1) ; BOX_VIEW(NM)%U   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 2) ; BOX_VIEW(NM)%V   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 3) ; BOX_VIEW(NM)%W   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 4) ; BOX_VIEW(NM)%US  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 5) ; BOX_VIEW(NM)%VS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 6) ; BOX_VIEW(NM)%WS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 7) ; BOX_VIEW(NM)%D   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 8) ; BOX_VIEW(NM)%DS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE( 9) ; BOX_VIEW(NM)%H   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(10) ; BOX_VIEW(NM)%HS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(11) ; BOX_VIEW(NM)%KRES(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(12) ; BOX_VIEW(NM)%FVX (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(13) ; BOX_VIEW(NM)%FVY (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(14) ; BOX_VIEW(NM)%FVZ (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(15) ; BOX_VIEW(NM)%RHO (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(16) ; BOX_VIEW(NM)%RHOS(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(17) ; BOX_VIEW(NM)%MU  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(18) ; BOX_VIEW(NM)%TMP (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(19) ; BOX_VIEW(NM)%Q   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
-   CASE(20) ; BOX_VIEW(NM)%RSUM(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 1) ; V%U   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 2) ; V%V   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 3) ; V%W   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 4) ; V%US  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 5) ; V%VS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 6) ; V%WS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 7) ; V%D   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 8) ; V%DS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE( 9) ; V%H   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(10) ; V%HS  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(11) ; V%KRES(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(12) ; V%FVX (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(13) ; V%FVY (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(14) ; V%FVZ (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(15) ; V%RHO (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(16) ; V%RHOS(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(17) ; V%MU  (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(18) ; V%TMP (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(19) ; V%Q   (LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
+   CASE(20) ; V%RSUM(LB(1):LB(1)+EXT(1)-1,LB(2):LB(2)+EXT(2)-1,LB(3):LB(3)+EXT(3)-1) => FLAT
 END SELECT
 IERR = 0
-END FUNCTION FDS_HOOK_SET_VIEW
+END FUNCTION FDS_HOOK_BIND_VIEW
 
 !> Declare (FLAG/=0) that the kernel wrappers may run on fine-level mesh numbers (only after patch 0007 is validated and the kernels call POINT_TO_BOX; off by default).
 SUBROUTINE FDS_HOOK_SET_FINE_READY(FLAG) BIND(C,NAME='fds_hook_set_fine_ready')
@@ -140,5 +162,26 @@ INTEGER, INTENT(IN) :: NMESHES_L0
 IF (NM>NMESHES_L0 .AND. .NOT.FINE_READY) CALL FDS_HOOK_FINE_ABORT(WHERE,INT(NM))
 
 END SUBROUTINE FDS_HOOK_FINE_GUARD
+
+!> Guard at the entry of a driver routine that is level-0 only (it reads MESHES(NM), FDS pressure/vent/wall structures of a level-0 mesh): a number above NMESHES always aborts, fine-ready or not.
+SUBROUTINE FDS_HOOK_L0_ONLY(WHERE,NM,NMESHES_L0)
+
+CHARACTER(*), INTENT(IN) :: WHERE
+INTEGER(C_INT), INTENT(IN) :: NM
+INTEGER, INTENT(IN) :: NMESHES_L0
+
+IF (NM>NMESHES_L0) CALL FDS_HOOK_FINE_ABORT(WHERE,INT(NM))
+
+END SUBROUTINE FDS_HOOK_L0_ONLY
+
+!> Call of the registered shadow procedure (no-op when none is registered).
+SUBROUTINE FDS_HOOK_SHADOW(PHASE,KIND,NM,T,DT,EST,DTNEW,ICHG)
+
+INTEGER, INTENT(IN) :: PHASE,KIND,NM,EST,ICHG
+REAL(EB), INTENT(IN) :: T,DT,DTNEW
+
+IF (ASSOCIATED(SHADOW_PROC)) CALL SHADOW_PROC(PHASE,KIND,NM,T,DT,EST,DTNEW,ICHG)
+
+END SUBROUTINE FDS_HOOK_SHADOW
 
 END MODULE FDS_AMREX_HOOKS

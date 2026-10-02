@@ -1,0 +1,80 @@
+diff --git a/Source/divg.f90 b/Source/divg.f90
+index 5bfe375..3fdce66 100644
+--- a/Source/divg.f90
++++ b/Source/divg.f90
+@@ -1,3 +1,9 @@
++#ifdef WITH_AMREX
++! Patch 0008: the kernels of this file find the data of a box through POINT_TO_BOX (patches 0005/0007): for a level-0 mesh without BOX_VIEW data it is POINT_TO_MESH,
++! for a box of a refinement level > 0 (D-056 option B) it points at FINE_LEVEL(L)%BOX(IB). Every CALL POINT_TO_MESH(NM) of this file becomes CALL POINT_TO_BOX(NM).
++#define POINT_TO_MESH POINT_TO_BOX
++#endif
++
+ MODULE DIVG
+ 
+ USE PRECISION_PARAMETERS
+diff --git a/Source/mass.f90 b/Source/mass.f90
+index df5c6ee..3c5cde5 100644
+--- a/Source/mass.f90
++++ b/Source/mass.f90
+@@ -1,5 +1,11 @@
+ !> \brief Mass transport equations
+ 
++#ifdef WITH_AMREX
++! Patch 0008: the kernels of this file find the data of a box through POINT_TO_BOX (patches 0005/0007): for a level-0 mesh without BOX_VIEW data it is POINT_TO_MESH,
++! for a box of a refinement level > 0 (D-056 option B) it points at FINE_LEVEL(L)%BOX(IB). Every CALL POINT_TO_MESH(NM) of this file becomes CALL POINT_TO_BOX(NM).
++#define POINT_TO_MESH POINT_TO_BOX
++#endif
++
+ MODULE MASS
+ 
+ USE PRECISION_PARAMETERS
+diff --git a/Source/turb.f90 b/Source/turb.f90
+index 4056527..6d3af57 100644
+--- a/Source/turb.f90
++++ b/Source/turb.f90
+@@ -1,6 +1,12 @@
+ ! This module is useful for verification tests and development of
+ ! turbulence models.
+ 
++#ifdef WITH_AMREX
++! Patch 0008: the kernels of this file find the data of a box through POINT_TO_BOX (patches 0005/0007): for a level-0 mesh without BOX_VIEW data it is POINT_TO_MESH,
++! for a box of a refinement level > 0 (D-056 option B) it points at FINE_LEVEL(L)%BOX(IB). Every CALL POINT_TO_MESH(NM) of this file becomes CALL POINT_TO_BOX(NM).
++#define POINT_TO_MESH POINT_TO_BOX
++#endif
++
+ MODULE TURBULENCE
+ 
+ USE PRECISION_PARAMETERS
+diff --git a/Source/velo.f90 b/Source/velo.f90
+index 2a1bcbe..395d02d 100644
+--- a/Source/velo.f90
++++ b/Source/velo.f90
+@@ -1,6 +1,12 @@
+ !> \brief Collection of velocity routines.
+ !> Computes the velocity flux terms, baroclinic torque correction terms, and performs the CFL check.
+ 
++#ifdef WITH_AMREX
++! Patch 0008: the kernels of this file find the data of a box through POINT_TO_BOX (patches 0005/0007): for a level-0 mesh without BOX_VIEW data it is POINT_TO_MESH,
++! for a box of a refinement level > 0 (D-056 option B) it points at FINE_LEVEL(L)%BOX(IB). Every CALL POINT_TO_MESH(NM) of this file becomes CALL POINT_TO_BOX(NM).
++#define POINT_TO_MESH POINT_TO_BOX
++#endif
++
+ MODULE VELO
+ 
+ USE PRECISION_PARAMETERS
+diff --git a/Source/wall.f90 b/Source/wall.f90
+index b98620e..5bd185b 100644
+--- a/Source/wall.f90
++++ b/Source/wall.f90
+@@ -1,5 +1,11 @@
+ !> \brief Collection of routines to compute boundary conditions
+ 
++#ifdef WITH_AMREX
++! Patch 0008: the kernels of this file find the data of a box through POINT_TO_BOX (patches 0005/0007): for a level-0 mesh without BOX_VIEW data it is POINT_TO_MESH,
++! for a box of a refinement level > 0 (D-056 option B) it points at FINE_LEVEL(L)%BOX(IB). Every CALL POINT_TO_MESH(NM) of this file becomes CALL POINT_TO_BOX(NM).
++#define POINT_TO_MESH POINT_TO_BOX
++#endif
++
+ MODULE WALL_ROUTINES
+ 
+ USE PRECISION_PARAMETERS

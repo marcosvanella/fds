@@ -29,6 +29,8 @@ extern "C" void fds_k_visc(int nm, int est);
 #ifdef FDS_FINE_B_DRAFT
 extern "C" int fds_fine_b_selftest();
 extern "C" void fds_fine_b_abort_test(int kind);
+extern "C" int fds_fine_b_shadow_enable(int mode);
+extern "C" int fds_fine_b_shadow_report();
 #endif
 
 namespace {
@@ -116,15 +118,28 @@ int main(int argc, char** argv)
             if (argc > 2 && std::strcmp(argv[2], "--run") == 0) {
                 // --run [--steps N] [--outdir D] [--chid C] [--quiet] [--exact-zone-sums]: the C++ time loop (S5)
                 fdsamr::RunOptions ro;
+                bool fine_shadow = false;
+                int fine_build = 0;
                 for (int i = 3; i < argc; ++i) {
                     if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) ro.max_steps = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) ro.outdir = argv[++i];
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) ro.chid = argv[++i];
                     else if (std::strcmp(argv[i], "--quiet") == 0) ro.quiet = true;
                     else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
+                    else if (std::strcmp(argv[i], "--fine-b-shadow") == 0) fine_shadow = true;
+                    else if (std::strcmp(argv[i], "--fine-b-build") == 0) { fine_shadow = true; fine_build = 1; }
                 }
+#ifdef FDS_FINE_B_DRAFT
+                // --fine-b-shadow: every kernel call is repeated on a fine-level copy of the box (draft/fds_fine_box_b.f90) and compared bit by bit
+                if (fine_shadow && fds_fine_b_shadow_enable(fine_build) != 0) amrex::Abort("--fine-b-shadow needs a single level-0 mesh");
+#else
+                if (fine_shadow) amrex::Abort("--fine-b-shadow needs a build with -DFDS_AMR_FINE_B_DRAFT=ON (patches 0007 and 0008)");
+#endif
                 fdsamr::TimeLoop loop(l0, dt, ro);
-                const int nfail = loop.run();
+                int nfail = loop.run();
+#ifdef FDS_FINE_B_DRAFT
+                if (fine_shadow) nfail += fds_fine_b_shadow_report();
+#endif
                 amrex::Print() << (nfail == 0 ? "RUN COMPLETE" : "RUN FAILED") << ": steps = " << loop.icyc() << ", T = " << loop.time() << "\n";
                 if (nfail == 0) mode_end = 1;
             }

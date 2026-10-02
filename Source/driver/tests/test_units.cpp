@@ -718,6 +718,12 @@ long test_pressure_bc_map(int)
     for (int c = 1; c <= 4; ++c) CHECK_MSG(str(1, c, c, 1, false, true) == "NN", std::string("TWO_D y, code ") + std::to_string(c) + " -> NN");
     CHECK_MSG(str(1, 0, 0, 1, true, true) == "PP" && str(1, 0, 0, 1, false, true) == "NN", "TWO_D y periodic -> PP, code 0 -> NN");
     CHECK_MSG(!map_pressure_bc_direction(1, 1, 1, 1, false, true).note.empty(), "the Dirichlet-to-Neumann change in the ignored direction is reported");
+    // code 0 on a non-periodic thick direction (soborot_*, bound_test_*: no pressure solve): refused, and the message names the case type and the AMR-mode limit
+    {
+        const DirBc m = map_pressure_bc_direction(0, 0, 0, 32, false, false);
+        CHECK_MSG(m.error.find("no pressure solve") != std::string::npos && m.error.find("AMR mode") != std::string::npos && m.error.find("soborot_") != std::string::npos && m.error.find("PERIODIC_TEST=13") != std::string::npos,
+                  "code 0 on a non-periodic direction: refusal message names the case type and says that no pressure solve is supported in AMR mode");
+    }
     // one-cell x or z (FDS solves it with the Dirichlet term): Neumann/periodic exact, Dirichlet refused
     CHECK_MSG(str(0, 3, 3, 1, false, false) == "NN" && str(2, 0, 0, 1, false, false) == "NN" && str(0, 0, 0, 1, true, false) == "PP", "one-cell x/z: N and P are exact");
     for (int c : {1, 2, 4}) CHECK_MSG(str(2, c, c, 1, false, false) == "ERR" && str(0, c, c, 1, false, false) == "ERR", std::string("one-cell x/z with code ") + std::to_string(c) + " (Dirichlet face) is refused");

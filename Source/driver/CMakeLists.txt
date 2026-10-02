@@ -50,6 +50,7 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_box_obj.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_amrex_hooks.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90
@@ -57,18 +58,27 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_alias.c
 )
-set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_amrex_hooks.f90
+set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_box_obj.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_amrex_hooks.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
     PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 
+# D-056 option B: FDS_FINE_B is defined for the driver Fortran when the tree carries patch 0007 (Source/mesh.f90 declares FINE_LEVEL_TYPE); fds_box_obj.f90 then resolves fine
+# mesh numbers to FINE_LEVEL(L)%BOX(IB). Without the patch the driver is unchanged.
+get_filename_component(_fds_mesh_f90 ${CMAKE_CURRENT_LIST_DIR}/../mesh.f90 ABSOLUTE)   # lexical '..': a tree whose driver directory is a symlink must read its own mesh.f90
+file(READ ${_fds_mesh_f90} _fds_mesh_src)
+if (_fds_mesh_src MATCHES "FINE_LEVEL_TYPE")
+    target_compile_definitions(fds PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:FDS_FINE_B>")
+    message(STATUS "Patch 0007 found in Source/mesh.f90: FDS_FINE_B defined")
+endif()
+
 # D-056 option B DRAFT (patch 0007, mesh.f90): needs the patch applied to the tree; OFF by default and not used for physics. Adds draft/fds_fine_mesh_b.f90 and the
 # `--fine-b-selftest` / `--fine-b-abort N` modes of fds_amr.
 option(FDS_AMR_FINE_B_DRAFT "Build the fine-level mesh object draft (needs patch 0007)" OFF)
 if (FDS_AMR_FINE_B_DRAFT)
-    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90)
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90 PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
+    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90 ${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_box_b.f90)
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_mesh_b.f90 ${CMAKE_CURRENT_LIST_DIR}/draft/fds_fine_box_b.f90 PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
     target_compile_definitions(fds PRIVATE FDS_FINE_B_DRAFT)
 endif()
 

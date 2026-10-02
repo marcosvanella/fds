@@ -45,7 +45,8 @@ A bound level needs, per box, a `MESH_TYPE` object holding:
    by level (patch 0005 grows by one module array; the kernels still receive the mesh number). Role 1 prefers (B): it does not touch the level-0 mesh count loops in
    `main.f90` (these assume NMESHES = level-0 meshes, MPI maps, `OMESH` allocation);
 5. `fds_p_mesh_info`, `fds_p_zone_*` per level (the zone tables stay level-0 under D-053 until pressure zones under AMR are decided).
-This is the single blocking item for physics on level > 0; nothing else in the driver is fixed to level 0 any more, except the items listed in section 2.
+**Status (S10.1, option B, DRAFT patches 0007/0008):** items 1 and 3 and the cell table of 2 are built by `draft/fds_fine_box_b.f90` (`BUILD_FINE_BOX`; state arrays bound by `FDS_FINE_B_SET_VIEW`) and the stages visc, dens(_pre/_post), vflux, div1/2, vpred, vcorr, mfd, baroclinic, noflux run on a box at mesh number `> NMESHES` through `POINT_TO_BOX`, bitwise equal to the level-0 run in the core of a built box and everywhere in a clone (`tests/run_fine_b_shadow_check.sh`). Still open: the domain-edge walls and the interface walls of a fine box (the cells next to a periodic or physical face of a built box differ from FDS's wall treatment), obstructions (none), the pressure stages (RHS, residual, velocity error, `H_GHOST`), match/neutralize/xfer stages (level 0 only, `FDS_HOOK_L0_ONLY`). Item 4 is decided (option B, D-056).
+This was the single blocking item for physics on level > 0; nothing else in the driver is fixed to level 0 any more, except the items listed in section 2.
 
 ## 4. Coarse-fine faces and the OMESH route
 
