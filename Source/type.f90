@@ -1329,8 +1329,6 @@ TYPE CC_CUTFACE_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::     TMP_FACE !< Gas phase cut-face temperature array. (1:NFACE)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) ::   RHO_D_DZDN !< Diffusive mass flux for species and cut-faces.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: H_RHO_D_DZDN !< Heat flux due to diffusive mass flux for species and cut-faces.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::     VEL_SAVE !< Saved unlinked velocities container for cut-faces.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::      VEL_LNK !< Linked velocity container for cut-faces.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::    VEL_OMESH !< OMESH Corrector velocity normal to cut-faces of MESHES(NOM).
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::   VELS_OMESH !< OMESH Predictor velocity normal to cut-faces. (1:NFACE)
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::VEL_LNK_OMESH !< OMESH Linked velocities.
@@ -1540,6 +1538,7 @@ TYPE CC_FACE_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NONORTH_COR !< (IAXIS:KAXIS,1:N) non-orthogonal correction vector.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VEL, VELS   !< (1:N) corrector and predictor owner-normal velocity.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: FN, FN_B    !< (1:N) momentum RHS and baroclinic component.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VEL_SAVE, VEL_LNK !< (1:N) pre-average and linked cut-face velocity.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: ADV_FLUX    !< (1:N_TOTAL_SCALARS,1:N) positive-axis rho*Z advective flux.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: DIFF_FLUX   !< (1:N_TOTAL_SCALARS,1:N) positive-axis rho*D*grad(Z) flux.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: DIFF_H_FLUX !< (1:N) positive-axis sensible-enthalpy diffusion flux.

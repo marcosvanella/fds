@@ -513,10 +513,9 @@ REAL(EB), INTENT(IN) :: VEL_CF
 LOGICAL, INTENT(IN) :: ESTIMATED
 INTEGER :: JCF,IF_
 TYPE(CC_FV_TYPE), POINTER :: FV
-IF (.NOT.FV_FACE_STORAGE(NM)) RETURN
 FV=>MESHES(NM)%FV
 DO JCF=1,CUT_FACE(ICF)%NFACE
-   IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF); IF (IF_<1) CYCLE
+   IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
    IF (ESTIMATED) THEN
       FV%FACE%VELS(IF_)=VEL_CF
    ELSE
@@ -3832,7 +3831,7 @@ CMP_FLG_IF : IF (CMP_FLG) THEN
    ! Area Average F:
    UN_LNK(1:MESHES(NM)%NUNK_F) = UN_LNK(1:MESHES(NM)%NUNK_F) / AREA_LNK(1:MESHES(NM)%NUNK_F)
 
-   ! Dump in EWC_UN_LNK(IW) and CF%VEL_LNK(JCF) of external boundary regular and cut-faces of type
+   ! Dump in EWC_UN_LNK(IW) and FACE%VEL_LNK of external boundary regular and cut-faces of type
    ! interpolated boundary:
    EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
       WC=>WALL(IW)
@@ -3870,12 +3869,13 @@ CMP_FLG_IF : IF (CMP_FLG) THEN
          ICF=FCVAR(I,J,K,CC_IDCF,X1AXIS)
          CF=>CUT_FACE(ICF)
          DO JCF=1,CF%NFACE
+            IF_=CF%FC(JCF)
             IF (CF%UNKF(JCF)>0) THEN
-               CF%VEL_LNK(JCF) = UN_LNK(CF%UNKF(JCF))
+               FV%FACE%VEL_LNK(IF_)=UN_LNK(CF%UNKF(JCF))
             ELSEIF(APPLY_TO_ESTIMATED_VARIABLES) THEN
-               CF%VEL_LNK(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
+               FV%FACE%VEL_LNK(IF_)=CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
             ELSE
-               CF%VEL_LNK(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL)
+               FV%FACE%VEL_LNK(IF_)=CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL)
             ENDIF
          ENDDO
       ENDIF
@@ -3933,7 +3933,7 @@ ELSE CMP_FLG_IF
          CASE(KAXIS); WS(I,J,K) = CC_FV_CUTFACE_MOM_AREA(NM,ICF,CC_FV_MOM_VELS) / (DY(J)*DX(I))
          END SELECT
       ENDDO
-      ! Dump flux matched EWC_UN_LNK(IW) and CF%VEL_LNK(JCF) of external boundary regular and cut-faces into
+      ! Dump flux matched EWC_UN_LNK(IW) and FACE%VEL_LNK of external boundary regular and cut-faces into
       ! corresponding US,VS,WS and FACE VELS:
       EXTERNAL_WALL_LOOP_2: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
          WC=>WALL(IW)
@@ -3954,7 +3954,7 @@ ELSE CMP_FLG_IF
             ICF=FCVAR(I,J,K,CC_IDCF,X1AXIS); CF=>CUT_FACE(ICF)
             DO JCF=1,CF%NFACE
                IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-               FV%FACE%VELS(IF_)=CF%VEL_LNK(JCF)
+               FV%FACE%VELS(IF_)=FV%FACE%VEL_LNK(IF_)
             ENDDO
             SELECT CASE(X1AXIS)
             CASE(IAXIS); US(I,J,K) = CC_FV_CUTFACE_MOM_AREA(NM,ICF,CC_FV_MOM_VELS) / (DY(J)*DZ(K))
@@ -4121,7 +4121,7 @@ ELSE CMP_FLG_IF
          CASE(KAXIS); W(I,J,K) = CC_FV_CUTFACE_MOM_AREA(NM,ICF,CC_FV_MOM_VEL) / (DY(J)*DX(I))
          END SELECT
       ENDDO
-      ! Dump flux matched EWC_UN_LNK(IW) and CF%VEL_LNK(JCF) of external boundary regular and cut-faces into
+      ! Dump flux matched EWC_UN_LNK(IW) and FACE%VEL_LNK of external boundary regular and cut-faces into
       ! corresponding U,V,W and FACE VEL:
       EXTERNAL_WALL_LOOP_3: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
          WC=>WALL(IW)
@@ -4142,7 +4142,7 @@ ELSE CMP_FLG_IF
             ICF=FCVAR(I,J,K,CC_IDCF,X1AXIS); CF=>CUT_FACE(ICF)
             DO JCF=1,CF%NFACE
                IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-               FV%FACE%VEL(IF_)=CF%VEL_LNK(JCF)
+               FV%FACE%VEL(IF_)=FV%FACE%VEL_LNK(IF_)
             ENDDO
             SELECT CASE(X1AXIS)
             CASE(IAXIS); U(I,J,K) = CC_FV_CUTFACE_MOM_AREA(NM,ICF,CC_FV_MOM_VEL) / (DY(J)*DZ(K))
@@ -5047,7 +5047,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                DO JCF=1,CF%NFACE
                   LL = LL + 1
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = CF%VEL_LNK(JCF)
+                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = FV%FACE%VEL_LNK(CF%FC(JCF))
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A3
          ELSE
@@ -5055,7 +5055,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
                   CF%VELS_OMESH(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
-                  CF%VEL_LNK_OMESH(JCF) = CF%VEL_LNK(JCF)
+                  CF%VEL_LNK_OMESH(JCF) = FV%FACE%VEL_LNK(CF%FC(JCF))
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112A4
          ENDIF
@@ -5222,7 +5222,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                DO JCF=1,CF%NFACE
                   LL = LL + 1
                   M3%REAL_SEND_PKG112(NQT2*(LL-1)+1) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL)
-                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = CF%VEL_LNK(JCF)
+                  M3%REAL_SEND_PKG112(NQT2*(LL-1)+2) = FV%FACE%VEL_LNK(CF%FC(JCF))
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B3
          ELSE
@@ -5230,7 +5230,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                ICF=M3%ICF_UFFB_CF_S(ICF1); CF => M%CUT_FACE(ICF)
                DO JCF=1,CF%NFACE
                   CF%VEL_OMESH(JCF) = CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL)
-                  CF%VEL_LNK_OMESH(JCF) = CF%VEL_LNK(JCF)
+                  CF%VEL_LNK_OMESH(JCF) = FV%FACE%VEL_LNK(CF%FC(JCF))
                ENDDO
             ENDDO PACK_REAL_SEND_PKG112B4
          ENDIF
@@ -6299,7 +6299,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                            ELSE
                               CFO%VEL_OMESH(JCFO)  = 0.5_EB*(CFO%VEL_OMESH(JCFO)+CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
                            ENDIF
-                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                         ELSE
                            IF(APPLY_TO_ESTIMATED_VARIABLES) THEN
                               CFO%VELS_OMESH(JCFO) = 0.5_EB*(CFO%VELS_OMESH(JCFO)+UU(0,JJ,KK))
@@ -6320,7 +6320,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                         OM_UU(IIO,JJO,KKO)    = 0.5_EB*(OM_UU(IIO,JJO,KKO)+ &
                         PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)+ &
                         (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
-                        OM%U_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%U_LNK(IIO,JJO,KKO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                        OM%U_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%U_LNK(IIO,JJO,KKO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                      ELSE
                         OM_UU(IIO,JJO,KKO)    = 0.5_EB*(OM_UU(IIO,JJO,KKO)+UU(0,JJ,KK))
                         OM%U_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%U_LNK(IIO,JJO,KKO)+EWC_UN_LNK(IW))
@@ -6362,7 +6362,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                            ELSE
                               CFO%VEL_OMESH(JCFO)  = 0.5_EB*(CFO%VEL_OMESH(JCFO)+CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
                            ENDIF
-                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                         ELSE
                            IF(APPLY_TO_ESTIMATED_VARIABLES) THEN
                               CFO%VELS_OMESH(JCFO) = 0.5_EB*(CFO%VELS_OMESH(JCFO)+UU(IBAR,JJ,KK))
@@ -6382,7 +6382,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                         OM_UU(IIO-1,JJO,KKO)    = 0.5_EB*(OM_UU(IIO-1,JJO,KKO)+ &
                         PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)+ &
                         (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
-                        OM%U_LNK(IIO-1,JJO,KKO) = 0.5_EB*(OM%U_LNK(IIO-1,JJO,KKO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                        OM%U_LNK(IIO-1,JJO,KKO) = 0.5_EB*(OM%U_LNK(IIO-1,JJO,KKO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                      ELSE
                         OM_UU(IIO-1,JJO,KKO)    = 0.5_EB*(OM_UU(IIO-1,JJO,KKO)+UU(IBAR,JJ,KK))
                         OM%U_LNK(IIO-1,JJO,KKO) = 0.5_EB*(OM%U_LNK(IIO-1,JJO,KKO)+EWC_UN_LNK(IW))
@@ -6425,7 +6425,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                               CFO%VEL_OMESH(JCFO)  = 0.5_EB*(CFO%VEL_OMESH(JCFO)+CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
                            ENDIF
 
-                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                         ELSE
                            IF(APPLY_TO_ESTIMATED_VARIABLES) THEN
                               CFO%VELS_OMESH(JCFO) = 0.5_EB*(CFO%VELS_OMESH(JCFO)+VV(II,0,KK))
@@ -6445,7 +6445,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                         OM_VV(IIO,JJO,KKO)    = 0.5_EB*(OM_VV(IIO,JJO,KKO)+ &
                         PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)+ &
                         (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
-                        OM%V_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%V_LNK(IIO,JJO,KKO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                        OM%V_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%V_LNK(IIO,JJO,KKO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                      ELSE
                         OM_VV(IIO,JJO,KKO)    = 0.5_EB*(OM_VV(IIO,JJO,KKO)+VV(II,0,KK))
                         OM%V_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%V_LNK(IIO,JJO,KKO)+EWC_UN_LNK(IW))
@@ -6487,7 +6487,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                            ELSE
                               CFO%VEL_OMESH(JCFO)  = 0.5_EB*(CFO%VEL_OMESH(JCFO)+CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
                            ENDIF
-                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                         ELSE
                            IF(APPLY_TO_ESTIMATED_VARIABLES) THEN
                               CFO%VELS_OMESH(JCFO) = 0.5_EB*(CFO%VELS_OMESH(JCFO)+VV(II,JBAR,KK))
@@ -6507,7 +6507,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                         OM_VV(IIO,JJO-1,KKO)    = 0.5_EB*(OM_VV(IIO,JJO-1,KKO)+ &
                         PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)+ &
                         (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
-                        OM%V_LNK(IIO,JJO-1,KKO) = 0.5_EB*(OM%V_LNK(IIO,JJO-1,KKO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                        OM%V_LNK(IIO,JJO-1,KKO) = 0.5_EB*(OM%V_LNK(IIO,JJO-1,KKO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                      ELSE
                         OM_VV(IIO,JJO-1,KKO)    = 0.5_EB*(OM_VV(IIO,JJO-1,KKO)+VV(II,JBAR,KK))
                         OM%V_LNK(IIO,JJO-1,KKO) = 0.5_EB*(OM%V_LNK(IIO,JJO-1,KKO)+EWC_UN_LNK(IW))
@@ -6549,7 +6549,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                            ELSE
                               CFO%VEL_OMESH(JCFO)  = 0.5_EB*(CFO%VEL_OMESH(JCFO)+CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
                            ENDIF
-                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                         ELSE
                            IF(APPLY_TO_ESTIMATED_VARIABLES) THEN
                               CFO%VELS_OMESH(JCFO) = 0.5_EB*(CFO%VELS_OMESH(JCFO)+WW(II,JJ,0))
@@ -6569,7 +6569,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                         OM_WW(IIO,JJO,KKO)    = 0.5_EB*(OM_WW(IIO,JJO,KKO)+ &
                         PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)+ &
                         (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
-                        OM%W_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%W_LNK(IIO,JJO,KKO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                        OM%W_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%W_LNK(IIO,JJO,KKO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                      ELSE
                         OM_WW(IIO,JJO,KKO)    = 0.5_EB*(OM_WW(IIO,JJO,KKO)+WW(II,JJ,0))
                         OM%W_LNK(IIO,JJO,KKO) = 0.5_EB*(OM%W_LNK(IIO,JJO,KKO)+EWC_UN_LNK(IW))
@@ -6611,7 +6611,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                            ELSE
                               CFO%VEL_OMESH(JCFO)  = 0.5_EB*(CFO%VEL_OMESH(JCFO)+CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
                            ENDIF
-                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                           CFO%VEL_LNK_OMESH(JCFO) = 0.5_EB*(CFO%VEL_LNK_OMESH(JCFO)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                         ELSE
                            IF(APPLY_TO_ESTIMATED_VARIABLES) THEN
                               CFO%VELS_OMESH(JCFO) = 0.5_EB*(CFO%VELS_OMESH(JCFO)+WW(II,JJ,KBAR))
@@ -6631,7 +6631,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                         OM_WW(IIO,JJO,KKO-1)    = 0.5_EB*(OM_WW(IIO,JJO,KKO-1)+ &
                         PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)+ &
                         (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL))
-                        OM%W_LNK(IIO,JJO,KKO-1) = 0.5_EB*(OM%W_LNK(IIO,JJO,KKO-1)+CUT_FACE(ICF)%VEL_LNK(JCF))
+                        OM%W_LNK(IIO,JJO,KKO-1) = 0.5_EB*(OM%W_LNK(IIO,JJO,KKO-1)+FV%FACE%VEL_LNK(CUT_FACE(ICF)%FC(JCF)))
                      ELSE
                         OM_WW(IIO,JJO,KKO-1)    = 0.5_EB*(OM_WW(IIO,JJO,KKO-1)+WW(II,JJ,KBAR))
                         OM%W_LNK(IIO,JJO,KKO-1) = 0.5_EB*(OM%W_LNK(IIO,JJO,KKO-1)+EWC_UN_LNK(IW))
@@ -6656,18 +6656,19 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
       IF (APPLY_TO_ESTIMATED_VARIABLES) THEN
          DO JCF=1,CF%NFACE
             IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-            CF%VEL_SAVE(JCF)=FV%FACE%VELS(IF_)
+            FV%FACE%VEL_SAVE(IF_)=FV%FACE%VELS(IF_)
             FV%FACE%VELS(IF_)=0.5_EB*(FV%FACE%VELS(IF_)+VEL_OTHER/DA_OTHER)
          ENDDO
       ELSE
          DO JCF=1,CF%NFACE
             IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
-            CF%VEL_SAVE(JCF)=FV%FACE%VEL(IF_)
+            FV%FACE%VEL_SAVE(IF_)=FV%FACE%VEL(IF_)
             FV%FACE%VEL(IF_)=0.5_EB*(FV%FACE%VEL(IF_)+VEL_OTHER/DA_OTHER)
          ENDDO
       ENDIF
       DO JCF=1,CF%NFACE
-         CF%VEL_LNK(JCF)      = 0.5_EB*(CF%VEL_LNK(JCF) + VEL_LNK_OTHER/DA_OTHER)
+         IF_=CF%FC(JCF)
+         FV%FACE%VEL_LNK(IF_)=0.5_EB*(FV%FACE%VEL_LNK(IF_)+VEL_LNK_OTHER/DA_OTHER)
       ENDDO
    ENDIF
 
@@ -9226,12 +9227,10 @@ MESH_LOOP_1 : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          ENDIF
 
          CUT_FACE(ICF)%VEL_CF        = VEL_CF
-         IF (FV_FACE_STORAGE(NM)) THEN
-            DO JCF=1,NFACE
-               IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF); IF (IF_<1) CYCLE
-               FV%FACE%VEL(IF_)=VEL_CF; FV%FACE%VELS(IF_)=VEL_CF
-            ENDDO
-         ENDIF
+         DO JCF=1,NFACE
+            IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF)
+            FV%FACE%VEL(IF_)=VEL_CF; FV%FACE%VELS(IF_)=VEL_CF
+         ENDDO
       ENDDO CUTFACE_LOOP
 
       ! Push cut-face velocities down to cartesian velocities:
@@ -11009,7 +11008,7 @@ DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
             B1 => BOUNDARY_PROP1(CFACE(CF%CFACE_INDEX(IFACE))%B1_INDEX)
             VELC =         PRFCT*B1%U_NORMAL + (1._EB-PRFCT)*B1%U_NORMAL_S
          ELSEIF(WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
-            VELC = CUT_FACE(ICF)%VEL_SAVE(IFACE)
+            VELC = FV%FACE%VEL_SAVE(CUT_FACE(ICF)%FC(IFACE))
          ELSE
             ! Last known cut-face velocity.
             VELC = GET_BOUNDARY_CUTFACE_VEL(ICF,IFACE,PRFCT)
@@ -11800,7 +11799,7 @@ DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
          B1 => BOUNDARY_PROP1(CFACE(CUT_FACE(ICF)%CFACE_INDEX(IFACE))%B1_INDEX)
          VELC =         PRFCT*B1%U_NORMAL + (1._EB-PRFCT)*B1%U_NORMAL_S
       ELSEIF(WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
-         VELC = CUT_FACE(ICF)%VEL_SAVE(IFACE)
+         VELC = FV%FACE%VEL_SAVE(CUT_FACE(ICF)%FC(IFACE))
       ELSE
          ! Last known cut-face velocity.
          VELC = GET_BOUNDARY_CUTFACE_VEL(ICF,IFACE,PRFCT)
@@ -17153,7 +17152,7 @@ MESH_LOOP_DBND : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       DO IFACE=1,CUT_FACE(ICF)%NFACE
          AF   = CUT_FACE(ICF)%AREA(IFACE)
          IF(WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
-            VELC = CUT_FACE(ICF)%VEL_SAVE(IFACE)
+            VELC = FV%FACE%VEL_SAVE(CUT_FACE(ICF)%FC(IFACE))
          ELSE
             VELC = PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VEL) + &
                    (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VELS)
@@ -23796,12 +23795,10 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                       CF => MESHES(NOM)%CUT_FACE(ICF)
                       IF(ALLOCATED(CF%VELS_OMESH)) DEALLOCATE(CF%VELS_OMESH)
                       IF(ALLOCATED(CF% VEL_OMESH)) DEALLOCATE(CF% VEL_OMESH)
-                      IF(ALLOCATED(CF% VEL_LNK)) DEALLOCATE(CF% VEL_LNK) ! For special cases of grid refinement.
                       IF(ALLOCATED(CF% VEL_LNK_OMESH)) DEALLOCATE(CF% VEL_LNK_OMESH)
                       IF(ALLOCATED(CF%  FN_OMESH)) DEALLOCATE(CF%  FN_OMESH)
                       ALLOCATE(CF%VELS_OMESH(1:CF%NFACE));     CF%   VELS_OMESH = 0._EB
                       ALLOCATE(CF% VEL_OMESH(1:CF%NFACE));     CF%    VEL_OMESH = 0._EB
-                      ALLOCATE(CF% VEL_LNK(1:CF%NFACE));       CF%      VEL_LNK = 0._EB
                       ALLOCATE(CF% VEL_LNK_OMESH(1:CF%NFACE)); CF%VEL_LNK_OMESH = 0._EB
                       ALLOCATE(CF%  FN_OMESH(1:CF%NFACE));     CF%     FN_OMESH = 0._EB
                    ENDIF
@@ -24128,22 +24125,6 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ENDDO
       ALLOCATE(INT1D(1:M3%NICF_R(1))); INT1D(1:M3%NICF_R(1)) = M3%ICF_UFFB_CF_R(1:M3%NICF_R(1))
       CALL MOVE_ALLOC(FROM=INT1D,TO=M3%ICF_UFFB_CF_R)
-   ENDDO
-ENDDO
-
-! Allocate VEL_LNK on Sending cut-faces if not yet allocated:
-DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-   DO NOM=1,NMESHES
-      M3 => MESHES(NM)%OMESH(NOM)
-      IF (M3%NICF_S(1)>0) THEN
-         DO IW=1,M3%NICF_S(1)
-            ICF=  M3%ICF_UFFB_CF_S(IW)
-            IF (ICF<1) CYCLE
-            CF => MESHES(NM)%CUT_FACE(ICF)
-            IF(.NOT.ALLOCATED(MESHES(NM)%CUT_FACE(ICF)%VEL_LNK)) ALLOCATE(MESHES(NM)%CUT_FACE(ICF)%VEL_LNK(1:CF%NFACE))
-            MESHES(NM)%CUT_FACE(ICF)%VEL_LNK = 0._EB
-         ENDDO
-      ENDIF
    ENDDO
 ENDDO
 
@@ -29084,11 +29065,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
   IF(ALLOCATED(M%UN_LNK)) DEALLOCATE(M%UN_LNK)
   ALLOCATE(M%EWC_UN_LNK(0:M%N_EXTERNAL_WALL_CELLS)); M%EWC_UN_LNK = 0._EB
   ALLOCATE(M%UN_LNK(0:M%NUNK_F)); M%UN_LNK = 0._EB
-  DO IW=1,M%N_EXTERNAL_WALL_CELLS
-     IF(M%WALL(IW)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY .OR. M%WALL(IW)%CUT_FACE_INDEX<1) CYCLE
-     CF => M%CUT_FACE(M%WALL(IW)%CUT_FACE_INDEX)
-     IF(.NOT.ALLOCATED(CF%VEL_LNK)) ALLOCATE(CF%VEL_LNK(1:CF%NFACE)); CF%VEL_LNK = 0._EB
-  ENDDO
 
   ! Allocate UN_ULNK:
   COUNT=0
