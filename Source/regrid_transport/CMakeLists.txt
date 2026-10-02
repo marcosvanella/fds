@@ -99,6 +99,15 @@ if (BUILD_TESTING)
         add_test(NAME regrid_transport_celltransfer COMMAND test_celltransfer)
         add_test(NAME regrid_transport_celltransfer_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_celltransfer>)
 
+        # R4: dynamic hierarchy through RegridAmrCore (tags, region clip, make/remake/clear, transfer, conservation across regrids), 1 and 4 ranks
+        add_executable(test_regrid_core tests/test_regrid_core.cpp tests/fds_stubs.cpp)
+        target_link_libraries(test_regrid_core PRIVATE fds_regrid_transport_amrex)
+        target_include_directories(test_regrid_core PRIVATE tests ${DRV}/tests)
+        add_test(NAME regrid_transport_regrid_core COMMAND test_regrid_core)
+        add_test(NAME regrid_transport_regrid_core_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_regrid_core>)
+        add_test(NAME regrid_transport_regrid_core_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_regrid_core> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
+        set_tests_properties(regrid_transport_regrid_core regrid_transport_regrid_core_np4 regrid_transport_regrid_core_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")   # one thread per rank: the test is small and oversubscribed threads only slow it
+
         # FR-016 ghost-value comparison against the dumps of the instrumented FDS (A-09b): needs the dump files, so it is a test only when RT_FR016_DUMP is given
         add_executable(fr016_ghost_check tests/fr016_ghost_check.cpp tests/fds_stubs.cpp)
         target_link_libraries(fr016_ghost_check PRIVATE fds_regrid_transport_amrex)

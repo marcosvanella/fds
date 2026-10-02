@@ -38,6 +38,23 @@ public:
     virtual void make_level(const LevelLayout& l) = 0;    // new level: allocate Fields/SideData; data is filled by Role 3 afterwards
     virtual void remake_level(const LevelLayout& l) = 0;  // same level, new grids: old fields stay readable until Role 3 has copied them
     virtual void clear_level(int level) = 0;
+    // R4: bracket around one dynamic regrid (all make/remake/clear calls of that regrid lie between them). Optional: the defaults do nothing, so
+    // existing listeners compile unchanged. A registry can free retired fields in end_regrid, after Role 3 has copied them.
+    virtual void begin_regrid() {}
+    virtual void end_regrid() {}
+};
+
+// R4: what fills the data of a level after the listener has allocated it. Implemented by Role 3 code that knows the field set (the cell and face
+// operators of CellTransfer.H / FaceTransfer.H); the adapter to the driver's Fields is not written yet (see notes/r4-regrid-wiring.md).
+class LevelDataTransfer {
+public:
+    virtual ~LevelDataTransfer() = default;
+    virtual void fill_initial_level(const LevelLayout& l) = 0;   // t = 0: evaluate the initial conditions directly on the new level (ruling: not interpolated)
+    virtual void fill_new_level(const LevelLayout& l) = 0;       // after make_level during a regrid: interpolate from level l.level-1
+    virtual void fill_remade_level(const LevelLayout& l) = 0;    // after remake_level: copy old fine data where it overlaps, interpolate the rest
+    virtual void level_cleared(int /*level*/) {}
+    // After the last level of the initial hierarchy / of a regrid: average down once (finest to coarsest), refill ghosts, recompute derived fields.
+    virtual void hierarchy_done(bool /*initial*/) {}
 };
 
 // No heat-flux override in Phase 3 (ruling 2026-10-02 (b) 3): conduction stays unmatched as in FDS.
