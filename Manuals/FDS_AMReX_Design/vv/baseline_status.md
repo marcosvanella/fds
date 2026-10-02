@@ -1,7 +1,10 @@
 # Baseline status: FireX 36975d7, GNU/Open MPI reference build
 
+**Change log.** 2026-10-02: added the section "M2a baselines (rebuilt Release binary)" and a binary note: csmag_32, its FISHPAK_BC periodic variant and the shunn3_4mesh_32 GLMAT runs, all with the rebuilt Release binary (new sha256), plus a rebuild-versus-original check. The previous version is archived at `docs/vv/archive/baseline_status_pre-m2a.md`.
+
 - **Build:** FDS `FDS-6.11.1-1244-g36975d765f-AMReX` (FireX worktree HEAD 36975d765fcead401e14b094a04f910ac42eab8a), GNU Fortran + Open MPI 5.0.7 (Debian package). The binaries are Release `build/firex-36975d7/ompi_gnu_rel/fds` and Debug (the `_db` build; sha256 below).
 - **HYPRE:** commit 63331f19c7 = **v2.32.0-24-g63331f19c**. The FDS run header prints "Hypre library version: 3.0.0" because CMakeLists hard-codes HYPRE_GIT_VERSION. That label is wrong; every manifest records the real version.
+- **Binary note (M2a update):** runs captured after the environment reset use a rebuilt Release binary, `vv-runs/refbin/gnu_ompi_firex-36975d7/fds`, sha256 `f4214a0a93127d63f99aba18455dabc4db7aa689288d02c9529669fe84c63238`. It differs from the original `9d3b5991…8050ec` used by all earlier baselines in this file (see the section "M2a baselines"). The `build/` directory is not preserved across resets.
 - **Written:** 2026-09-25. Author: V&V lead. The generator is `vv-runs/scripts/make_report.py`, which reads `vv-runs/analysis/gnu_ompi_firex-36975d7/analysis.json` and every `manifest.json`.
 - **Baseline directory:** `vv-runs/baseline/gnu_ompi_firex-36975d7/`. It is read-only (`chmod -R a-w`) and has `SHA256SUMS` over every file, using relative paths. A-09 Debug runs and the Tier 2 `emb_1to1` run are in `vv-runs/a09/gnu_ompi_firex-36975d7/`, G0 is in `vv-runs/g0/…` and the restart-repeat calibration is in `vv-runs/calib/…`. Those three directories are not part of the frozen baseline.
 - **Run protocol:**
@@ -774,6 +777,27 @@ Proposal:
 - **Serial execution.** All runs were strictly sequential, which is below the 8-concurrent-rank cap. Timeouts were max(600 s, 3× estimate); none triggered.
 - **Wall times** include `mpirun` start-up. "fds_elapsed_s" in the CSV is FDS's own elapsed time.
 
+## M2a baselines (rebuilt Release binary)
+
+**These runs used a rebuilt Release binary, not the original.** Binary: `vv-runs/refbin/gnu_ompi_firex-36975d7/fds`, sha256 `f4214a0a93127d63f99aba18455dabc4db7aa689288d02c9529669fe84c63238` (FireX 36975d7, GCC 14.2.0, Open MPI 5.0.7, `-O3`, HYPRE v2.32.0-24, same FDS banner revision `FDS-6.11.1-1244-g36975d765f-AMReX`). Its sha256 differs from the original `9d3b5991447a70b8cd1d067e7db6fec8506479b32fd62961339f8d387e8050ec`, which every earlier baseline in this file used; the original was lost when the environment reset. The `build/` directory is not preserved across resets, so the persistent copy in `vv-runs/refbin/` is the reference path from now on. Environment: `vv-runs/refbin/gnu_ompi_firex-36975d7/env/gnu_ompi_env.sh` (or `(local GNU toolchain setup directory)/env_gnu_ompi.sh`). Each manifest records the new sha256 and a `binary_note`.
+
+Protocol is unchanged (OMP_NUM_THREADS=1, `mpirun --bind-to none`, one run at a time, timeout 300 s). Inputs are byte-identical in the FireX 36975d7 tree and in the checked-out worktrees. Derived inputs keep the CHID of the source and live in separate directories. This departs from the earlier `_glmat` copies, which appended a CHID suffix and renamed the input. Each derived directory has a `derivation.diff` against the committed input. `csmag_32*` directories also hold `cbc32_uvw.csv` (sha256 `c6a3bb7f370657165d97d8b568544ec5875cb30917ccfb8a75920c67a443a935`). Driver: `vv-runs/scripts/m2a_baselines.py` (uses `vv_run.py`, which gained a `set_param` derivation op).
+
+| run | ranks | wall s | exit | steps | final KE (m2/s2) | max pressure it. | input sha256 (16) |
+|---|---|---|---|---|---|---|---|
+| csmag_32 | 1 | 4.5 | 0 | 28 | 7.8094950E-003 | 5 | ec02e54137237844 |
+| csmag_32__sf17 | 1 | 4.4 | 0 | 28 | 7.8094950248272692E-003 | 5 | 67d75c97d7fab3af |
+| csmag_32__fishpak_bc000 | 1 | 4.09 | 0 | 28 | 7.8083125E-003 | 1 | 86273b0c6e937065 |
+| csmag_32__sf17_fishpak_bc000 | 1 | 4.17 | 0 | 28 | 7.8083125290093021E-003 | 1 | 4cb5d45e6fb6e764 |
+| shunn3_4mesh_32__rebuild | 4 | 1.02 | 0 | 82 |  | 1 | 7425a6f2e8555c18 |
+| shunn3_4mesh_32__glmat | 4 | 1.05 | 0 | 82 |  | 1 | 836e03202c46c101 |
+| shunn3_4mesh_32__sf17_glmat | 4 | 0.88 | 0 | 82 |  | 1 | a9ae04fc33025fed |
+
+- All seven runs: exit 0, "STOP: FDS completed successfully", no NaN, trap or error lines.
+- `csmag_32` solves with `SOLVER = FFT` by default. Adding `&PRES FISHPAK_BC=0,0,0 /` (fully periodic) keeps the FFT solver; the pressure iteration count drops from 5/3/3… (max 5, mean 2.83) to 1 at every step. The largest velocity error over all steps falls from 8.7e-3 to 8.4e-4. Final KE differs by 1.5e-4 relative (7.8094950E-003 vs 7.8083125E-003).
+- The `shunn3_4mesh_32__glmat` runs use `SOLVER='GLMAT'` (FDS prints "Solver: GLMAT" and a GlMat information block). The largest velocity error over all steps is 1.1e-16, against 5.7e-3 with the default FFT solver. The largest pressure error over all steps is 3.4, against 28 with FFT. Both take 1 pressure iteration per step and 82 steps. No extra HYPRE or other settings were needed.
+- Rebuild check (`shunn3_4mesh_32__rebuild`, default solver, 4 ranks, plain input) against the existing `shunn3_4mesh_32` baseline from the original binary: `_hrr.csv`, `_mass.csv`, `_mms.csv` byte-identical; `_steps.csv` identical in step size and simulation time at all 82 steps (wall-clock columns differ); the 44 retained `.sf` slice files are byte-identical; the Time Step, Pressure Iterations and Maximum Velocity/Pressure Error lines of the `.out` are identical. The rebuild reproduces the original binary on this case.
+
 ## Pending / not done
 
 - G0 setup-only sweep (T_END=0) over all 941 inputs: not run, pending per instruction.
@@ -785,7 +809,7 @@ Proposal:
 
 ## Integrity
 
-- `vv-runs/baseline/gnu_ompi_firex-36975d7/SHA256SUMS` covers every file in the baseline directory, with paths relative to it. It lists 5622 files and was written before the directory was made read-only (`chmod -R a-w`, 2026-09-25). The sha256 of SHA256SUMS itself is 892069296d03215c1212781340d5b89e48c645a138fa1bffdf14173eea3134fe. A verification run after the chmod passed.
+- `vv-runs/baseline/gnu_ompi_firex-36975d7/SHA256SUMS` covers every file in the baseline directory, with paths relative to it. It lists 5622 files at that time (the M2a directories were appended on 2026-10-02, so the list and its own sha256 have changed since) and was written before the directory was made read-only (`chmod -R a-w`, 2026-09-25). The sha256 of SHA256SUMS itself is 892069296d03215c1212781340d5b89e48c645a138fa1bffdf14173eea3134fe. A verification run after the chmod passed.
 - Verify with: `cd vv-runs/baseline/gnu_ompi_firex-36975d7 && sha256sum -c --quiet SHA256SUMS`.
 - this repository and `(local FDS master checkout)` were never written. `test-plan.md`, `case_inventory.*` and `requirements.md` were not edited.
 

@@ -1,0 +1,144 @@
+prefix_or_component,flat_name,kernel_or_any,status,note
+M%,(drop prefix),any,mapped,drop prefix; the dummy keeps the upstream name (X for M%X)
+MESHES(NM)%,(drop prefix),any,proposed,"drop prefix; own mesh only, never OMESH/MESHES(NOM)"
+SF%,<table>,any,proposed,SURFACE(WC%SURF_INDEX) scalar: per-surface table SF_<comp>(0:N_SURF) when needed; else by-value scalar
+SM%,<table>,any,proposed,SPECIES_MIXTURE(N): scalar component -> by-value scalar (hoisted) or table <comp>_SPEC(NS)
+SPECIES_MIXTURE(N)%MW,MW_SPEC(N),any,mapped,MW_SPEC(N)
+"CELL(CELL_INDEX(I,J,K))%SOLID","SOLID(I,J,K)",any,mapped,"SOLID(I,J,K)"
+BC%IIG,BC_IIG(IW),wall_kp_ghost;wall_rho_d_dzdn;wall_strain_rate;wall_un_store;wall_up_ghost;wall_us_pred;wall_uvw_interp;wall_uvw_interp_corr,generated,BOUNDARY_COORD(WC%BC_INDEX)%IIG; non-geometry loops using it: 33; extent NWE+NWI
+BC%JJG,BC_JJG(IW),wall_kp_ghost;wall_rho_d_dzdn;wall_strain_rate;wall_un_store;wall_up_ghost;wall_us_pred;wall_uvw_interp;wall_uvw_interp_corr,generated,BOUNDARY_COORD(WC%BC_INDEX)%JJG; non-geometry loops using it: 33; extent NWE+NWI
+BC%KKG,BC_KKG(IW),wall_kp_ghost;wall_rho_d_dzdn;wall_strain_rate;wall_un_store;wall_up_ghost;wall_us_pred;wall_uvw_interp;wall_uvw_interp_corr,generated,BOUNDARY_COORD(WC%BC_INDEX)%KKG; non-geometry loops using it: 32; extent NWE+NWI
+BC%IOR,BC_IOR(IW),wall_rho_d_dzdn;wall_strain_rate;wall_un_store;wall_us_pred;wall_uvw_interp;wall_uvw_interp_corr,generated,BOUNDARY_COORD(WC%BC_INDEX)%IOR; non-geometry loops using it: 31; extent NWE+NWI
+BC%II,BC_II(IW),wall_coriolis_ghost;wall_hs_bt;wall_kp_ghost;wall_up_ghost;wall_us_pred,generated,BOUNDARY_COORD(WC%BC_INDEX)%II; non-geometry loops using it: 29; extent NWE+NWI
+BC%JJ,BC_JJ(IW),wall_coriolis_ghost;wall_hs_bt;wall_kp_ghost;wall_up_ghost;wall_us_pred,generated,BOUNDARY_COORD(WC%BC_INDEX)%JJ; non-geometry loops using it: 29; extent NWE+NWI
+BC%KK,BC_KK(IW),wall_coriolis_ghost;wall_hs_bt;wall_kp_ghost;wall_up_ghost;wall_us_pred,generated,BOUNDARY_COORD(WC%BC_INDEX)%KK; non-geometry loops using it: 29; extent NWE+NWI
+BC%X,BC_X(IW),any,proposed,BOUNDARY_COORD(WC%BC_INDEX)%X; non-geometry loops using it: 5; extent NWE+NWI
+BC%Y,BC_Y(IW),any,proposed,BOUNDARY_COORD(WC%BC_INDEX)%Y; non-geometry loops using it: 5; extent NWE+NWI
+BC%Z,BC_Z(IW),any,proposed,BOUNDARY_COORD(WC%BC_INDEX)%Z; non-geometry loops using it: 5; extent NWE+NWI
+B1%TMP_F,B1_TMP_F(IW),wall_b2_work1,generated,BOUNDARY_PROP1(WC%B1_INDEX)%TMP_F; non-geometry loops using it: 7; extent NWE+NWI
+B1%RDN,B1_RDN(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%RDN; non-geometry loops using it: 6; extent NWE+NWI
+B1%RHO_F,B1_RHO_F(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%RHO_F; non-geometry loops using it: 6; extent NWE+NWI
+B1%U_NORMAL,B1_U_NORMAL(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%U_NORMAL; non-geometry loops using it: 6; extent NWE+NWI
+B1%U_NORMAL_S,B1_U_NORMAL_S(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%U_NORMAL_S; non-geometry loops using it: 6; extent NWE+NWI
+B1%ZZ_F,"B1_ZZ_F(IW,1:NS)",any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%ZZ_F; non-geometry loops using it: 5; extent NWE+NWI
+B1%Q_RAD_IN,B1_Q_RAD_IN(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%Q_RAD_IN; non-geometry loops using it: 4; extent NWE+NWI
+B1%TMP_G,B1_TMP_G(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%TMP_G; non-geometry loops using it: 4; extent NWE+NWI
+B1%AREA,B1_AREA(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%AREA; non-geometry loops using it: 3; extent NWE+NWI
+B1%HEAT_TRANS_COEF,B1_HEAT_TRANS_COEF(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%HEAT_TRANS_COEF; non-geometry loops using it: 3; extent NWE+NWI
+B1%RHO_D_DZDN_F,"B1_RHO_D_DZDN_F(IW,1:NS)",wall_rho_d_dzdn,generated,BOUNDARY_PROP1(WC%B1_INDEX)%RHO_D_DZDN_F; non-geometry loops using it: 3; extent NWE+NWI
+B1%T_IGN,B1_T_IGN(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%T_IGN; non-geometry loops using it: 3; extent NWE+NWI
+B1%NODE_INDEX,B1_NODE_INDEX(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%NODE_INDEX; non-geometry loops using it: 2; extent NWE+NWI
+B1%Q_CON_F,B1_Q_CON_F(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%Q_CON_F; non-geometry loops using it: 2; extent NWE+NWI
+B1%AREA_ADJUST,B1_AREA_ADJUST(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%AREA_ADJUST; non-geometry loops using it: 1; extent NWE+NWI
+B1%AWM_AEROSOL,"B1_AWM_AEROSOL(IW,1:NS)",any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%AWM_AEROSOL; non-geometry loops using it: 1; extent NWE+NWI
+B1%BURNAWAY,B1_BURNAWAY(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%BURNAWAY; non-geometry loops using it: 1; extent NWE+NWI
+B1%EMISSIVITY,B1_EMISSIVITY(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%EMISSIVITY; non-geometry loops using it: 1; extent NWE+NWI
+B1%K_G,B1_K_G(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%K_G; non-geometry loops using it: 1; extent NWE+NWI
+B1%PRESSURE_ZONE,B1_PRESSURE_ZONE(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%PRESSURE_ZONE; non-geometry loops using it: 1; extent NWE+NWI
+B1%Q_CONDENSE,B1_Q_CONDENSE(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%Q_CONDENSE; non-geometry loops using it: 1; extent NWE+NWI
+B1%Q_LEAK,B1_Q_LEAK(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%Q_LEAK; non-geometry loops using it: 1; extent NWE+NWI
+B1%RHO_D_F,"B1_RHO_D_F(IW,1:NS)",any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%RHO_D_F; non-geometry loops using it: 1; extent NWE+NWI
+B1%RHO_G,B1_RHO_G(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%RHO_G; non-geometry loops using it: 1; extent NWE+NWI
+B1%U_TANG,B1_U_TANG(IW),any,proposed,BOUNDARY_PROP1(WC%B1_INDEX)%U_TANG; non-geometry loops using it: 1; extent NWE+NWI
+EWC%IIO_MIN,EW_IIO_MIN(IW),any,proposed,EXTERNAL_WALL(IW)%IIO_MIN; non-geometry loops using it: 12; extent NWE
+EWC%JJO_MIN,EW_JJO_MIN(IW),any,proposed,EXTERNAL_WALL(IW)%JJO_MIN; non-geometry loops using it: 12; extent NWE
+EWC%KKO_MIN,EW_KKO_MIN(IW),any,proposed,EXTERNAL_WALL(IW)%KKO_MIN; non-geometry loops using it: 11; extent NWE
+EWC%IIO_MAX,EW_IIO_MAX(IW),any,proposed,EXTERNAL_WALL(IW)%IIO_MAX; non-geometry loops using it: 10; extent NWE
+EWC%JJO_MAX,EW_JJO_MAX(IW),any,proposed,EXTERNAL_WALL(IW)%JJO_MAX; non-geometry loops using it: 10; extent NWE
+EWC%NOM,EW_NOM(IW),any,proposed,EXTERNAL_WALL(IW)%NOM; non-geometry loops using it: 10; extent NWE
+EWC%KKO_MAX,EW_KKO_MAX(IW),any,proposed,EXTERNAL_WALL(IW)%KKO_MAX; non-geometry loops using it: 9; extent NWE
+EWC%PRESSURE_BC_TYPE,EW_PRESSURE_BC_TYPE(IW),any,proposed,EXTERNAL_WALL(IW)%PRESSURE_BC_TYPE; non-geometry loops using it: 3; extent NWE
+EWC%BOUNDARY_TYPE_PREVIOUS,EW_BOUNDARY_TYPE_PREVIOUS(IW),wall_uvw_interp_corr,generated,EXTERNAL_WALL(IW)%BOUNDARY_TYPE_PREVIOUS; non-geometry loops using it: 1; extent NWE
+EWC%DUNDT,EW_DUNDT(IW),any,proposed,EXTERNAL_WALL(IW)%DUNDT; non-geometry loops using it: 1; extent NWE
+EWC%NIC,EW_NIC(IW),wall_rho_d_dzdn,generated,EXTERNAL_WALL(IW)%NIC; non-geometry loops using it: 1; extent NWE
+WC%BC_INDEX,(none),any,mapped,"index component: consumed by the driver when it builds the tables (the generator elides WC=>WALL(IW), BC=>BOUNDARY_COORD(WC%BC_INDEX) aliases)"
+WC%BOUNDARY_TYPE,W_BOUNDARY_TYPE(IW),wall_hs_bt;wall_rho_d_dzdn;wall_strain_rate;wall_up_ghost;wall_us_pred;wall_uvw_interp,generated,WALL(IW)%BOUNDARY_TYPE; non-geometry loops using it: 37; extent NWE+NWI
+WC%B1_INDEX,(none),any,mapped,"index component: consumed by the driver when it builds the tables (the generator elides WC=>WALL(IW), BC=>BOUNDARY_COORD(WC%BC_INDEX) aliases)"
+WC%SURF_INDEX,W_SURF_INDEX(IW),wall_strain_rate,generated,WALL(IW)%SURF_INDEX; non-geometry loops using it: 8; extent NWE+NWI
+WC%B2_INDEX,(none),any,mapped,"index component: consumed by the driver when it builds the tables (the generator elides WC=>WALL(IW), BC=>BOUNDARY_COORD(WC%BC_INDEX) aliases)"
+WC%THIN,W_THIN(IW),wall_rho_d_dzdn,generated,WALL(IW)%THIN; non-geometry loops using it: 3; extent NWE+NWI
+WC%BR_INDEX,(none),any,mapped,"index component: consumed by the driver when it builds the tables (the generator elides WC=>WALL(IW), BC=>BOUNDARY_COORD(WC%BC_INDEX) aliases)"
+WC%OD_INDEX,(none),any,mapped,"index component: consumed by the driver when it builds the tables (the generator elides WC=>WALL(IW), BC=>BOUNDARY_COORD(WC%BC_INDEX) aliases)"
+WC%VENT_INDEX,W_VENT_INDEX(IW),any,proposed,WALL(IW)%VENT_INDEX; non-geometry loops using it: 2; extent NWE+NWI
+WC%OBST_INDEX,W_OBST_INDEX(IW),any,proposed,WALL(IW)%OBST_INDEX; non-geometry loops using it: 1; extent NWE+NWI
+WC%TD_INDEX,(none),any,mapped,"index component: consumed by the driver when it builds the tables (the generator elides WC=>WALL(IW), BC=>BOUNDARY_COORD(WC%BC_INDEX) aliases)"
+M%UVW_SAVE,UVW_SAVE(IW),wall_uvw_interp;wall_uvw_interp_corr,generated,mesh array indexed by IW; extent NWE
+M%UN_WALLS,UN_WALLS(IW),wall_un_store,generated,mesh array indexed by IW; extent NWE+N_INTERNAL_WALL_CELLS_AUX
+M%U_GHOST,U_GHOST(IW),wall_coriolis_ghost;wall_up_ghost,generated,mesh array indexed by IW; extent NWE
+M%V_GHOST,V_GHOST(IW),wall_coriolis_ghost;wall_up_ghost,generated,mesh array indexed by IW; extent NWE
+M%W_GHOST,W_GHOST(IW),wall_coriolis_ghost;wall_up_ghost,generated,mesh array indexed by IW; extent NWE
+M%ADV_FX,ADV_FX,adv_flux_avg;adv_flux_store,generated,"face_centred_flux; deferred(:,:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1,1:N_TOTAL_SCALARS)"
+M%ADV_FY,ADV_FY,adv_flux_avg;adv_flux_store,generated,"face_centred_flux; deferred(:,:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1,1:N_TOTAL_SCALARS)"
+M%ADV_FZ,ADV_FZ,adv_flux_avg;adv_flux_store,generated,"face_centred_flux; deferred(:,:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1,1:N_TOTAL_SCALARS)"
+M%DEL_RHO_D_DEL_Z,DEL_RHO_D_DEL_Z,dp_species;zz_corr,generated,"cell_centred_solution; deferred(:,:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1,N_TOTAL_SCALARS)"
+M%FVX,FVX,wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%FVY,FVY,wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%FVZ,FVZ,wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%FX,FX,adv_flux_avg;adv_flux_store;flux_mw_fix;zz_corr;zzs_pred,generated,"face_centred_flux; deferred(:,:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1,N_LOWER_SCALARS:N_TOTAL_SCALARS)"
+M%FY,FY,adv_flux_avg;adv_flux_store;flux_mw_fix;zz_corr;zzs_pred,generated,"face_centred_flux; deferred(:,:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1,N_LOWER_SCALARS:N_TOTAL_SCALARS)"
+M%FZ,FZ,adv_flux_avg;adv_flux_store;flux_mw_fix;zz_corr;zzs_pred,generated,"face_centred_flux; deferred(:,:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1,N_LOWER_SCALARS:N_TOTAL_SCALARS)"
+M%HS,HS,wall_hs_bt,generated,"cell_centred_solution; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%IBAR,IBAR,adv_flux_avg;adv_flux_store;conductivity;cp_rhg;delta_rho_zz_zero;dp_kdtd;dp_species;flux_mw_fix;flux_mw_fix_zz;h_rho_d_dzd;kdtd;kres;mu_dns;rho_d_dzd;rho_sum;rho_z_p_divg;rho_z_p_mass;rho_zz_clip_assign;rhos_sum;rsum_pred;up_deardorff;wall_b2_work1;wall_coriolis_ghost;wall_hs_bt;wall_kp_ghost;wall_rho_d_dzdn;wall_strain_rate;wall_un_store;wall_up_ghost;wall_us_pred;wall_uvw_interp;wall_uvw_interp_corr;zz_corr;zzs_pred,generated,grid_geometry; scalar
+M%IBP1,IBP1,rho_z_p_divg;rho_z_p_mass,generated,grid_geometry; scalar
+M%JBAR,JBAR,adv_flux_avg;adv_flux_store;conductivity;cp_rhg;delta_rho_zz_zero;dp_kdtd;dp_species;flux_mw_fix;flux_mw_fix_zz;h_rho_d_dzd;kdtd;kres;mu_dns;rho_d_dzd;rho_sum;rho_z_p_divg;rho_z_p_mass;rho_zz_clip_assign;rhos_sum;rsum_pred;up_deardorff;wall_b2_work1;wall_coriolis_ghost;wall_hs_bt;wall_kp_ghost;wall_rho_d_dzdn;wall_strain_rate;wall_un_store;wall_up_ghost;wall_us_pred;wall_uvw_interp;wall_uvw_interp_corr;zz_corr;zzs_pred,generated,grid_geometry; scalar
+M%JBP1,JBP1,rho_z_p_divg;rho_z_p_mass,generated,grid_geometry; scalar
+M%KBAR,KBAR,adv_flux_avg;adv_flux_store;conductivity;cp_rhg;delta_rho_zz_zero;dp_kdtd;dp_species;flux_mw_fix;flux_mw_fix_zz;h_rho_d_dzd;kdtd;kres;mu_dns;rho_d_dzd;rho_sum;rho_z_p_divg;rho_z_p_mass;rho_zz_clip_assign;rhos_sum;rsum_pred;up_deardorff;wall_b2_work1;wall_coriolis_ghost;wall_hs_bt;wall_kp_ghost;wall_rho_d_dzdn;wall_strain_rate;wall_un_store;wall_up_ghost;wall_us_pred;wall_uvw_interp;wall_uvw_interp_corr;zz_corr;zzs_pred,generated,grid_geometry; scalar
+M%KBP1,KBP1,rho_z_p_divg;rho_z_p_mass,generated,grid_geometry; scalar
+M%KRES,KRES,kres,generated,"cell_centred_solution; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%MU_DNS,MU_DNS,mu_dns,generated,"cell_centred_solution; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%Q,Q,dp_kdtd,generated,"cell_centred_solution; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%QR,QR,dp_kdtd,generated,"radiation; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%R,R,zz_corr;zzs_pred,generated,grid_geometry; deferred(:); allocated as (0:M%IBAR)
+M%RDX,RDX,dp_kdtd;wall_strain_rate;zz_corr;zzs_pred,generated,grid_geometry; deferred(:); allocated as (0:M%IBP1)
+M%RDXN,RDXN,kdtd;rho_d_dzd,generated,grid_geometry; deferred(:); allocated as (0:M%IBAR)
+M%RDY,RDY,dp_kdtd;wall_strain_rate;zz_corr;zzs_pred,generated,grid_geometry; deferred(:); allocated as (0:M%JBP1)
+M%RDYN,RDYN,kdtd;rho_d_dzd,generated,grid_geometry; deferred(:); allocated as (0:M%JBAR)
+M%RDZ,RDZ,dp_kdtd;wall_strain_rate;zz_corr;zzs_pred,generated,grid_geometry; deferred(:); allocated as (0:M%KBP1)
+M%RDZN,RDZN,kdtd;rho_d_dzd,generated,grid_geometry; deferred(:); allocated as (0:M%KBAR)
+M%RHO,RHO,rho_sum;zz_corr;zzs_pred,generated,"cell_centred_solution; deferred(:,:,:); allocated as (-1:IBP1+1,-1:JBP1+1,-1:KBP1+1)"
+M%RHOS,RHOS,rhos_sum;rsum_pred;zz_corr,generated,"cell_centred_solution; deferred(:,:,:); allocated as (-1:IBP1+1,-1:JBP1+1,-1:KBP1+1)"
+M%RRN,RRN,zz_corr;zzs_pred,generated,grid_geometry; deferred(:); allocated as (0:M%IBP1)
+M%RSUM,RSUM,dp_species,generated,"cell_centred_solution; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%STRAIN_RATE,STRAIN_RATE,wall_strain_rate,generated,"cell_centred_solution; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,0:KBP1)"
+M%TMP,TMP,conductivity;cp_rhg;dp_species;h_rho_d_dzd;kdtd;mu_dns,generated,"cell_centred_solution; deferred(:,:,:); allocated as (-1:IBP1+1,-1:JBP1+1,-1:KBP1+1)"
+M%U,U,wall_un_store;wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (-1:IBP1,0:JBP1,0:KBP1)"
+M%US,US,wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (-1:IBP1,0:JBP1,0:KBP1)"
+M%UVW_SAVE,UVW_SAVE,wall_uvw_interp;wall_uvw_interp_corr,generated,ghost_boundary; deferred(:); allocated as (M%N_EXTERNAL_WALL_CELLS)
+M%U_GHOST,U_GHOST,wall_coriolis_ghost;wall_up_ghost,generated,ghost_boundary; deferred(:); allocated as (M%N_EXTERNAL_WALL_CELLS)
+M%V,V,wall_un_store;wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (0:IBP1,-1:JBP1,0:KBP1)"
+M%VS,VS,wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (0:IBP1,-1:JBP1,0:KBP1)"
+M%V_GHOST,V_GHOST,wall_coriolis_ghost;wall_up_ghost,generated,ghost_boundary; deferred(:); allocated as (M%N_EXTERNAL_WALL_CELLS)
+M%W,W,wall_un_store;wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,-1:KBP1)"
+M%WS,WS,wall_us_pred,generated,"face_centred_flux; deferred(:,:,:); allocated as (0:IBP1,0:JBP1,-1:KBP1)"
+M%ZZ,ZZ,rho_sum;zz_corr;zzs_pred,generated,"cell_centred_solution; deferred(:,:,:,:); allocated as (-1:IBP1+1,-1:JBP1+1,-1:KBP1+1,N_TOTAL_SCALARS)"
+M%ZZS,ZZS,rhos_sum;rsum_pred;zz_corr;zzs_pred,generated,"cell_centred_solution; deferred(:,:,:,:); allocated as (-1:IBP1+1,-1:JBP1+1,-1:KBP1+1,N_TOTAL_SCALARS)"
+CP,CP,cp_rhg,generated,"work-array alias of M%WORK5 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+DELTA_RHO_ZZ,DELTA_RHO_ZZ,delta_rho_zz_zero;rho_zz_clip_assign,generated,"work-array alias of M%WORK5 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+DEL_RHO_D_DEL_Z__0,DEL_RHO_D_DEL_Z__0,zzs_pred,generated,"work-array alias of M%SWORK4 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+DP,DP,dp_kdtd;dp_species,generated,"alias of different mesh components in different routines or steps (M%D, M%DS); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+FX_ZZ,FX_ZZ,flux_mw_fix_zz,generated,"work-array alias of M%SWORK1 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+FY_ZZ,FY_ZZ,flux_mw_fix_zz,generated,"work-array alias of M%SWORK2 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+FZ_ZZ,FZ_ZZ,flux_mw_fix_zz,generated,"work-array alias of M%SWORK3 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+H_RHO_D_DZDX,H_RHO_D_DZDX,h_rho_d_dzd,generated,"work-array alias of M%WORK5 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+H_RHO_D_DZDY,H_RHO_D_DZDY,h_rho_d_dzd,generated,"work-array alias of M%WORK6 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+H_RHO_D_DZDZ,H_RHO_D_DZDZ,h_rho_d_dzd,generated,"work-array alias of M%WORK7 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+KDTDX,KDTDX,dp_kdtd;kdtd,generated,"work-array alias of M%WORK1 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+KDTDY,KDTDY,dp_kdtd;kdtd,generated,"work-array alias of M%WORK2 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+KDTDZ,KDTDZ,dp_kdtd;kdtd,generated,"work-array alias of M%WORK3 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+KP,KP,conductivity;kdtd;wall_kp_ghost,generated,"work-array alias of M%WORK4 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+RHOP,RHOP,dp_species;rho_z_p_divg;rho_z_p_mass;rho_zz_clip_assign,generated,"alias of different mesh components in different routines or steps (M%RHO, M%RHOS, RHO, RHOS); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+RHO_D,RHO_D,rho_d_dzd,generated,"work-array alias of M%WORK4 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+RHO_D_DZDX,RHO_D_DZDX,h_rho_d_dzd;rho_d_dzd;wall_rho_d_dzdn,generated,"work-array alias of M%SWORK1 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+RHO_D_DZDY,RHO_D_DZDY,h_rho_d_dzd;rho_d_dzd;wall_rho_d_dzdn,generated,"work-array alias of M%SWORK2 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+RHO_D_DZDZ,RHO_D_DZDZ,h_rho_d_dzd;rho_d_dzd;wall_rho_d_dzdn,generated,"work-array alias of M%SWORK3 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+RHO_ZZ,RHO_ZZ,rho_zz_clip_assign,generated,"alias of different mesh components in different routines or steps (M%ZZ, M%ZZS); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+RHO_Z_P,RHO_Z_P,rho_z_p_divg;rho_z_p_mass,generated,"work-array alias of M%WORK_PAD (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+R_H_G,R_H_G,cp_rhg;dp_species,generated,"work-array alias of M%WORK9 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+UP,UP,up_deardorff;wall_coriolis_ghost;wall_up_ghost,generated,"alias of different mesh components in different routines or steps (M%WORK1, M%WORK7); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+UU,UU,adv_flux_avg;adv_flux_store;kres;up_deardorff;wall_strain_rate;wall_uvw_interp;wall_uvw_interp_corr;zz_corr;zzs_pred,generated,"alias of different mesh components in different routines or steps (M%WORK_U, M%U, M%US); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+U_DOT_DEL_RHO_Z,U_DOT_DEL_RHO_Z,dp_species,generated,"work-array alias of M%WORK7 (POINT_TO_MESH, mesh.f90:505+); the kernel dummy keeps the local name"
+VP,VP,up_deardorff;wall_coriolis_ghost;wall_up_ghost,generated,"alias of different mesh components in different routines or steps (M%WORK2, M%WORK8); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+VV,VV,adv_flux_avg;adv_flux_store;kres;up_deardorff;wall_strain_rate;wall_uvw_interp;wall_uvw_interp_corr;zz_corr;zzs_pred,generated,"alias of different mesh components in different routines or steps (M%WORK_V, M%V, M%VS); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+WP,WP,up_deardorff;wall_coriolis_ghost;wall_up_ghost,generated,"alias of different mesh components in different routines or steps (M%WORK3, M%WORK9); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+WW,WW,adv_flux_avg;adv_flux_store;kres;up_deardorff;wall_strain_rate;wall_uvw_interp;wall_uvw_interp_corr;zz_corr;zzs_pred,generated,"alias of different mesh components in different routines or steps (M%WORK_W, M%W, M%WS); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
+ZZP,ZZP,conductivity;cp_rhg;mu_dns;rho_d_dzd;rho_z_p_divg;rho_z_p_mass,generated,"alias of different mesh components in different routines or steps (M%ZZ, M%ZZS, ZZ, ZZS); hygiene item 8: the driver passes the one that applies (for example divg.f90:60-76 aims UU at U or US per step)"
