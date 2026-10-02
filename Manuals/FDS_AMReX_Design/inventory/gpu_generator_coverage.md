@@ -23,14 +23,14 @@ C subclasses (non-geometry): wall/cface layout (now: wall loops over `WALL`/`BOU
 ## 3. Coverage today (what the generator actually translates and tests)
 | Status | Loops | Est. time % |
 |---|---|---|
-| translated and bitwise-tested (A 11, B 8, C 6) | 25 | 1.227 |
+| translated and bitwise-tested (A 25, B 9, C 11) | 45 | 2.479 |
 | partly: an inner K,J,I nest is translated and tested, the outer survey loop is not (L0365 divg.f90:128-235, L0369 divg.f90:287-421, L0381 divg.f90:640-660, L0401 divg.f90:995, L0877 mass.f90:868, L0880 mass.f90:65) | 6 | 21.628 |
-| front end accepts, no test yet (A 46, B 3) | 49 | 1.055 |
-| classified translatable, front end rejects (generator gap; A 71, B 9) | 80 | 6.003 |
-| not translatable today (retired 207 and host 13 included) | 291 | 39.531 |
-- 34 kernels are generated: 7 from round 1, 18 from round 2 and 9 from round 3. 25 map one-to-one to a survey loop, 8 sit inside the six partly covered loops, and `conductivity` is a whole-array assignment (divg.f90:462) with no loop. Inner-nest time is not separated by the survey model, so the 21.628% of the partly covered loops is an upper bound for what their inner kernels cover.
+| front end accepts, no test yet (A 33, B 3) | 36 | 0.878 |
+| classified translatable, front end rejects (generator gap; A 70, B 8) | 78 | 5.892 |
+| not translatable today (retired 207 and host 13 included) | 286 | 38.567 |
+- 54 kernels are generated: 7 from round 1, 18 from round 2, 9 from round 3, 13 from round 4 (velo.f90 predictor, corrector, baroclinic and vorticity/stress cell loops, divg.f90 divergence time-derivative inputs), 3 from round 5 (`CHECK_STABILITY` maximum-with-location loops, velo.f90:3059, 3093, 3121, built by `red_argmax.py`), 3 from round 6 (`VELOCITY_FLUX` edge-table loops L1376-L1378, velo.f90:662-714, 720-772, 778-830, built by `edge_tables.py`) and 1 from round 7 (`CHECK_DIVERGENCE`, divg.f90:1675-1711, built by `red_extrema.py`). 45 map one-to-one to a survey loop, 8 sit inside the six partly covered loops, and `conductivity` is a whole-array assignment (divg.f90:462) with no loop. Inner-nest time is not separated by the survey model, so the 21.628% of the partly covered loops is an upper bound for what their inner kernels cover.
 - **Tested** here means the generated kernel equals the verbatim upstream loop text bit for bit (section 6), not that it ran on a GPU.
-- "Classified" is not "translated". Of the 148 A and B loops, 19 are translated and tested, 49 more pass the front end (1.055%), and 80 are rejected for generator gaps. The class-C wall loops add 6 more tested loops (the 25 above are A 11, B 8, C 6).
+- "Classified" is not "translated". Of the 148 A and B loops, 34 are translated and tested, 36 more pass the front end (0.878%), and 78 are rejected for generator gaps. The class-C wall loops add 7 more tested loops and the edge-table loops L1376-L1378 add 3, and `CHECK_DIVERGENCE` L0363 adds 1 (the 45 above are A 25, B 9, C 11); the cylindrical edge loops L1392 and L1393 (K,I nests with `J` fixed) are not translated.
 
 ## 4. What the WALL flat tables unlock
 Tables and fields: `docs/adr/drafts/gpu-generator-design.md`, section "WALL flat tables". Tier = what a wall-keyed C loop needs (non-geometry, translation-eligible):
@@ -41,7 +41,7 @@ Tables and fields: `docs/adr/drafts/gpu-generator-design.md`, section "WALL flat
 | T4 | other derived data: `OMESH`, `BOUNDARY_ONE_D`, `BOUNDARY_THR_D`, `ZONE_MESH`, `EDGE`, thin wall, mesh records | 36 | 8.289 |
 | T2 | ragged per-record arrays (`SYNTHETIC_TURBULENCE`, turb.f90) | 1 | 0.572 |
 - **T1 by routine** (loops): `DIVERGENCE_PART_1` 5 (outer loops L0365, L0369 included), `MASS_FINITE_DIFFERENCES` 2 (L0880 mass.f90:65-192 4.832%, L0882 mass.f90:224-320 0.302%), `SPECIES_ADVECTION_PART_1_NEW` 2 (L0401 3.260%), `CHECK_MASS_DENSITY` 2 (L0877 mass.f90:868-939 1.967%), `SETTLING_VELOCITY` 1 (1.325%), `COMPUTE_VISCOSITY` 2, `WALL_VELOCITY_NO_GRADH` 3, `ENTHALPY_ADVECTION_NEW` 2, `SPECIES_ADVECTION_PART_2` 2, `CHECK_DIVERGENCE` 1, `NO_FLUX` 1, `CHECK_STABILITY` 1, `COMPUTE_STRAIN_RATE` 1, `CORIOLIS_FORCE` 1, `MERGE_PRESSURE_ZONES` 1, `DIVERGENCE_PART_2` 1, and small `pres.f90`/`part.f90`/`radi.f90` wall loops (5). **Round 3 status of the T1 tier (32 loops; L0906 left it for class B).** Whole-loop translated and bitwise-tested: **6** (L1400 velo.f90:3347-3368, L0372 divg.f90:482-486, and the round-3 loops L1122 pres.f90:4351, L1361 velo.f90:440, L1380 velo.f90:981, L1401 velo.f90:3378). L0906 (part.f90:3654, `B2`) is also translated and tested but is now class B. Partly covered through per-nest markers: 5 (L0365, L0369, L0401, L0877, L0880; for the last three only the cell sub-nests: the `RHO_Z_P` product at mass.f90:70 and divg.f90:998, the `DELTA_RHO_ZZ` zero fill at mass.f90:871 and the `RHO_ZZ` clip assign at mass.f90:931). Of the 29 T1 loops that were blocked before round 3, 5 are now translated and tested (L0906, L1122, L1361, L1380, L1401; 0.062% modelled time) and 3 more are partly covered; 21 stay untranslated. What blocks those 21:
-  - reduction or outer-loop `CYCLE`: L0363 (divg.f90:1675), L1348 (velo.f90:3093);
+  - reduction or outer-loop `CYCLE`: L0363 (divg.f90:1675); L1348 (velo.f90:3093) was in this list and is translated and tested since round 5 (`cfl_wall_max`), L0363 is translated and tested since round 7 (`div_extrema`), so 19 of the 21 stay untranslated;
   - race or read-modify-write: L0386 (`USUM(IPZ)`), L1358 (`CELL_COUNTER`), L0375 (accumulation through wall subscripts), the `DELTA_RHO_ZZ` scatter of L0877, and L1359 (velo.f90:355: a `UNIQUE` contract cannot be proven);
   - pointer or callee: L0398 (`U_TEMP=>U_WORK` and a pointer callee), the wall nests of L0880 and L0401 (`FX_P` remap pointer, `Z_TEMP` array constructors), L0405 (`UU` associated outside the routine), L1272 (element pointer with callees);
   - whole-array assignment inside the loop body: L0403, L0882;
@@ -91,7 +91,7 @@ Denominator A: the 231 translation-eligible loops (49.177%). Denominator B: all 
 | + T3 callee loops (14, mainly `WALL_BC`) | 14, 8.232 | 84.0% | 82.0% | 88.9% / 84.5% |
 | + T4 and T2 (37; needs `OMESH` exchange buffers, ONE_D tables) | 37, 8.861 | 100% | 100% | 97.1% / 97.2% |
 (The 13 host-side loops, 1.935%, never reach 100%.) The revised statement: **about 80% of eligible time needs A, B, T1 and T3 (194 loops, 82.0% of eligible time, 84.5% of the non-geometry denominator once the retired loops are counted); 80% of eligible loops needs A, B and T1 (180 loops, 77.9%) plus about 5 of the T3 loops.** Without the WALL tables the ceiling is A and B: 16.7% of eligible time. Concrete work, in order:
-1. Test the 49 loops the front end already accepts (1.055%): mechanical with `make_r2_tests.py`.
+1. Test the 36 loops the front end still accepts untested (0.878%; 13 of the original 49 were tested in round 4): mechanical with `make_r2_tests.py`.
 2. Close the cheap generator gaps (rows 3 to 7 of section 7: function references 8, `policy.arrays` lines 8, whole-array assignment 3, rank contract 18, live-out scalars via `PRIVATE`): 49 loops, about 5.0 points of total time (mostly A and B).
 3. Wall T1 (done in round 3 for 5 loops and for the cell sub-nests of 3 more): `B2`/`SF` aliases, internal-only wall bounds (`N_EXTERNAL_WALL_CELLS+1:`), `UNIQUE` and `IDEMPOTENT` markers, `policy.assoc`, per-nest markers for L0880, L0401, L0877. The 21 T1 loops still open are listed in section 4.
 4. T3: flatten the `WALL_BC` callees (hand port, generator for the arithmetic).

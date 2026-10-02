@@ -1,0 +1,202 @@
+# Blocked-loop families for the GPU generator, grouped by owner
+
+Purpose: one list of the loop families the generator cannot translate today, with the reason, a proposed rewrite and whether the rewrite changes floating-point summation order. Source: `docs/inventory/gpu_generator_loop_classes.csv` and `docs/inventory/gpu_generator_coverage.md` (section 4, "what remains blocked"), re-read against the Fortran source. Line numbers are at the inventory baseline `36975d7` (`Source/*.f90`); the current FDS-AMReX line only shifts some lines in `velo.f90` and `main.f90` by `#ifdef WITH_AMREX` guards. "Time" is the modelled share of total run time in percent from the loop-class CSV (estimates from the inventory model, not measurements). Loop ids (L0386 and so on) are the CSV ids.
+
+**Rules that apply to every rewrite below.**
+- Anything that edits upstream source (a marker, a loop cleanup, an `!$OMP` or `UNIQUE` assertion) is delivered only as a patch file in `docs/upstream-patches/`, one short-scope change per patch, applying to the upstream file without `WITH_AMREX` code, with a rationale, a behaviour-unchanged check and its result, a target line (FireX, master or both) and the index row, as in `docs/upstream-patches/README.md`. Nothing is committed or pushed upstream.
+- Each family is signed off by its domain lead before a rewrite becomes a patch (the review table in the same README).
+- "Changes summation order?" is about the floating-point result against the current FDS source loop order: **no** means the rewritten loop adds the same terms in the same order and is bitwise comparable; **yes** means the order changes (such families are tested with a tolerance or against an order-independent reference, per ruling (c) in `docs/amrex/stage1-gpu-spike-plan.md`).
+- The GPU Generator Engineer amends the entries marked *(amended by the GPU Generator Engineer)* (reductions and `CYCLE` families).
+
+## Index
+
+| Id | Family | Owner | Loops | Time (%) | Summation order changes? |
+|---|---|---|---|---|---|
+| P1 | Zone sums `DSUM/PSUM/USUM(IPZ)` | Pressure | L0385, L0386, L0387 | 0.344 | yes (by design) |
+| P2 | `CONNECTED_ZONES` flags | Pressure | L0400 | 0.037 | no |
+| P3 | Solid-cell `DP` boundary correction | Pressure | L0394 | 0.042 | only if walls per solid cell are not added in wall order |
+| P4 | Rank-4 LOGICAL `LOG_INTWC` | Pressure | L1130, L1154 | 0.002 | no |
+| S1 | `DELTA_RHO_ZZ` and `DELTA_RHO` scatter | Species & Combustion | L0877, L0876 | 2.566 | no, if gathered in source-cell order |
+| S2 | Wall nests with pointer scratch and array constructors | Species & Combustion | L0880 wall nest, L0401 wall nest, L0403, L0882, L0398 | see entry | no |
+| S3 | Wall scatter into `U_DOT_DEL_RHO_*` and cell loops that read `CELL%WALL_INDEX` | Species & Combustion | L0398, L0399, L0405, L0406 | 0.672 | no, if walls per cell are added in wall order |
+| S4 | `SETTLING_VELOCITY` | Species & Combustion | L1272 | 1.325 | no |
+| SP1 | `CELL_COUNTER` running average | Solid Phase | L1358 | 0.056 | no, if walls per cell are visited in wall order |
+| SP2 | Ghost mirror by wall subscript | Solid Phase | L1359 | 0.006 | no |
+| SP3 | Wall-subscript accumulation `DP(IIG)` | Solid Phase | L0375 | 0.042 | no, if walls per cell are added in wall order |
+| SP4 | `WALL_BC` loops and wall heat transfer | Solid Phase | L1486-L1489, L1485, L1452, L1470, L1471 | 7.815 | no |
+| R1 | Radiation wall loops | Radiation | L1239, L1243, L1248, L1245 | 0.003 | no |
+| V1 | `CHECK_STABILITY` reductions | V&V | L1347, L1348, L1349 | 0.125 | no (max and argmax); translated and tested, tie rule `>=` (last iteration wins) |
+| V2 | `CHECK_DIVERGENCE` | V&V | L0363 | 0.272 | no (max, min); translated and tested, tie rules `>=` (last wins) and `<` (first wins) |
+| O1 | Edge-table loops | other / unassigned | L1376-L1378, L1392, L1393 | 0.706 | no |
+| O2 | Neighbour-mesh (`OMESH`) loops | other / unassigned | L1367, L1363, L1364, L1366, L1390, L1399 | 4.251 | no, if inner loops keep their order |
+| O3 | Wall-subscript stores without a uniqueness proof | other / unassigned | L1402 | 0.022 | no |
+| O4 | Geometry-deferred reductions | other / unassigned | L1128, L1140, L1242 | 14.930 | not assessed (deferred) |
+
+The time column for S2 is not summed, because L0880 is a 4.832% nest of which the wall nest is only a part, and the CSV does not split it.
+
+---
+
+## Pressure (zone sums)
+
+### P1. Zone sums `DSUM`, `PSUM`, `USUM` with a pressure-zone index *(amended by the GPU Generator Engineer)*
+- **Loops.** `DIVERGENCE_PART_1`: cell sums L0385 divg.f90:730-753 (0.318, geometry-deferred because of the `CC_IBM` calls at divg.f90:740-748); wall sums L0386 divg.f90:757-767 (0.022); CFACE sums L0387 divg.f90:770-778 (0.004, deferred). The sums are read in `DIVERGENCE_PART_2` at divg.f90:1472-1519 (short serial loops over zones, host side) and combined across processes at main.f90:2026-2040.
+- **Why blocked.** Read-modify-write on `DSUM(IPZ)`, `PSUM(IPZ)`, `USUM(IPZ)` where `IPZ` changes per cell or wall (divg.f90:735, 739, 750, 762-766): a data race if the loop is run in parallel; `IPZ` is also written in the loop and read after it (divg.f90:774), which the front end reports as a live-out scalar (L0386). In FDS these loops are serial, K,J,I ascending (no `!$OMP` between divg.f90:727 and 781), meshes of a process add into the same arrays in turn, then `MPI_ALLREDUCE` with `MPI_SUM`.
+- **Decision (owner; `generator-decisions.md`, decision B).** Default path: the GPU computes the per-cell terms `VC*DP`, `VC*(R_PBAR*R_PFCT-RTRM)` and the per-wall terms `U_NORMAL*AREA`; the additions into `DSUM/PSUM/USUM(IPZ)` stay serial in the FDS order (cells in K,J,I ascending, then walls in ascending `IW`), on the host or in a single-thread device pass. Bitwise equal to FDS for one process. Optional path: a compile-time or macro switch selects exact fixed-point sums on the GPU instead; off by default, tested separately (order-independent across box layouts and thread counts), documented as not bitwise equal to FDS. The GPU Generator Engineer implements the switch. The per-box tree is no longer proposed.
+- **Proposed rewrite (superseded by the decision above; kept as alternatives).** Per box, accumulate one partial per zone (vectors of length `N_ZONE`) in a block-level reduction, then combine partials in global box-index order (ruling (c)) or with the fixed-point exact accumulation of `ExactSum.H` (decomposition-independent). The wall term `B1%U_NORMAL_S*B1%AREA` (or `U_NORMAL*AREA`) becomes a per-wall product in the wall table reduced by key `IPZ`. The cut-cell calls stay in the geometry bucket.
+- **Changes summation order?** Yes, any parallel rewrite changes the floating-point order; exact statement. FDS adds into each zone entry one term at a time, left to right: `DSUM(IPZ) = DSUM(IPZ) + VC*DP(I,J,K)` and `PSUM(IPZ) = PSUM(IPZ) + VC*(R_PBAR(K,IPZ)*R_PFCT-RTRM(I,J,K))` over the cells of a mesh in K,J,I ascending order (divg.f90:731-753), then `USUM(IPZ) = USUM(IPZ) + B1%U_NORMAL_S*B1%AREA` (or `U_NORMAL`) over the walls in ascending `IW` (757-767); meshes of a process add into the same arrays one after the other, then `MPI_ALLREDUCE(MPI_SUM)` combines processes in an order chosen by the MPI library (main.f90:2026-2040). So the FDS value is the rounded result of one long serial chain per zone and already depends on the mesh and process decomposition. Floating-point addition is not associative, so every rewrite that is not a serial chain gives a different last-bit result:
+  - *Serial chain kept.* The per-cell and per-wall terms (`VC*DP`, `VC*(...)`, `U_NORMAL*AREA`) are elementwise and can be computed on the device bit for bit; only the adds must stay in order. Compute the terms into a per-cell and per-wall array on the device, then add them in the source order on one thread per zone (or on the host). Bitwise equal to the FDS serial loop for one process; the adds are serial (0.34% of run time at the baseline, so cheap in absolute terms for small meshes, but not parallel).
+  - *Exact fixed-point accumulation* (`ExactSum.H` style, 128-bit integers on a fixed grid). Result independent of order, thread count, box layout and process count; it equals the correctly rounded exact sum, which is not the serially rounded FDS value. Different from FDS in the last bits (see the illustration below); reproducible across configurations, which FDS itself is not.
+  - *Fixed-shape tree per zone* (pairwise, partials combined in global box-index order). Deterministic for a given layout and shape, different from FDS and different from the exact value, and changes with the layout.
+  - *Atomics or unordered `reduction(+)`.* Order depends on the schedule: not reproducible run to run; not acceptable except for debugging.
+  An illustration, not a measurement of FDS: for 300 random sums of 10^4 terms with mixed signs and a 10^6 spread of magnitudes, a pairwise tree differed from the serial chain in the last bits in 99% of the sums, and the exactly rounded sum differed in 99%. Real divergence terms are better behaved, but nothing guarantees equality. These sums are NOT translated: no kernel exists for L0385, L0386, L0387.
+
+### P2. `CONNECTED_ZONES` flag setting
+- **Loops.** L0400, `MERGE_PRESSURE_ZONES`, divg.f90:1301-1319 (0.037).
+- **Why blocked.** Rank-2 integer array `CONNECTED_ZONES(IOPZ,IPZ)` has no table kind; stores through zone values read from cell arrays (divg.f90:1306-1317).
+- **Proposed rewrite.** Flatten to a rank-1 table of `(N_ZONE+1)**2` integers; all stores write the constant 1 (divg.f90:1309-1317), so duplicates are idempotent and need no ordering; mark the stores as a logical-OR flag fill.
+- **Changes summation order?** No (integer flags, no sums).
+
+### P3. Solid-cell `DP` boundary correction
+- **Loops.** L0394, `DIVERGENCE_PART_2`, divg.f90:1574-1604 (0.042).
+- **Why blocked.** The alias `B1 => BOUNDARY_PROP1(WC%BC_INDEX)` (divg.f90:1581) is not one of the recognised wall aliases; the loop subtracts `UN_P*...` from `DP(II,JJ,KK)` at solid cells (1589-1599), so two walls on the same solid cell accumulate into one element, and the open/mirror/interpolated branch copies `DP(IIG,JJG,KKG)` into `DP(II,JJ,KK)` (1602). Note: this loop indexes `BOUNDARY_PROP1` with `WC%BC_INDEX`; the other wall loops in the same file use `WC%B1_INDEX` (for example divg.f90:761). Whether the two indices always coincide must be confirmed by the owner before the table is built (patch candidate if not).
+- **Proposed rewrite.** Gather per solid cell over its walls in ascending wall index (cell-to-wall list built with the wall tables), with the `U_NORMAL` or `U_NORMAL_S` choice passed as a per-step table; the copy branch is a separate pass after the subtract pass.
+- **Changes summation order?** Only if the walls of one solid cell are not added in ascending wall index; with that order, no.
+
+### P4. Rank-4 LOGICAL `LOG_INTWC`
+- **Loops.** L1130 `GET_H_REGFACES` pres.f90:5580-5601; L1154 `ULMAT_GET_H_REGFACES` pres.f90:2031-2047 (0.001 each).
+- **Why blocked.** `LOG_INTWC(I,J,K,IAXIS:KAXIS)` is a rank-4 LOGICAL array, which the table kinds do not cover; stores of `.TRUE.` through wall subscripts (pres.f90:5589-5599, 2040-2045).
+- **Proposed rewrite.** Declare as `integer(c_int)` (0/1) rank-4 or three rank-3 masks; stores are idempotent. These are matrix set-up loops (run at set-up, not per step), so leaving them on the host is also acceptable.
+- **Changes summation order?** No.
+
+Not rewritten (listed so nothing is lost): the pressure-solver set-up loops `ULMAT_SOLVE_ZONE` L1190-L1204, `PRESSURE_SOLVER_COMPUTE_RHS` L1209, `TUNNEL_POISSON_SOLVER` L1223-L1227, `CHECK_UNSUPPORTED_MESH` L1121 (each 0.000 to 0.086) belong to the FDS pressure solvers the AMReX solver replaces or to host set-up (`docs/inventory/gpu_generator_coverage.md` section 5). The geometry-deferred matrix loops are under O4.
+
+---
+
+## Species & Combustion
+
+### S1. `DELTA_RHO_ZZ` and `DELTA_RHO` scatter
+- **Loops.** L0877 `CHECK_MASS_DENSITY` mass.f90:868-939 (1.967; the scatter nest is mass.f90:873-925, the update nest 931-937 is already translated); the same pattern for the density, L0876 mass.f90:799-849 (0.599).
+- **Why blocked.** Each clipped cell adds into itself and six neighbours (mass.f90:916-922, and 840-846 for `DELTA_RHO`), so a neighbour cell receives contributions from up to seven source cells: a race if run in parallel. The nest is under a species loop `N` with the alias `DELTA_RHO_ZZ=>WORK5` (mass.f90:870), a per-species flag `CLIP_RHO_ZZ(N)` set from the cells (mass.f90:889) and a `CYCLE` on a sum test (914), so it is not a perfect K,J,I nest.
+- **Proposed rewrite.** Two passes: pass 1 per source cell stores `CONST`, `MASS_N(-3:3)` and `VC(-3:3)` (or the seven contributions) in temporary arrays; pass 2 per target cell sums the seven contributions. Add them in the order the serial loop adds them: sources `(I,J,K-1)`, `(I,J-1,K)`, `(I-1,J,K)`, itself, `(I+1,J,K)`, `(I,J+1,K)`, `(I,J,K+1)` (ascending K,J,I of the source), starting from zero. `CLIP_RHO_ZZ(N)` becomes an integer max-reduction (order independent).
+- **Changes summation order?** No, if the gather adds in the source order above; any other order changes the last digits.
+- **Decision for L0877 and L0876 (honest handling of the scatter).** The scatter does race: one target cell is written by up to seven source cells in the same nest (mass.f90:916-922; 840-846), so a one-thread-per-source device loop would lose or reorder updates, and an atomic add would change the summation order. Therefore **the scatter nests stay on the host** and no atomics are used. Only the already translated parts (`delta_rho_zz_zero` mass.f90:871, `rho_zz_clip_assign` mass.f90:931-937) count as device work; the credit of the scatter itself (L0877 1.967, L0876 0.599) is not claimed. The two-pass gather above is race-free and adds in exactly the serial order, so it is bitwise equal to FDS; it is the proposed device path, to be built only after the Species & Combustion lead signs off the family (review table in `docs/upstream-patches/README.md`) and after the per-cell `WALL_INDEX` table exists (the `WALL_INDEX(n)==0` tests at mass.f90:907-912 select which neighbours receive mass, see `massflux-wall-table-spec.md` section 2.2). A host-versus-gather bitwise test (random clipped fields, 6 flag sets, 4 and 8 threads) is the acceptance test for that step.
+
+### S2. Wall nests with pointer scratch and array constructors
+- **Loops.** The wall nest of L0880 `MASS_FINITE_DIFFERENCES` mass.f90:93-188 (inside the 4.832 nest at mass.f90:65-192); the wall nest of L0401 `SPECIES_ADVECTION_PART_1_NEW` divg.f90:1021-1084 (inside the 3.260 loop at divg.f90:995-1088); L0403 divg.f90:1120-1183 (0.193); L0882 mass.f90:224-320 (0.302, the same off-wall face logic for `Z=0`); the same pattern in L0398 (see S3).
+- **Why blocked.** Per-thread scratch pointers `U_TEMP=>U_WORK`, `F_TEMP=>F_WORK`, `Z_TEMP=>Z_WORK` (mass.f90:89-91, divg.f90:1017-1019, 1116-1118), whole-array assignments from array constructors such as `Z_TEMP(0:3,1,1)=(/RHO_Z_P(II+1,JJ,KK),RHO_Z_P(II+1:II+2,JJ,KK),DUMMY/)` (mass.f90:141-179; divg.f90:1037-1077, 1160-1176) and a call to `GET_SCALAR_FACE_VALUE` with a pointer dummy on one-cell scratch arrays (mass.f90:275; divg.f90:1039, 1162). The loop writes off-wall faces (`FX(II+1,...)`, mass.f90:276), the cell flux loop reads them afterwards.
+- **Proposed rewrite.** Replace the scratch arrays and the call by a scalar inline function of the four neighbouring `Z` values and the face velocity (the limiter body of `GET_SCALAR_FACE_VALUE`, func.f90:1330-1487, for one face), with scalar locals instead of `Z_TEMP`/`U_TEMP`/`F_TEMP`. Add a table-gather-time check that no two walls write the same off-wall face (a `UNIQUE` assertion, patch file if it is placed in upstream source).
+- **Changes summation order?** No: the same arithmetic per face, per-face writes only, no sums over walls.
+- **Notes from the wall-table spec (`massflux-wall-table-spec.md`).** (1) In the divergence nests (L0401, L0403) and in L0398 the `Z_TEMP` constructors fill only three of the four scratch elements (divg.f90:872, 882, 1037, 1047, 1136, 1146 and the y and z cases); the mass.f90 versions pad with `DUMMY=0`. With the MP5 limiter the callee reads the unassigned element (func.f90:1443-1448). Proposed upstream patches: `docs/upstream-patches/0001-divg-species-ztemp-pad.patch` (species routine) and `0002-divg-enthalpy-ztemp-pad.patch` (enthalpy routine); neither applied upstream. (2) L0403 reads `RHO_Z_P` where L0882 reads `RHO_RMW`: not a numerical difference, both pointers are aimed at `WORK_PAD` (divg.f90:991, 1094), so no patch is proposed.
+
+### S3. Wall scatter into `U_DOT_DEL_RHO_H_S` / `U_DOT_DEL_RHO_Z` and the cell loops that follow
+- **Loops.** L0398 `ENTHALPY_ADVECTION_NEW` wall loop divg.f90:835-939 (0.260); L0399 divg.f90:946-966 (0.185); L0405 `SPECIES_ADVECTION_PART_2` wall loop divg.f90:1237-1266 (0.042); L0406 divg.f90:1269-1289 (0.185).
+- **Why blocked.** L0398: pointer remap `U_TEMP => U_WORK` (divg.f90:863), array constructors (872, 882, 889, 896), pointer callee (874 etc.), and an accumulate through the wall's gas-cell subscript `U_DOT_DEL_RHO_H_S(BC%IIG,...) = ... - SIGN(...)*DU*B1%RDN` (divg.f90:936-937). L0405: `UU`, `VV`, `WW` are module pointers set in `DIVERGENCE_PART_1` (divg.f90:64-72), not in the routine, so the front end finds the pointer associated outside the routine; same wall-subscript accumulate (1263-1264) and a read of `UVW_SAVE(IW)` (1260). L0399 and L0406: `CELL(IC)%WALL_INDEX(+-n)==0` tests (divg.f90:957-962, 1280-1285) have no table, and the result arrays are `POINTER` dummies.
+- **Proposed rewrite.** Pass `UU/VV/WW` and the work arrays as explicit arguments. Build a per-cell six-flag mask (face has a wall) at table-gather time to replace `WALL_INDEX(n)==0`. Do the wall accumulate as a gather per gas cell over its walls in ascending wall index (cell-to-wall list table, same table as SP1 and SP3), run before the cell loop exactly as in the source (wall loop first, cell loop adds on top).
+- **Changes summation order?** Only if the walls of a gas cell are added in a different order than ascending wall index; with that order, no. Cells with one wall (the common case) are unaffected either way.
+
+### S4. `SETTLING_VELOCITY`
+- **Loops.** L1272 soot.f90:54-175 (1.325).
+- **Why blocked.** The species loop `N` (soot.f90:54) holds three sub-nests: the face nest (soot.f90:60-132, calls `GET_VISCOSITY`, `GET_CONDUCTIVITY`, `CUNNINGHAM`, uses `ZZ_GET(1:N_TRACKED_SPECIES)=...` array sections and per-species `SPECIES_MIXTURE(N)%...` components, soot.f90:59, 65, 73-78), a wall loop zeroing settling velocity at wall faces (soot.f90:136-160) and the divergence update nest (soot.f90:162-174). It is not a single K,J,I nest, and the per-species record access needs a species table.
+- **Proposed rewrite.** Split into three kernels: face velocities (species scalars passed as arguments for the current `N`: `MEAN_DIAMETER`, `DENSITY_SOLID`, `THERMOPHORETIC_DIAMETER`, `CONDUCTIVITY_SOLID`; viscosity and conductivity through the existing table callees; `CUNNINGHAM` as an inline function), the wall zeroing as a wall-table loop, and the update nest. The face values are stored, not summed.
+- **Changes summation order?** No: per-face values, and the update nest keeps the source expression order. (`U_SETTLE` is the sum of at most two terms in source order, soot.f90:77-84.)
+
+*Note: `CHECK_MASS_DENSITY` L0878 (mass.f90:947-961, 0.100) is a per-cell `SUM`/`MAXLOC` over species; the front end accepts it (class B), no test exists yet. It is not blocked and does not reduce across cells.*
+
+---
+
+## Solid Phase
+
+### SP1. `CELL_COUNTER` running average in `COMPUTE_VISCOSITY`
+- **Loops.** L1358 velo.f90:306-351 (0.056).
+- **Why blocked.** `CELL_COUNTER => IWORK1` (velo.f90:304) is read, incremented and used in a running average through the wall's gas-cell subscript (velo.f90:343-346): `MU = (1-WGT)*MU + WGT*(...)`, `WGT = 1/CELL_COUNTER`. When several walls share a gas cell (corners, thin obstructions) the result depends on wall order and the update is a read-modify-write race. The loop also calls `WALE_VISCOSITY`, which uses the module variable `C_WALE` (front-end note), and selects `NU_EDDY` by `SF%NEAR_WALL_TURB_MODEL` (a surface-table read).
+- **Proposed rewrite.** Cell-gather kernel: per gas cell, a CSR list of its solid walls in ascending wall index; the kernel runs the same running-average update over that list in order and writes `MU` once. Pass `C_WALE` as a scalar argument, inline `WALE_VISCOSITY`; add a `SURFACE` table field for `NEAR_WALL_TURB_MODEL`, `NEAR_WALL_EDDY_VISCOSITY` and `B2%Y_PLUS` (wall table).
+- **Changes summation order?** No, if the walls of each cell are processed in ascending wall index (the average is order dependent, so any other order changes the last digits).
+
+### SP2. Ghost mirror by wall subscript
+- **Loops.** L1359 velo.f90:355-363 (0.006).
+- **Why blocked.** Stores `KRES(II,JJ,KK)` and `MU(II,JJ,KK)` from the gas cell (velo.f90:360-361) through wall-table subscripts; the front end cannot prove that no two walls share a ghost cell (no `UNIQUE`, no `!$OMP DO` upstream).
+- **Proposed rewrite.** Assert at table-gather time that the `(II,JJ,KK)` targets are distinct and that no target equals a gas cell read (`IIG,JJG,KKG`); then run as a plain per-wall copy after SP1 (it reads the `MU` that SP1 wrote). The assertion is a table check; if it is wanted in the Fortran source as a `UNIQUE` marker it is a patch file.
+- **Changes summation order?** No (copies, no sums).
+
+### SP3. Accumulation through wall subscripts in `DIVERGENCE_PART_1`
+- **Loops.** L0375 divg.f90:532-554 (0.042).
+- **Why blocked.** `DP(BC%IIG,BC%JJG,BC%KKG) = DP(...) - (B1%AREA_ADJUST*B1%Q_CON_F*B1%RDN - B1%Q_LEAK)` (divg.f90:544) is an accumulate through wall subscripts with no `!$OMP DO` above it upstream; `B1%K_G` is stored per wall (538, 541); the `KDTDX/KDTDY/KDTDZ` zero stores (547-552) are guarded by a thin-wall `CYCLE` (545) to avoid an upstream race.
+- **Proposed rewrite.** Same cell-gather list as SP1 and S3: per gas cell, subtract each wall's term in ascending wall index; the `K_G` and zero stores are per-wall (unique faces, asserted at gather time, with the thin-wall rule kept).
+- **Changes summation order?** No, if the walls of a cell are added in ascending wall index.
+
+### SP4. `WALL_BC` loops and wall heat transfer
+- **Loops.** L1486 wall.f90:109-119 (0.407); L1487 wall.f90:124-137 (0.354); L1488 wall.f90:144-185 (2.688); L1489 wall.f90:192-194 (1.370); `SURFACE_HEAT_TRANSFER` L1485 wall.f90:888-947 (1.832); `ASSIGN_GHOST_VALUE` L1452 wall.f90:319-339 (0.199); `HT3D_TEMPERATURE_EXCHANGE` L1470 wall.f90:3635-3677 (0.500) and L1471 wall.f90:3681-3717 (0.465).
+- **Why blocked.** Not races: each wall iteration is independent and the upstream loops are already `!$OMP DO SCHEDULE(DYNAMIC)` (wall.f90:108, 123, 143, 191). They are blocked by what they call: `ASSIGN_GHOST_VALUE`, `NEAR_SURFACE_GAS_VARIABLES`, `HEAT_TRANSFER_COEFFICIENT`, `SOLID_HEAT_TRANSFER`, `CALCULATE_ZZ_F` and others (wall.f90:113-118, 129-133, 193), which read `SURFACE`, material, `BOUNDARY_ONE_D` layer arrays (ragged per wall) and, for L1485, L1452 and the thin-wall and 3-D loops, `OMESH` copies through `EWC%IIO_MIN..KKO_MAX` (wall.f90:319-336, 896-899) and `BOUNDARY_THR_D` node lists (wall.f90:3649-3700).
+- **Proposed rewrite.** Hand port with generator help in stages: first the leaf callees with only scalar inputs (`NEAR_SURFACE_GAS_VARIABLES`, `ASSIGN_GHOST_VALUE`), then a second table family for ragged per-wall data (offset and count per wall for `ONE_D%` layers and nodes), then the conduction solve. Neighbour-mesh sums keep the source loop order (K,J,I over `KKO,JJO,IIO`, wall.f90:896-898, 319-321).
+- **Changes summation order?** No, provided each wall's internal sums (layers, species `N`, the `IIO/JJO/KKO` overlap sums) keep their source loop order; walls are independent of each other.
+
+---
+
+## Radiation
+
+### R1. Radiation wall loops
+- **Loops.** L1239 `RADIATION_FVM` radi.f90:3886-3892 (0.000); L1243 radi.f90:4961-4970 (0.000); L1248 `INTERPOLATE_IL` radi.f90:3651-3662 (0.001); L1245 radi.f90:5044-5059 (0.002, file output, host).
+- **Why blocked.** L1239: `WC%B1_INDEX==0` is tested as a value (radi.f90:3888), while the table design allows `B1_INDEX` only as a gather index in the alias line. L1243 and L1248 read ragged per-wall radiation records (`BOUNDARY_RADIA`, `BR%BAND(IBND)%ILW(...)`, radi.f90:4965-4968, 3653-3660) with array statements and a `SUM` intrinsic. L1245 writes files (host).
+- **Proposed rewrite.** L1239: store a per-wall flag `B1_PRESENT` in the wall table (the value of `B1_INDEX>0`) and use it in the loop test. L1243 and L1248: a ragged table (band offset and angle count per wall); the `SUM(...)` and the interpolation sum over `I_INTP` expand into explicit loops in source order. L1245 stays on the host. These loops are small (about 0.003 together); the dominant radiation loop (`RADIATION_FVM` L1242, 4.576) is geometry-deferred, see O4.
+- **Changes summation order?** No (sums expanded in source order; the other loops are stores).
+
+---
+
+## V&V (CHECK_STABILITY and cross-cutting reductions)
+
+### V1. `CHECK_STABILITY` reductions *(amended by the GPU Generator Engineer)*
+**Status: translated and bitwise-tested (kernels `cfl_max`, `cfl_wall_max`, `vn_max`; generator `red_argmax.py`; tests in `s5_gen/test`).** No longer blocked.
+- **Loops.** L1347 velo.f90:3059-3080 (0.074); L1348 velo.f90:3093-3108 (0.014); L1349 velo.f90:3121-3134 (0.037).
+- **What the source does.** Each loop ends with `IF (V>=ACC) THEN; ACC=V; LOC=...; ENDIF` (3072-3077, 3102-3107, 3125-3130). The comparison is `>=`, so the LAST iteration in loop order (K outer, I inner; ascending `IW` for the wall loop) among equal maxima wins. L1348 continues the same `UVWMAX` after the cell pass, so a wall beats an equal cell and a later wall beats an earlier one. In L1347 each OpenMP thread keeps its own `UVWMAX_TMP` (start 0) and the `CRITICAL` merge (3082-3089) uses strict `>` against `UVWMAX`: on a tie across threads the first thread to arrive wins, so the upstream index depends on the thread count and the arrival order. `UVWMAX` sets the time step (`CFL = DT*UVWMAX`, 3111); the location is diagnostic.
+- **What was built.** Three passes, no atomics: (1) `reduction(max)` of V over the iterations that pass `V >= ACC`, (2) `reduction(max)` of the linear iteration index (K,J,I order, or `IW`) among those whose V equals that maximum, (3) one iteration re-runs the body at the winner and stores value and location. The result equals the serial loop's bits, including the location and the sign of a zero; outputs stay untouched if nothing passes. `MAXVAL(ABS(X(I-1:I,J,K)))` is expanded to `MAX(ABS(..),ABS(..))` in subscript order; `CYCLE I_LOOP` is a plain `CYCLE` because the label names the kernel's innermost loop. The OpenMP merge of per-thread results (3082-3089) is not translated (the device kernel replaces thread partials by the exact serial result for the box).
+- **What the tests showed (differences from the first proposal).** The serial rule is not just "(value, linear index) lexicographic maximum": (a) the initial accumulator takes part with `>=`, so a cell equal to the incoming `ACC` still writes its location (tested with ACC set to the maximum itself); (b) an incoming `ACC` above every value leaves value and location untouched (tested); (c) NaN never wins; (d) two equal maxima can differ in the sign of zero, so the stored value must be the winner's own value, not the reduced maximum; (e) with `>=` an all-zero field writes the last fluid cell in L1349 and L1347's cell pass, but the L1347 merge uses `>` against 0, so after the merge an all-zero field leaves `ICFL` as it was (caller side); (f) an all-solid mesh leaves the locations as they were (upstream `I_VN` stays 0). The tie positions were tested at several places, including first, middle and last cell, with solid cells and non-solid walls at tie positions, at 4 and 8 threads on the host fallback and in 6 build configurations; a mutant that takes the first tie, one that mirrors the index order and one that swaps the index significance are all caught.
+- **Open points.** (1) One kernel call covers one box. With several boxes in a mesh the caller must merge box results by (value, then the larger GLOBAL K,J,I linear index), not by box order, to equal the serial mesh loop; with several meshes the upstream order is mesh order. (2) The sign of `MAX(+0,-0)` and the result of `MAX(NaN,x)` are compiler choices (reference and kernel can differ in a signed zero from `MAX` itself, not from the argmax); they are outside the guarantee. (3) `ONTH` power in L1348 (`**ONTH`) is a `pow` call: bitwise equality holds against `gfortran`, an NVHPC or `libdevice` `pow` may differ in the last bit and needs its own check on the device. (4) `D_Z_MAX` is allocated only when `CHECK_VN` is set (init.f90:565-567); the kernel must only be called then (the loop is under that flag, outside the translated range).
+- **Changes summation order?** No: a maximum is order independent, and the index equals the serial one by the tie rule above. (No floating-point sum is in these loops.)
+
+### V2. `CHECK_DIVERGENCE` *(amended by the GPU Generator Engineer)*
+**Status: translated and bitwise-tested (kernel `div_extrema`; generator `red_extrema.py`).** No longer blocked.
+- **What was built.** The same three passes as V1, for three accumulators at once: `RESMAX` (`IF (ABS(RES)>=RESMAX)`, last wins) with `IRM,JRM,KRM`, `DIVMX` (`>=`, last wins) with `IMX,JMX,KMX`, and `DIVMN` (`<`, first wins) with `IMN,JMN,KMN`. Each accumulator and location is a one-element in/out array. The solid-cell `CYCLE LOOP1` is a plain `CYCLE` (the label names the innermost loop); `CARTVELDIV` is an ordinary array output (the body is re-run in each pass, the same cell stores the same value). Tests cover ties at several positions in both geometries, entry values equal to the extremes and beyond them, signed zeros, NaN and all-solid boxes, at 4 and 8 threads; the minimum is a first-wins rule, so a cell equal to the incoming `DIVMN` does not write.
+- **Finding.** `RESMAX=MAX(RES,RESMAX)` (divg.f90:1696) is a no-op for every non-NaN `RES` (the line before just stored `ABS(RES)`), but not for NaN: gfortran's `MAX(NaN,x)` returns NaN, so after a NaN cell the serial `RESMAX` is NaN or a later cell's residual while `IRM,JRM,KRM` stay behind. The kernel does not reproduce that: a NaN cell never wins and the `RESMAX` group stays a consistent pair; `DIVMX` and `DIVMN` are exact for NaN (comparisons only). A NaN in the divergence means the run has already failed.
+- **Original analysis (kept).**
+- **Loops.** L0363 divg.f90:1675-1711 (0.272).
+- **Why blocked.** Module scalars `RESMAX`, `DIVMX`, `DIVMN` and their indices are updated in the loop (divg.f90:1690-1708); the `RESMAX` self-update appears twice (`RESMAX=ABS(RES)` at 1691 and `RESMAX=MAX(RES,RESMAX)` at 1696); `CYCLE LOOP1` skips solid cells (1678), which the front end reports as a `CYCLE` it cannot map; `CARTVELDIV` is stored under a flag (1688).
+- **Proposed rewrite.** Three (value, linear index) reductions (max of residual, max of `DIV`, min of `DIV`) with the same tie rules as source (`>=` for the two maxima, `<` for the minimum, so the minimum keeps the first); the `DIV` store is a plain kernel output.
+- **Changes summation order?** No (max and min only; `DIV` itself is computed per cell by the same expression).
+
+*Cross-cutting reductions found elsewhere:* the zone sums are P1; the per-species `SUM/MAXLOC` of L0878 is per cell, see the note under S4; `MESH_EXCHANGE` and MPI reductions are retired or host-side (`docs/inventory/gpu_generator_coverage.md` section 5).
+
+---
+
+## Other / unassigned
+
+### O1. Edge-table loops
+- **Status (round 6).** L1376, L1377, L1378 are translated and bitwise-tested (kernels `vflux_fvx`, `vflux_fvy`, `vflux_fvz`, built by `edge_tables.py`). Not done: L1375 (calls `EVALUATE_RAMP`, a function of a ramp table), the cylindrical L1392 and L1393 (K,I nests with `J` fixed by an assignment before the loop: the front end only takes K,J,I nests, so this is a classifier change and needs a decision) and, outside this family, L1390/L1363 (neighbour-mesh data, O2).
+- **Tables (new family, same naming rule as the wall tables: prefix plus component, entity index first, component index last).** `CE_EDGE_INDEX(0:IBAR+1,0:JBAR+1,0:KBAR+1,12)` integer, the value of `CELL(CELL_INDEX(I,J,K))%EDGE_INDEX(n)`; `ED_OMEGA(0:NEDGE,-2:2)` and `ED_TAU(0:NEDGE,-2:2)` real, the values of `EDGE(IE)%OMEGA(k)` and `%TAU(k)`; `NEDGE` an integer argument. Edge numbers are the box's own local numbers; row 0 is the "no edge" record and holds the default `-1.E6` in both tables (as `EDGE(0)` does upstream), so `CE_EDGE_INDEX = 0` never passes the `> -1.E5` test. Per box, only edges with a set `OMEGA` (obstruction and boundary edges) matter; every other edge can share the sentinel. `CE_EDGE_INDEX` changes only with the geometry; `ED_OMEGA` and `ED_TAU` are rewritten by the driver each step before the kernel. Neighbour boxes are not needed: the nest reads its own cell's edges only.
+- **Write race.** None. Each iteration writes only its own `FVX(I,J,K)` (or `FVY`, `FVZ`); the edge tables, the gravity vectors and the stencil arrays are read-only in the loops. Upstream puts the three loops under `!$OMP DO` (one parallel region, `NOWAIT`), which agrees; the host tests run at 4 and 8 threads. The generator checks that the edge tables are never written and that the edge-index scalars take their values only from `CE_EDGE_INDEX`.
+- **Loops.** `VELOCITY_FLUX` L1376, L1377, L1378 velo.f90:662-714, 720-772, 778-830 (0.226 each); `VELOCITY_FLUX_CYLINDRICAL` L1392, L1393 velo.f90:1270-1302, 1306-1337 (0.014 each); L1375 velo.f90:649-653 (0.001, calls `EVALUATE_RAMP` on a ramp table).
+- **Why blocked.** The loop bodies read `CELL(IC)%EDGE_INDEX(n)` and `EDGE(IE)%OMEGA(+-1,+-2)`, `%TAU(+-1,+-2)` (velo.f90:678-697) with a conditional override (`OMEGA > -1.E5`). There is no edge table; `EDGE` is not a wall or cell record.
+- **Proposed rewrite.** Add an edge flat-table family decided like the wall tables: `EDGE_INDEX(12,cell)` as an integer table, and `OMEGA(-2:2,edge)`, `TAU(-2:2,edge)` as real tables with the "unset" sentinel kept. `EVALUATE_RAMP` becomes a table lookup of the ramp's points (or the 1-D loop stays on the host: it is `0:IBAR` long). Needs the table decision and an owner (the flat-table owner).
+- **Changes summation order?** No (per-cell values from the same expression; no sums across cells).
+
+### O2. Neighbour-mesh (`OMESH`) loops
+- **Loops.** `VELOCITY_BC` L1367 velo.f90:1858-1897 (0.795); `MATCH_VELOCITY_FLUX` L1363 velo.f90:2891-3015 (0.994); `NO_FLUX` L1364 velo.f90:1376-1400 (0.426) and L1366 velo.f90:1463-1559 (0.056); `PATCH_VELOCITY_FLUX` L1390 velo.f90:1081-1198 (1.270); `VISCOSITY_BC` L1399 velo.f90:514-550 (0.710). `MATCH_VELOCITY` itself (2.612) is geometry-deferred (cut-face loop).
+- **Why blocked.** They read neighbour-mesh arrays through pointers (`OMESH(NOM)%US/U/H/HS/MU/D/KRES`) over the overlap range `EWC%IIO_MIN..KKO_MAX` (velo.f90:1863-1888, 1382); L1366 is blocked only by the designator `EXTERNAL_WALL(IW)%NOM` (velo.f90:1470, 1475), which needs a one-column table. The summation in `VELOCITY_BC` is a fixed K,J,I sum over the overlap (velo.f90:1873-1888) followed by a division by the cell count.
+- **Proposed rewrite.** They wait for the exchange-buffer layout (ADR-001): once the neighbour data are in a receive buffer or a ghost-cell layer of the same box array, the loops become wall-table kernels with an `NOM`/overlap-range table. Do L1366 first (needs only the `NOM` table). Which of these loops are still needed at all depends on what replaces the FDS mesh interface (fill of ghost cells by `FillBoundary` for matched boxes).
+- **Changes summation order?** No, if the overlap sums keep the K,J,I order within each wall; the number and order of the terms depend on the exchange layout, not on the kernel.
+
+### O3. Wall-subscript stores without a uniqueness proof
+- **Loops.** L1402 `WALL_VELOCITY_NO_GRADH` velo.f90:3414-3450 (0.022).
+- **Why blocked.** Writes `U/V/W(IIG-1,...)` and `(IIG,...)` through wall subscripts (velo.f90:3437-3447) with no `!$OMP DO` above it upstream, so independence of the wall targets is not provable by the front end. Values depend on the wall only (`UN_WALLS(IW)`, `US`, `FVX` at the target face).
+- **Proposed rewrite.** Assert at table-gather time that no face is the target of two walls (including the thin-wall case) and run as a per-wall store; the sibling loops L1400 and L1401 (velo.f90:3347-3408) are already translated and tested with the same pattern, so the assertion should be shared with them.
+- **Changes summation order?** No (stores, no sums).
+
+### O4. Geometry-deferred reductions (not part of this rewrite list)
+Large loops with reductions that sit in the geometry-deferred bucket and wait for the geometry refactor: `GET_H_MATRIX` L1128 pres.f90:5038-5260 (5.193), `GET_MATRIXGRAPH_H_WHLDOM` L1140 pres.f90:5326-5528 (5.161), `RADIATION_FVM` L1242 radi.f90:3912-4953 (4.576), `GLMAT_SOLVER` L1143 (1.321), `GET_MATRIX_INDEXES_H` L1142 (0.574), `GET_BCS_H_MATRIX` L1127 (0.388). Their owners are Pressure (L1127, L1128, L1140, L1142, L1143) and Radiation (L1242), listed here so the totals are not lost. The summation order question is not assessed until the geometry refactor.
+
+---
+
+## Items needing a decision or confirmation
+1. Edge flat tables (O1): decided and built for L1376-L1378 (round 6). Open: the cylindrical K,I nests with `J` fixed (L1392, L1393) need the front end to accept a two-loop nest; and `EVALUATE_RAMP` for L1375.
+2. `BOUNDARY_PROP1(WC%BC_INDEX)` in divg.f90:1581 against `B1_INDEX` elsewhere (P3): owner to confirm the indices coincide.
+3. Cell-to-wall list (CSR, ascending wall index) as a new table family shared by S3, SP1, SP3 and P3.
+4. Tie rule for argmax/argmin (V1, V2): lexicographic on K,J,I order as proposed, to be confirmed by the V&V lead.
