@@ -14,3 +14,11 @@ Stub (first commit by the Chief Architect, 2026-10-02). Milestones R0 to R6 are 
 | `notes/flux-override-interface.md` | flux read-out and override input requested from the driver (interface flux overwrite) |
 | `tests/` | `test_amr_input.cpp`, `test_hierarchy.cpp`, `mesh_text.H` (test-only mesh reader), `cases/` (mesh lines of two Verification inputs) |
 | `notes/readf90-cmake-patch-list.md` | patch list for `read.f90` and top-level CMake (Architect) |
+
+## R2a (AMReX part)
+- `RegridAmrCore.H/.cpp`: `AmrCore` subclass; `init_static()` installs the grids of `Hierarchy` and calls `LevelListener::make_level` (level 0 is adopted by the driver, so it is not notified by default).
+- `LevelOps.H/.cpp`: `average_down_cells` (fine to coarse volume average of covered cells), `fill_cf_ghosts_pc` (coarse-fine ghost cells, piecewise-constant, layers 1 and 2 hold the same coarse value).
+- `DriverAdapter.H/.cpp`: `make_cf_ghost_hook(LevelRegistry&)` for `TimeLoop::set_cf_ghost_hook`, `average_down_registry`. Cell-centred scalars only; H/HS and face velocities are skipped.
+- `tests/test_amrcore.cpp` (ctest `regrid_transport_amrcore`, also run with `mpirun -np 2/4`). The CMake part is built when AMReX is found; the installed AMReX needs Fortran enabled and a HYPRE prefix
+  (`-DHYPRE_ROOT=<prefix> -DCMAKE_PREFIX_PATH=<prefix>`), as for the driver build.
+
