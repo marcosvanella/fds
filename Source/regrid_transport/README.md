@@ -22,3 +22,9 @@ Stub (first commit by the Chief Architect, 2026-10-02). Milestones R0 to R6 are 
 - `tests/test_amrcore.cpp` (ctest `regrid_transport_amrcore`, also run with `mpirun -np 2/4`). The CMake part is built when AMReX is found; the installed AMReX needs Fortran enabled and a HYPRE prefix
   (`-DHYPRE_ROOT=<prefix> -DCMAKE_PREFIX_PATH=<prefix>`), as for the driver build.
 
+
+## Ghost rules, wiring, checks
+- `LevelOps`/`DriverAdapter`: FDS coarse-fine ghost rules (see `notes/fr016-ghost-check.md`), exposed as the per-level hook `make_cf_ghost_hook`.
+- `TimeLoopWiring`: `install_cf_ghost_hooks(loop, finest)` and `average_down_hierarchy(loop)` for the driver's TimeLoop (compile-checked as `fds_rt_wiring_check`).
+- `FluxOverrideOps`: face lists and area-sum of fine fluxes onto coarse faces (`notes/flux-override-interface.md`); tested without the flux hooks.
+- `tests/fr016_ghost_check.cpp`: baseline comparison, enabled with `-DRT_FR016_DUMP=<prefix>`.

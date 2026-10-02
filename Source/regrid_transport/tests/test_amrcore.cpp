@@ -20,22 +20,6 @@
 
 using namespace fdsrt;
 
-// Test-only mirror of fdsamr::exchange_fields (Source/driver/GhostExchange.cpp, which also holds the FDS-linked BcStep and cannot be linked without the Fortran
-// objects). If the driver list changes, this copy must follow; the sentinel checks below do not depend on the exact list for H/HS and RHO/ZZ.
-namespace fdsamr {
-std::vector<std::string> exchange_fields(int code, bool predictor)
-{
-    switch (code) {
-    case 1: return {"RHOS", "ZZS", "MU", "KRES", "D", "TMP", "RSUM"};
-    case 4: return {"RHO", "ZZ", "MU", "KRES", "DS", "TMP", "RSUM"};
-    case 3: return {"US", "VS", "WS", "HS"};
-    case 6: return {"U", "V", "W", "H"};
-    case 5: return {"FVX", "FVY", "FVZ", predictor ? "H" : "HS"};
-    default: return {};
-    }
-}
-}  // namespace fdsamr
-
 namespace {
 
 double fval(int i, int j, int k, int n) { return 1.0 + 0.001 * i + 0.0173 * j + 0.31 * k + 7.0 * n + std::sin(0.37 * i + 0.11 * k); }
@@ -526,6 +510,37 @@ int main(int argc, char** argv)
             long hs_bad = 0;
             { const amrex::MultiFab& m = reg.fields(1)["HS"]; for (amrex::MFIter mfi(m); mfi.isValid(); ++mfi) { auto a = m.const_array(mfi); amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) { if (a(i, j, k) != -777.0) ++hs_bad; }); } }
             CHECK_MSG(hs_bad == 0, "H/HS ghost cells are not transferred by this hook");
+
+            // (1b) the same through the driver's real BcStep::exchange of level 1 (the entry point TimeLoop::stage_exchange calls): same-level fill, then the hook
+            {
+                for (int l = 0; l < 2; ++l)
+                    for (const auto& n : reg.fields(l).names()) reg.fields(l)[n].setVal(-777.0);
+                for (const auto& n : names) if (reg.fields(0).has(n)) reg.fields(0)[n].setVal(uval(n));
+                for (const auto& n : names) if (reg.fields(1).has(n)) { amrex::MultiFab& m = reg.fields(1)[n]; for (amrex::MFIter mfi(m); mfi.isValid(); ++mfi) m[mfi].setVal<amrex::RunOn::Host>(uval(n), mfi.validbox()); }
+                CfHookStats hs2;
+                fdsamr::BcStep bc1(reg.level(1), reg.fields(1));
+                bc1.ext_ghost = true;
+                bc1.cf_ghost_hook = make_cf_ghost_hook(reg, ThermoProvider(), &hs2);
+                bc1.exchange(4, true);
+                long bad = 0, n12 = 0;
+                const amrex::MultiFab& m = reg.fields(1)["RHO"];
+                const amrex::Box fdom = reg.level(1).geom.Domain();
+                for (amrex::MFIter mfi(m); mfi.isValid(); ++mfi) {
+                    auto a = m.const_array(mfi);
+                    const amrex::Box vb = mfi.validbox();
+                    amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
+                        const amrex::IntVect iv(i, j, k);
+                        if (vb.contains(iv) || !fdom.contains(iv)) return;
+                        const int layer = std::max({vb.smallEnd(0) - i, i - vb.bigEnd(0), vb.smallEnd(1) - j, j - vb.bigEnd(1), vb.smallEnd(2) - k, k - vb.bigEnd(2)});
+                        if (layer <= 2) { ++n12; if (a(i, j, k) != uval("RHO")) ++bad; }
+                    });
+                }
+                long v2[3] = {bad, n12, hs2.calls}; amrex::ParallelDescriptor::ReduceLongSum(v2, 3);
+                CHECK_MSG(v2[1] > 0 && v2[0] == 0, "BcStep::exchange(4) on level 1 with the hook set: RHO ghost layers 1 and 2 hold the coarse value, bad=" + std::to_string(v2[0]));
+                CHECK_MSG(v2[2] == amrex::ParallelDescriptor::NProcs(), "the hook ran once per exchange (summed over ranks)");
+                bc1.exchange(3, true);
+                CHECK_MSG(hs2.calls == 1, "BcStep::exchange(3) (velocities and H) adds no hook work");
+            }
 
             // (2) average-down through the registry: distinct fine values, coarse covered cells become the 2x1x2 mean
             for (int l = 0; l < 2; ++l) fill_all(reg.fields(l)["RHO"], l == 0 ? gval : fval, false);
