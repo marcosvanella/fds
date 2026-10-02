@@ -36,6 +36,7 @@
 #include "SideData.H"
 #include "check.H"
 #include "ExactSum.H"
+#include "LevelRegistry.H"
 
 using namespace fdsamr;
 
@@ -565,6 +566,141 @@ long test_exact_sum(int nranks)
     return fdstest::report("exact_sum (D-028: bitwise across box splits 32/16/8/4 cells; ranks as launched)");
 }
 
+
+// S9: per-level registry (Role 3 plan section 4 items 1, 2, 5; RegridInterface.H LevelListener). Level 0 is a 16x8x16 domain in 2x1x2 boxes (periodic in y), level 1 a
+// refined (ratio 2) region over its lower-left part cut into two boxes: make_level, covered mask, layout-built SideData at coarse-fine and box-box faces, exact sums over
+// uncovered cells (bitwise independent of the fine box split), remake_level with the old objects readable, clear_level.
+long test_levels(int nranks)
+{
+    Layout L0{"lv", {16, 8, 16}, {2, 1, 2}, {0, 1, 0}};
+    Level0 l0 = make_level0(L0, nranks);
+    Fields F0(l0, 2);
+    SideData sd0(l0, layout_cell_walls(l0));
+    LevelRegistry reg(l0.dom, 2);
+    reg.adopt_level0(l0, F0, sd0);
+    CHECK_MSG(reg.num_levels() == 1 && reg.has_level(0) && !reg.has_level(1), "registry starts with level 0 only");
+    CHECK_MSG(reg.fds_bound(0), "level 0 is FDS-bound (mesh list present)");
+    CHECK_MSG(reg.covered_mask(0) == nullptr, "no covered mask without a finer level");
+
+    const amrex::IntVect rr(2, 2, 2);
+    auto fine_layout = [&](int chop) {
+        fdsrt::LevelLayout fl;
+        fl.level = 1; fl.ref_ratio_from_parent = rr;
+        amrex::Box fdom = amrex::refine(l0.geom.Domain(), rr);
+        amrex::RealBox rb(l0.geom.ProbLo(), l0.geom.ProbHi());
+        amrex::Array<int, 3> per{l0.dom.periodic[0], l0.dom.periodic[1], l0.dom.periodic[2]};
+        fl.geom.define(fdom, rb, 0, per);
+        amrex::BoxList bl;
+        // refined part: fine cells (0..31, 0..7, 0..15) = level-0 cells (0..15, 0..3, 0..7)
+        for (int q = 0; q < chop; ++q) bl.push_back(amrex::Box(amrex::IntVect(32 * q / chop, 0, 0), amrex::IntVect(32 * (q + 1) / chop - 1, 7, 15)));
+        fl.ba.define(bl);
+        fl.dm.define(fl.ba);
+        return fl;
+    };
+    fdsrt::LevelLayout f2 = fine_layout(2);
+    reg.make_level(f2);
+    CHECK_MSG(reg.num_levels() == 2 && reg.has_level(1), "make_level(1)");
+    CHECK_MSG(!reg.fds_bound(1), "level 1 has no FDS binding (layout only)");
+    CHECK_MSG(reg.level(1).level == 1 && reg.level(1).ref_ratio_from_parent == rr, "level index and ratio recorded");
+    CHECK_MSG(std::abs(reg.level(1).dx[0] - 0.5 * l0.dx[0]) < 1e-15 && std::abs(reg.level(1).dx[2] - 0.5 * l0.dx[2]) < 1e-15, "fine cell size is half the coarse one");
+    CHECK_MSG(reg.fields(1).has("RHO") && reg.fields(1)["RHO"].boxArray() == f2.ba && reg.fields(1)["RHO"].nGrow() == 3, "Fields of level 1 on the level's BoxArray, D-031 ghost width 3 for RHO");
+    CHECK_MSG(reg.fields(1)["ZZ"].nComp() == 2, "ZZ carries N_TOTAL_SCALARS components on level 1");
+    CHECK_MSG(reg.n_side_rebuilds == 1, "make_level rebuilt the level-1 SideData");
+
+    // SideData of level 1: wall at the domain edge (periodic edge too), open at box-box and coarse-fine faces, source flag 1 inside the domain
+    {
+        const amrex::iMultiFab& m = reg.side_data(1).mask();
+        for (amrex::MFIter mfi(m); mfi.isValid(); ++mfi) {
+            const auto a = m.const_array(mfi);
+            const amrex::Box vb = mfi.validbox();
+            auto at = [&](int i, int j, int k, int c) { return vb.contains(amrex::IntVect(i, j, k)) ? a(i, j, k, c) : -99; };
+            const int w1 = at(0, 0, 0, 1);    if (w1 != -99) CHECK_MSG(w1 == 1, "level 1: -x face at the domain edge is a wall");
+            const int wy = at(0, 0, 0, 3);    if (wy != -99) CHECK_MSG(wy == 1, "level 1: periodic y edge keeps the wall code (as FDS)");
+            const int bb = at(15, 0, 0, 2);   if (bb != -99) CHECK_MSG(bb == 0, "level 1: box-box +x face is open");
+            const int cf = at(0, 7, 0, 4);    if (cf != -99) CHECK_MSG(cf == 0, "level 1: coarse-fine +y face is open");
+            const int cz = at(0, 0, 15, 6);   if (cz != -99) CHECK_MSG(cz == 0, "level 1: coarse-fine +z face is open");
+            const int sf = at(0, 0, 0, 0);    if (sf != -99) CHECK_MSG(sf == 0, "level 1: no solid cells");
+            const int src = a(vb.smallEnd(0), vb.smallEnd(1), vb.smallEnd(2), 7); CHECK_MSG(src == 1, "level 1: source flag set inside the domain");
+        }
+    }
+    // covered mask of level 0: the refined part, 16 x 4 x 8 = 512 cells
+    {
+        const amrex::iMultiFab* cov = reg.covered_mask(0);
+        CHECK_MSG(cov != nullptr && reg.covered_mask(1) == nullptr, "level 0 covered mask exists, the finest level has none");
+        long n = 0;
+        if (cov) for (amrex::MFIter mfi(*cov); mfi.isValid(); ++mfi) { const auto a = cov->const_array(mfi); amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { n += a(i, j, k); }); }
+        amrex::ParallelAllReduce::Sum(n, amrex::ParallelContext::CommunicatorSub());
+        CHECK_MSG(n == 512, "covered cells of level 0 = 512, got " + std::to_string(n));
+    }
+    // exact sums over uncovered cells
+    auto term = [&](int i, int j, int k, int c) {
+        const std::uint64_t h = mix64((std::uint64_t)(i + 5) * 73856093ULL ^ (std::uint64_t)(j + 3) * 19349663ULL ^ (std::uint64_t)(k + 9) * 83492791ULL ^ ((std::uint64_t)c << 40));
+        return std::ldexp(static_cast<double>(h & 0xFFFFFFFFFFFFFULL) / 4503599627370496.0 - 0.5, static_cast<int>((h >> 52) % 24) - 12);
+    };
+    amrex::MultiFab& R0 = F0["RHO"];
+    R0.setVal(0.0);
+    for (amrex::MFIter mfi(R0); mfi.isValid(); ++mfi) { auto a = R0.array(mfi); amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { a(i, j, k) = term(i, j, k, 0); }); }
+    const double vol0 = l0.dx[0] * l0.dx[1] * l0.dx[2];
+    {
+        const double all_plain = exact_sum(R0, 0, vol0);
+        const double nomask = exact_sum_uncovered(R0, 0, vol0, nullptr);
+        CHECK_MSG(std::memcmp(&all_plain, &nomask, sizeof(double)) == 0, "exact_sum_uncovered with no mask is bitwise exact_sum");
+        // serial reference over the uncovered cells (fixed point at the documented scale)
+        double mx = 0.0; long double ld = 0.0L;
+        auto unc = [&](int i, int j, int k) { return !(i <= 15 && j <= 3 && k <= 7); };
+        for (int k = 0; k < 16; ++k) for (int j = 0; j < 8; ++j) for (int i = 0; i < 16; ++i) if (unc(i, j, k)) { const double t = term(i, j, k, 0) * vol0; mx = std::max(mx, std::abs(t)); ld += t; }
+        int ex = 0; std::frexp(mx, &ex); const int sc = 62 - ex;
+        __int128 acc = 0;
+        for (int k = 0; k < 16; ++k) for (int j = 0; j < 8; ++j) for (int i = 0; i < 16; ++i) if (unc(i, j, k)) acc += static_cast<__int128>(std::llround(std::ldexp(term(i, j, k, 0) * vol0, sc)));
+        const double ref = std::ldexp(static_cast<double>(acc), -sc);
+        const double got = exact_sum_uncovered(R0, 0, vol0, reg.covered_mask(0));
+        CHECK_MSG(std::memcmp(&got, &ref, sizeof(double)) == 0, "exact_sum_uncovered equals the serial reference over the uncovered cells (bitwise)");
+        CHECK_MSG(std::abs(ref - static_cast<double>(ld)) <= 1e-12 * std::abs(static_cast<double>(ld)), "reference close to the long double sum");
+        const double pr = exact_sum_product_uncovered(R0, 0, R0, 0, 1.0, reg.covered_mask(0)); (void)pr;
+    }
+    // hierarchy sum: level 1 holds the piecewise-constant prolongation of level 0; the sum over the uncovered coarse cells plus all fine cells (weight vol/8) is the level-0 sum
+    auto fill_fine = [&]() {
+        amrex::MultiFab& R1 = reg.fields(1)["RHO"];
+        R1.setVal(0.0);
+        for (amrex::MFIter mfi(R1); mfi.isValid(); ++mfi) { auto a = R1.array(mfi); amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { a(i, j, k) = term(i / 2, j / 2, k / 2, 0); }); }
+    };
+    fill_fine();
+    double h2;
+    {
+        std::vector<const amrex::MultiFab*> mf{&R0, &reg.fields(1)["RHO"]};
+        std::vector<double> w{vol0, vol0 / 8.0};
+        std::vector<const amrex::iMultiFab*> cv{reg.covered_mask(0), nullptr};
+        h2 = exact_sum_hierarchy(mf, 0, w, cv);
+        const double lvl0 = exact_sum(R0, 0, vol0);
+        CHECK_MSG(std::abs(h2 - lvl0) <= 1e-12 * std::abs(lvl0) + 1e-300, "hierarchy exact sum equals the level-0 sum of the same field (rounding only)");
+    }
+    // remake_level with another fine box split: the old objects stay readable, the hierarchy sum is bitwise the same (decomposition independent)
+    {
+        fdsrt::LevelLayout f4 = fine_layout(4);
+        reg.remake_level(f4);
+        CHECK_MSG(reg.retired_fields(1) != nullptr && reg.retired_level(1) != nullptr && reg.retired_level(1)->ba == f2.ba, "remake_level keeps the previous level readable");
+        CHECK_MSG(reg.level(1).ba == f4.ba && reg.level(1).ba.size() == 4, "remake_level installed the new layout");
+        reg.release_retired(1);
+        CHECK_MSG(reg.retired_fields(1) == nullptr, "release_retired frees the previous level");
+        fill_fine();
+        std::vector<const amrex::MultiFab*> mf{&R0, &reg.fields(1)["RHO"]};
+        std::vector<double> w{vol0, vol0 / 8.0};
+        std::vector<const amrex::iMultiFab*> cv{reg.covered_mask(0), nullptr};
+        const double h4 = exact_sum_hierarchy(mf, 0, w, cv);
+        CHECK_MSG(std::memcmp(&h2, &h4, sizeof(double)) == 0, "hierarchy exact sum is bitwise independent of the fine box split (2 vs 4 boxes)");
+        CHECK_MSG(reg.n_remake == 1 && reg.n_side_rebuilds == 2, "one remake, SideData rebuilt per make/remake");
+    }
+    // level 0 cannot be remade differently; the same layout is accepted
+    {
+        fdsrt::LevelLayout l0l; l0l.level = 0; l0l.geom = l0.geom; l0l.ba = l0.ba; l0l.dm = l0.dm;
+        reg.make_level(l0l);
+        CHECK_MSG(reg.num_levels() == 2, "make_level(0) with the adopted layout is a no-op");
+    }
+    reg.clear_level(1);
+    CHECK_MSG(reg.num_levels() == 1 && !reg.has_level(1) && reg.covered_mask(0) == nullptr && reg.n_clear == 1, "clear_level(1) removes the level and the covered mask below it");
+    return fdstest::report("levels (S9: registry make/remake/clear, covered mask, layout SideData, uncovered exact sums; ranks as launched)");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -592,6 +728,7 @@ int main(int argc, char** argv)
             fails += test_registry(nranks);
             fails += test_tile_race(nranks, thread_sweep);
             fails += test_exact_sum(nranks);
+            fails += test_levels(nranks);
             if (amrex::ParallelDescriptor::IOProcessor()) std::printf("%s: %ld failing checks\n", fails == 0 ? "ALL PASS" : "SOME FAILED", fails);
         }
     }

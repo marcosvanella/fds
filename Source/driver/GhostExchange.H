@@ -37,6 +37,21 @@ std::vector<std::string> exchange_fields(int code, bool predictor = true);
 // H/HS are exchanged like FDS does (their ghosts hold the pressure solver's boundary values, which belong to the pressure backend: S6).
 void ghost_exchange(Fields& F, int code, bool predictor = true);
 
+// Coarse-fine ghost hook (S9, Role 3 plan section 4 item 4). A level > 0 has ghost cells that belong to no box of the level and are not outside the domain: the cells
+// across a coarse-fine face. The same-level FillBoundary of ghost_exchange leaves them untouched; the hook fills them (Role 3: FillPatch from the coarser level
+// at the time of the stage) for the `fields` of the exchange code, on the level the BcStep belongs to. It runs after the same-level fill and before the boundary
+// routines (after_exchange). The OMESH route of FDS never sees a coarse-fine face: fill_omesh copies box data between boxes of the SAME level only, and with
+// EXTERNAL_GHOSTS_FILLED (patches 0003/0004, D-055) the neighbour-mesh NOM>0 branches of VISCOSITY_BC, VELOCITY_BC and NO_FLUX are skipped, so the hook-filled ghosts are
+// what the kernels read. A level > 0 therefore requires ext_ghost (checked). Level 0 has no coarse-fine face (the hook is never needed there and is not called
+// unless one is installed; a single-level run is unchanged).
+struct CfGhostRequest {
+    int level;                        // AMR level of the BcStep
+    int code;                         // MESH_EXCHANGE code (1, 3, 4, 5, 6)
+    bool predictor;                   // stage (selects H/HS for code 5)
+    std::vector<std::string> fields;  // registered names to fill, exchange_fields(code, predictor) present in the level's Fields
+};
+using CfGhostHook = std::function<void(const CfGhostRequest&)>;
+
 // Boundary-condition step that FDS runs right after exchange `code` (1, 3, 4, 6; other codes: nothing). Fills OMESH(NOM) of every local box from the
 // box data (ghost fill of `code` must have been done), then calls the unmodified routine of MAIN_LOOP:
 //   code 3 (predictor end):  MATCH_VELOCITY, VELOCITY_BC(estimated)     code 6 (corrector end): MATCH_VELOCITY, VELOCITY_BC(final)
@@ -49,6 +64,9 @@ public:
     // VELOCITY_BC runs (its edge loop would otherwise use the OMESH interpolation branch instead of the regular edge formulas of the single mesh).
     bool ext_ghost = false;   // EXTERNAL_GHOSTS_FILLED mode (patches 0003/0004): MATCH_VELOCITY is skipped by FDS, the driver saves the face velocities instead
     std::function<void(bool)> iface_hook;
+    CfGhostHook cf_ghost_hook;   // optional, see CfGhostRequest
+    // ghost_exchange(F, code, predictor) followed by cf_ghost_hook (if set). The time loop calls this at every exchange position.
+    void exchange(int code, bool predictor = true);
     void after_exchange(int code, double t, double dt);
     void wall_bc(int predictor, double t, double dt);   // WALL_BC of the stage (all local boxes)
     // Kernel-check replay: the box data is ALREADY matched (a frozen dump state), so MATCH_VELOCITY is not run again; the ghost-producing routines only:

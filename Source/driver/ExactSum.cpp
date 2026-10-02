@@ -84,4 +84,59 @@ double exact_sum_product(const amrex::MultiFab& ma, int ca, const amrex::MultiFa
     return exact_group_sums(1, g, v)[0];
 }
 
+namespace {
+inline bool is_covered(const amrex::iMultiFab* cov, amrex::MFIter& mfi, int i, int j, int k)
+{
+    return cov != nullptr && (*cov)[mfi](amrex::IntVect(i, j, k)) != 0;
+}
+}  // namespace
+
+double exact_sum_uncovered(const amrex::MultiFab& mf, int comp, double weight, const amrex::iMultiFab* covered)
+{
+    std::vector<int> g;
+    std::vector<double> v;
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        const auto a = mf.const_array(mfi);
+        const amrex::Box b = mfi.validbox();
+        for (int k = b.smallEnd(2); k <= b.bigEnd(2); ++k)
+            for (int j = b.smallEnd(1); j <= b.bigEnd(1); ++j)
+                for (int i = b.smallEnd(0); i <= b.bigEnd(0); ++i)
+                    if (!is_covered(covered, mfi, i, j, k)) { g.push_back(0); v.push_back(a(i, j, k, comp) * weight); }
+    }
+    return exact_group_sums(1, g, v)[0];
+}
+
+double exact_sum_product_uncovered(const amrex::MultiFab& ma, int ca, const amrex::MultiFab& mb, int cb, double weight, const amrex::iMultiFab* covered)
+{
+    std::vector<int> g;
+    std::vector<double> v;
+    for (amrex::MFIter mfi(ma); mfi.isValid(); ++mfi) {
+        const auto a = ma.const_array(mfi);
+        const auto b2 = mb.const_array(mfi);
+        const amrex::Box b = mfi.validbox();
+        for (int k = b.smallEnd(2); k <= b.bigEnd(2); ++k)
+            for (int j = b.smallEnd(1); j <= b.bigEnd(1); ++j)
+                for (int i = b.smallEnd(0); i <= b.bigEnd(0); ++i)
+                    if (!is_covered(covered, mfi, i, j, k)) { g.push_back(0); v.push_back(a(i, j, k, ca) * b2(i, j, k, cb) * weight); }
+    }
+    return exact_group_sums(1, g, v)[0];
+}
+
+double exact_sum_hierarchy(const std::vector<const amrex::MultiFab*>& mf, int comp, const std::vector<double>& weight, const std::vector<const amrex::iMultiFab*>& covered)
+{
+    AMREX_ALWAYS_ASSERT(mf.size() == weight.size() && mf.size() == covered.size());
+    std::vector<int> g;
+    std::vector<double> v;
+    for (std::size_t l = 0; l < mf.size(); ++l)
+        for (amrex::MFIter mfi(*mf[l]); mfi.isValid(); ++mfi) {
+            const auto a = mf[l]->const_array(mfi);
+            const amrex::Box b = mfi.validbox();
+            for (int k = b.smallEnd(2); k <= b.bigEnd(2); ++k)
+                for (int j = b.smallEnd(1); j <= b.bigEnd(1); ++j)
+                    for (int i = b.smallEnd(0); i <= b.bigEnd(0); ++i)
+                        if (!is_covered(covered[l], mfi, i, j, k)) { g.push_back(0); v.push_back(a(i, j, k, comp) * weight[l]); }
+        }
+    return exact_group_sums(1, g, v)[0];
+}
+
 }  // namespace fdsamr

@@ -50,13 +50,14 @@ int main(int argc, char** argv)
                 amrex::Print() << (nfail == 0 ? "SELFTEST PASS" : "SELFTEST FAIL") << "\n";
             }
             if (argc > 2 && std::strcmp(argv[2], "--run") == 0) {
-                // --run [--steps N] [--outdir D] [--chid C] [--quiet]: the C++ time loop (S5)
+                // --run [--steps N] [--outdir D] [--chid C] [--quiet] [--exact-zone-sums]: the C++ time loop (S5)
                 fdsamr::RunOptions ro;
                 for (int i = 3; i < argc; ++i) {
                     if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) ro.max_steps = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) ro.outdir = argv[++i];
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) ro.chid = argv[++i];
                     else if (std::strcmp(argv[i], "--quiet") == 0) ro.quiet = true;
+                    else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
                 }
                 fdsamr::TimeLoop loop(l0, dt, ro);
                 const int nfail = loop.run();

@@ -17,6 +17,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -25,6 +26,7 @@
 
 #include "FdsSetup.H"
 #include "Fields.H"
+#include "GhostExchange.H"
 #include "SideData.H"
 #include "check.H"
 
@@ -245,6 +247,26 @@ int fds_selftest(const Level0& l0)
     if (amrex::ParallelDescriptor::IOProcessor())
         std::printf("  bounds cross-check against init.f90 allocations: %ld array(s) checked on this rank, %ld not allocated in this case\n",
                     n_bounds_checked, n_bounds_skipped);
+    // ---- S9: coarse-fine ghost hook of BcStep::exchange (level 0 has no coarse-fine face; the hook is called after the same-level fill with the request) ----
+    {
+        BcStep bc(l0, F);
+        std::vector<CfGhostRequest> got;
+        CHECK(!bc.cf_ghost_hook);
+        bc.exchange(1);   // no hook: plain ghost_exchange, nothing recorded
+        bc.cf_ghost_hook = [&](const CfGhostRequest& r) { got.push_back(r); };
+        bc.exchange(1, true);
+        bc.exchange(5, false);
+        bc.exchange(6, false);
+        bc.exchange(7, true);
+        CHECK(got.size() == 4);
+        if (got.size() == 4) {
+            CHECK(got[0].level == 0 && got[0].code == 1 && got[0].predictor);
+            std::vector<std::string> e1; for (const auto& n : exchange_fields(1, true)) if (F.has(n)) e1.push_back(n);
+            CHECK(got[0].fields == e1 && !e1.empty());
+            CHECK(got[1].code == 5 && !got[1].predictor && std::find(got[1].fields.begin(), got[1].fields.end(), "HS") != got[1].fields.end() && std::find(got[1].fields.begin(), got[1].fields.end(), "H") == got[1].fields.end());
+            CHECK(got[3].code == 7 && got[3].fields.empty());
+        }
+    }
     const long f = report("selftest_fds (FDS bounds table, alias read/write/pass, side data from FDS cells)");
     return static_cast<int>(f);
 }

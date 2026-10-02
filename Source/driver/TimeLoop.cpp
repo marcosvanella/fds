@@ -5,6 +5,7 @@
 //      here loops over all components, the D-031 clip special-cases only the tracked species.
 //  (b) Only uniform Cartesian metrics are used (R(I)/RRN(I) dropped); CYLINDRICAL and TRN* meshes are rejected (IR-002), the pressure call-through assumes IPS=0.
 #include "TimeLoop.H"
+#include "LevelRegistry.H"
 
 #include <AMReX_BLassert.H>
 #include <AMReX_ParallelContext.H>
@@ -135,7 +136,39 @@ struct TimeLoop::Impl {
     bool fds_outputs = false;       // FDS's own CHID_devc/_hrr/_mass/_steps/.out writers are driven (main.f90 patch 0006 present)
 
     explicit Impl(TimeLoop& l) : L(l), l0(l.m_l0) { std::memset(IP, 0, sizeof IP); std::memset(RP, 0, sizeof RP); }
-    bool local(int i) const { return is_local(l0, i); }
+
+    // ---- per-level context (S9). The stage functions below act on the CURRENT level c (select(lev)); level 0 is the default and the only bound level today. The code that is
+    // level-0 only (set-up, pressure scheme, zone sums, outputs) keeps using l0 / L.m_F directly and is documented as such (notes/level-interface.md section 2).
+    struct LevelCtx {
+        const Level* lev = nullptr;
+        Fields* F = nullptr;
+        BcStep* bc = nullptr;
+        SideData* sd = nullptr;
+        amrex::MultiFab* drho = nullptr;   // scratch of the D-031 clip
+        amrex::MultiFab* dzz = nullptr;
+        int nbox = 0;
+        int fds0 = 0;                      // FDS mesh number of box i is fds0 + i + 1
+        int off = 0;                       // first slot of this level in the global per-box vectors (dt_new, chg)
+    };
+    std::vector<LevelCtx> lc;
+    LevelCtx* c = nullptr;
+    void select(int lev)
+    {
+        if (lev < 0 || lev >= static_cast<int>(lc.size())) {
+            const bool known = L.m_reg && L.m_reg->has_level(lev);
+            die("level " + std::to_string(lev) + (known ? " exists in the registry (layout, Fields, SideData) but has no FDS binding: " : " is not a bound level: ") +
+                "the kernels take an FDS mesh number and a fine-level FDS MESH_TYPE object (metrics RDX..RDZN, wall tables, CELL_INDEX, POINT_TO_BOX route of patch 0005 DRAFT) does not exist yet (notes/level-interface.md section 3)");
+        }
+        c = &lc[lev];
+    }
+    int bi(int nm) const { return nm - 1 - c->fds0; }   // box index of FDS mesh number nm on the current level
+    template <class Fn> void for_levels(Fn f)            // every bound level, coarse to fine; the current level is level 0 again afterwards
+    {
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l) { select(l); f(l); }
+        select(0);
+    }
+    int total_boxes() const { return lc.empty() ? 0 : lc.back().off + lc.back().nbox; }
+    bool local(int i) const { return c ? c->lev->dm[i] == amrex::ParallelDescriptor::MyProc() : is_local(l0, i); }
 
     // ------------------------------------------------------------ setup
     void check_scope()
@@ -184,6 +217,12 @@ struct TimeLoop::Impl {
         rhs.reset(new amrex::MultiFab(l0.ba, l0.dm, 1, 0));
         phi.reset(new amrex::MultiFab(l0.ba, l0.dm, 1, 1));
         rhs->setVal(0.0); phi->setVal(0.0);
+        lc.assign(1, LevelCtx());
+        lc[0].lev = &l0; lc[0].F = L.m_F.get(); lc[0].bc = L.m_bc.get(); lc[0].sd = L.m_sd.get(); lc[0].drho = drho.get(); lc[0].dzz = dzz.get();
+        lc[0].nbox = nbox; lc[0].fds0 = l0.fds_mesh_offset; lc[0].off = 0;
+        c = &lc[0];
+        L.m_reg.reset(new LevelRegistry(l0.dom, ns));
+        L.m_reg->adopt_level0(l0, *L.m_F, *L.m_sd);
         L.bind_fields(true);
         pressure_bc_map();
         zone_setup();
@@ -313,39 +352,39 @@ struct TimeLoop::Impl {
     void iface(bool on, bool all = false)
     {
         if (!iface_mode) return;
-        const amrex::Box dom = l0.geom.Domain();
+        const amrex::Box dom = c->lev->geom.Domain();
         each_local([&](int nm) {
-            const amrex::Box b = l0.ba[nm - 1];
+            const amrex::Box b = c->lev->ba[bi(nm)];
             int e[6] = {b.smallEnd(0) == dom.smallEnd(0), b.bigEnd(0) == dom.bigEnd(0), b.smallEnd(1) == dom.smallEnd(1), b.bigEnd(1) == dom.bigEnd(1), b.smallEnd(2) == dom.smallEnd(2), b.bigEnd(2) == dom.bigEnd(2)};
             fds_p_iface_walls(nm, on ? 1 : 0, e, (iface_mode == 2 || all) ? 1 : 0);
         });
     }
 
     void state(bool pred, bool first) { fds_k_state(pred ? 1 : 0, first ? 1 : 0, L.m_icyc, L.m_rmin, L.m_rmax); }
-    template <class F> void each_local(F f) { for (int i = 0; i < nbox; ++i) if (local(i)) f(i + 1); }
+    template <class F> void each_local(F f) { for (int i = 0; i < c->nbox; ++i) if (local(i)) f(c->fds0 + i + 1); }
 
     // ------------------------------------------------------------ D-031 level clip (port of the kernel check's clip_level; gather form)
     void clip_level(bool pred, std::vector<int>& flags)
     {
-        Fields& F = *L.m_F;
+        Fields& F = *c->F;
         amrex::MultiFab& RP_ = F[pred ? "RHOS" : "RHO"];
         amrex::MultiFab& RZ = F[pred ? "ZZS" : "ZZ"];
-        const amrex::Periodicity per = l0.geom.periodicity();
+        const amrex::Periodicity per = c->lev->geom.periodicity();
         RP_.FillBoundary(0, 1, RP_.nGrowVect(), per);
         RZ.FillBoundary(0, RZ.nComp(), RZ.nGrowVect(), per);
-        const amrex::iMultiFab& mask = L.m_sd->mask();
+        const amrex::iMultiFab& mask = c->sd->mask();
         const int NS = RZ.nComp(), NT = nt;
         const double rmin = L.m_rmin, rmax = L.m_rmax;
-        auto mkdx = [&](const amrex::Box& qb, std::vector<double> dxv[3]) { for (int d = 0; d < 3; ++d) dxv[d].assign(qb.length(d), l0.dx[d]); };
-        flags.assign(nbox, 0);
+        auto mkdx = [&](const amrex::Box& qb, std::vector<double> dxv[3]) { for (int d = 0; d < 3; ++d) dxv[d].assign(qb.length(d), c->lev->dx[d]); };
+        flags.assign(c->nbox, 0);
         int fl[2] = {0, 0};
         std::vector<double> dxv[3];
         for (amrex::MFIter mfi(RP_); mfi.isValid(); ++mfi) {
-            const amrex::Box qb = RP_[mfi].box(), mb = mask[mfi].box(), db = (*drho)[mfi].box(), v = mfi.validbox();
+            const amrex::Box qb = RP_[mfi].box(), mb = mask[mfi].box(), db = (*c->drho)[mfi].box(), v = mfi.validbox();
             mkdx(qb, dxv);
             int f[2], n;
             fds_clip_density(qb.loVect(), qb.hiVect(), mb.loVect(), mb.hiVect(), v.loVect(), v.hiVect(), db.loVect(), db.hiVect(), v.loVect(), v.hiVect(),
-                             RP_[mfi].dataPtr(), mask[mfi].dataPtr(), dxv[0].data(), dxv[1].data(), dxv[2].data(), rmin, rmax, (*drho)[mfi].dataPtr(), f, &n);
+                             RP_[mfi].dataPtr(), mask[mfi].dataPtr(), dxv[0].data(), dxv[1].data(), dxv[2].data(), rmin, rmax, (*c->drho)[mfi].dataPtr(), f, &n);
             fl[0] |= f[0]; fl[1] |= f[1];
             flags[mfi.index()] = f[0] | (f[1] << 1);
         }
@@ -354,8 +393,8 @@ struct TimeLoop::Impl {
         amrex::ParallelAllReduce::Or(rmx, amrex::ParallelContext::CommunicatorSub());
         if (rmn || rmx) {
             for (amrex::MFIter mfi(RP_); mfi.isValid(); ++mfi) {
-                const amrex::Box qb = RP_[mfi].box(), db = (*drho)[mfi].box(), v = mfi.validbox();
-                fds_clip_density_apply(qb.loVect(), qb.hiVect(), v.loVect(), v.hiVect(), db.loVect(), db.hiVect(), RP_[mfi].dataPtr(), (*drho)[mfi].dataPtr(), rmin, rmax);
+                const amrex::Box qb = RP_[mfi].box(), db = (*c->drho)[mfi].box(), v = mfi.validbox();
+                fds_clip_density_apply(qb.loVect(), qb.hiVect(), v.loVect(), v.hiVect(), db.loVect(), db.hiVect(), RP_[mfi].dataPtr(), (*c->drho)[mfi].dataPtr(), rmin, rmax);
             }
             RP_.FillBoundary(0, 1, RP_.nGrowVect(), per);
         }
@@ -372,9 +411,9 @@ struct TimeLoop::Impl {
                 const amrex::Box fb = RZ[mfi].box(), rb = RP_[mfi].box(), mb = mask[mfi].box(), v = mfi.validbox();
                 mkdx(fb, dxv);
                 for (int n = 1; n <= NT; ++n) {
-                    int f, c;
+                    int f, ccnt;
                     fds_clip_species(fb.loVect(), fb.hiVect(), rb.loVect(), rb.hiVect(), mb.loVect(), mb.hiVect(), v.loVect(), v.hiVect(), NS, n, RP_[mfi].dataPtr(),
-                                     RZ[mfi].dataPtr(), mask[mfi].dataPtr(), dxv[0].data(), dxv[1].data(), dxv[2].data(), (*dzz)[mfi].dataPtr(n - 1), &f, &c);
+                                     RZ[mfi].dataPtr(), mask[mfi].dataPtr(), dxv[0].data(), dxv[1].data(), dxv[2].data(), (*c->dzz)[mfi].dataPtr(n - 1), &f, &ccnt);
                     zfl[n - 1] |= f;
                 }
             }
@@ -384,7 +423,7 @@ struct TimeLoop::Impl {
                 for (int n = 1; n <= NT; ++n)
                     if (zfl[n - 1])
                         fds_clip_species_apply(rb.loVect(), rb.hiVect(), fb.loVect(), fb.hiVect(), v.loVect(), v.hiVect(), NS, n, RP_[mfi].dataPtr(), RZ[mfi].dataPtr(),
-                                               (*dzz)[mfi].dataPtr(n - 1));
+                                               (*c->dzz)[mfi].dataPtr(n - 1));
                 if (rmn || rmx || anyz)
                     fds_clip_renorm(rb.loVect(), rb.hiVect(), fb.loVect(), fb.hiVect(), v.loVect(), v.hiVect(), NS, NT, RP_[mfi].dataPtr(), RZ[mfi].dataPtr(),
                                     mask[mfi].dataPtr());
@@ -398,20 +437,29 @@ struct TimeLoop::Impl {
         each_local([&](int nm) { fds_p_dens_pre(t, dt, nm); });
         std::vector<int> flags;
         clip_level(pred, flags);
-        each_local([&](int nm) { fds_k_set_flags(nm, flags[nm - 1]); fds_k_dens_post(t, dt, nm); });
+        each_local([&](int nm) { fds_k_set_flags(nm, flags[bi(nm)]); fds_k_dens_post(t, dt, nm); });
     }
 
     // ------------------------------------------------------------ D-028: zone integrals (DSUM, PSUM, USUM) as exact fixed-point sums
     void zone_sums(bool pred)
     {
         if (nzone <= 0) return;
-        std::vector<int> g; std::vector<double> v;
+        const bool exact = L.m_o.exact_zone_sums || std::getenv("FDSTL_EXACT_ZONES") != nullptr;
+        const bool diag = exact || std::getenv("FDSTL_ZONE_DIAG") != nullptr;
         std::vector<double> fds_loc(3 * nzone, 0.0);
         {
             std::vector<double> d(nzone), p(nzone), u(nzone);
             fds_p_zone_get(nzone, d.data(), p.data(), u.data());
             for (int z = 0; z < nzone; ++z) { fds_loc[z] = d[z]; fds_loc[nzone + z] = p[z]; fds_loc[2 * nzone + z] = u[z]; }
         }
+        // FDS's own order: the kernels accumulated DSUM/PSUM/USUM per rank in box order; then the MPI_SUM reduction of INITIALIZE_DIVERGENCE_INTEGRALS' partner (main.f90 ~2111)
+        amrex::ParallelAllReduce::Sum(fds_loc.data(), 3 * nzone, amrex::ParallelContext::CommunicatorSub());
+        if (!diag) {
+            if (std::getenv("FDSTL_ZONES")) for (int z = 0; z < nzone; ++z) amrex::Print() << "  [zone] icyc " << L.m_icyc << (pred ? " P " : " C ") << "FDS order DSUM " << std::setprecision(17) << fds_loc[z] << " PSUM " << fds_loc[nzone + z] << " USUM " << fds_loc[2 * nzone + z] << "\n";
+            fds_p_zone_set(nzone, fds_loc.data(), fds_loc.data() + nzone, fds_loc.data() + 2 * nzone);
+            return;
+        }
+        std::vector<int> g; std::vector<double> v;
         each_local([&](int nm) {
             const int i = nm - 1;
             const long nc = static_cast<long>(mip[16 * i]) * mip[16 * i + 1] * mip[16 * i + 2];
@@ -425,10 +473,10 @@ struct TimeLoop::Impl {
             for (int w = 0; w < nw; ++w) if (wz[w] > 0) { g.push_back(2 * nzone + wz[w] - 1); v.push_back(wt[w]); }
         });
         const std::vector<double> s = exact_group_sums(3 * nzone, g, v);
-        amrex::ParallelAllReduce::Sum(fds_loc.data(), 3 * nzone, amrex::ParallelContext::CommunicatorSub());   // FDS's own order (per rank, then over ranks)
         for (int q = 0; q < 3 * nzone; ++q) zone_rel_step = std::max(zone_rel_step, std::abs(s[q] - fds_loc[q]) / std::max(std::abs(s[q]), 1e-30));
-        if (std::getenv("FDSTL_ZONES")) for (int z = 0; z < nzone; ++z) amrex::Print() << "  [zone] icyc " << L.m_icyc << (pred ? " P " : " C ") << "DSUM " << std::setprecision(17) << s[z] << " PSUM " << s[nzone + z] << " USUM " << s[2 * nzone + z] << "\n";
-        fds_p_zone_set(nzone, s.data(), s.data() + nzone, s.data() + 2 * nzone);
+        if (std::getenv("FDSTL_ZONES")) for (int z = 0; z < nzone; ++z) amrex::Print() << "  [zone] icyc " << L.m_icyc << (pred ? " P " : " C ") << "DSUM " << std::setprecision(17) << s[z] << " PSUM " << s[nzone + z] << " USUM " << s[2 * nzone + z] << " (FDS order: " << fds_loc[z] << " " << fds_loc[nzone + z] << " " << fds_loc[2 * nzone + z] << ")\n";
+        if (exact) fds_p_zone_set(nzone, s.data(), s.data() + nzone, s.data() + 2 * nzone);
+        else fds_p_zone_set(nzone, fds_loc.data(), fds_loc.data() + nzone, fds_loc.data() + 2 * nzone);
     }
 
     // ------------------------------------------------------------ pressure (PRESSURE_ITERATION_SCHEME, main.f90:1649)
@@ -589,11 +637,34 @@ struct TimeLoop::Impl {
         return iter;
     }
 
+    // ------------------------------------------------------------ per-level stage bodies (S9): the exact calls advance() makes, on the current level c
+    void s_visc_mfd(bool pred) { each_local([&](int nm) { fds_k_visc(nm, pred ? 0 : 1); fds_p_mfd(nm); }); }
+    void s_exchange(int code, bool pred) { c->bc->exchange(code, pred); }
+    void s_after(int code) { c->bc->after_exchange(code, L.m_t, L.m_dt); }
+    void s_vflux(bool pred)
+    {
+        iface(true);
+        each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(L.m_t, L.m_dt, nm, pred ? 0 : 1); });
+        iface(false);
+    }
+    void s_wall_bc(bool pred) { c->bc->wall_bc(pred ? 1 : 0, L.m_t, L.m_dt); }
+    void s_div1() { iface(true); each_local([&](int nm) { fds_k_div1(L.m_t, L.m_dt, nm); }); iface(false); }
+    void s_div2() { each_local([&](int nm) { fds_k_div2(L.m_dt, nm); }); }
+    // velocity predictor: writes this rank's boxes of the level into the global per-box vectors at slot off + box (other slots untouched)
+    void s_vpred(std::vector<double>& dn, std::vector<double>& ci)
+    {
+        each_local([&](int nm) {
+            double dtn, cfl, vn; int ic;
+            fds_k_vpred(L.m_t + L.m_dt, L.m_dt, nm, &dtn, &ic, &cfl, &vn);
+            dn[c->off + bi(nm)] = dtn; ci[c->off + bi(nm)] = ic;
+        });
+    }
+    void s_vcorr() { each_local([&](int nm) { fds_k_vcorr(L.m_t, L.m_dt, nm); }); }
+
     // ------------------------------------------------------------ one MAIN_LOOP iteration
     bool advance()
     {
-        Fields& F = *L.m_F;
-        BcStep& bc = *L.m_bc;
+        select(0);
         StepRecord rec;
         zone_rel_step = 0.0;
         ++L.m_icyc;
@@ -605,7 +676,7 @@ struct TimeLoop::Impl {
 
         // ---------------- predictor
         state(true, true);
-        each_local([&](int nm) { fds_k_visc(nm, 0); fds_p_mfd(nm); });
+        for_levels([&](int) { s_visc_mfd(true); });
         first_pass = true;
         passes = 0;
         int stop = 0;
@@ -618,48 +689,43 @@ struct TimeLoop::Impl {
                 stage_scratch("static", {{"MU_RSQMW_Z", 2}, {"K_RSQMW_Z", 2}, {"CP_Z", 2}, {"H_SENS_Z", 2}, {"RSQ_MW_Z", 1}, {"MWR_Z", 1}, {"MW", 1}}, true);
             }
             stage_raw(passes == 1 ? "p1_pre_dens" : "p2_pre_dens", {"RHO", "ZZ", "TMP", "U", "V", "W", "H", "HS", "MU", "KRES"});
-            density(true, t, dt);
+            for_levels([&](int) { density(true, t, dt); });
             stage(passes == 1 ? "p1_dens" : "p2_dens", {"RHOS", "ZZS"});
             stage_raw(passes == 1 ? "p1_a_dens" : "p2_a_dens", {"RHOS", "TMP"});
-            ghost_exchange(F, 1);
+            for_levels([&](int) { s_exchange(1, true); });
             stage_raw(passes == 1 ? "p1_b_fill" : "p2_b_fill", {"RHOS", "TMP"});
-            bc.after_exchange(1, t, dt);
+            for_levels([&](int) { s_after(1); });
             stage_raw(passes == 1 ? "p1_c_visc" : "p2_c_visc", {"RHOS", "TMP"});
             stage_raw(passes == 1 ? "p1_prevflux" : "p2_prevflux", {"RHO", "RHOS", "U", "V", "W", "MU", "KRES", "H", "HS", "ZZ", "TMP"});
             if (const char* e = std::getenv("FDSTL_EDGES")) if (std::atoi(e) == L.m_icyc && passes == 1) each_local([&](int nm) { const std::string fn = dir + "/edges_p1_b" + std::to_string(nm) + ".bin"; fds_p_edge_dump(nm, fn.c_str(), static_cast<int>(fn.size())); });
-            iface(true);
-            each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(t, dt, nm, 0); });
-            iface(false);
+            for_levels([&](int) { s_vflux(true); });
             stage(passes == 1 ? "p1_vflux" : "p2_vflux", {"FVX", "FVZ", "MU"});
             fds_p_init_div();
-            bc.wall_bc(1, t, dt);
+            for_levels([&](int) { s_wall_bc(true); });
             if (std::getenv("FDSTL_WALLS") && L.m_icyc == std::atoi(std::getenv("FDSTL_WALLS")) && passes == 1)
                 each_local([&](int nm) { const amrex::Box b = l0.ba[nm - 1]; fds_p_wall_dump(nm, b.smallEnd(0), b.smallEnd(2), 5); });
             stage_raw(passes == 1 ? "p1_prediv" : "p2_prediv", {"RHOS", "ZZS", "TMP", "RSUM", "U", "V", "W", "MU", "KRES", "D"});
-            iface(true);
-            each_local([&](int nm) { fds_k_div1(t, dt, nm); });
-            iface(false);
+            for_levels([&](int) { s_div1(); });
             stage(passes == 1 ? "p1_div1" : "p2_div1", {"DS", "MU", "KRES", "TMP", "RSUM"});
             if (passes == 1) stage_scratch("p1_div1", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"WORK7", 3}, {"WORK8", 3}, {"WORK9", 3},
                                                        {"SWORK1", 4}, {"SWORK2", 4}, {"SWORK3", 4}, {"SWORK4", 4}, {"DEL_RHO_D_DEL_Z", 4}});
             zone_sums(true);
-            each_local([&](int nm) { fds_k_div2(dt, nm); });
+            for_levels([&](int) { s_div2(); });
             stage(passes == 1 ? "p1_div" : "p2_div", {"D", "DS", "DDDT"});
             state(true, first_pass);
             bool took = L.m_hook && L.m_hook(true, passes);
             if (!took) { const double tp0 = amrex::second(); rec.it_pred = pressure_scheme(true, t, dt, rec.perr_pred, rec.verr_pred); t_pres += amrex::second() - tp0; }
             // velocity predictor of every box, then the global DT decision (MIN over boxes and ranks)
             stage(passes == 1 ? "p1_press" : "p2_press", {"H", "FVX", "FVZ"});
-            std::vector<double> dn(nbox, 0.0);
-            std::vector<double> ci(nbox, 0.0);
-            each_local([&](int nm) {
-                double dtn, cfl, vn; int ic;
-                fds_k_vpred(t + dt, dt, nm, &dtn, &ic, &cfl, &vn);
-                dn[nm - 1] = dtn; ci[nm - 1] = ic;
-            });
-            amrex::ParallelAllReduce::Sum(dn.data(), nbox, amrex::ParallelContext::CommunicatorSub());
-            amrex::ParallelAllReduce::Sum(ci.data(), nbox, amrex::ParallelContext::CommunicatorSub());
-            for (int i = 0; i < nbox; ++i) { dt_new[i] = dn[i]; chg[i] = static_cast<int>(ci[i]); }
+            // (S9: the vectors hold every bound level, slot off + box; every box has one owner, so the Sum reduction is a gather; dt_at_step_start / dt_after_pass take the
+            // MIN over all of them: one global dt over levels and ranks, the same in both stages, D-050)
+            const int ntot = total_boxes();
+            std::vector<double> dn(ntot, 0.0);
+            std::vector<double> ci(ntot, 0.0);
+            for_levels([&](int) { s_vpred(dn, ci); });
+            amrex::ParallelAllReduce::Sum(dn.data(), ntot, amrex::ParallelContext::CommunicatorSub());
+            amrex::ParallelAllReduce::Sum(ci.data(), ntot, amrex::ParallelContext::CommunicatorSub());
+            for (int i = 0; i < ntot; ++i) { dt_new[i] = dn[i]; chg[i] = static_cast<int>(ci[i]); }
             stop = fds_p_stop_status();
             all_max(stop);
             bool nonfinite = false;
@@ -670,46 +736,42 @@ struct TimeLoop::Impl {
         }
         rec.passes = passes;
         stage("pred_end", {"US", "WS", "RHOS"});
-        ghost_exchange(F, 3);
-        bc.after_exchange(3, t, dt);
+        for_levels([&](int) { s_exchange(3, true); });
+        for_levels([&](int) { s_after(3); });
         stage("pred_match", {"US", "WS"});
 
         // ---------------- corrector
         t = time_advance(t, dt);
         fds_p_zero_dot();   // MAIN_LOOP: Q_DOT = 0, M_DOT = 0 after T = T + DT
         state(false, first_pass);
-        each_local([&](int nm) { fds_k_visc(nm, 1); fds_p_mfd(nm); });
+        for_levels([&](int) { s_visc_mfd(false); });
         stage_raw("c_pre", {"RHOS", "TMP", "RHO", "US", "VS", "WS", "H", "HS"});
-        density(false, t, dt);
+        for_levels([&](int) { density(false, t, dt); });
         stage("c_dens", {"RHO", "ZZ"});
-        ghost_exchange(F, 4);
-        bc.after_exchange(4, t, dt);
+        for_levels([&](int) { s_exchange(4, false); });
+        for_levels([&](int) { s_after(4); });
         stage_raw("c_prevflux", {"RHOS", "US", "VS", "WS", "MU", "KRES", "H", "HS", "ZZS", "TMP", "RHO"});
-        iface(true);
-        each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(t, dt, nm, 1); });
-        iface(false);
+        for_levels([&](int) { s_vflux(false); });
         stage("c_vflux", {"FVX", "FVZ"});
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
-        bc.wall_bc(0, t, dt);
+        for_levels([&](int) { s_wall_bc(false); });
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();
-        iface(true);
-        each_local([&](int nm) { fds_k_div1(t, dt, nm); });
-        iface(false);
+        for_levels([&](int) { s_div1(); });
         zone_sums(false);
-        each_local([&](int nm) { fds_k_div2(dt, nm); });
+        for_levels([&](int) { s_div2(); });
         state(false, first_pass);
         {
             bool took = L.m_hook && L.m_hook(false, 1);
             if (!took) { const double tp0 = amrex::second(); rec.it_corr = pressure_scheme(false, t, dt, rec.perr_corr, rec.verr_corr); t_pres += amrex::second() - tp0; }
         }
         stage("c_press", {"HS", "DS"});
-        each_local([&](int nm) { fds_k_vcorr(t, dt, nm); });
+        for_levels([&](int) { s_vcorr(); });
         stage("c_end", {"U", "W"});
-        ghost_exchange(F, 6);
-        bc.after_exchange(6, t, dt);
+        for_levels([&](int) { s_exchange(6, false); });
+        for_levels([&](int) { s_after(6); });
         rec.dt = dt;
         rec.zone_rel = zone_rel_step;
         L.m_steps.push_back(rec);
@@ -990,6 +1052,44 @@ void TimeLoop::bind_fields(bool copy_setup_state)
             if (fds_shim_bind(nm, s.name, fab.dataPtr(), lb, ext, stride) != 0) die(std::string("cannot bind ") + s.name);
         }
     }
+}
+
+// ---- S9 per-level entry points (thin wrappers on the Impl stage bodies; level 0 is the current level again on return)
+int TimeLoop::num_levels() const { return static_cast<int>(m->lc.size()); }
+#define FDSTL_LEVEL_STAGE(lev, body) do { m->select(lev); body; m->select(0); } while (0)
+void TimeLoop::stage_viscosity(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_visc_mfd(predictor)); }
+void TimeLoop::stage_density(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->density(predictor, m_t, m_dt)); }
+void TimeLoop::stage_exchange(int lev, int code, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_exchange(code, predictor)); }
+void TimeLoop::stage_boundary(int lev, int code) { FDSTL_LEVEL_STAGE(lev, m->s_after(code)); }
+void TimeLoop::stage_velocity_flux(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_vflux(predictor)); }
+void TimeLoop::stage_wall_bc(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_wall_bc(predictor)); }
+void TimeLoop::stage_divergence1(int lev) { FDSTL_LEVEL_STAGE(lev, m->s_div1()); }
+void TimeLoop::stage_divergence2(int lev) { FDSTL_LEVEL_STAGE(lev, m->s_div2()); }
+void TimeLoop::stage_velocity_correct(int lev) { FDSTL_LEVEL_STAGE(lev, m->s_vcorr()); }
+void TimeLoop::stage_velocity_update(int lev, bool predictor, double* local_dt, int* change_time_step)
+{
+    if (!predictor) die("stage_velocity_update: the corrector velocity update is stage_velocity_correct");
+    m->select(lev);
+    std::vector<double> dn(m->total_boxes(), 1.0e300), ci(m->total_boxes(), 0.0);
+    m->s_vpred(dn, ci);
+    double mn = 1.0e300; int ch = 0;
+    for (int i = 0; i < m->c->nbox; ++i) if (m->local(i)) { mn = std::min(mn, dn[m->c->off + i]); ch |= static_cast<int>(ci[m->c->off + i]); }
+    *local_dt = mn; *change_time_step = ch;
+    m->select(0);
+}
+#undef FDSTL_LEVEL_STAGE
+double TimeLoop::global_dt(const std::vector<double>& local_dt_per_level) const
+{
+    double mn = 1.0e300;
+    for (double d : local_dt_per_level) mn = std::min(mn, d);
+    amrex::ParallelAllReduce::Min(mn, amrex::ParallelContext::CommunicatorSub());
+    return mn;
+}
+void TimeLoop::set_cf_ghost_hook(int lev, CfGhostHook h)
+{
+    m->select(lev);
+    m->c->bc->cf_ghost_hook = std::move(h);
+    m->select(0);
 }
 
 bool TimeLoop::advance() { const double t0 = amrex::second(); const bool ok = m->advance(); m->t_loop += amrex::second() - t0; return ok; }

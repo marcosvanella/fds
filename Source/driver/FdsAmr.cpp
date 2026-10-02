@@ -71,6 +71,17 @@ Level0 assemble_level0(const amrex::Vector<MeshInfo>& meshes, const DomainInfo& 
     return l0;
 }
 
+Level make_layout_level(int level, const amrex::Geometry& geom, const amrex::BoxArray& ba, const amrex::DistributionMapping& dm,
+                        const amrex::IntVect& ref_ratio_from_parent, const DomainInfo& dom)
+{
+    AMREX_ALWAYS_ASSERT(level >= 0 && ba.size() >= 1);
+    Level l;
+    l.geom = geom; l.ba = ba; l.dm = dm; l.dom = dom;
+    l.level = level; l.ref_ratio_from_parent = ref_ratio_from_parent;
+    for (int d = 0; d < 3; ++d) l.dx[d] = geom.CellSize(d);
+    return l;
+}
+
 void print_level0(const Level0& l0)
 {
     amrex::Print() << "FDS-AMReX level 0: " << l0.ba.size() << " box(es), domain " << l0.geom.Domain()

@@ -23,7 +23,7 @@ SideData::SideData(const Level0& l0, const CellWallProvider& provider)
     m_mask.setVal(0);
     const amrex::Box dom = l0.geom.Domain();
     for (amrex::MFIter mfi(m_mask); mfi.isValid(); ++mfi) {
-        const int nm = mfi.index() + 1;
+        const int nm = mfi.index() + 1 + l0.fds_mesh_offset;   // FDS mesh number of the box (level 0: box index + 1)
         const amrex::Box vb = mfi.validbox();
         auto a = m_mask.array(mfi);
         provider(nm, vb, a);

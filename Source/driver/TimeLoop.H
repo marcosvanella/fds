@@ -21,6 +21,7 @@
 
 #include "Fields.H"
 #include "GhostExchange.H"
+#include "LevelRegistry.H"
 #include "SideData.H"
 #include "TimeStep.H"
 
@@ -32,6 +33,10 @@ struct RunOptions {
     int max_steps = -1;            // <0: until T_END
     std::string ref_dir;           // baseline directory of the case (optional): MMS and restart comparison data are read by tests/compare_run.py
     bool quiet = false;
+    // D-053: the pressure-zone sums USUM, DSUM, PSUM keep FDS's own summation order (per rank in box order, then MPI_ALLREDUCE) by default. true (--exact-zone-sums or
+    // env FDSTL_EXACT_ZONES=1) replaces them by the decomposition-independent fixed-point sums of D-028 (ExactSum); a GPU option, off by default, tested separately
+    // (tests/run_zone_sum_check.sh). The set-up volumes and areas (zone_setup) are D-028 sums in both modes.
+    bool exact_zone_sums = false;
 };
 
 struct StepRecord {
@@ -40,7 +45,7 @@ struct StepRecord {
     int passes = 0;                // passes of the CHANGE_TIME_STEP loop
     int it_pred = 0, it_corr = 0;  // pressure iterations of the last pass (predictor) and of the corrector
     double perr_pred = 0.0, verr_pred = 0.0, perr_corr = 0.0, verr_corr = 0.0;
-    double zone_rel = 0.0;         // max relative difference FDS accumulation vs exact fixed-point zone sums in this step (diagnostic)
+    double zone_rel = 0.0;         // max relative difference FDS accumulation vs exact fixed-point zone sums in this step (diagnostic; computed only with exact_zone_sums or FDSTL_ZONE_DIAG, else 0)
 };
 
 class TimeLoop {
@@ -57,8 +62,33 @@ public:
     bool advance();            // one MAIN_LOOP iteration; false if the run must stop (instability)
     // Bind the level-0 fields to the FDS arrays of every local box. Copies the FDS set-up state into the FABs first (the binding replaces the FDS arrays).
     void bind_fields(bool copy_setup_state);
-    Fields& fields() { return *m_F; }
-    BcStep& bcstep() { return *m_bc; }
+    Fields& fields() { return *m_F; }      // level 0 (same as fields(0))
+    BcStep& bcstep() { return *m_bc; }     // level 0
+
+    // ---- S9: per-level interface (notes/level-interface.md; Role 3 plan section 4 items 1-5). Stable header: these names and signatures are what Role 3 codes against.
+    // registry(): the per-level Level/Fields/SideData/covered mask and the fdsrt::LevelListener for Role 3's make/remake/clear_level. Valid after construction of the loop.
+    LevelRegistry& registry() { return *m_reg; }
+    // Levels that advance() steps: those with an FDS binding. 1 until fine-level FDS MESH_TYPE objects exist; the registry may hold more levels (layout, Fields, SideData).
+    int num_levels() const;
+    // Per-level stage entry points. Each is the exact body that advance() runs for that level at that position of MAIN_LOOP (same calls, same order), on the level's boxes
+    // of this rank. `predictor` selects the stage (true = predictor). t and dt are the loop's current time and step. A level without an FDS binding aborts with a
+    // message naming the missing piece (no fine-level physics is faked). The pressure solve, the zone sums and the outputs are NOT per level: they stay global
+    // (the composite pressure solve across levels is Role 2/3 work, notes/level-interface.md section 4).
+    void stage_viscosity(int lev, bool predictor);          // COMPUTE_VISCOSITY + MASS_FINITE_DIFFERENCES
+    void stage_density(int lev, bool predictor);            // DENSITY incl. the D-031 clip over this level (the pre/clip/post split form)
+    void stage_exchange(int lev, int code, bool predictor); // MESH_EXCHANGE code on the level: same-level fill, then the coarse-fine ghost hook (BcStep::exchange)
+    void stage_boundary(int lev, int code);                 // the boundary routines FDS runs after exchange `code` (BcStep::after_exchange)
+    void stage_velocity_flux(int lev, bool predictor);      // VELOCITY_FLUX (+ the interface walls as regular faces)
+    void stage_wall_bc(int lev, bool predictor);            // WALL_BC
+    void stage_divergence1(int lev);                        // DIVERGENCE_PART_1
+    void stage_divergence2(int lev);                        // DIVERGENCE_PART_2
+    // VELOCITY_PREDICTOR of the level: smallest stable dt of the level's boxes of this rank (a large number if the rank has none) and CHANGE_TIME_STEP flag (OR).
+    void stage_velocity_update(int lev, bool predictor, double* local_dt, int* change_time_step);
+    void stage_velocity_correct(int lev);                   // VELOCITY_CORRECTOR
+    // Global dt: MIN of the per-level local dts over levels and ranks. Same value for both stages of a step (D-050: dt is decided once per pass, both stages use it).
+    double global_dt(const std::vector<double>& local_dt_per_level) const;
+    // Coarse-fine ghost hook of level `lev` (Role 3 plan item 4): called by stage_exchange after the same-level fill of every exchange code. See CfGhostRequest.
+    void set_cf_ghost_hook(int lev, CfGhostHook h);
     double time() const { return m_t; }
     double dt() const { return m_dt; }
     int icyc() const { return m_icyc; }
@@ -73,6 +103,7 @@ private:
     std::unique_ptr<Fields> m_F;
     std::unique_ptr<SideData> m_sd;
     std::unique_ptr<BcStep> m_bc;
+    std::unique_ptr<LevelRegistry> m_reg;
     PressureHook m_hook;
     double m_t = 0.0, m_dt = 0.0, m_rmin = 0.0, m_rmax = 0.0;
     int m_icyc = 0;

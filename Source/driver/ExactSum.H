@@ -14,6 +14,7 @@
 #define FDS_EXACTSUM_H_
 
 #include <AMReX_MultiFab.H>
+#include <AMReX_iMultiFab.H>
 
 #include <vector>
 
@@ -27,6 +28,17 @@ double exact_sum(const amrex::MultiFab& mf, int comp, double weight);
 
 // Global exact sum of (a(i,j,k,ca) * b(i,j,k,cb)) * weight over valid cells (for example mass = RHO * Z * cell volume).
 double exact_sum_product(const amrex::MultiFab& a, int ca, const amrex::MultiFab& b, int cb, double weight);
+
+// Uncovered-cell variants (S9, D-028 under AMR, Role 3 plan section 4 item 2): `covered` is the fine-mask of the level (same BoxArray/DistributionMapping as the
+// data, any ghost width; nonzero = the valid cell is covered by a finer level, see LevelRegistry::covered_mask). Covered cells contribute nothing, so a
+// level-by-level sum of the uncovered cells counts every point of the domain once. nullptr = nothing covered: bitwise equal to exact_sum / exact_sum_product.
+// The result still depends on the multiset of terms only (not on box split or rank count), the multiset being the uncovered cells.
+double exact_sum_uncovered(const amrex::MultiFab& mf, int comp, double weight, const amrex::iMultiFab* covered);
+double exact_sum_product_uncovered(const amrex::MultiFab& a, int ca, const amrex::MultiFab& b, int cb, double weight, const amrex::iMultiFab* covered);
+
+// Several levels in one fixed-point sum (one scale for the whole hierarchy, so the total is independent of how the cells are split between levels and ranks):
+// level l carries its own cell weight (volume of a level-l cell). Vectors have one entry per level; covered[l] may be nullptr (finest level).
+double exact_sum_hierarchy(const std::vector<const amrex::MultiFab*>& mf, int comp, const std::vector<double>& weight, const std::vector<const amrex::iMultiFab*>& covered);
 
 }  // namespace fdsamr
 

@@ -93,10 +93,21 @@ void BcStep::fill_omesh()
             }
             if (amrex::ParallelDescriptor::NProcs() > 1) amrex::ParallelDescriptor::Bcast(buf.data(), n, owner);
             for (int nm = 0; nm < nbox; ++nm)
-                if (local(nm)) fds_g_fill_om(nm + 1, nom + 1, kv.second, nb.lb, nb.ext, nc, buf.data());
+                if (local(nm)) fds_g_fill_om(nm + 1 + m_l0.fds_mesh_offset, nom + 1 + m_l0.fds_mesh_offset, kv.second, nb.lb, nb.ext, nc, buf.data());
         }
     }
     g_prof[1] += amrex::second() - tp0;
+}
+
+void BcStep::exchange(int code, bool predictor)
+{
+    if (m_l0.level > 0 && !ext_ghost) amrex::Abort("BcStep: a level > 0 has coarse-fine faces and needs EXTERNAL_GHOSTS_FILLED (ext_ghost, patches 0003/0004); the OMESH route is same-level only");
+    ghost_exchange(m_F, code, predictor);
+    if (cf_ghost_hook) {
+        CfGhostRequest r{m_l0.level, code, predictor, {}};
+        for (const auto& n : exchange_fields(code, predictor)) if (m_F.has(n)) r.fields.push_back(n);
+        cf_ghost_hook(r);
+    }
 }
 
 void BcStep::after_exchange(int code, double t, double dt)
@@ -106,7 +117,7 @@ void BcStep::after_exchange(int code, double t, double dt)
     if (code != 1 && code != 3 && code != 4 && code != 6) return;
     if (ext_ghost && (code == 3 || code == 6))   // UVW_SAVE: the face velocities before the match (DENSITY restores them at the wall faces)
         for (int nm = 0; nm < nbox; ++nm)
-            if (local(nm)) { fds_g_phase(code == 3 ? 1 : 0); fds_p_save_uvw(nm + 1, code == 3 ? 1 : 0); }
+            if (local(nm)) { fds_g_phase(code == 3 ? 1 : 0); fds_p_save_uvw(nm + 1 + m_l0.fds_mesh_offset, code == 3 ? 1 : 0); }
     if (ext_ghost && (code == 3 || code == 6)) {
         // the periodic domain faces: FDS's MATCH_VELOCITY averages the two copies of the flow face (patch 0003 skips it, the driver does it on the AMReX data)
         static const char* const pn[2][3] = {{"U", "V", "W"}, {"US", "VS", "WS"}};
@@ -122,14 +133,14 @@ void BcStep::after_exchange(int code, double t, double dt)
         if (!local(nm)) continue;
         if (code == 3 || code == 6) {
             fds_g_phase(code == 3 ? 1 : 0);
-            if (!ext_ghost) fds_g_match(nm + 1);
+            if (!ext_ghost) fds_g_match(nm + 1 + m_l0.fds_mesh_offset);
         }
     }
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
-        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); fds_g_velocity_bc(t, nm + 1, code == 3 ? 1 : 0); if (iface_hook) iface_hook(false); }
+        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); fds_g_velocity_bc(t, nm + 1 + m_l0.fds_mesh_offset, code == 3 ? 1 : 0); if (iface_hook) iface_hook(false); }
         else {
-            fds_g_viscosity_bc(nm + 1, code == 4 ? 1 : 0);
+            fds_g_viscosity_bc(nm + 1 + m_l0.fds_mesh_offset, code == 4 ? 1 : 0);
             // FDS ends COMPUTE_VISCOSITY with clamped copies of MU, KRES in the edge cells of the domain; the full ghost fill above replaced them by periodic images
             const amrex::Box& b = m_l0.ba[nm];
             const amrex::Box& d = m_l0.geom.Domain();
@@ -139,7 +150,7 @@ void BcStep::after_exchange(int code, double t, double dt)
                 if (b.bigEnd(dir) == d.bigEnd(dir)) mask |= 2 << (2 * dir);
             }
             const int which = (skip_fix("mu") ? 0 : 1) | (skip_fix("kres") ? 0 : 2);   // bit 0: MU, bit 1: KRES
-            if (which) fds_g_mu_edges_dom(nm + 1, mask, which);
+            if (which) fds_g_mu_edges_dom(nm + 1 + m_l0.fds_mesh_offset, mask, which);
         }
     }
 }
@@ -186,7 +197,7 @@ void BcStep::wall_bc(int predictor, double t, double dt)
 {
     fds_g_phase(predictor);
     for (int nm = 0; nm < static_cast<int>(m_l0.ba.size()); ++nm)
-        if (local(nm)) fds_g_wall_bc(t, dt, nm + 1);
+        if (local(nm)) fds_g_wall_bc(t, dt, nm + 1 + m_l0.fds_mesh_offset);
 }
 
 void BcStep::replay_velocity(double t, double dt, bool predictor)
@@ -200,9 +211,9 @@ void BcStep::replay_velocity(double t, double dt, bool predictor)
     fds_g_phase(predictor ? 0 : 1);   // FDS calls VELOCITY_BC(final velocities) with CORRECTOR set (main.f90 1174) and VELOCITY_BC(estimated) with PREDICTOR set (969)
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
-        fds_g_viscosity_bc(nm + 1, predictor ? 0 : 1);
-        fds_g_mu_edges(nm + 1);   // the clamped edge-cell copies of MU, KRES that COMPUTE_VISCOSITY ends with (a frozen state has them from the periodic fill)
-        fds_g_velocity_bc(t, nm + 1, predictor ? 0 : 1);
+        fds_g_viscosity_bc(nm + 1 + m_l0.fds_mesh_offset, predictor ? 0 : 1);
+        fds_g_mu_edges(nm + 1 + m_l0.fds_mesh_offset);   // the clamped edge-cell copies of MU, KRES that COMPUTE_VISCOSITY ends with (a frozen state has them from the periodic fill)
+        fds_g_velocity_bc(t, nm + 1 + m_l0.fds_mesh_offset, predictor ? 0 : 1);
     }
     fds_g_phase(predictor ? 1 : 0);
 }
