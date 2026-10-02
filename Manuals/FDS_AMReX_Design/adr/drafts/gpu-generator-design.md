@@ -109,3 +109,7 @@ CMake `integration/s5gen.cmake` and make `integration/s5gen.mk` run the generato
 | `SOLID` | same | existing | dynamic: refresh after every obstruction change, before the nests |
 
 Face-write check: `wall_checks.face_write_check(tables)` (outcomes a, b, c of the spec; mixed thin/non-thin W-writers flagged; opposite-direction off-wall pairs and shared thin faces are legal); `check_all` adds the range and WALL_INDEX consistency checks. Tests: `test/test_wall_tables.py`.
+
+## Direct EXTERNAL_WALL(IW)%COMP designator (implemented)
+
+`wall_ref` accepts `EXTERNAL_WALL(IW)%NOM` (and any other scalar component) without an `EWC` alias: it becomes the flat table `EW_NOM(IW)` of extent `NWE`, role `wall`, type `EXTERNAL_WALL`. The subscript must be the loop variable `IW`. In a loop over the internal walls too (`NWE+NWI`), the read must sit under `IF (IW<=N_EXTERNAL_WALL_CELLS)` (or the else branch of `IW>N_EXTERNAL_WALL_CELLS`), else the generator refuses it (the table has no internal entries). The aliases `WC`, `BC`, `B1` of the NO_FLUX wall loop (velo.f90:1463-1559) are recognised as before. `EW_NCELL` and `EW_OFF` are not implemented (their meaning is open). Tests: `test/test_wall_nom.py`.

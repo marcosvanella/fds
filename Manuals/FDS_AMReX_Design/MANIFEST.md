@@ -20,3 +20,4 @@ working area and are not in this repository.
 | `upstream-patches/0001-divg-species-ztemp-pad.patch` | 10329 (10 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/0002-divg-enthalpy-ztemp-pad.patch` | 5490 (5 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/0003-mass-check-density-two-pass.patch` | 8140 (8 KiB) |  | not Markdown or CSV | not recorded |
+| `upstream-patches/0004-divg-solid-dp-b1-index.patch` | 7123 (7 KiB) |  | not Markdown or CSV | not recorded |
