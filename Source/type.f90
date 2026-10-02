@@ -1329,10 +1329,6 @@ TYPE CC_CUTFACE_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::     TMP_FACE !< Gas phase cut-face temperature array. (1:NFACE)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) ::   RHO_D_DZDN !< Diffusive mass flux for species and cut-faces.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: H_RHO_D_DZDN !< Heat flux due to diffusive mass flux for species and cut-faces.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::          VEL !< Corrector velocity normal to cut-faces. (1:NFACE)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::         VELS !< Predictor velocity normal to cut-faces. (1:NFACE)
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::           FN !< Momentum RHS in cut-faces (Advective+diffusive+body+...).
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   ::         FN_B !< Baroclinic Force RHS in cut-faces.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::     VEL_SAVE !< Saved unlinked velocities container for cut-faces.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::      VEL_LNK !< Linked velocity container for cut-faces.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   ::    VEL_OMESH !< OMESH Corrector velocity normal to cut-faces of MESHES(NOM).
