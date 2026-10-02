@@ -16,12 +16,19 @@ exchange between ranks; Role 1 only sees local boxes.
 ## 2. Read-out: stage face fluxes (Role 1 provides)
 Per box and per direction d in {x,y,z}, a face-centred array, scalar index n = 1..N_TOTAL_SCALARS as the component, no ghost layer:
 - **ADV**: the stage product used in the mass update, `FX(I,J,K,n)*UU(I,J,K)` (and FY*VV, FZ*WW). Not the stored `ADV_FX` after the
-  corrector, which is the average of the two stages (mass.f90:654). Unit kg/(m2 s) of rho*Z_n.
+  corrector, which is the average of the two stages (mass.f90:654). Unit kg/(m2 s) of rho*Z_n. On interface faces `UU` is the
+  *unmatched* face velocity: `DENSITY` restores `UVW_SAVE` there (mass.f90:421-434, 593-607; driver copy fds_density_split.f90:86-91,
+  181-186), while the momentum terms use the matched value (`MATCH_VELOCITY`, velo.f90:2630). In the multi-level path an interface
+  face has one velocity (coarse = area average of the fine faces), so `UVW_SAVE` must equal that velocity; matched and unmatched then coincide.
 - **DIF**: the species diffusive face flux `RHO_D_DZDX(I,J,K,n)` (and Y, Z) after the divg.f90 species-sum correction and the wall
-  corrections, i.e. the values the divergence loop reads. Same unit. (`DIF_FX` in the registry already exists; confirm it holds
+  corrections, i.e. the values the divergence loop reads. Same unit. FDS already overwrites the coarse diffusive species flux with
+  the area-weighted sum of the fine two-point fluxes at its own mesh interfaces (wall.f90:891-958, `EWC%NIC>1`; divg.f90:204-216; TRG
+  Mass_Chapter.tex:234). Our override must give the same numbers (fine face flux with the coarse value injected as ghost, species-sum
+  fix as wall.f90:955-959). That FDS branch reads `OMESH` data the AMReX port does not fill, so Role 1 bypasses it at level interfaces. (`DIF_FX` in the registry already exists; confirm it holds
   these values and is filled in AMR mode without `STORE_SPECIES_FLUX` side effects.)
-- **HEAT (second step, after ADV and DIF work)**: `KDTDX` (conduction) and `H_RHO_D_DZDX` per species n, same positions, so that the
-  integral of D matches the interface heat flux. Not needed for mass and species conservation.
+- **HEAT (optional, later)**: FDS does not match conduction `KDTDX` at refined interfaces (skipped for INTERPOLATED faces, divg.f90:~540)
+  and forms the enthalpy diffusion flux as face enthalpy x the overwritten species flux (divg.f90:~303). Phase 3 reproduces FDS: no
+  HEAT override. If wanted later: `KDTDX` and `H_RHO_D_DZDX` per species n at the same positions. Not needed for mass and species.
 
 Indexing. FDS face I in direction x is the HIGH face of cell I, valid I = 0..IBAR, with J = 1..JBAR, K = 1..KBAR (analogous for y, z).
 In the registry's AMReX index (Fields.H index map) the same face is face `a = lo_x + I`, the LOW face of cell `a`; the array is nodal
@@ -62,4 +69,5 @@ a no-op bitwise).
    an extra output (cell arrays unchanged)?
 2. Shared faces between level-0 boxes: do both boxes compute bitwise the same value today? The override relies on both using the same
    replacement value, which is guaranteed only for listed faces.
-3. Do `ghost` faces (index -1 and IBP1) ever feed the divergence? We assume not, so overrides never target them.
+3. Confirm the `COARSE_MESH_IF` branch (wall.f90:891) is skipped, and that `UVW_SAVE` is set to the face velocity, at level interfaces.
+4. Do `ghost` faces (index -1 and IBP1) ever feed the divergence? We assume not, so overrides never target them.
