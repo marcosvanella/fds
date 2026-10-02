@@ -5272,7 +5272,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      IF (M%FCVAR(II,JJ,KK,CC_UNKF,IAXIS)>0) THEN ! Regular Face
                         M3%REAL_SEND_PKG112(LL+1) = M%UN_LNK(M%FCVAR(II,JJ,KK,CC_UNKF,IAXIS))
                      ELSEIF(M%FCVAR(II,JJ,KK,CC_IDRC,IAXIS)>0) THEN ! RC Face.
-                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,IAXIS); IF(M%FCVAR(II,JJ,KK,CC_UNKF,IAXIS)>0) &
+                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,IAXIS); IF(M%RC_FACE(ICF)%UNKF>0) &
                         M3%REAL_SEND_PKG112(LL+1) = M%UN_LNK(M%RC_FACE(ICF)%UNKF)
                      ENDIF
                      ! V linked Velocity:
@@ -5280,7 +5280,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      IF (M%FCVAR(II,JJ,KK,CC_UNKF,JAXIS)>0) THEN ! Regular Face
                         M3%REAL_SEND_PKG112(LL+2) = M%UN_LNK(M%FCVAR(II,JJ,KK,CC_UNKF,JAXIS))
                      ELSEIF(M%FCVAR(II,JJ,KK,CC_IDRC,JAXIS)>0) THEN ! RC Face.
-                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,JAXIS); IF(M%FCVAR(II,JJ,KK,CC_UNKF,JAXIS)>0) &
+                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,JAXIS); IF(M%RC_FACE(ICF)%UNKF>0) &
                         M3%REAL_SEND_PKG112(LL+2) = M%UN_LNK(M%RC_FACE(ICF)%UNKF)
                      ENDIF
                      ! W linked velocity:
@@ -5288,7 +5288,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      IF (M%FCVAR(II,JJ,KK,CC_UNKF,KAXIS)>0) THEN ! Regular Face
                         M3%REAL_SEND_PKG112(LL+3) = M%UN_LNK(M%FCVAR(II,JJ,KK,CC_UNKF,KAXIS))
                      ELSEIF(M%FCVAR(II,JJ,KK,CC_IDRC,KAXIS)>0) THEN ! RC Face.
-                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,KAXIS); IF(M%FCVAR(II,JJ,KK,CC_UNKF,KAXIS)>0) &
+                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,KAXIS); IF(M%RC_FACE(ICF)%UNKF>0) &
                         M3%REAL_SEND_PKG112(LL+3) = M%UN_LNK(M%RC_FACE(ICF)%UNKF)
                      ENDIF
                      LL = LL+3
@@ -5306,7 +5306,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      IF (M%FCVAR(II,JJ,KK,CC_UNKF,IAXIS)>0) THEN ! Regular Face
                         UP2(II,JJ,KK) = M%UN_LNK(M%FCVAR(II,JJ,KK,CC_UNKF,IAXIS))
                      ELSEIF(M%FCVAR(II,JJ,KK,CC_IDRC,IAXIS)>0) THEN ! RC Face.
-                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,IAXIS); IF(M%FCVAR(II,JJ,KK,CC_UNKF,IAXIS)>0) &
+                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,IAXIS); IF(M%RC_FACE(ICF)%UNKF>0) &
                         UP2(II,JJ,KK) = M%UN_LNK(M%RC_FACE(ICF)%UNKF)
                      ENDIF
                      ! V linked Velocity:
@@ -5314,7 +5314,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      IF (M%FCVAR(II,JJ,KK,CC_UNKF,JAXIS)>0) THEN ! Regular Face
                         VP2(II,JJ,KK) = M%UN_LNK(M%FCVAR(II,JJ,KK,CC_UNKF,JAXIS))
                      ELSEIF(M%FCVAR(II,JJ,KK,CC_IDRC,JAXIS)>0) THEN ! RC Face.
-                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,JAXIS); IF(M%FCVAR(II,JJ,KK,CC_UNKF,JAXIS)>0) &
+                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,JAXIS); IF(M%RC_FACE(ICF)%UNKF>0) &
                         VP2(II,JJ,KK) = M%UN_LNK(M%RC_FACE(ICF)%UNKF)
                      ENDIF
                      ! W linked velocity:
@@ -5322,7 +5322,7 @@ SENDING_MESH_LOOP_2: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                      IF (M%FCVAR(II,JJ,KK,CC_UNKF,KAXIS)>0) THEN ! Regular Face
                         WP2(II,JJ,KK) = M%UN_LNK(M%FCVAR(II,JJ,KK,CC_UNKF,KAXIS))
                      ELSEIF(M%FCVAR(II,JJ,KK,CC_IDRC,KAXIS)>0) THEN ! RC Face.
-                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,KAXIS); IF(M%FCVAR(II,JJ,KK,CC_UNKF,KAXIS)>0) &
+                        ICF=M%FCVAR(II,JJ,KK,CC_IDRC,KAXIS); IF(M%RC_FACE(ICF)%UNKF>0) &
                         WP2(II,JJ,KK) = M%UN_LNK(M%RC_FACE(ICF)%UNKF)
                      ENDIF
                   ENDDO
