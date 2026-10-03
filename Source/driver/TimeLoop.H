@@ -130,7 +130,7 @@ private:
 //                               without a list). Without a preceding apply_flux_divergence on the level it is a plain stage_divergence1 (new levels after a regrid).
 // With no override set the sequence is bitwise the one-call result (tests/run_flux_hook_check.sh). stage_flux(l, Adv, d) is valid after
 // compute_stage_fluxes, stage_flux(l, Dif, d) after apply_flux_divergence. The Role 3 loop therefore reads ADV and sets ADV overrides before apply_flux_divergence and
-// reads DIF and sets DIF overrides between apply_flux_divergence and run_divergence_part1. max_divergence_error is item 4 (D-058) and aborts until then.
+// reads DIF and sets DIF overrides between apply_flux_divergence and run_divergence_part1. max_divergence_error (D-058) is max |div u - D| over the valid cells of the level on this rank (uniform Cartesian differences of the level's U, V, W and D).
 class FluxStages : public fdsrt::FluxAccess {
 public:
     explicit FluxStages(TimeLoop& tl) : m_tl(tl) {}

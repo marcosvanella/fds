@@ -1168,6 +1168,13 @@ struct TimeLoop::Impl {
 
     void finish()
     {
+        if (std::getenv("FDSTL_DIVERR")) {   // D-058 diagnostic (FluxStages::max_divergence_error), level 0, no effect on the results
+            FluxStages fs(L);
+            double e = fs.max_divergence_error(0);
+            all_max(e);
+            const double dmax = L.m_reg->fields(0)["D"].norminf(0, 0, false);   // scale of D (valid cells)
+            amrex::Print() << "DIVERR level 0: max |div u - D| over the valid cells = " << std::setprecision(6) << e << " (1/s), max |D| = " << dmax << "\n";
+        }
         if (fluxchk) {
             double mx0 = fluxchk_max[0], mx1 = fluxchk_max[1];
             all_max(mx0); all_max(mx1);
@@ -1331,7 +1338,7 @@ int TimeLoop::run()
     return fails;
 }
 
-// ---- FluxStages: fdsrt::FluxAccess on a TimeLoop (phase mapping documented in TimeLoop.H)
+// ---- FluxStages: fdsrt::FluxAccess (D-058: max_divergence_error) on a TimeLoop (phase mapping documented in TimeLoop.H)
 void FluxStages::compute_stage_fluxes(int level, bool) { m_tl.flux_readout_adv(level); }
 void FluxStages::apply_flux_divergence(int level, bool predictor)
 {
@@ -1358,10 +1365,27 @@ void FluxStages::run_divergence_part1(int level)
     if (level < static_cast<int>(m_div1_pending.size()) && m_div1_pending[level]) { m_div1_pending[level] = 0; m_tl.flux_apply_dif(level); }
     else m_tl.stage_divergence1(level);
 }
-double FluxStages::max_divergence_error(int) const
+double FluxStages::max_divergence_error(int level) const
 {
-    amrex::Abort("FluxStages::max_divergence_error: D-058 diagnostic, implemented in S10.4");
-    return 0.0;
+    // D-058 diagnostic: max over the valid cells of `level` on this rank of |div u - D|, with u the face velocities U, V, W of the level's Fields (AMReX face a = low face of cell a, the
+    // divergence is the uniform-Cartesian difference with the level's dx) and D the divergence array. After a full step D equals div u up to the pressure tolerance.
+    if (!m_tl.m_reg || !m_tl.m_reg->has_level(level)) amrex::Abort("FluxStages::max_divergence_error: no such level");
+    Fields& F = m_tl.m_reg->fields(level);
+    const Level& lev = m_tl.m_reg->level(level);
+    double mx = 0.0;
+    for (amrex::MFIter mfi(F["D"]); mfi.isValid(); ++mfi) {
+        const amrex::Box vb = mfi.validbox();
+        const auto d = F["D"].const_array(mfi);
+        const auto u = F["U"].const_array(mfi); const auto v = F["V"].const_array(mfi); const auto w = F["W"].const_array(mfi);
+        for (int k = vb.smallEnd(2); k <= vb.bigEnd(2); ++k)
+            for (int j = vb.smallEnd(1); j <= vb.bigEnd(1); ++j)
+                for (int i = vb.smallEnd(0); i <= vb.bigEnd(0); ++i) {
+                    const double div = (u(i + 1, j, k) - u(i, j, k)) / lev.dx[0] + (v(i, j + 1, k) - v(i, j, k)) / lev.dx[1] + (w(i, j, k + 1) - w(i, j, k)) / lev.dx[2];
+                    mx = std::max(mx, std::abs(div - d(i, j, k)));
+                }
+    }
+    return mx;
 }
+
 
 }  // namespace fdsamr
