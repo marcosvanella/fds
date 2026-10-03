@@ -1,3 +1,9 @@
+#ifdef WITH_AMREX
+! Patch 0008: the kernels of this file find the data of a box through POINT_TO_BOX (patches 0005/0007): for a level-0 mesh without BOX_VIEW data it is POINT_TO_MESH,
+! for a box of a refinement level > 0 (D-056 option B) it points at FINE_LEVEL(L)%BOX(IB). Every CALL POINT_TO_MESH(NM) of this file becomes CALL POINT_TO_BOX(NM).
+#define POINT_TO_MESH POINT_TO_BOX
+#endif
+
 MODULE DIVG
 
 USE PRECISION_PARAMETERS
@@ -30,6 +36,9 @@ USE MANUFACTURED_SOLUTIONS, ONLY: DIFF_MMS,UF_MMS,WF_MMS,VD2D_MMS_Z_SRC
 USE COMPLEX_GEOMETRY, ONLY : CC_CGSC, CC_UNKZ, CC_SOLID, CC_CUTCFE
 USE CC_SCALARS, ONLY : ADD_CUTCELL_PSUM,ADD_LINKEDCELL_PSUM,SET_EXIMDIFFLX_3D,SET_EXIMRHOHSLIM_3D,&
                        SET_EXIMRHOZZLIM_3D,CC_DIVERGENCE_PART_1,CC_VELOCITY_FLUX,CFACE_PREDICT_NORMAL_VELOCITY
+#ifdef WITH_AMREX
+USE FDS_FLUX_HOOKS, ONLY: FDS_HOOK_DIF_FLUX
+#endif
 
 INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(IN) :: T,DT
@@ -264,6 +273,12 @@ SPECIES_GT_1_IF: IF (N_TOTAL_SCALARS>1) THEN
 
    IF (CC_IBM) CALL SET_EXIMDIFFLX_3D(NM,RHO_D_DZDX,RHO_D_DZDY,RHO_D_DZDZ)
 
+#ifdef WITH_AMREX
+   ! Patch 0009 (interface flux hooks): read out the species diffusive face fluxes RHO_D_DZDX/Y/Z as the divergence reads them, or replace listed values; returns at once
+   ! (no registered box, no override) in every run that does not use the hooks.
+   CALL FDS_HOOK_DIF_FLUX(NM,LBOUND(RHO_D_DZDX,4),RHO_D_DZDX,RHO_D_DZDY,RHO_D_DZDZ)
+
+#endif
    ! Store diffusive flux for output
 
    IF (STORE_SPECIES_FLUX) THEN

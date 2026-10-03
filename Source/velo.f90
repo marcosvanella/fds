@@ -1,6 +1,12 @@
 !> \brief Collection of velocity routines.
 !> Computes the velocity flux terms, baroclinic torque correction terms, and performs the CFL check.
 
+#ifdef WITH_AMREX
+! Patch 0008: the kernels of this file find the data of a box through POINT_TO_BOX (patches 0005/0007): for a level-0 mesh without BOX_VIEW data it is POINT_TO_MESH,
+! for a box of a refinement level > 0 (D-056 option B) it points at FINE_LEVEL(L)%BOX(IB). Every CALL POINT_TO_MESH(NM) of this file becomes CALL POINT_TO_BOX(NM).
+#define POINT_TO_MESH POINT_TO_BOX
+#endif
+
 MODULE VELO
 
 USE PRECISION_PARAMETERS
