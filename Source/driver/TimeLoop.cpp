@@ -98,6 +98,11 @@ void fds_p_get_err(int nm, double* pe, double* ve, double* ptb);
 void fds_p_set_wall_counter(int n);
 // fds_flux_hooks.f90 (notes/flux-hooks-design.md)
 void fds_flux_reserve(int ntot);
+int fds_wseam_refresh(int nm);
+void fds_wseam_counts(int nm, int* next, int* nint);
+int fds_wseam_upload(int nm);
+int fds_wseam_check(int nm);
+int fds_wseam_poke(int nm);
 int fds_flux_register(int nm, int kind, int dir, const int* lb, const int* ext, double* p);
 int fds_flux_set_mode(int nm, int kind, int mode);
 int fds_flux_set_override(int nm, int kind, int n, const int* dir, const int* idx, int nsc, const double* val);
@@ -236,6 +241,12 @@ struct TimeLoop::Impl {
         amrex::Print() << "FDS-AMReX: FDS output writers (devc/hrr/mass/steps/out) " << (fds_outputs ? "driven through fds_setup(mode=3)" : "not available (main.f90 patch 0006 absent or FDSTL_NO_FDS_OUTPUTS set)") << "\n";
         if (const char* e = std::getenv("FDSTL_FLUXCHK")) fluxchk = std::atoi(e);
         if (const char* e = std::getenv("FDSTL_FLUXCHK_KINDS")) fluxchk_kinds = std::atoi(e);
+        if (const char* e = std::getenv("FDSTL_WSEAM")) wseam = std::atoi(e);
+        if (wseam) {
+            long te = 0, ti = 0;
+            each_local([&](int nm) { int a = 0, b = 0; fds_wseam_counts(nm, &a, &b); te += a; ti += b; });
+            amrex::Print() << "FDS-AMReX: wall seam check FDSTL_WSEAM=" << wseam << " (W1 lists built, rank 0: " << te << " external and " << ti << " internal wall cells in its boxes; 2 = negative control)\n";
+        }
         if (fluxchk) amrex::Print() << "FDS-AMReX: interface flux hook check FDSTL_FLUXCHK=" << fluxchk << " (1 empty override, 2 no-op override with the read-out values, 3 scaled values: negative control)\n";
         if (const char* e = std::getenv("FDSTL_IFACE")) iface_mode = std::atoi(e);
         L.m_bc->iface_hook = [this](bool on) { iface(on); };
@@ -370,6 +381,26 @@ struct TimeLoop::Impl {
     // for a box whose mode is 0, so the unhooked step is the original code.
     struct StageFlux { std::unique_ptr<amrex::MultiFab> mf[2][3]; std::vector<int> mode = {0, 0}; };
     std::vector<StageFlux> sfx;        // by level
+    // ---- S10.3 wall-state seam (ADR-001 W1/W2; notes/wall-seam-design.md). FDSTL_WSEAM=1: before the density update and before WALL_BC of every stage the four host-produced wall arrays
+    // (UVW_SAVE, U_GHOST, V_GHOST, W_GHOST) are staged over the box's WLIST_EXT (the stand-in of the device upload) with a checksum assertion, and after the stage the host arrays
+    // are asserted unchanged (the wall kernels only consume them). 2 = negative control: a host value is perturbed after the upload, the assertion must stop the run.
+    int wseam = 0;
+    void wseam_upload(const char* where)
+    {
+        if (!wseam) return;
+        each_local([&](int nm) {
+            if (fds_wseam_upload(nm) != 0) die(std::string("wall seam: the staged copy differs from the host arrays right after the upload (box ") + std::to_string(nm) + ", " + where + ")");
+            if (wseam == 2) fds_wseam_poke(nm);
+        });
+    }
+    void wseam_check(const char* where)
+    {
+        if (!wseam) return;
+        each_local([&](int nm) {
+            if (fds_wseam_check(nm) != 0)
+                die(std::string("wall seam: UVW_SAVE/U_GHOST/V_GHOST/W_GHOST of box ") + std::to_string(nm) + " changed on the host after the upload (checksum assertion of ADR-001 W2, stage " + where + ")");
+        });
+    }
     int fluxchk = 0;                   // env FDSTL_FLUXCHK: 1 bracket every density / divergence-1 call with a read-out and an empty override pass; 2 override with the read-out values
                                        // of every face (a no-op: result must be bitwise the unhooked one); 3 as 2 with every value scaled by 1+1e-3 (negative control: result must differ)
     int fluxchk_kinds = 3;             // env FDSTL_FLUXCHK_KINDS: bit 0 ADV, bit 1 DIF (default both)
@@ -567,6 +598,7 @@ struct TimeLoop::Impl {
     // DENSITY of every box (the D-031 split form: pre-clip half, level gather clip, post-clip half)
     void density(bool pred, double t, double dt)
     {
+        wseam_upload("DENSITY");
         const bool fx = fluxchk && (fluxchk_kinds & 1);
         if (fx) fluxchk_density(pred, t, dt);
         each_local([&](int nm) { fds_p_dens_pre(t, dt, nm); });
@@ -574,6 +606,7 @@ struct TimeLoop::Impl {
         clip_level(pred, flags);
         each_local([&](int nm) { fds_k_set_flags(nm, flags[bi(nm)]); fds_k_dens_post(t, dt, nm); });
         if (fx) { flux_set_override(0, {}); flux_set_mode(0, 0); }
+        wseam_check("DENSITY");
     }
 
     // ------------------------------------------------------------ D-028: zone integrals (DSUM, PSUM, USUM) as exact fixed-point sums
@@ -783,7 +816,7 @@ struct TimeLoop::Impl {
         each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(L.m_t, L.m_dt, nm, pred ? 0 : 1); });
         iface(false);
     }
-    void s_wall_bc(bool pred) { c->bc->wall_bc(pred ? 1 : 0, L.m_t, L.m_dt); }
+    void s_wall_bc(bool pred) { wseam_upload("WALL_BC"); c->bc->wall_bc(pred ? 1 : 0, L.m_t, L.m_dt); wseam_check("WALL_BC"); }
     void s_div1() { if (fluxchk && (fluxchk_kinds & 2)) { fluxchk_div1(); return; } div1_plain(); }
     void s_div2() { each_local([&](int nm) { fds_k_div2(L.m_dt, nm); }); }
     // velocity predictor: writes this rank's boxes of the level into the global per-box vectors at slot off + box (other slots untouched)
