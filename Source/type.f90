@@ -1324,7 +1324,6 @@ TYPE CC_CUTFACE_TYPE
 
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) ::         UNKH !< Low and high side cut-cell H unknown number. (LOW:HIGH,1:NFACE)
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) ::         UNKZ !< Low and high side cut-cell Z unknown number. (LOW:HIGH,1:NFACE)
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   ::         UNKF !< Momentum unknown number, used for face linking. (1:NFACE)
    INTEGER,  ALLOCATABLE, DIMENSION(:)   ::           FC !< (1:NFACE) FV FACE index; 0 if not in FACE inventory.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) ::      XCENLOW !< Centroid position for cut-cells in low side. (IAXIS:KAXIS,1:NFACE)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) ::     XCENHIGH !< Centroid position for cut-cells in high side. (IAXIS:KAXIS,1:NFACE)
@@ -1516,7 +1515,7 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: X1AXIS      !< (1:N) axis (IAXIS:KAXIS) for Cartesian-aligned faces, else 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK_FACE    !< (IAXIS:KAXIS,1:N) Cartesian face locator for axis faces.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: NBR_IJK     !< (IAXIS:KAXIS,1:N) outside Cartesian cell for FV/structured coupling.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKF        !< (1:N) legacy-compatible staggered momentum link row.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKF        !< (1:N) link number. The only copy, except RC faces with FC=0.
    ! Link group -> FACE rows (CSR): rows with UNKF==IL are (LINK_NM,LINK_ROW)(LINK_PTR(IL):LINK_PTR(IL+1)-1).
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_PTR    !< (1:NUNK_F+1) CSR offsets into LINK_NM/LINK_ROW.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_NM     !< (1:sum group sizes) mesh of each group member.
@@ -1598,7 +1597,7 @@ TYPE CC_RCFACE_TYPE
    INTEGER                                         ::       PRES_ZONE=-1 !< Pressure zone where RC face is.
    INTEGER,  DIMENSION(MAX_DIM+1)                  ::                IJK !< Location indexes and axis of RC face. [ I J K X1AXIS]
    INTEGER                                         ::               FC=0 !< FV FACE index; 0 if not in FACE inventory.
-   INTEGER                                         ::             UNKF=0 !< Momentum unknown number if face is linked.
+   INTEGER                                         ::             UNKF=0 !< Link number of a seam RC face (FC=0); 0 otherwise.
    INTEGER,  DIMENSION(LOW_IND:HIGH_IND)           ::               UNKZ !< Scalar transport unknown numbers in connected cells.
    INTEGER,  DIMENSION(LOW_IND:HIGH_IND)           ::               UNKH !< Pressure unknown numbers in connected cells.
    REAL(EB), DIMENSION(MAX_DIM,LOW_IND:HIGH_IND)   ::               XCEN !< Centroid location of connected cells.
