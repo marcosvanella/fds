@@ -28,10 +28,12 @@ USE PHYSICAL_FUNCTIONS, ONLY : GET_SPECIFIC_GAS_CONSTANT
 USE MANUFACTURED_SOLUTIONS, ONLY: VD2D_MMS_Z_OF_RHO,VD2D_MMS_Z_SRC,UF_MMS,WF_MMS,VD2D_MMS_RHO_OF_Z,VD2D_MMS_Z_SRC
 USE SOOT_ROUTINES, ONLY: SETTLING_VELOCITY
 USE CC_SCALARS, ONLY : SET_EXIMADVFLX_3D,ROTATED_CUBE_RHS_ZZ
+USE FDS_FLUX_HOOKS, ONLY: FDS_FLUX_ACTIVE,FDS_HOOK_ADV,PRX,PRY,PRZ
 
 INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(IN) :: T,DT
 REAL(EB) :: TNOW,RHS,Q_Z,XHAT,ZHAT
+LOGICAL :: RO_ADV,OVR_ADV
 REAL(EB), ALLOCATABLE, DIMENSION(:) :: ZZ_GET
 INTEGER :: I,J,K,N,IW
 REAL(EB), POINTER, DIMENSION(:,:,:,:) :: DEL_RHO_D_DEL_Z__0
@@ -95,6 +97,28 @@ CASE(.TRUE.) PREDICTOR_STEP
 
    ! Predictor step for mass density
 
+   ! ---- interface flux hooks (fds_flux_hooks.f90): read-out of the stage product (the update is skipped) or the list of overridden faces ----
+   OVR_ADV = .FALSE.
+   IF (FDS_FLUX_ACTIVE(NM,0)) THEN
+      CALL FDS_HOOK_ADV(NM,LBOUND(FX,4),LBOUND(UU),LBOUND(VV),LBOUND(WW),UU,VV,WW,FX,FY,FZ,RO_ADV,OVR_ADV)
+      IF (RO_ADV) RETURN
+   ENDIF
+   IF (OVR_ADV) THEN
+   DO N=1,N_TOTAL_SCALARS
+      DO K=1,KBAR
+         DO J=1,JBAR
+            DO I=1,IBAR
+               IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+               RHS = - DEL_RHO_D_DEL_Z__0(I,J,K,N) &
+                   + (PRX(I,J,K,N)*R(I) - PRX(I-1,J,K,N)*R(I-1))*RDX(I)*RRN(I) &
+                   + (PRY(I,J,K,N)      - PRY(I,J-1,K,N)       )*RDY(J)        &
+                   + (PRZ(I,J,K,N)      - PRZ(I,J,K-1,N)       )*RDZ(K)
+               ZZS(I,J,K,N) = RHO(I,J,K)*ZZ(I,J,K,N) - DT*RHS
+            ENDDO
+         ENDDO
+      ENDDO
+   ENDDO
+   ELSE
    DO N=1,N_TOTAL_SCALARS
       DO K=1,KBAR
          DO J=1,JBAR
@@ -109,6 +133,7 @@ CASE(.TRUE.) PREDICTOR_STEP
          ENDDO
       ENDDO
    ENDDO
+   ENDIF
 
 
    IF (CC_IBM) CALL SET_EXIMADVFLX_3D(NM,UU,VV,WW)
@@ -192,6 +217,28 @@ CASE(.FALSE.) PREDICTOR_STEP  ! CORRECTOR step
 
    ! Compute species mass density at the next time step
 
+   ! ---- interface flux hooks (fds_flux_hooks.f90): read-out of the stage product (the update is skipped) or the list of overridden faces ----
+   OVR_ADV = .FALSE.
+   IF (FDS_FLUX_ACTIVE(NM,0)) THEN
+      CALL FDS_HOOK_ADV(NM,LBOUND(FX,4),LBOUND(UU),LBOUND(VV),LBOUND(WW),UU,VV,WW,FX,FY,FZ,RO_ADV,OVR_ADV)
+      IF (RO_ADV) RETURN
+   ENDIF
+   IF (OVR_ADV) THEN
+   DO N=1,N_TOTAL_SCALARS
+      DO K=1,KBAR
+         DO J=1,JBAR
+            DO I=1,IBAR
+               IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+               RHS = - DEL_RHO_D_DEL_Z(I,J,K,N) &
+                   + (PRX(I,J,K,N)*R(I) - PRX(I-1,J,K,N)*R(I-1))*RDX(I)*RRN(I) &
+                   + (PRY(I,J,K,N)      - PRY(I,J-1,K,N)       )*RDY(J)        &
+                   + (PRZ(I,J,K,N)      - PRZ(I,J,K-1,N)       )*RDZ(K)
+               ZZ(I,J,K,N) = .5_EB*( RHO(I,J,K)*ZZ(I,J,K,N) + RHOS(I,J,K)*ZZS(I,J,K,N) - DT*RHS )
+            ENDDO
+         ENDDO
+      ENDDO
+   ENDDO
+   ELSE
    DO N=1,N_TOTAL_SCALARS
       DO K=1,KBAR
          DO J=1,JBAR
@@ -206,6 +253,7 @@ CASE(.FALSE.) PREDICTOR_STEP  ! CORRECTOR step
          ENDDO
       ENDDO
    ENDDO
+   ENDIF
 
 
    ! Add gas production source term

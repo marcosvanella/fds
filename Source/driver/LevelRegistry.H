@@ -17,6 +17,7 @@
 #include <AMReX_iMultiFab.H>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -47,6 +48,13 @@ public:
     void make_level(const fdsrt::LevelLayout& l) override;
     void remake_level(const fdsrt::LevelLayout& l) override;   // the previous level objects stay readable through retired(level) until release_retired(level)
     void clear_level(int level) override;
+    // D-058 (R4): bracket of one dynamic regrid. Between begin_regrid() and end_regrid() nothing that make_level / remake_level / clear_level replaces or removes is freed: remake_level
+    // keeps the previous objects of the level (retired_*), clear_level keeps the removed levels (retired_level / retired_fields work for them as well), and end_regrid() frees
+    // everything retired, all levels, so that Role 3 can copy from every old field before any of them goes away. Outside the bracket the behaviour is the S9 one (remake_level
+    // retires until release_retired(l); clear_level frees at once). Nesting is refused.
+    void begin_regrid() override;
+    void end_regrid() override;
+    bool in_regrid() const { return m_in_regrid; }
 
     int num_levels() const { return static_cast<int>(m_lv.size()); }   // levels 0..finest
     bool has_level(int l) const { return l >= 0 && l < num_levels() && m_lv[l].F != nullptr; }
@@ -71,10 +79,21 @@ public:
     // After remake_level: the previous Fields/Level of that level, for Role 3's transfer. release_retired frees them. nullptr when nothing is retired.
     const Level* retired_level(int l) const;
     Fields* retired_fields(int l);
-    void release_retired(int l);
+    void release_retired(int l);   // also frees what clear_level retired inside a regrid bracket for that level
+
+    // D-058 (R4): "initial fields on level L". t = 0 hierarchy: the initial conditions are evaluated DIRECTLY at the cell centres and face centres of the new level (not interpolated);
+    // the caller then averages down once (the Role 3 DriverAdapter average_down_registry) and refills ghosts. `cell` gives rho, T and the N_TOTAL_SCALARS mass fractions at a cell
+    // centre, `velocity(dir, x, y, z)` the normal velocity at a face centre (optional: faces stay 0). Fills the valid region of RHO, RHOS (= RHO), TMP, ZZ, ZZS (= ZZ) and, with
+    // `velocity`, U/V/W and US/VS/WS (= U/V/W) of level l >= 1 (level 0 is the FDS initialisation); fields that the registry does not carry are skipped. Ghost cells are not touched.
+    // x, y, z are physical coordinates: ProbLo + (index + 1/2) dx for a cell, ProbLo + index dx in the normal direction of a face (AMReX face index = low face of the cell of that index).
+    struct InitialFill {
+        std::function<void(double x, double y, double z, double* rho, double* tmp, double* zz /* [N_TOTAL_SCALARS] */)> cell;
+        std::function<double(int dir, double x, double y, double z)> velocity;
+    };
+    void fill_initial_level(int l, const InitialFill& f);
 
     // Counters for tests and logs.
-    int n_make = 0, n_remake = 0, n_clear = 0, n_side_rebuilds = 0;
+    int n_make = 0, n_remake = 0, n_clear = 0, n_side_rebuilds = 0, n_begin_regrid = 0, n_end_regrid = 0;
 
 private:
     struct Slot {
@@ -99,6 +118,9 @@ private:
     std::vector<std::string> m_names;
     std::vector<Slot> m_lv;
     bool m_have0 = false;
+    bool m_in_regrid = false;
+    struct Cleared { std::unique_ptr<Level> lev; std::unique_ptr<Fields> F; std::unique_ptr<SideData> sd; };
+    std::map<int, Cleared> m_cleared;   //!< levels removed by clear_level inside a regrid bracket, kept readable until end_regrid
 };
 
 }  // namespace fdsamr

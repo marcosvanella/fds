@@ -697,8 +697,71 @@ long test_levels(int nranks)
         reg.make_level(l0l);
         CHECK_MSG(reg.num_levels() == 2, "make_level(0) with the adopted layout is a no-op");
     }
+    // D-058 (R4): regrid bracket, old objects of remade and of cleared levels stay readable until end_regrid
+    {
+        CHECK_MSG(!reg.in_regrid(), "not in a regrid");
+        reg.begin_regrid();
+        CHECK_MSG(reg.in_regrid() && reg.n_begin_regrid == 1, "begin_regrid sets the bracket");
+        const amrex::BoxArray ba_before = reg.level(1).ba;
+        reg.clear_level(1);
+        CHECK_MSG(reg.num_levels() == 1 && !reg.has_level(1), "clear_level inside the bracket removes the level");
+        CHECK_MSG(reg.retired_level(1) != nullptr && reg.retired_fields(1) != nullptr && reg.retired_level(1)->ba == ba_before, "the cleared level stays readable inside the bracket");
+        CHECK_MSG(reg.retired_fields(1)->has("RHO") && reg.retired_fields(1)->operator[]("RHO").boxArray() == ba_before, "the cleared level's fields are intact");
+        reg.make_level(f2);
+        CHECK_MSG(reg.has_level(1) && reg.level(1).ba == f2.ba, "make_level of the same level number inside the bracket");
+        reg.end_regrid();
+        CHECK_MSG(!reg.in_regrid() && reg.retired_level(1) == nullptr && reg.retired_fields(1) == nullptr && reg.n_end_regrid == 1, "end_regrid frees everything retired");
+        reg.begin_regrid();
+        fdsrt::LevelLayout f4c = fine_layout(4);
+        reg.remake_level(f4c);
+        CHECK_MSG(reg.retired_level(1) != nullptr && reg.retired_level(1)->ba == f2.ba && reg.level(1).ba == f4c.ba, "remake inside the bracket keeps the previous level");
+        reg.end_regrid();
+        CHECK_MSG(reg.retired_level(1) == nullptr, "end_regrid frees the remade level's previous objects (no release_retired call needed)");
+        // runtime build on a different DistributionMapping (round robin, reversed) of the same BoxArray
+        fdsrt::LevelLayout f4r = fine_layout(4);
+        amrex::Vector<int> pm(f4r.ba.size());
+        for (int i = 0; i < static_cast<int>(f4r.ba.size()); ++i) pm[i] = (static_cast<int>(f4r.ba.size()) - 1 - i) % nranks;
+        f4r.dm = amrex::DistributionMapping(pm);
+        reg.begin_regrid(); reg.remake_level(f4r); reg.end_regrid();
+        CHECK_MSG(reg.level(1).dm.ProcessorMap() == f4r.dm.ProcessorMap() && reg.fields(1)["RHO"].DistributionMap().ProcessorMap() == f4r.dm.ProcessorMap(), "Fields are built on the level's own DistributionMapping at run time");
+    }
+    // D-058 (R4): initial fields on level 1 by direct evaluation at cell and face centres
+    {
+        LevelRegistry::InitialFill ini;
+        ini.cell = [](double x, double y, double z, double* rho, double* tmp, double* zz) { *rho = 1.0 + x + 2.0 * y + 3.0 * z; *tmp = 300.0 + x; zz[0] = 0.25; zz[1] = 0.75; };
+        ini.velocity = [](int d, double x, double y, double z) { return (d + 1) * (x + 10.0 * y + 100.0 * z); };
+        reg.fill_initial_level(1, ini);
+        const Level& lv = reg.level(1);
+        const double* plo = lv.geom.ProbLo();
+        long bad = 0, n = 0;
+        for (amrex::MFIter mfi(reg.fields(1)["RHO"]); mfi.isValid(); ++mfi) {
+            const amrex::Box vb = mfi.validbox();
+            const auto r = reg.fields(1)["RHO"].const_array(mfi); const auto rs = reg.fields(1)["RHOS"].const_array(mfi);
+            const auto t = reg.fields(1)["TMP"].const_array(mfi); const auto z = reg.fields(1)["ZZ"].const_array(mfi); const auto zs = reg.fields(1)["ZZS"].const_array(mfi);
+            amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
+                const double x = plo[0] + (i + 0.5) * lv.dx[0], y = plo[1] + (j + 0.5) * lv.dx[1], zc = plo[2] + (k + 0.5) * lv.dx[2];
+                ++n;
+                if (r(i, j, k) != 1.0 + x + 2.0 * y + 3.0 * zc || rs(i, j, k) != r(i, j, k) || t(i, j, k) != 300.0 + x || z(i, j, k, 0) != 0.25 || z(i, j, k, 1) != 0.75 || zs(i, j, k, 1) != 0.75) ++bad;
+            });
+        }
+        const char* fn[3] = {"U", "V", "W"}; const char* fs[3] = {"US", "VS", "WS"};
+        for (int d = 0; d < 3; ++d)
+            for (amrex::MFIter mfi(reg.fields(1)[fn[d]]); mfi.isValid(); ++mfi) {
+                const amrex::Box fb = mfi.validbox();
+                const auto a = reg.fields(1)[fn[d]].const_array(mfi); const auto as = reg.fields(1)[fs[d]].const_array(mfi);
+                amrex::LoopOnCpu(fb, [&](int i, int j, int k) {
+                    const int ix[3] = {i, j, k}; double x[3];
+                    for (int e = 0; e < 3; ++e) x[e] = plo[e] + (ix[e] + (e == d ? 0.0 : 0.5)) * lv.dx[e];
+                    ++n;
+                    if (a(i, j, k) != (d + 1) * (x[0] + 10.0 * x[1] + 100.0 * x[2]) || as(i, j, k) != a(i, j, k)) ++bad;
+                });
+            }
+        amrex::ParallelAllReduce::Sum(bad, amrex::ParallelContext::CommunicatorSub());
+        amrex::ParallelAllReduce::Sum(n, amrex::ParallelContext::CommunicatorSub());
+        CHECK_MSG(n > 0 && bad == 0, "fill_initial_level: " + std::to_string(bad) + " of " + std::to_string(n) + " values differ from the direct evaluation at cell and face centres");
+    }
     reg.clear_level(1);
-    CHECK_MSG(reg.num_levels() == 1 && !reg.has_level(1) && reg.covered_mask(0) == nullptr && reg.n_clear == 1, "clear_level(1) removes the level and the covered mask below it");
+    CHECK_MSG(reg.num_levels() == 1 && !reg.has_level(1) && reg.covered_mask(0) == nullptr && reg.n_clear == 2, "clear_level(1) removes the level and the covered mask below it");
     return fdstest::report("levels (S9: registry make/remake/clear, covered mask, layout SideData, uncovered exact sums; ranks as launched)");
 }
 

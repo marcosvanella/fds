@@ -110,6 +110,10 @@ void LevelRegistry::clear_level(int level)
     for (int l = num_levels() - 1; l >= level; --l) {
         Slot& s = m_lv[l];
         s.old_sd.reset(); s.old_F.reset(); s.old_lev.reset(); s.covered.reset();
+        if (m_in_regrid && s.F_own) {   // D-058: keep the removed level readable until end_regrid
+            Cleared& cl = m_cleared[l];
+            cl.sd = std::move(s.sd_own); cl.F = std::move(s.F_own); cl.lev = std::move(s.lev_own);
+        }
         s.sd_own.reset(); s.F_own.reset(); s.lev_own.reset();
         s.lev = nullptr; s.F = nullptr; s.sd = nullptr;
     }
@@ -140,12 +144,92 @@ void LevelRegistry::refresh_covered()
 
 const amrex::iMultiFab* LevelRegistry::covered_mask(int l) const { return (l >= 0 && l < num_levels()) ? m_lv[l].covered.get() : nullptr; }
 
-const Level* LevelRegistry::retired_level(int l) const { return (l >= 0 && l < num_levels()) ? m_lv[l].old_lev.get() : nullptr; }
-Fields* LevelRegistry::retired_fields(int l) { return (l >= 0 && l < num_levels()) ? m_lv[l].old_F.get() : nullptr; }
+const Level* LevelRegistry::retired_level(int l) const
+{
+    if (l >= 0 && l < num_levels() && m_lv[l].old_lev) return m_lv[l].old_lev.get();
+    auto it = m_cleared.find(l);
+    return it != m_cleared.end() ? it->second.lev.get() : nullptr;
+}
+Fields* LevelRegistry::retired_fields(int l)
+{
+    if (l >= 0 && l < num_levels() && m_lv[l].old_F) return m_lv[l].old_F.get();
+    auto it = m_cleared.find(l);
+    return it != m_cleared.end() ? it->second.F.get() : nullptr;
+}
 void LevelRegistry::release_retired(int l)
 {
+    m_cleared.erase(l);
     if (l < 0 || l >= num_levels()) return;
     m_lv[l].old_sd.reset(); m_lv[l].old_F.reset(); m_lv[l].old_lev.reset();
+}
+
+void LevelRegistry::begin_regrid()
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!m_in_regrid, "LevelRegistry: begin_regrid inside a regrid (the brackets do not nest)");
+    m_in_regrid = true;
+    ++n_begin_regrid;
+}
+
+void LevelRegistry::end_regrid()
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_in_regrid, "LevelRegistry: end_regrid without begin_regrid");
+    for (int l = 0; l < num_levels(); ++l) { m_lv[l].old_sd.reset(); m_lv[l].old_F.reset(); m_lv[l].old_lev.reset(); }
+    m_cleared.clear();
+    m_in_regrid = false;
+    ++n_end_regrid;
+}
+
+void LevelRegistry::fill_initial_level(int l, const InitialFill& f)
+{
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(l >= 1 && has_level(l), "LevelRegistry::fill_initial_level: level must exist and be > 0 (level 0 is the FDS initialisation)");
+    Fields& F = fields(l);
+    const Level& lev = *m_lv[l].lev;
+    const int ns = m_ns;
+    const double* plo = lev.geom.ProbLo();
+    const double dx[3] = {lev.dx[0], lev.dx[1], lev.dx[2]};
+    auto has = [&](const char* n) { return F.has(n); };
+    if (f.cell) {
+        for (amrex::MFIter mfi(F["RHO"]); mfi.isValid(); ++mfi) {
+            const amrex::Box vb = mfi.validbox();
+            std::vector<double> zz(ns);
+            for (int k = vb.smallEnd(2); k <= vb.bigEnd(2); ++k)
+                for (int j = vb.smallEnd(1); j <= vb.bigEnd(1); ++j)
+                    for (int i = vb.smallEnd(0); i <= vb.bigEnd(0); ++i) {
+                        double rho = 0.0, tmp = 0.0;
+                        f.cell(plo[0] + (i + 0.5) * dx[0], plo[1] + (j + 0.5) * dx[1], plo[2] + (k + 0.5) * dx[2], &rho, &tmp, zz.data());
+                        auto put = [&](const char* n, double v) { if (has(n)) F[n].array(mfi)(i, j, k, 0) = v; };
+                        put("RHO", rho); put("RHOS", rho); put("TMP", tmp);
+                        for (int n = 0; n < ns; ++n) {
+                            if (has("ZZ"))  F["ZZ"].array(mfi)(i, j, k, n) = zz[n];
+                            if (has("ZZS")) F["ZZS"].array(mfi)(i, j, k, n) = zz[n];
+                        }
+                    }
+        }
+    }
+    if (f.velocity) {
+        const char* nm[3][2] = {{"U", "US"}, {"V", "VS"}, {"W", "WS"}};
+        for (int d = 0; d < 3; ++d) {
+            if (!has(nm[d][0])) continue;
+            for (amrex::MFIter mfi(F[nm[d][0]]); mfi.isValid(); ++mfi) {
+                amrex::Box fb = mfi.validbox();   // nodal in d for a face field
+                auto a = F[nm[d][0]].array(mfi);
+                for (int k = fb.smallEnd(2); k <= fb.bigEnd(2); ++k)
+                    for (int j = fb.smallEnd(1); j <= fb.bigEnd(1); ++j)
+                        for (int i = fb.smallEnd(0); i <= fb.bigEnd(0); ++i) {
+                            const int idx[3] = {i, j, k};
+                            double x[3];
+                            for (int e = 0; e < 3; ++e) x[e] = plo[e] + (idx[e] + (e == d ? 0.0 : 0.5)) * dx[e];
+                            a(i, j, k, 0) = f.velocity(d, x[0], x[1], x[2]);
+                        }
+                if (has(nm[d][1])) {
+                    auto as = F[nm[d][1]].array(mfi);
+                    for (int k = fb.smallEnd(2); k <= fb.bigEnd(2); ++k)
+                        for (int j = fb.smallEnd(1); j <= fb.bigEnd(1); ++j)
+                            for (int i = fb.smallEnd(0); i <= fb.bigEnd(0); ++i) as(i, j, k, 0) = a(i, j, k, 0);
+                }
+            }
+        }
+    }
 }
 
 }  // namespace fdsamr

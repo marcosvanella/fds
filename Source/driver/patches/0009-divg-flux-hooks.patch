@@ -1,0 +1,27 @@
+diff --git a/Source/divg.f90 b/Source/divg.f90
+index 5bfe375..16e86a4 100644
+--- a/Source/divg.f90
++++ b/Source/divg.f90
+@@ -30,6 +30,9 @@ USE MANUFACTURED_SOLUTIONS, ONLY: DIFF_MMS,UF_MMS,WF_MMS,VD2D_MMS_Z_SRC
+ USE COMPLEX_GEOMETRY, ONLY : CC_CGSC, CC_UNKZ, CC_SOLID, CC_CUTCFE
+ USE CC_SCALARS, ONLY : ADD_CUTCELL_PSUM,ADD_LINKEDCELL_PSUM,SET_EXIMDIFFLX_3D,SET_EXIMRHOHSLIM_3D,&
+                        SET_EXIMRHOZZLIM_3D,CC_DIVERGENCE_PART_1,CC_VELOCITY_FLUX,CFACE_PREDICT_NORMAL_VELOCITY
++#ifdef WITH_AMREX
++USE FDS_FLUX_HOOKS, ONLY: FDS_HOOK_DIF_FLUX
++#endif
+ 
+ INTEGER, INTENT(IN) :: NM
+ REAL(EB), INTENT(IN) :: T,DT
+@@ -264,6 +267,12 @@ SPECIES_GT_1_IF: IF (N_TOTAL_SCALARS>1) THEN
+ 
+    IF (CC_IBM) CALL SET_EXIMDIFFLX_3D(NM,RHO_D_DZDX,RHO_D_DZDY,RHO_D_DZDZ)
+ 
++#ifdef WITH_AMREX
++   ! Patch 0009 (interface flux hooks): read out the species diffusive face fluxes RHO_D_DZDX/Y/Z as the divergence reads them, or replace listed values; returns at once
++   ! (no registered box, no override) in every run that does not use the hooks.
++   CALL FDS_HOOK_DIF_FLUX(NM,LBOUND(RHO_D_DZDX,4),RHO_D_DZDX,RHO_D_DZDY,RHO_D_DZDZ)
++
++#endif
+    ! Store diffusive flux for output
+ 
+    IF (STORE_SPECIES_FLUX) THEN

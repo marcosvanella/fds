@@ -85,6 +85,16 @@ public:
     // VELOCITY_PREDICTOR of the level: smallest stable dt of the level's boxes of this rank (a large number if the rank has none) and CHANGE_TIME_STEP flag (OR).
     void stage_velocity_update(int lev, bool predictor, double* local_dt, int* change_time_step);
     void stage_velocity_correct(int lev);                   // VELOCITY_CORRECTOR
+    // ---- S10.2 interface flux hooks (notes/flux-hooks-design.md). kind 0 = ADV (stage product face value x face velocity, kg/(m2 s) of rho*Z_n), kind 1 = DIF (RHO_D_DZDX/Y/Z as the divergence reads them).
+    // flux_array(lev, kind, dir): nodal MultiFab in `dir`, ncomp N_TOTAL_SCALARS (component n-1 = scalar n), no ghost cells, the level's BoxArray and DistributionMapping; AMReX face a is FDS face I = a-lo.
+    // flux_readout_adv(lev): after stage_viscosity; fills the ADV arrays, no cell update. flux_readout_dif(lev): runs DIVERGENCE_PART_1 (= stage_divergence1) and fills the DIF arrays.
+    // flux_set_override(lev, kind, lists): replaces the lists (one vector of FluxOverride per local box in MFIter order; an empty vector clears) and switches the kind to override mode: the next
+    // stage_density (ADV) and flux_apply_dif (DIF) use them. flux_apply_dif(lev): DIVERGENCE_PART_1 again with the DIF list applied (zone sums restored first), a no-op without a list.
+    void flux_readout_adv(int lev);
+    void flux_readout_dif(int lev);
+    void flux_apply_dif(int lev);
+    void flux_set_override(int lev, int kind, const std::vector<std::vector<fdsrt::FluxOverride>>& per_local_box);
+    const amrex::MultiFab& flux_array(int lev, int kind, int dir);
     // Global dt: MIN of the per-level local dts over levels and ranks. Same value for both stages of a step (D-050: dt is decided once per pass, both stages use it).
     double global_dt(const std::vector<double>& local_dt_per_level) const;
     // Coarse-fine ghost hook of level `lev` (Role 3 plan item 4): called by stage_exchange after the same-level fill of every exchange code. See CfGhostRequest.
@@ -107,7 +117,33 @@ private:
     PressureHook m_hook;
     double m_t = 0.0, m_dt = 0.0, m_rmin = 0.0, m_rmax = 0.0;
     int m_icyc = 0;
+    std::vector<double> m_last_local_dt;   //!< per level: result of the last stage_velocity_update (FluxStages::local_dt)
+    friend class FluxStages;
     std::vector<StepRecord> m_steps;
+};
+
+// Adapter that implements the three-phase fdsrt::FluxAccess protocol (RegridInterface.H) on a TimeLoop. FDS orders the work of one stage as
+// viscosity, DENSITY (advective fluxes, cell update), DIVERGENCE_PART_1 (diffusive fluxes), so the adapter maps the phases as follows:
+//   compute_stage_fluxes(l, p)  flux_readout_adv: ADV face fluxes of the stage, no cell update (stage_viscosity must have run);
+//   apply_flux_divergence(l, p) stage_density with the ADV override list, then DIVERGENCE_PART_1 with a DIF readout (DIF arrays valid after this call);
+//   run_divergence_part1(l)     after apply_flux_divergence: the DIF override list is applied (DIVERGENCE_PART_1 re-run, zone sums restored; a no-op
+//                               without a list). Without a preceding apply_flux_divergence on the level it is a plain stage_divergence1 (new levels after a regrid).
+// With no override set the sequence is bitwise the one-call result (tests/run_flux_hook_check.sh). stage_flux(l, Adv, d) is valid after
+// compute_stage_fluxes, stage_flux(l, Dif, d) after apply_flux_divergence. The Role 3 loop therefore reads ADV and sets ADV overrides before apply_flux_divergence and
+// reads DIF and sets DIF overrides between apply_flux_divergence and run_divergence_part1. max_divergence_error is item 4 (D-058) and aborts until then.
+class FluxStages : public fdsrt::FluxAccess {
+public:
+    explicit FluxStages(TimeLoop& tl) : m_tl(tl) {}
+    void compute_stage_fluxes(int level, bool predictor) override;
+    void apply_flux_divergence(int level, bool predictor) override;
+    const amrex::MultiFab& stage_flux(int level, fdsrt::FluxKind kind, int dir) const override;
+    void set_flux_override(int level, fdsrt::FluxKind kind, const std::vector<std::vector<fdsrt::FluxOverride>>& per_local_box) override;
+    double local_dt(int level) const override;
+    void run_divergence_part1(int level) override;
+    double max_divergence_error(int level) const override;
+private:
+    TimeLoop& m_tl;
+    std::vector<char> m_div1_pending;   //!< per level: DIVERGENCE_PART_1 ran inside apply_flux_divergence and its DIF override is still open
 };
 
 }  // namespace fdsamr

@@ -96,6 +96,11 @@ void fds_p_resid(int nm);
 void fds_p_velerr(double dt, int nm);
 void fds_p_get_err(int nm, double* pe, double* ve, double* ptb);
 void fds_p_set_wall_counter(int n);
+// fds_flux_hooks.f90 (notes/flux-hooks-design.md)
+void fds_flux_reserve(int ntot);
+int fds_flux_register(int nm, int kind, int dir, const int* lb, const int* ext, double* p);
+int fds_flux_set_mode(int nm, int kind, int mode);
+int fds_flux_set_override(int nm, int kind, int n, const int* dir, const int* idx, int nsc, const double* val);
 int fds_p_stop_status();
 }
 
@@ -229,6 +234,9 @@ struct TimeLoop::Impl {
         zone_setup();
         fds_outputs = fds_hook_step_outputs() != 0 && std::getenv("FDSTL_NO_FDS_OUTPUTS") == nullptr;
         amrex::Print() << "FDS-AMReX: FDS output writers (devc/hrr/mass/steps/out) " << (fds_outputs ? "driven through fds_setup(mode=3)" : "not available (main.f90 patch 0006 absent or FDSTL_NO_FDS_OUTPUTS set)") << "\n";
+        if (const char* e = std::getenv("FDSTL_FLUXCHK")) fluxchk = std::atoi(e);
+        if (const char* e = std::getenv("FDSTL_FLUXCHK_KINDS")) fluxchk_kinds = std::atoi(e);
+        if (fluxchk) amrex::Print() << "FDS-AMReX: interface flux hook check FDSTL_FLUXCHK=" << fluxchk << " (1 empty override, 2 no-op override with the read-out values, 3 scaled values: negative control)\n";
         if (const char* e = std::getenv("FDSTL_IFACE")) iface_mode = std::atoi(e);
         L.m_bc->iface_hook = [this](bool on) { iface(on); };
         if (const char* e = std::getenv("FDSTL_EXTGHOST")) ext_ghost = std::atoi(e) != 0;
@@ -356,6 +364,138 @@ struct TimeLoop::Impl {
     void state(bool pred, bool first) { fds_k_state(pred ? 1 : 0, first ? 1 : 0, L.m_icyc, L.m_rmin, L.m_rmax); }
     template <class F> void each_local(F f) { for (int i = 0; i < c->nbox; ++i) if (local(i)) f(c->fds0 + i + 1); }
 
+    // ------------------------------------------------------------ S10.2 interface flux hooks (notes/flux-hooks-design.md)
+    // ADV (kind 0) = the stage product FX*UU read by the density update, DIF (kind 1) = RHO_D_DZDX/Y/Z as the divergence reads them; nodal MultiFabs per level, ncomp = N_TOTAL_SCALARS, no ghost layer.
+    // FDS face I (high face of cell I) = AMReX face lo+I in the normal direction; tangentially FDS J = b-lo+1. Registered with the Fortran hook module per local box; the hooks do nothing
+    // for a box whose mode is 0, so the unhooked step is the original code.
+    struct StageFlux { std::unique_ptr<amrex::MultiFab> mf[2][3]; std::vector<int> mode = {0, 0}; };
+    std::vector<StageFlux> sfx;        // by level
+    int fluxchk = 0;                   // env FDSTL_FLUXCHK: 1 bracket every density / divergence-1 call with a read-out and an empty override pass; 2 override with the read-out values
+                                       // of every face (a no-op: result must be bitwise the unhooked one); 3 as 2 with every value scaled by 1+1e-3 (negative control: result must differ)
+    int fluxchk_kinds = 3;             // env FDSTL_FLUXCHK_KINDS: bit 0 ADV, bit 1 DIF (default both)
+    long fluxchk_calls[2] = {0, 0}, fluxchk_faces[2] = {0, 0};
+    double fluxchk_max[2] = {0, 0};
+    int lev_of_c() const { return static_cast<int>(c - lc.data()); }
+    StageFlux& stage_flux_arrays()
+    {
+        const int lev = lev_of_c();
+        if (static_cast<int>(sfx.size()) <= lev) sfx.resize(lev + 1);
+        StageFlux& S = sfx[lev];
+        if (S.mf[0][0]) return S;
+        fds_flux_reserve(c->fds0 + c->nbox);
+        for (int k = 0; k < 2; ++k)
+            for (int d = 0; d < 3; ++d) {
+                const amrex::BoxArray nba = amrex::convert(c->lev->ba, amrex::IntVect::TheDimensionVector(d));
+                S.mf[k][d].reset(new amrex::MultiFab(nba, c->lev->dm, std::max(1, ns), 0));
+                S.mf[k][d]->setVal(0.0);
+                for (amrex::MFIter mfi(*S.mf[k][d]); mfi.isValid(); ++mfi) {
+                    const amrex::Box b = mfi.validbox();
+                    const int lb[4] = {d == 0 ? 0 : 1, d == 1 ? 0 : 1, d == 2 ? 0 : 1, 1};
+                    const int ext[4] = {b.length(0), b.length(1), b.length(2), std::max(1, ns)};
+                    if (fds_flux_register(c->fds0 + mfi.index() + 1, k, d, lb, ext, (*S.mf[k][d])[mfi].dataPtr()) != 0) die("fds_flux_register failed");
+                }
+            }
+        return S;
+    }
+    void flux_set_mode(int kind, int mode)
+    {
+        stage_flux_arrays().mode[kind] = mode;
+        each_local([&](int nm) { if (fds_flux_set_mode(nm, kind, mode) != 0) die("fds_flux_set_mode failed"); });
+    }
+    // override lists (FluxOverride: AMReX face indices) -> the Fortran hook table; lists are in the order of the local boxes of the level (MFIter order). Mode becomes 2 (empty lists: nothing changes).
+    void flux_set_override(int kind, const std::vector<std::vector<fdsrt::FluxOverride>>& per_box)
+    {
+        StageFlux& S = stage_flux_arrays();
+        int k = 0;
+        for (amrex::MFIter mfi(*S.mf[kind][0]); mfi.isValid(); ++mfi, ++k) {
+            const int nm = c->fds0 + mfi.index() + 1;
+            const amrex::Box vbx = c->lev->ba[mfi.index()]; const amrex::IntVect lo = vbx.smallEnd();
+            std::vector<int> dir, idx; std::vector<double> val; int n = 0;
+            if (k < static_cast<int>(per_box.size()))
+                for (const fdsrt::FluxOverride& fo : per_box[k]) {
+                    if (fo.nscal != ns) die("flux override: nscal differs from N_TOTAL_SCALARS");
+                    if (fo.dir < 0 || fo.dir > 2) die("flux override: bad direction");
+                    for (std::size_t f = 0; f < fo.face.size(); ++f) {
+                        dir.push_back(fo.dir);
+                        for (int e = 0; e < 3; ++e) idx.push_back(fo.face[f][e] - lo[e] + (e == fo.dir ? 0 : 1));
+                        for (int q = 0; q < ns; ++q) val.push_back(fo.value[f * ns + q]);
+                        ++n;
+                    }
+                }
+            const int r = fds_flux_set_override(nm, kind, n, dir.data(), idx.data(), ns, val.data());
+            if (r != 0) die(std::string("flux override rejected (") + (r == 2 ? "a face outside the valid range of the box" : "bad argument") + ") on box " + std::to_string(mfi.index()));
+        }
+        flux_set_mode(kind, 2);
+    }
+    // one list per local box and direction with every face of the read-out array (scaled): the whole-box no-op override
+    std::vector<std::vector<fdsrt::FluxOverride>> flux_lists_from_readout(int kind, double scale)
+    {
+        StageFlux& S = stage_flux_arrays();
+        std::vector<std::vector<fdsrt::FluxOverride>> per_box;
+        for (amrex::MFIter mfi(*S.mf[kind][0]); mfi.isValid(); ++mfi) {
+            per_box.emplace_back();
+            for (int d = 0; d < 3; ++d) {
+                fdsrt::FluxOverride fo; fo.dir = d; fo.nscal = ns;
+                const amrex::Box b = (*S.mf[kind][d])[mfi].box();
+                const amrex::Array4<const double> a = S.mf[kind][d]->const_array(mfi);
+                for (int kk = b.smallEnd(2); kk <= b.bigEnd(2); ++kk)
+                    for (int jj = b.smallEnd(1); jj <= b.bigEnd(1); ++jj)
+                        for (int ii = b.smallEnd(0); ii <= b.bigEnd(0); ++ii) {
+                            fo.face.push_back({ii, jj, kk});
+                            for (int q = 0; q < ns; ++q) { fo.value.push_back(a(ii, jj, kk, q) * scale); fluxchk_max[kind] = std::max(fluxchk_max[kind], std::abs(a(ii, jj, kk, q))); }
+                            ++fluxchk_faces[kind];
+                        }
+                per_box.back().push_back(std::move(fo));
+            }
+        }
+        return per_box;
+    }
+    // ADV read-out of the stage (needs FX: call after the viscosity/MFD stage): the density update is skipped for the box by the hook, nothing else changes
+    void flux_readout_adv(double t, double dt)
+    {
+        StageFlux& S = stage_flux_arrays(); const int old = S.mode[0];
+        flux_set_mode(0, 1);
+        each_local([&](int nm) { fds_p_dens_pre(t, dt, nm); });
+        flux_set_mode(0, old);
+    }
+    std::vector<double> zsave;
+    void zone_save() { if (nzone <= 0) return; zsave.assign(3 * nzone, 0.0); fds_p_zone_get(nzone, zsave.data(), zsave.data() + nzone, zsave.data() + 2 * nzone); }
+    void zone_restore() { if (nzone <= 0) return; fds_p_zone_set(nzone, zsave.data(), zsave.data() + nzone, zsave.data() + 2 * nzone); }
+    void div1_plain() { iface(true); each_local([&](int nm) { fds_k_div1(L.m_t, L.m_dt, nm); }); iface(false); }
+    // DIF read-out: the stage divergence-1 itself with the hook copying the fluxes (the kernel result is the normal one). The zone sums are saved first so that the override pass can redo them.
+    void flux_readout_dif()
+    {
+        StageFlux& S = stage_flux_arrays(); const int old = S.mode[1];
+        flux_set_mode(1, 1); zone_save(); div1_plain(); flux_set_mode(1, old);
+    }
+    // DIF override pass: DIVERGENCE_PART_1 once more with the listed faces replaced (zone sums restored first; the kernel is re-runnable with identical inputs)
+    void flux_apply_dif()
+    {
+        StageFlux& S = stage_flux_arrays();
+        if (S.mode[1] != 2) return;
+        zone_restore(); div1_plain();
+    }
+    // FDSTL_FLUXCHK: bracket the stage calls (see fluxchk above)
+    void fluxchk_prepare(int kind)
+    {
+        ++fluxchk_calls[kind];
+        if (fluxchk == 1) flux_set_override(kind, {});
+        else flux_set_override(kind, flux_lists_from_readout(kind, fluxchk == 3 ? 1.001 : 1.0));
+    }
+    void fluxchk_density(bool pred, double t, double dt)
+    {
+        (void)pred;
+        flux_readout_adv(t, dt);
+        fluxchk_prepare(0);
+    }
+    void fluxchk_div1()
+    {
+        flux_readout_dif();
+        fluxchk_prepare(1);
+        flux_apply_dif();
+        flux_set_override(1, {}); flux_set_mode(1, 0);
+    }
+
     // ------------------------------------------------------------ D-031 level clip (port of the kernel check's clip_level; gather form)
     void clip_level(bool pred, std::vector<int>& flags)
     {
@@ -427,10 +567,13 @@ struct TimeLoop::Impl {
     // DENSITY of every box (the D-031 split form: pre-clip half, level gather clip, post-clip half)
     void density(bool pred, double t, double dt)
     {
+        const bool fx = fluxchk && (fluxchk_kinds & 1);
+        if (fx) fluxchk_density(pred, t, dt);
         each_local([&](int nm) { fds_p_dens_pre(t, dt, nm); });
         std::vector<int> flags;
         clip_level(pred, flags);
         each_local([&](int nm) { fds_k_set_flags(nm, flags[bi(nm)]); fds_k_dens_post(t, dt, nm); });
+        if (fx) { flux_set_override(0, {}); flux_set_mode(0, 0); }
     }
 
     // ------------------------------------------------------------ D-028: zone integrals (DSUM, PSUM, USUM) as exact fixed-point sums
@@ -641,7 +784,7 @@ struct TimeLoop::Impl {
         iface(false);
     }
     void s_wall_bc(bool pred) { c->bc->wall_bc(pred ? 1 : 0, L.m_t, L.m_dt); }
-    void s_div1() { iface(true); each_local([&](int nm) { fds_k_div1(L.m_t, L.m_dt, nm); }); iface(false); }
+    void s_div1() { if (fluxchk && (fluxchk_kinds & 2)) { fluxchk_div1(); return; } div1_plain(); }
     void s_div2() { each_local([&](int nm) { fds_k_div2(L.m_dt, nm); }); }
     // velocity predictor: writes this rank's boxes of the level into the global per-box vectors at slot off + box (other slots untouched)
     void s_vpred(std::vector<double>& dn, std::vector<double>& ci)
@@ -992,6 +1135,12 @@ struct TimeLoop::Impl {
 
     void finish()
     {
+        if (fluxchk) {
+            double mx0 = fluxchk_max[0], mx1 = fluxchk_max[1];
+            all_max(mx0); all_max(mx1);
+            amrex::Print() << "FLUXCHK mode " << fluxchk << ": ADV " << fluxchk_calls[0] << " calls (this rank " << fluxchk_faces[0] << " faces listed, max |flux| " << mx0 << "), DIF " << fluxchk_calls[1]
+                           << " calls (" << fluxchk_faces[1] << " faces, max |flux| " << mx1 << ")\n";
+        }
         if (amrex::ParallelDescriptor::MyProc() == 0) {
             std::FILE* f = std::fopen((dir + "/" + L.m_o.chid + "_driver_steps.csv").c_str(), "w");
             if (f) {
@@ -1086,6 +1235,23 @@ void TimeLoop::stage_wall_bc(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m
 void TimeLoop::stage_divergence1(int lev) { FDSTL_LEVEL_STAGE(lev, m->s_div1()); }
 void TimeLoop::stage_divergence2(int lev) { FDSTL_LEVEL_STAGE(lev, m->s_div2()); }
 void TimeLoop::stage_velocity_correct(int lev) { FDSTL_LEVEL_STAGE(lev, m->s_vcorr()); }
+// ---- S10.2 interface flux hooks (see TimeLoop.H and notes/flux-hooks-design.md)
+void TimeLoop::flux_readout_adv(int lev) { FDSTL_LEVEL_STAGE(lev, m->flux_readout_adv(m_t, m_dt)); }
+void TimeLoop::flux_readout_dif(int lev) { FDSTL_LEVEL_STAGE(lev, m->flux_readout_dif()); }
+void TimeLoop::flux_apply_dif(int lev) { FDSTL_LEVEL_STAGE(lev, m->flux_apply_dif()); }
+void TimeLoop::flux_set_override(int lev, int kind, const std::vector<std::vector<fdsrt::FluxOverride>>& per_local_box)
+{
+    if (kind < 0 || kind > 1) die("flux_set_override: kind must be 0 (ADV) or 1 (DIF)");
+    FDSTL_LEVEL_STAGE(lev, m->flux_set_override(kind, per_local_box));
+}
+const amrex::MultiFab& TimeLoop::flux_array(int lev, int kind, int dir)
+{
+    if (kind < 0 || kind > 1 || dir < 0 || dir > 2) die("flux_array: bad kind or direction");
+    m->select(lev);
+    const amrex::MultiFab& r = *m->stage_flux_arrays().mf[kind][dir];
+    m->select(0);
+    return r;
+}
 void TimeLoop::stage_velocity_update(int lev, bool predictor, double* local_dt, int* change_time_step)
 {
     if (!predictor) die("stage_velocity_update: the corrector velocity update is stage_velocity_correct");
@@ -1095,6 +1261,8 @@ void TimeLoop::stage_velocity_update(int lev, bool predictor, double* local_dt, 
     double mn = 1.0e300; int ch = 0;
     for (int i = 0; i < m->c->nbox; ++i) if (m->local(i)) { mn = std::min(mn, dn[m->c->off + i]); ch |= static_cast<int>(ci[m->c->off + i]); }
     *local_dt = mn; *change_time_step = ch;
+    if (static_cast<int>(m_last_local_dt.size()) <= lev) m_last_local_dt.resize(lev + 1, 1.0e300);
+    m_last_local_dt[lev] = mn;
     m->select(0);
 }
 #undef FDSTL_LEVEL_STAGE
@@ -1128,6 +1296,39 @@ int TimeLoop::run()
     }
     m->finish();
     return fails;
+}
+
+// ---- FluxStages: fdsrt::FluxAccess on a TimeLoop (phase mapping documented in TimeLoop.H)
+void FluxStages::compute_stage_fluxes(int level, bool) { m_tl.flux_readout_adv(level); }
+void FluxStages::apply_flux_divergence(int level, bool predictor)
+{
+    m_tl.stage_density(level, predictor);   // consumes the ADV override list when one is set
+    m_tl.flux_readout_dif(level);           // DIVERGENCE_PART_1 plus the DIF readout
+    if (static_cast<int>(m_div1_pending.size()) <= level) m_div1_pending.resize(level + 1, 0);
+    m_div1_pending[level] = 1;
+}
+const amrex::MultiFab& FluxStages::stage_flux(int level, fdsrt::FluxKind kind, int dir) const
+{
+    return m_tl.flux_array(level, kind == fdsrt::FluxKind::Adv ? 0 : 1, dir);
+}
+void FluxStages::set_flux_override(int level, fdsrt::FluxKind kind, const std::vector<std::vector<fdsrt::FluxOverride>>& per_local_box)
+{
+    m_tl.flux_set_override(level, kind == fdsrt::FluxKind::Adv ? 0 : 1, per_local_box);
+}
+double FluxStages::local_dt(int level) const
+{
+    if (level < 0 || level >= static_cast<int>(m_tl.m_last_local_dt.size())) return 1.0e300;
+    return m_tl.m_last_local_dt[level];
+}
+void FluxStages::run_divergence_part1(int level)
+{
+    if (level < static_cast<int>(m_div1_pending.size()) && m_div1_pending[level]) { m_div1_pending[level] = 0; m_tl.flux_apply_dif(level); }
+    else m_tl.stage_divergence1(level);
+}
+double FluxStages::max_divergence_error(int) const
+{
+    amrex::Abort("FluxStages::max_divergence_error: D-058 diagnostic, implemented in S10.4");
+    return 0.0;
 }
 
 }  // namespace fdsamr

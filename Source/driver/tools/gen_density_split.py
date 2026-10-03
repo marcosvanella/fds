@@ -54,5 +54,32 @@ txt = HDR + '\n'.join(pre + post)
 # D-056 option B: the copy finds its box through POINT_TO_BOX (level 0: same as POINT_TO_MESH) and reads M_DOT_PPP from the mesh object of the box (level 0 or fine level)
 assert txt.count('CALL POINT_TO_MESH(NM)') == 2 and txt.count('ALLOCATED(MESHES(NM)%M_DOT_PPP)') == 2
 txt = txt.replace('CALL POINT_TO_MESH(NM)', 'CALL POINT_TO_BOX(NM)').replace('ALLOCATED(MESHES(NM)%M_DOT_PPP)', 'HAS_M_DOT_PPP(NM)')
+# Interface flux hooks (notes/flux-hooks-design.md, driver side only: mass.f90 is not edited). Before each of the two species updates the copy asks the hook module whether the box is in read-out
+# or override mode; read-out stores the stage product FX*UU (FY*VV, FZ*WW) and returns without updating, override with a non-empty list runs a second copy of the update loop that reads
+# the product arrays PRX,PRY,PRZ (the product with the listed faces replaced). The original loop is untouched and is what runs whenever no list is set (bitwise the unhooked code).
+def hook_block(txt, rhs_anchor):
+    i = txt.index(rhs_anchor)
+    a = txt.rindex('   DO N=1,N_TOTAL_SCALARS', 0, i)
+    b = txt.index('\n   ENDDO\n', i) + len('\n   ENDDO\n')
+    blk = txt[a:b]
+    alt = blk
+    for o, n in (('FX(I,J,K,N)*UU(I,J,K)*R(I) - FX(I-1,J,K,N)*UU(I-1,J,K)*R(I-1)', 'PRX(I,J,K,N)*R(I) - PRX(I-1,J,K,N)*R(I-1)'),
+                 ('FY(I,J,K,N)*VV(I,J,K)      - FY(I,J-1,K,N)*VV(I,J-1,K)       ', 'PRY(I,J,K,N)      - PRY(I,J-1,K,N)       '),
+                 ('FZ(I,J,K,N)*WW(I,J,K)      - FZ(I,J,K-1,N)*WW(I,J,K-1)       ', 'PRZ(I,J,K,N)      - PRZ(I,J,K-1,N)       ')):
+        assert alt.count(o) == 1, o
+        alt = alt.replace(o, n)
+    hook = ('   ! ---- interface flux hooks (fds_flux_hooks.f90): read-out of the stage product (the update is skipped) or the list of overridden faces ----\n'
+            '   OVR_ADV = .FALSE.\n'
+            '   IF (FDS_FLUX_ACTIVE(NM,0)) THEN\n'
+            '      CALL FDS_HOOK_ADV(NM,LBOUND(FX,4),LBOUND(UU),LBOUND(VV),LBOUND(WW),UU,VV,WW,FX,FY,FZ,RO_ADV,OVR_ADV)\n'
+            '      IF (RO_ADV) RETURN\n'
+            '   ENDIF\n'
+            '   IF (OVR_ADV) THEN\n' + alt + '   ELSE\n' + blk + '   ENDIF\n')
+    return txt[:a] + hook + txt[b:]
+txt = hook_block(txt, 'RHS = - DEL_RHO_D_DEL_Z__0(I,J,K,N)')
+txt = hook_block(txt, 'RHS = - DEL_RHO_D_DEL_Z(I,J,K,N)')
+assert txt.count('USE CC_SCALARS, ONLY : SET_EXIMADVFLX_3D,ROTATED_CUBE_RHS_ZZ\n') >= 1 and txt.count('REAL(EB) :: TNOW,RHS,Q_Z,XHAT,ZHAT\n') >= 1
+txt = txt.replace('USE CC_SCALARS, ONLY : SET_EXIMADVFLX_3D,ROTATED_CUBE_RHS_ZZ\n', 'USE CC_SCALARS, ONLY : SET_EXIMADVFLX_3D,ROTATED_CUBE_RHS_ZZ\nUSE FDS_FLUX_HOOKS, ONLY: FDS_FLUX_ACTIVE,FDS_HOOK_ADV,PRX,PRY,PRZ\n', 1)
+txt = txt.replace('REAL(EB) :: TNOW,RHS,Q_Z,XHAT,ZHAT\n', 'REAL(EB) :: TNOW,RHS,Q_Z,XHAT,ZHAT\nLOGICAL :: RO_ADV,OVR_ADV\n', 1)
 open(out, 'w').write(txt)
 print('wrote', os.path.normpath(out))
