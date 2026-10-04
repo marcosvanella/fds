@@ -19,3 +19,12 @@ H gradient at the fine C/F faces); velocity predictor; the same for the correcto
 K2 kernel launches are blocking and are not issued on AMReX streams. Per-box concurrency therefore means one host thread per box; the driver has to synchronise the AMReX stream
 (`amrex::Gpu::streamSynchronize()`) before any K2 launch that consumes a result written on a stream (for example the PRHS, the average-down or the ghost fills), and again before AMReX
 reads what a K2 launch wrote.
+
+## Numbers (ns2d_16_l0, patch coarse cells 4..11, ratio (2,1,2), 1 rank, flux overwrite on)
+* Level 0 periodic ghost corruption (the last open cause of the composite PRHS mean): `after_exchange(6)` run for a fine box (fill_omesh, then VELOCITY_BC of the fine mesh) overwrote the
+  periodic z ghost rows of the LEVEL-0 U (and the x ghost columns of W); the first predictor FVX/FVZ at the periodic faces then differed from the single-level run (sums 91.8 vs 10.6 at the two faces of a
+  periodic pair) and the sum of PRHS did not telescope (6.38 = removed mean 1.6 x domain volume). A level > 0 has no external wall cell, so `BcStep::after_exchange` no longer runs fill_omesh or
+  VELOCITY_BC on it (`FDSTL_SKIPAFT=0` restores them). The cause inside the fine-mesh VELOCITY_BC is not understood; to be checked when fine walls are built.
+* Result after the fixes: 40 steps (t = 0.42): composite mass 3.947843523 -> same, relative change 1.3e-14; rho*Z the same; max|div u - D| over the uncovered cells 1.8e-12 (level 0 6e-14,
+  level 1 1.8e-12), removed mean of the Poisson right-hand side 4e-13 (relative to rms 4e-17), 100 composite solves with MLMG.
+* Debug switches: `FDSTL_GHOSTDBG=1` (RANGE/DIVERR/RHSSUM/WRAP lines; 2: field ranges; 3: worst cell and Poisson residual), `FDSTL_TLDIAG=1` (PROBE lines of the level-0 ghost rows).

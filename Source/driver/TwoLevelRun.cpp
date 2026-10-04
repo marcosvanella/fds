@@ -71,6 +71,15 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     int fails = 0;
     LevelRegistry& reg = loop.registry();
     const int ns = l0.dom.n_total;
+    auto probe = [&](const char* tag) {   // FDSTL_TLDIAG: periodic z ghost of U on level 0 at x face 5 (must equal the opposite valid row)
+        if (!std::getenv("FDSTL_TLDIAG")) return;
+        const amrex::MultiFab& u = reg.fields(0)["U"];
+        for (amrex::MFIter mfi(u); mfi.isValid(); ++mfi) {
+            auto a = u.const_array(mfi);
+            amrex::Print() << "PROBE " << tag << ": U(5,0,-1) " << a(5, 0, -1) << " U(5,0,15) " << a(5, 0, 15) << " U(5,0,16) " << a(5, 0, 16) << " U(5,0,0) " << a(5, 0, 0) << "\n";
+        }
+    };
+    probe("entry");
     const amrex::Box dom = l0.geom.Domain();
 
     // ---- the hierarchy: &AMR and &AMR_REGION text -> AmrParams, the level-0 meshes -> Hierarchy -> RegridAmrCore; level 1 is made by the first regrid_dynamic (the tag function tags the patch)
@@ -131,10 +140,13 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
     });
     core.init_static(reg, false, fdsrt::RegridAmrCore::DmFn(), &l0.dm);
+    probe("after init_static");
 
     // ---- level 0 alone: one corrector-form pass for the D of the initial state (the target of the projection and the parent value of the new level's D)
     loop.set_state(0.0, dt_setup, 0);
+    probe("before first prime");
     loop.prime_levels();
+    probe("after first prime");
     fdsrt::PressureBackendSolver solver;
     fdsrt::PostRegridProjectionState pst;
     pst.solver = &solver;
@@ -142,6 +154,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     pst.options.accept_abs = 1.0e-9;
     fdsrt::install_post_regrid_projection(core, reg, pst);   // D-063: the hook of RegridAmrCore::regrid_dynamic
     core.regrid_dynamic(0.0);
+    probe("after regrid_dynamic");
     const int finest = core.finestLevel();
     if (finest != 1) { amrex::Print() << "TWO-LEVEL: expected one fine level, got finest level " << finest << "\n"; return 1; }
     amrex::Print() << "TWO-LEVEL regrid_dynamic: changed " << core.last_outcome().changed << ", new cells " << core.last_outcome().new_cells << ", retained " << core.last_outcome().retained_cells
@@ -152,6 +165,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     fdsrt::CfHookStats cfs;
     fdsrt::install_cf_ghost_hooks(loop, finest, fdsrt::ThermoProvider(), &cfs);
     loop.set_flux_overwrite(o.overwrite);
+    probe("after bind/hooks");
     amrex::Print() << "TWO-LEVEL: level 1 = " << reg.level(1).ba.size() << " box(es), " << reg.level(1).ba.numPts() << " cells, ratio (" << rr[0] << "," << rr[1] << "," << rr[2] << "), blocking factor "
                    << o.blocking << ", flux overwrite " << (o.overwrite ? "on" : "off") << ", projection " << o.projection << "\n";
     const int nl = finest + 1;
@@ -159,6 +173,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // ---- the fine level's own D, KRES, MU, ... by one corrector-form pass, then the post-regrid projection of the two-level velocity with that D (the body of the hook, Role 3 PostRegridProjection)
     loop.set_state(0.0, dt_setup, 0);
     loop.prime_levels();
+    probe("after second prime");
     if (std::getenv("FDSTL_TLDIAG")) {
         for (int l = 0; l < nl; ++l)
             for (const char* nm : {"RHO", "TMP", "ZZ", "D", "DS", "DDDT", "KRES", "MU", "U", "V", "W"}) {

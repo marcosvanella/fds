@@ -1031,9 +1031,13 @@ struct TimeLoop::Impl {
         select(0);
         if (IP[4]) for_levels([&](int) { each_local([&](int nm) { fds_p_baroclinic(t, nm); }); });   // BAROCLINIC_CORRECTION of every level (reads H/HS and RHO with the ghost layers of the level)
         L.m_bc->exchange_om();
+        wrap_check("composite before match");
         each_local([&](int nm) { fds_g_match_flux(nm); });
+        wrap_check("composite after match");
         for_levels([&](int) { each_local([&](int nm) { fds_p_noflux(dt, nm, 1); }); });
+        wrap_check("composite after noflux");
         composite_average_down_flux(reg, nl);
+        wrap_check("composite after avg-down");
         select(0);
         each_local([&](int nm) { fds_p_rhs(t, dt, nm); });
         const double ts0 = amrex::second();
@@ -1199,19 +1203,35 @@ struct TimeLoop::Impl {
     {
         const int nl = static_cast<int>(lc.size());
         const bool full = std::getenv("FDSTL_PRIME_FULL") != nullptr;
+        auto probe = [&](const char* tag) {
+            if (!std::getenv("FDSTL_TLDIAG") || nl < 2) return;
+            const amrex::MultiFab& u = (*lc[0].F)["U"];
+            for (amrex::MFIter mfi(u); mfi.isValid(); ++mfi) { auto a = u.const_array(mfi); amrex::Print() << "PROBE prime " << tag << ": U(5,0,-1) " << a(5, 0, -1) << " U(5,0,16) " << a(5, 0, 16) << "\n"; }
+        };
+        probe("entry");
         state(false, false);
+        probe("after state");
         nan_report("start");
         for (int l = 1; l < nl; ++l) {
             composite_fill_fine_face_ghosts(*L.m_reg, l, {"U", "V", "W"});
             composite_fill_fine_face_ghosts(*L.m_reg, l, {"US", "VS", "WS"});
         }
-        for_levels([&](int) { s_exchange(6, false); });
-        for_levels([&](int) { s_after(6); });
+        probe("after fine face ghosts");
+        // level 0 keeps the ghost layers of its own initialisation: the corrector-form exchange/after_exchange 6 and 4 at t=0 (ICYC=0) overwrote the periodic ghost layer of U/W with wall-extrapolated values
+        // (first predictor FVX/FVZ wrong at the periodic faces: the PRHS did not telescope, removed mean 1.6); only the new levels get them
+        for (int l = 1; l < nl; ++l) { select(l); s_exchange(6, false); }
+        probe("after exchange 6");
+        for (int l = 1; l < nl; ++l) { select(l); s_after(6); }
+        select(0);
+        probe("after after-6");
         nan_report("exchange 6");
         if (full) for_levels([&](int) { s_visc_mfd(false); });
         nan_report("viscosity");
-        for_levels([&](int) { s_exchange(4, false); });
-        for_levels([&](int) { s_after(4); });
+        for (int l = 1; l < nl; ++l) { select(l); s_exchange(4, false); }
+        probe("after exchange 4");
+        for (int l = 1; l < nl; ++l) { select(l); s_after(4); }
+        select(0);
+        probe("after after-4");
         nan_report("exchange 4");
         if (!full) return;
         for_levels([&](int) { s_vflux(false); });
@@ -1225,8 +1245,22 @@ struct TimeLoop::Impl {
         nan_report("div2");
     }
 
+    // FDSTL_GHOSTDBG: FVX/FVZ at the periodic wrap of level 0 (sums over the domain faces; a periodic level needs low == high for the PRHS to telescope)
+    void wrap_check(const char* tag)
+    {
+        if (!std::getenv("FDSTL_GHOSTDBG")) return;
+        const amrex::Box dom = lc[0].lev->geom.Domain();
+        for (amrex::MFIter m0((*lc[0].F)["FVX"]); m0.isValid(); ++m0) {
+            auto cx = (*lc[0].F)["FVX"].const_array(m0); auto cz = (*lc[0].F)["FVZ"].const_array(m0);
+            double a = 0, b = 0, c = 0, d = 0;
+            for (int k = dom.smallEnd(2); k <= dom.bigEnd(2); ++k) { a += cx(dom.smallEnd(0) - 1, 0, k); b += cx(dom.bigEnd(0), 0, k); }
+            for (int i = dom.smallEnd(0); i <= dom.bigEnd(0); ++i) { c += cz(i, 0, dom.smallEnd(2) - 1); d += cz(i, 0, dom.bigEnd(2)); }
+            amrex::Print() << "WRAP " << tag << " icyc " << L.m_icyc << ": sum FVX low " << a << " high " << b << "; sum FVZ low " << c << " high " << d << "\n";
+        }
+    }
     int pressure_scheme(bool pred, double t, double dt, double& perr_out, double& verr_out)
     {
+        wrap_check(pred ? "pred scheme in" : "corr scheme in");
         if (multi()) return pressure_scheme_composite(pred, t, dt, perr_out, verr_out);
         Fields& F = *L.m_F;
         BcStep& bc = *L.m_bc;
@@ -1247,6 +1281,7 @@ struct TimeLoop::Impl {
                 each_local([&](int nm) { fds_g_match_flux(nm); });
             }
             if (fvd) stage_raw("c_fv_matched", {"FVX", "FVY", "FVZ"});
+            wrap_check("after match");
             each_local([&](int nm) { fds_p_noflux(dt, nm, iter == 1 ? 1 : 0); fds_p_rhs(t, dt, nm); });
             if (fvd) stage_raw("c_fv_noflux", {"FVX", "FVY", "FVZ"});
             solve_poisson(pred);

@@ -141,7 +141,12 @@ void BcStep::after_exchange(int code, double t, double dt)
     (void)dt;
     const int nbox = static_cast<int>(m_l0.ba.size());
     if (code != 1 && code != 3 && code != 4 && code != 6) return;
-    if (ext_ghost && (code == 3 || code == 6))   // UVW_SAVE: the face velocities before the match (DENSITY restores them at the wall faces)
+    // A level > 0 has no external wall cell: its domain-edge ghosts are the mirror rule (mirror_domain_edges), its coarse-fine ghosts the composite fill. FDS's VELOCITY_BC on a fine box, run after
+    // fill_omesh, overwrote the periodic z/x ghost layer of the LEVEL-0 face velocity (U(5,-1), W(-1,5)): the first predictor then saw wrong FVX/FVZ at the periodic faces and the composite PRHS did not
+    // telescope (removed mean 1.6, div error dt*1.6). Both are therefore not run on a level > 0 (FDSTL_SKIPAFT=0 restores them for the investigation: bit 1 save_uvw, 2 fill_omesh, 4 velocity_bc skipped).
+    static const int dbg_skip = std::getenv("FDSTL_SKIPAFT") ? std::atoi(std::getenv("FDSTL_SKIPAFT")) : 6;
+    const bool fine_dbg = m_l0.level > 0;
+    if (ext_ghost && (code == 3 || code == 6) && !(fine_dbg && (dbg_skip & 1)))   // UVW_SAVE: the face velocities before the match (DENSITY restores them at the wall faces)
         for (int nm = 0; nm < nbox; ++nm)
             if (local(nm)) { fds_g_phase(code == 3 ? 1 : 0); fds_p_save_uvw(nm + 1 + m_l0.fds_mesh_offset, code == 3 ? 1 : 0); }
     if (ext_ghost && (code == 3 || code == 6)) {
@@ -153,7 +158,7 @@ void BcStep::after_exchange(int code, double t, double dt)
         for (int d = 0; d < 3; ++d)
             if (m_l0.dom.periodic[d] && m_F.has(pn[code == 3][d])) m_F.fill_ghosts(pn[code == 3][d]);
     }
-    fill_omesh();   // after the match: FDS's MATCH_VELOCITY also writes the averaged values into OMESH, which VELOCITY_BC reads for the periodic ghosts
+    if (!(fine_dbg && (dbg_skip & 2))) fill_omesh();   // after the match: FDS's MATCH_VELOCITY also writes the averaged values into OMESH, which VELOCITY_BC reads for the periodic ghosts
     ProfScope prof_bc(3);
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
@@ -164,7 +169,7 @@ void BcStep::after_exchange(int code, double t, double dt)
     }
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
-        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); fds_g_velocity_bc(t, nm + 1 + m_l0.fds_mesh_offset, code == 3 ? 1 : 0); if (iface_hook) iface_hook(false); }
+        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); if (!(fine_dbg && (dbg_skip & 4))) fds_g_velocity_bc(t, nm + 1 + m_l0.fds_mesh_offset, code == 3 ? 1 : 0); if (iface_hook) iface_hook(false); }
         else {
             fds_g_viscosity_bc(nm + 1 + m_l0.fds_mesh_offset, code == 4 ? 1 : 0);
             // FDS ends COMPUTE_VISCOSITY with clamped copies of MU, KRES in the edge cells of the domain; the full ghost fill above replaced them by periodic images
