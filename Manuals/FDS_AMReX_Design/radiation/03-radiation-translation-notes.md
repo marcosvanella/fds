@@ -121,11 +121,16 @@ Run on the worktree at `743dbce961` plus the uncommitted radiation files, with `
 | Fast checks (`test_mesh_rad.py`: generation, golden, write sets, rewrite/overlap/drift refusals, nine pinned refusals) | all PASS, no FAIL line |
 | Bitwise program, six flag sets (O0, O2, O0omp, O2omp, O2omp_off, O2omp_dpd), 1/4/8 threads, 8632 cases each | **PASS in all six**: 0 mismatches, 0 kernels with too few non-vacuous cases, 148 guard-skipped cases; run by `test_mesh_rad.py --all` under the shared lock `.s5gen.lock` ("radiation bitwise test passes in all six flag sets") |
 | Spec mutant (flat chain `Q += ILW(n)` for L1243) | **detected**: clean build 0 mismatches, `-DRAD_MUT_FLATSUM` build 51 mismatches (private output directory, O2omp) |
-| 17 generated-kernel mutants | the sweep runs under the same lock after the bitwise stage; see the line below |
+| 17 generated-kernel mutants (`--mutants`, run inside `--all` under the lock) | **all 17 detected, 0 survivors**; full `--all` run: RESULT: PASS, 92 PASS lines, 0 FAIL |
+| the specification-kernel mutant (flat chain for L1243) | detected |
+
+Mutants, all detected: `rad_rte_source` (regrouped sum `KFST4_GAS + (KFST4_PART + term)`; `UIIOLD` of the neighbour cell), `rad_extcoe` (sign error; `RSA_RAT` on the particle term only), `rad_uiid_wb` (`WEIGH_CYL*(RSA_N*IL)` regrouped), `rad_uiid_gray` (accumulates from band 1), `rad_qr_wb` (`QR + (K*U - F)` regrouped), `rad_qr_gray` (`F - K*U`), `rad_uii_sum` (sum order reversed; sum started at -0), `rad_thin_kfst4` (solid test inverted), `rad_corr_kfst4` (`>=` for `>` at the clip tie), `rad_gray_kfst4` (`K*(4*sigma*T**4)` regrouped), `rad_wall_qin_zero` (`TMP_GAS_FRONT < 0` for `<= 0`; walls without `B1` written; `NULL_BOUNDARY` walls written), `rad_emis_wb` (overwritten instead of accumulated).
+
+Coverage gap, stated plainly: twelve of the 17 kernels carry a mutant. `rad_uiiold_wb`, `rad_uiiold_gray`, `rad_qrw_wb`, `rad_qrw_gray` and `rad_abs_wb` do not; they are plain copies or the same pattern as a mutated sibling (`rad_qrw_*` as `rad_qr_*`, `rad_abs_wb` as `rad_emis_wb`), and the bitwise test covers them, but no mutant proves that the test would catch a change in them. A surviving mutant would have been reported here; none survived. Add one mutant each if the reviewer wants the gap closed.
 
 Test bug found and fixed on the way: the serial flag sets (O0, O2) failed to link because the generated test called `omp_set_num_threads` without the `!$` sentinel. Fixed in `make_rad_tests.py` (two lines). The five sets other than the first O2omp run were first run in private output directories while the lock was held by other jobs for over an hour; the final claim above is from the run under the lock.
 
-Mutant sweep status and commit hashes: see the report; commits are local only.
+Commits are local only; hashes are in the report.
 
 ## 8. Shared-file requests (not made by me; I own none of these)
 

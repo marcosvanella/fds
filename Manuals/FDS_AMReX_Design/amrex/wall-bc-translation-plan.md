@@ -346,3 +346,49 @@ Interim state worth stating: with the gas-side passes on the device and the solv
 - `loop_work_list.csv` / `loop-work-list.md`: the L1489 row describes a loop calling `CALC_DEPOSITION`/`CALC_HVAC_BC` with gas-cell sums. At 192-194 it is the lateral thin-wall solve (section 8). Those calls are in L1488 (173, 178). The AMR Solid Phase Lead's own sign-off needs the matching correction.
 - `04-blocked-loop-signoff.md` (own document, to be fixed in a separate commit): several `wall.f90` cites are off against the survey. Survey values: obstruction mass copy 1379 and subtraction 1390-1391 (`CRITICAL` blocks 1378-1387 and 1389-1392); `D_SOURCE`/`M_DOT_PPP` 1412-1415 and 1420-1422 (deposition 1730-1733); particle block 1519-1556; back-wall pointers 1880-1884 and 1913-1927; third mass writer 2695.
 - `wall_sums.py` and its README quote working-tree line numbers (9-12 higher than the survey); a note on the revision should be added by the author of the files.
+
+## 18. Rulings received
+
+Dated 2026-10-04. Sources: decisions D-064 (fine-level solid plan, `docs/solid/05-fine-level-solid-plan.md`, questions OQ-S1 to OQ-S6) and D-065 (this plan), in `README.md` and in `adr/drafts/ruling-role3-plan.md`, Updates (f) and (g). Answers from the Wall Loops Engineer and the Generator Engineer on Q7 and Q8 are logged here as well. Sections 1 to 17 above are left as written (v0.1); where a ruling changes them, the change is stated here.
+
+### 18.1 D-064 (fine-level solid plan)
+
+| Plan label | Question | Ruling | Consequence for the translation |
+|---|---|---|---|
+| OQ-S1 (this plan: Q5) | May the mass-flux block of `CALCULATE_ZZ_F` (`wall.f90` 1185-1320) be extracted verbatim as a record-local routine? | Yes, as a guarded `WITH_AMREX` patch, bit-identical in FDS-only mode. Status **DRAFT** until the oneAPI and GNU Debug builds are validated. The Legacy Mapper confirms the block has no dependence on owner loop state beyond its arguments. A6 is extended to cover it. | The `ZZ_F` work (section 5.4, 8 to 12 days) is planned as two parts: the record-local mass-flux routine and the owner remainder. No generator work on the routine starts before the Mapper's confirmation. |
+| OQ-S2 | Face key | (level, global integer index of the gas-side cell at that level's resolution, `IOR` in plus or minus 1 to 3). Independent of mesh, box and rank. Sum order (level, k, j, i, `IOR`). The Spec Lead aligns FR-046. | Replaces the Morton-index proposal of `05` section 2.1. Record store sort order and the ordered sums use this key. |
+| OQ-S3 (this plan: Q3) | How do fine mesh objects reach `HEAT_TRANSFER_COEFFICIENT` and the back-side reads? | One accessor returns the mesh object of (NM, level) via `POINT_TO_BOX` (D-056). Introduced by a guarded local patch at `HEAT_TRANSFER_COEFFICIENT` (`func.f90` 3156) and at the back-side `MESHES(NM)` lookups. Not an upstream patch. The Legacy Mapper lists every `MESHES(NM)` lookup on the solid path. | The HTC callee (section 6.3, item 4) and the back-side reads of the solve use the accessor; the sites are the ones named in sections 3 and 5.3. Open: the Mapper's list. |
+| OQ-S4 | Who builds fine-level OBST wall tables | Role 1 (Data Layout), in Phase 5. Role 3 triggers the rebuild at regrid. | No work for this plan; the refresh trigger of section 11.3 is the same hook. |
+| OQ-S5 | Area-mean `TMP_F` against the FR-022 wall budget | Deferred. Bring the WP6 numbers if the budget misses. | None. |
+| OQ-S8 (D-064 item 6) | Thin-wall faces | Records are never deeper than their owner; thin-wall records stay at the owner's level. | The lateral thin-wall pass (L1489, section 8) runs at owner level; no fan-out for it. |
+
+D-064 numbers its six items 1 to 6; item 6 answers OQ-S8 of `05`. The radiation-history question (`ILW`, `Q_RAD_IN` belongs to the record or to the owner, OQ-S6 in `05` section 8) and `AREA_ADJUST` (OQ-S7) were not part of D-064 and stay with the Radiation Lead and the Spec Lead.
+
+### 18.2 D-065 (this plan)
+
+| Question | Ruling | Condition and consequence |
+|---|---|---|
+| Q1 | Retire L1485 (`EWC%NIC>1`) in the AMR route behind a host abort guard. | **Conditional**: the Legacy Mapper and the Solid Phase Lead grep the supported AMR input set and confirm no case has `NIC>1`; inputs that fail are listed as FDS-only and refused (consistent with D-055). Effort stays 0.5 day (section 9.3); the 4 to 5 day T4 plan is not started. |
+| Q2 | Back-wall heat transfer coefficient (row E of section 5.2): snapshot of the other side in the AMR route. | FDS-only mode is untouched. The host AMR route offers the same snapshot mode, so the difference to FDS is measured as algorithm, not as port. The V&V Lead signs the tolerances for `back_wall_test` and `heat_conduction_a`. The "non-thick walls first" alternative is dropped. |
+| Q4 | Whole wall pass on the host when `HVAC_SOLVE` is on. | Acceptable in Phase 4. HVAC cases are correctness gates only, not GPU performance gates. Listed as a known limitation; reopened if an HVAC case becomes a performance target. |
+| Q6 | Neighbour obstruction-mass read (line 1379). | Returns the value at the start of `WALL_BC` of that stage: snapshot before the pass, read-only during it, identical on host and device. The difference from FDS order is recorded like Q2. Burn-away stays deferred (FR-042). |
+
+### 18.3 Answers from other roles
+
+- **Q7 (Generator Engineer), partly answered.** Function callees with a `REAL` result: 2 to 3 days after the current queue. `SPACING` intrinsic: hours. Call-site inlining for `OPTIONAL` and derived-type dummies: 3 to 4 days. The slot-store feature for the three `OMP CRITICAL` patterns (rows A and B of section 5.2) is **not in the generator queue yet**, and its combine order must replay the serial order (ascending wall index, wall-major). Still open: queue position and dates for the slot-store feature and the owner-gather template.
+- **Q8 (Wall Loops Engineer), answered.** `EW_NCELL` and `EW_OFF` do not exist. The CSR tables are prefix-sum tables built by `wall_checks.csr_cell_walls`: `W_CSR_GAS_PTR`/`W_CSR_GAS_LIST` (key gas cell) and `W_CSR_WC_PTR`/`W_CSR_WC_LIST` (key wall cell). No ragged `ONE_D` store exists yet; it is built on the same prefix-sum pattern (`OD_OFF`, `OD_N`). L0394 and L0405 were already translated by the Wall engineer (`wall_bc_dp`, `wall_spec_adv2`), so the consumer claims of the Solid Phase Lead on them are **released** (they are reviewed in `docs/solid/07-sp2-sp3-kernel-review.md`). The consumer line in the work split (section 13) no longer applies; the Solid Phase Lead takes L1486 and L1487 instead of L0394 and L0405.
+
+### 18.4 Question status after the rulings
+
+| # | Status | What remains |
+|---|---|---|
+| Q1 | **Closed, conditional** (D-065) | The input-set grep (Mapper with the Solid Phase Lead). Result decides between "refused inputs listed" and a reopen. |
+| Q2 | **Closed** (D-065) | V&V tolerances for `back_wall_test` and `heat_conduction_a`; the host snapshot mode (a switch in the host AMR route). |
+| Q3 | **Closed** (D-064 (3)) | The Mapper's list of `MESHES(NM)` lookups on the solid path; the guarded patch (draft). |
+| Q4 | **Closed** (D-065) | Known-limitation entry. |
+| Q5 | **Closed, DRAFT** (D-064 (1)) | oneAPI and GNU Debug validation; the Mapper's no-hidden-dependence confirmation. |
+| Q6 | **Closed** (D-065) | Record the difference from FDS order next to Q2's. |
+| Q7 | **Open, partly answered** | Dates for the slot-store feature and the owner-gather template; function callees 2 to 3 days after the current queue; inliner 3 to 4 days; `SPACING` hours. |
+| Q8 | **Closed** | Build the ragged `OD_*` store on the prefix-sum pattern (Wall engineer for the builder; layout review in `docs/solid/06-solve-port-test-design.md`). |
+| Q9 | **Pending** | FDS Legacy Mapper (reclassify L0823 and L0822 as host-side, fix the L1489 register text, the REASSIGN counter patch file, claim confirmation). |
+| Q10 | **Open, mine** | SP-R9 statistical test design; thin-wall events in `wall_sums.py`. |

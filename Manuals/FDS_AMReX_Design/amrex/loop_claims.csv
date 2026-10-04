@@ -20,8 +20,8 @@ L1402,GPU Wall Loops Engineer,claimed,O3 wall-subscript stores; queued after the
 L1359,GPU Wall Loops Engineer,claimed,SP2 ghost mirror (highest wall index wins); queued after the per-surface tables
 L0375,GPU Wall Loops Engineer,claimed,SP3 accumulation through wall subscripts (CSR gather)
 L1358,GPU Wall Loops Engineer,claimed,SP1 CELL_COUNTER running average (CSR gather)
-L0394,AMR Solid Phase Lead,claimed,P3 solid-cell DP correction; CSR consumer after the scratch-sum reference exists
-L0405,AMR Solid Phase Lead,claimed,S3 wall accumulate; CSR consumer after the scratch-sum reference exists
+L0394,GPU Wall Loops Engineer,translated,wall_bc_dp on the s5-wall branch (P3 solid-cell DP correction); Solid Phase claim released
+L0405,GPU Wall Loops Engineer,translated,wall_spec_adv2 on the s5-wall branch (S3 wall accumulate); Solid Phase claim released
 L0880,Legacy Mapper,in progress,S2 package: the four mass-flux wall nests are finished but not committed to s5-gen; counted in the coverage figure
 L0882,Legacy Mapper,in progress,S2 package: the four mass-flux wall nests are finished but not committed to s5-gen; counted in the coverage figure
 L0401,Legacy Mapper,claimed,S2 package; wall nest with pointer scratch and array constructors
@@ -45,4 +45,10 @@ L0608,AMR Species & Combustion Lead,claimed,idempotent B1-alias marker store
 L1488,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
 L1489,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
 L1485,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
-L0823,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
+L0823,AMR Solid Phase Lead,claimed,host-side event code (REASSIGN_WALL_CELLS); the device deliverable is a table-refresh trigger (wall-bc-translation-plan.md section 11); no device kernel planned
+L1486,AMR Solid Phase Lead,claimed,WALL_BC ghost values loop 1; wall-bc-translation-plan.md
+L1487,AMR Solid Phase Lead,claimed,WALL_BC thin-wall loop 0; wall-bc-translation-plan.md
+L1239,AMR Radiation Lead,claimed,R1 zero of Q_RAD_IN where TMP_GAS_FRONT<=0; needs the B1_PRESENT wall-table flag (radiation 00-r1-signoff); kernel rad_wall_qin_zero is already in the committed radiation sidecar
+L1243,AMR Radiation Lead,claimed,R1 open-boundary Q_RAD_IN; blocked on the ragged BR_ILW(NRA bands wall) table; per-band temporary starting at +0
+L1248,AMR Radiation Lead,claimed,R1 INTERPOLATE_IL wall loop; low priority and host first; blocked on the ragged BR_ILW table; keep the ILW_OLD copy
+L1245,AMR Radiation Lead,not planned (host),R1 RADF file write; host code

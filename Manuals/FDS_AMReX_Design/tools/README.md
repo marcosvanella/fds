@@ -43,6 +43,7 @@ distribute-parallel-do, gfortran offload, gfortran offload with callee-bind), an
 | K2-06 | a region calls a routine that is not a `declare target` routine in the same set of files |
 | K2-07 | the kernel header note is missing (see below) |
 | K2-08 | device code in the C++ layer is not in the K1 registry |
+| K2-10 | (D-070) a libm call in kernel code that is not registered (see "libm kernels" below) |
 | K2-09 | (warning) a registry entry or waiver no longer matches anything |
 
 Kernel header note (K2-07), as the tool defines it: every kernel with a target region has a comment directly above it, or after its
@@ -56,6 +57,18 @@ categories `pack`, `gather`, `scatter`, `checksum` are the data-movement kernels
 other category (`reference`, `test-harness`, `physics-fallback`) is always printed as WAIVED. `[[waiver]]` entries accept a K2 finding for now.
 `status = "proposed"` means nobody has accepted the reason yet: the tool exits 0 and prints it, `--strict` exits 1.
 Exit codes: 0 pass, 1 findings, 2 usage or tool error.
+
+**libm kernels (D-070).** Kernels whose arithmetic is only `+ - * /` and `sqrt` (and `abs`, `min`, `max`, `sign`, `mod`, integer powers such as `**2`)
+stay bitwise, with the +0/-0 rule. A kernel that calls a libm function is compared with a per-value tolerance of at most 2 ulp instead (the device and
+host math libraries differ in the last bit; ulp = unit in the last place). K2-10 flags every such call: `**` with a non-integer exponent (a real
+constant such as `ONTH`, a real variable, or a real expression such as `1._EB/3._EB`; an integer, an integer variable, or a real literal with an
+integral value such as `2._EB` is not a libm power), and the functions `exp, log, log10, sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh,
+asinh, acosh, atanh, erf, erfc, gamma, log_gamma, hypot, bessel_*` (also the `d...` and `alog` names). Declare-target callees are checked too. A kernel is
+registered with a `[[libm]]` entry (kernel, `tolerance_ulp` > 0 and <= 2, optional `functions` list where `pow` stands for `**`, optional `file`,
+`measured_ulp`, `dt_coupled`, `ruling`, a `reason`, `status`); its calls then print as NOTE "accepted: category libm, tolerance 2 ulp". A call of a
+function that is not in the entry's list, a call in another kernel, or an entry with a tolerance above 2 ulp (registry load error) is not accepted,
+and a proposed entry fails `--strict` like a proposed waiver. A `[[libm]]` entry that matches no call is a K2-09 warning. The first entry is
+`cfl_wall_max` (`pow`, 2 ulp, measured 1 ulp, feeds the time step, so the run-level tolerance used for cross-compiler runs applies to what depends on it).
 
 **Prototypes (D-068).** The hand-written S4 files (`s4_mass_k2.F90`, `s4_mass_k2_dc.F90`, `s4d_k2.F90`) and the K1 comparison code (`s4_driver.cpp`,
 `s4_mass_k1.H`, `s4d_k1.H`) are evaluation code. They are listed as `[[prototype]]` entries (file, reason, `expiry`, `allowed_in`, status) and as
@@ -134,6 +147,7 @@ device compute only the elementwise terms. The optional exact fixed-point sum is
 | ZS-02 | the cell nest is not K outermost, J, I innermost; a loop has a negative step (a step that is not a literal is a warning); an accumulation sits in no recognised nest (warning) |
 | ZS-03 | for one array the nests are not in the order cells, walls, cut faces |
 | ZS-04 | an accumulation sits inside `omp parallel`, `target`, `simd`, `do concurrent` or under `atomic`/`critical` |
+| ZS-06 | (note) the update sits in a per-cell wall list loop (`DO IWP = W_CSR_GAS_PTR(ICELL), W_CSR_GAS_PTR(ICELL+1)-1`, one thread per gas cell, walls in list order); accepted as in the reviewed wall-list design, relying on the list builder and its tests |
 | ZS-05 | (`k2`) a target region writes a zone-sum array, adds into an array element whose subscript holds no loop index, or has `reduction(+)` or `atomic` |
 | ZS-10 | (`log`) the terms of a zone are not applied in the FDS order |
 | ZS-11 | (`log`) the reported `result` is not, bit for bit, the serial chain of the logged terms (only a warning with several ranks) |
@@ -156,12 +170,12 @@ must all differ. The tests also mutate the Fortran toy (I outermost, walls desce
     python3 tools/port_kernel_map.py [--tree DIR] [--md OUT.md] [--json OUT.json] [--no-gate] [--device-runs FILE] [--strict] [-v]
     python3 tools/port_kernel_map.py --md inventory/port_kernel_status.md --json inventory/port_kernel_status.json    # refresh the committed snapshot
 
-Reads the kernel list from `s5_markers.toml` and every `markers/*.toml` sidecar, the golden `markers/golden_signatures.json`, the generated
+Reads the kernel list from `s5_markers.toml` (a wall-list variant, `wlist_of = "base"`, takes the mapping of its base kernel) and every `markers/*.toml` sidecar, the golden `markers/golden_signatures.json`, the generated
 `s5gen_k2.F90`/`.H`/`s5gen_args.json` and the sidecar text goldens `test/*.golden` (nothing is edited). For each kernel it writes the FDS
 routine and `file:lines` (from the marker), the loop ids `L0001...` that overlap those lines (`inventory/gpu_candidate_loops.csv`), the route
 (K2, or K1 for the registry entries of `kernel_registry.toml`), where the kernel text lives, the host bitwise suites that cover it and
 whether a device run is on record (both from `vv-runs/gpu_gate`, found next to the docs repository or through `GPU_GATE_DIR`; `--no-gate`
-leaves those columns empty), and a one-word status (device, device-note, host, generated, sidecar-only, pending, no-text). The Markdown table and the JSON
+leaves those columns empty), and a one-word status (device, device-note, device-libm, host, generated, sidecar-only, pending, no-text). The Markdown table and the JSON
 have the same rows; the JSON is stable (no clock time) so a refresh shows only real changes. The existing routine-level table
 `inventory/port_kernel_map.csv` is not touched; differences to its `generated_kernels` column are listed in the Markdown for its owner.
 
@@ -174,19 +188,20 @@ Self-check (exit 1 on a failure):
 | PM-03 | the same kernel name appears in two marker files with a different file, routine or lines |
 | PM-04 | a golden kernel has no kernel text (neither in `generated/s5gen_k2.F90` nor in a `test/*.golden`) |
 | PM-05 | (warning) a golden kernel is missing from the argument manifest or the header; the gate registry disagrees with the map. `--strict` makes warnings fail |
+| PM-07 | a `[[libm]]` registry entry names a kernel that is not mapped |
 | PM-06 | `device_runs.toml` names a kernel that is not mapped, names one twice, has a state other than `on-record` / `on-record-open-note`, or an open-note entry without a note |
 
 "Device run on record" repeats what `check_device_logs.py` lists for the kernel set; it is a registry note, not a check of log files.
 
 **Device-run overlay (D-068).** `tools/device_runs.toml` adds device runs that have happened but that the gate registry does not list yet
 (the registry belongs to the gate, so it is not edited from here). A kernel in the overlay gets the status `device`; a run with one open
-numerical question (`state = "on-record-open-note"`) gives `device-note`. The 8 target regions with `reduction(max|min)` (the kernels
+numerical question (`state = "on-record-open-note"`) gives `device-note`; a kernel with a `[[libm]]` registry entry (D-070) gives `device-libm`, "device run on record, libm tolerance 2 ulp (D-070)". The 8 target regions with `reduction(max|min)` (the kernels
 `cfl_max`, `cfl_wall_max`, `vn_max`, `div_extrema`) need a device run before they count as ported, so the map has a section of its own
 for them and a `port_state` field in the JSON: "not ported: a reduction region needs a device run", "device run on record", or "device run on
 record, with one open numerical note". The rounds 4 to 7 run on a GPU (default and distribute-parallel-do builds, about 25 scenarios)
 is on record for all 20 kernels; 19 of them show no difference to the host result. `cfl_wall_max` shows a last-bit difference of UVWMAX in
-three scenarios (attributed to the power function of the device math library), a decision on it is pending, so it is labelled "device run on
-record, with one open numerical note" and not ported. Delete an overlay entry once the gate registry lists the run.
+three scenarios (the power function of the device math library); ruling D-070 puts it in the `libm` category with a tolerance of 2 ulp (measured 1), so
+it is labelled `device-libm`. D-070 does not say that a kernel is "ported", so no kernel is called ported here. Delete an overlay entry once the gate registry lists the run.
 
 ## Quick start
 
@@ -196,5 +211,19 @@ record, with one open numerical note" and not ported. Delete an overlay entry on
     python3 tools/kernel_lint.py --amrex-build <AMReX CUDA build dir>      # tool 2
     python3 tools/zone_sum_order.py                       # tool 3 (add `toy --fortran` for the bitwise reference case)
     python3 tools/port_kernel_map.py --md inventory/port_kernel_status.md --json inventory/port_kernel_status.json   # tool 4
+    tools/ci_checks.sh                                    # all four with --strict (the CI entry point)
 
-For a CI job that should block on every open point, add `--strict` to tools 1 to 3 (proposed waivers then fail too).
+## CI entry point
+
+    tools/ci_checks.sh [--tree DIR] [--amrex-build DIR] [--with-tests] [--json-dir DIR] [-v]
+
+One script for CI. It runs `k2_ci_check.py`, `kernel_lint.py`, `zone_sum_order.py` and `port_kernel_map.py`, each with `--strict`, runs all four even
+when one fails, prints a summary and exits 1 when any of them fails on a production file (a tool that cannot run counts as failed), 0 otherwise.
+`--strict` means: a proposed (not yet accepted) waiver or prototype entry fails, and so does a warning of the kernel-map self-check. Prototype
+findings (see "Prototypes" above) are printed in a block of their own and never fail the script. Pass `--amrex-build DIR` (or set
+`AMREX_CUDA_BUILD`) so that the AMReX CUDA build's `CMakeCache.txt` is checked for `AMReX_CUDA_FASTMATH`; `--with-tests` adds the unit tests. Needs
+Python 3.11 or newer (`PYTHON=...` to choose one) and `gfortran` (used as a preprocessor).
+
+`kernel_lint.py` fails rules BF-05 and BF-07 until the CMake side of D-068 (`tools/patches/cmake-fastmath-pin.patch`, reviewed by the AMReX
+Integration Lead) is applied to the worktree: `git apply tools/patches/cmake-fastmath-pin.patch` from the worktree root. With the patch
+applied, `ci_checks.sh` passes for the production kernels (the tests check this on a scratch copy of the worktree).

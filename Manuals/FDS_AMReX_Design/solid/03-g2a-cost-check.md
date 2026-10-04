@@ -38,3 +38,5 @@ There are no per-record node counts in FDS output, so the bound is parametric. F
 
 ## Pass signals carried to G2 (A only)
 Solid mass and enthalpy change across a regrid ≤ 1e-12 relative. Every record bitwise unchanged across each regrid after its first split (A3).
+
+Note: the bulk plot and restart output of the runs in `vv-runs/g2a` was deleted to free disk. The CSV timing files, logs and inputs used by `share.py` are kept, and the runs can be regenerated from the inputs.

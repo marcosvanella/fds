@@ -56,7 +56,7 @@ The `Read` column: `R` the loop text was read for this list, `I` inventory entry
 Share of the whole list: the pressure and H loops are small in the model (the largest solver-side loop, L1209, is 0.008 %; the matrix and Poisson internals carry the weight and are not in scope). Prioritise by dependency (steps 2 to 4 unlock several loops each), not by share.
 
 <!-- GENERATED-BEGIN:pvh -->
-Counts over sections A to C (77 loops): blocked 13, claimed 7, needs-feature 24, test-only 6, translatable-now 5, translated 22.
+Counts over sections A to C (77 loops): blocked 13, claimed 5, needs-feature 23, test-only 6, translatable-now 5, translated 25.
 
 ### A. pres.f90, translation-eligible, non-geometry
 
@@ -138,14 +138,14 @@ Counts over sections A to C (77 loops): blocked 13, claimed 7, needs-feature 24,
 | L1346 | velo.f90:3297-3305 | BAROCLINIC_CORRECTION | (inventory only: cell/face loop) | 0.011 | translated | translated | kernel baro_fvz | - | I |
 | L1400 | velo.f90:3347-3368 | WALL_VELOCITY_NO_GRADH | (inventory only: wall loop; wall gather; live-out scalars (PRIVATE list)) | 0.014 | translated | translated | kernel wall_un_store | - | I |
 | L1401 | velo.f90:3378-3408 | WALL_VELOCITY_NO_GRADH | (inventory only: wall loop; wall gather; live-out scalars (PRIVATE list)) | 0.021 | translated | translated | kernel wall_us_pred | - | I |
-| L1402 | velo.f90:3414-3450 | WALL_VELOCITY_NO_GRADH | WALL_VELOCITY_NO_GRADH: U/V/W at the wall face from the stored normal velocity | 0.022 | claimed | no uniqueness proof (O3) | wall_us_pred, wall_un_store | GPU Wall Loops Engineer | I |
+| L1402 | velo.f90:3414-3450 | WALL_VELOCITY_NO_GRADH | WALL_VELOCITY_NO_GRADH: U/V/W at the wall face from the stored normal velocity | 0.022 | translated | translated | kernel wall_uvw_nograd | GPU Wall Loops Engineer | I |
 
 ### C. divg.f90, pressure-related (DIVERGENCE_PART_2, zones, CHECK_DIVERGENCE)
 
 | Loop | file:lines | Routine | What | Share % | Class | Feature or blocker | Closest kernel | Owner | Read |
 |---|---|---|---|---|---|---|---|---|---|
-| L0400 | divg.f90:1301-1319 | MERGE_PRESSURE_ZONES | MERGE_PRESSURE_ZONES: CONNECTED_ZONES flags | 0.037 | needs-feature | P2: rank-2 integer array has no table kind | wall_us_pred (IDEMPOTENT marker) | open — available | I |
-| L0394 | divg.f90:1574-1604 | DIVERGENCE_PART_2 | DIVERGENCE_PART_2: DP correction at solid cells from walls | 0.042 | claimed | P3: several walls add into one solid cell; CSR consumer | wall_kp_ghost (wall store); CSR family not built | AMR Solid Phase Lead | I |
+| L0400 | divg.f90:1301-1319 | MERGE_PRESSURE_ZONES | MERGE_PRESSURE_ZONES: CONNECTED_ZONES flags | 0.037 | translated | translated | kernel wall_connect_zones | - | I |
+| L0394 | divg.f90:1574-1604 | DIVERGENCE_PART_2 | DIVERGENCE_PART_2: DP correction at solid cells from walls | 0.042 | translated | translated | kernel wall_bc_dp | GPU Wall Loops Engineer | I |
 | L0395 | divg.f90:1611-1618 | DIVERGENCE_PART_2 | DIVERGENCE_PART_2: DIV predictor | 0.012 | translated | translated | kernel div2_pred | - | R |
 | L0396 | divg.f90:1621-1630 | DIVERGENCE_PART_2 | DIVERGENCE_PART_2: DIV corrector | 0.012 | translated | translated | kernel div2_corr | - | R |
 | L0363 | divg.f90:1675-1711 | CHECK_DIVERGENCE | CHECK_DIVERGENCE: residual and divergence extrema with locations | 0.272 | translated | translated | kernel div_extrema | - | R |
