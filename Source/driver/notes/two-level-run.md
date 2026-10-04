@@ -31,3 +31,17 @@ reads what a K2 launch wrote.
 
 ## Input converter in the driver (D-076)
 `main.cpp` calls `prepare_amr_input` (Role 3's `InputConverter`, patch `regrid_transport/notes/driver-patch-main-input-converter.patch`): a multi-level `&MESH` input with an `&AMR` line is converted to a level-0 input (finer meshes removed, one cover mesh per hole, written as `<stem>_amr_level0.fds` in the working directory by rank 0); a level-0-only input is passed through unchanged and no file is written. `assemble_level0`, `print_pressure_bc` and the end-of-run `fds_setup` use the converted name; `build_level0` sees level-0 meshes only. The converted hierarchy and parameters (`conv.hierarchy`, `conv.params`) are not yet consumed by the step loop. Checked with `tests/cases/ns2d_13mesh_amr.fds` (13 meshes: 12 level-0 meshes, 1 finer mesh removed, 1 cover mesh added; 13 boxes, one cell size): `--run` of 10 steps gives the same T and DT as the one-mesh `ns2d_16_l0` and the same UVEL device record; the single-level runs of `run_level_bind_check.sh` stay bitwise equal to the reference executable.
+
+## Controls, multi-box fine level, 4 ranks (S14.4; 40 steps, t = 0.42, fine patch coarse cells 4..11, ratio (2,1,2), composite mass 3.947843523)
+| Run | fine boxes | ranks | mass change (relative) | max abs(div u - D) |
+|---|---|---|---|---|
+| overwrite ON | 1 | 1 | 1.3e-14 | 1.84e-12 |
+| `--no-overwrite` | 1 | 1 | 1.3e-14 | 1.84e-12 |
+| `--maxsize 8` | 4 | 1 | 1.3e-14 | 1.84e-12 |
+| `--maxsize 4` | 16 | 1 | 1.3e-14 | 1.84e-12 |
+| `ns2d_16_4m` (4 level-0 meshes, one per rank), default boxes | 4 | 4 | -1.2e-15 | 1.83e-12 |
+| `ns2d_16_4m`, `--maxsize 4` | 16 | 4 | -1.2e-15 | 1.84e-12 |
+* The overwrite-off control is not discriminating on `ns2d_16`: constant density and one species give a constant advective flux, so the interface flux overwrite changes nothing. The discriminating controls: `driver_unit_tests` TWOLEVEL (overwrite ON composite rho change 2.2e-15, OFF 7.2e-4 over 45 steps) and Role 3's `run_e2e_driver.sh` E3b (ON 6e-16, OFF 4.35e-5).
+* The multi-box and 4-rank runs need no same-level seam FV averaging on this case (fine boxes of one level share the faces through the AMReX exchange); a case with a flux through a seam of two fine boxes that are not exchanged is not covered.
+* Before S14.4 the 4-rank runs with 16 fine boxes crashed (segfault in `fds_p_save_uvw`, then in `fds_g_fill_om`): the BcStep mesh-number offset, `notes/fine-velocity-bc.md`.
+* Role 3's regrid tests against the committed `RegistryTransfer` (standalone `regrid_transport` build): all 14 ctest entries pass (celltransfer, regrid_core 1/4 ranks and rank check, facetransfer, species_avgdown, blob_registry 1/4 ranks and rank check, moving_blob_p3 1/4 ranks); `test_regrid_core` worst composite change per regrid 1.87e-16, clips 0, 6 of 6 regrids changed the grids, hierarchy hash 9678b9b0b9139a7b, data hash 1cbb18482dc6ee2d.
