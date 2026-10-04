@@ -72,6 +72,7 @@ void fds_p_init_div();
 void fds_p_zone_get(int n, double* d, double* p, double* u);
 void fds_p_zone_set(int n, const double* d, const double* p, const double* u);
 void fds_p_wall_dump(int nm, int ofx, int ofz, int kg0);
+void fds_p_wall_table_dump(int nm, int ofx, int ofz);   // SCRATCH PATCH
 void fds_hook_set_flag(int flag);
 void fds_p_edge_dump(int nm, const char* fn, int nc);
 void fds_p_iface_walls(int nm, int mode, const int* edge, int all_edges);
@@ -691,8 +692,27 @@ struct TimeLoop::Impl {
         const bool fx = fluxchk && (fluxchk_kinds & 1);
         if (fx) fluxchk_density(pred, t, dt);
         each_local([&](int nm) { fds_p_dens_pre(t, dt, nm); });
+        const char* pcs = std::getenv("FDSTL_PRECLIP");     // SCRATCH PATCH: dump RHOS/ZZS before the level clip and DELTA_RHO after it
+        const bool pcd = pcs && std::atoi(pcs) == L.m_icyc;
+        auto dumpfab = [&](const char* tag, amrex::MultiFab& mf) {
+            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                const amrex::FArrayBox& fab = mf[mfi]; const amrex::Box b = fab.box(); const amrex::Box v = mfi.validbox();
+                std::FILE* fp = std::fopen((dir + "/raw_" + tag + "_b" + std::to_string(mfi.index()) + ".bin").c_str(), "wb"); if (!fp) continue;
+                int hdr[16] = {b.smallEnd(0), b.smallEnd(1), b.smallEnd(2), b.bigEnd(0), b.bigEnd(1), b.bigEnd(2), fab.nComp(), 0, v.smallEnd(0), v.smallEnd(1), v.smallEnd(2), v.bigEnd(0), v.bigEnd(1), v.bigEnd(2), 0, 0};
+                std::fwrite(hdr, sizeof(int), 16, fp); std::fwrite(fab.dataPtr(), sizeof(double), static_cast<std::size_t>(b.numPts()) * fab.nComp(), fp); std::fclose(fp);
+            }
+        };
+        if (pcd) { dumpfab(pred ? "preclip_p_RHOS" : "preclip_c_RHO", (*c->F)[pred ? "RHOS" : "RHO"]); dumpfab(pred ? "preclip_p_ZZS" : "preclip_c_ZZ", (*c->F)[pred ? "ZZS" : "ZZ"]); }
         std::vector<int> flags;
         clip_level(pred, flags);
+        if (pcd) {
+            double dmax = 0.0; long nz = 0;
+            for (amrex::MFIter mfi(*c->drho); mfi.isValid(); ++mfi) { const amrex::FArrayBox& fab = (*c->drho)[mfi]; const double* p = fab.dataPtr(); const long np = fab.box().numPts(); for (long q = 0; q < np; ++q) { if (p[q] != 0.0) ++nz; dmax = std::max(dmax, std::abs(p[q])); } }
+            std::fprintf(stderr, "PRECLIP icyc %d %s rmin %.17g rmax %.17g clip flags (rhomin|rhomax<<1) per box:", L.m_icyc, pred ? "pred" : "corr", L.m_rmin, L.m_rmax);
+            for (int f : flags) std::fprintf(stderr, " %d", f);
+            std::fprintf(stderr, "  DELTA_RHO nonzero %ld max|.| %.6g\n", nz, dmax);
+            dumpfab(pred ? "preclip_p_DELTA_RHO" : "preclip_c_DELTA_RHO", *c->drho);
+        }
         each_local([&](int nm) { fds_k_set_flags(nm, flags[bi(nm)]); fds_k_dens_post(t, dt, nm); });
         if (fx) { flux_set_override(0, {}); flux_set_mode(0, 0); }
         wseam_check("DENSITY");
@@ -865,12 +885,16 @@ struct TimeLoop::Impl {
         for (;;) {
             fds_p_iter_inc();
             ++iter;
+            const bool fvd = !pred && iter == 1;   // FVX/FVY/FVZ dumps of the first corrector iteration (stage_raw is silent unless FDSTL_STAGE selects the cycle)
+            if (fvd) stage_raw("c_fv_pres_in", {"FVX", "FVY", "FVZ"});
             if (fds_p_iter_baro() || iter == 1) {
                 if (IP[4]) each_local([&](int nm) { fds_p_baroclinic(t, nm); });
                 bc.exchange_om();   // MESH_EXCHANGE(5): FVX, FVY, FVZ (and H/HS) to OMESH
                 each_local([&](int nm) { fds_g_match_flux(nm); });
             }
+            if (fvd) stage_raw("c_fv_matched", {"FVX", "FVY", "FVZ"});
             each_local([&](int nm) { fds_p_noflux(dt, nm, iter == 1 ? 1 : 0); fds_p_rhs(t, dt, nm); });
+            if (fvd) stage_raw("c_fv_noflux", {"FVX", "FVY", "FVZ"});
             solve_poisson(pred);
             each_local([&](int nm) { fds_p_resid(nm); });
             if (!IP[0]) break;
@@ -963,7 +987,11 @@ struct TimeLoop::Impl {
             fds_p_init_div();
             for_levels([&](int) { s_wall_bc(true); });
             if (std::getenv("FDSTL_WALLS") && L.m_icyc == std::atoi(std::getenv("FDSTL_WALLS")) && passes == 1)
-                each_local([&](int nm) { const amrex::Box b = l0.ba[nm - 1]; fds_p_wall_dump(nm, b.smallEnd(0), b.smallEnd(2), 5); });
+                {   // SCRATCH PATCH: print plane FDSTL_WALLS_K (default 5, <0 = all planes); FDSTL_WALLTAB=1 also writes walltab_b<box>.bin (all external + internal walls)
+                    const char* kk = std::getenv("FDSTL_WALLS_K"); const int k0 = kk ? std::atoi(kk) : 5;
+                    each_local([&](int nm) { const amrex::Box b = l0.ba[nm - 1]; fds_p_wall_dump(nm, b.smallEnd(0), b.smallEnd(2), k0);
+                        if (std::getenv("FDSTL_WALLTAB")) fds_p_wall_table_dump(nm, b.smallEnd(0), b.smallEnd(2)); });
+                }
             stage_raw(passes == 1 ? "p1_prediv" : "p2_prediv", {"RHOS", "ZZS", "TMP", "RSUM", "U", "V", "W", "MU", "KRES", "D"});
             for_levels([&](int) { s_div1(); });
             stage(passes == 1 ? "p1_div1" : "p2_div1", {"DS", "MU", "KRES", "TMP", "RSUM"});
@@ -1019,15 +1047,19 @@ struct TimeLoop::Impl {
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();
+        stage_raw("c_fv_wallbc", {"FVX", "FVY", "FVZ"});   // FVX/FVY/FVZ bracket: where do they change after c_vflux (WP1b)
         for_levels([&](int) { s_div1(); });
         zone_sums(false);
+        stage_raw("c_fv_div1", {"FVX", "FVY", "FVZ"});
         for_levels([&](int) { s_div2(); });
         state(false, first_pass);
+        stage_raw("c_fv_div2", {"FVX", "FVY", "FVZ"});
         {
             bool took = L.m_hook && L.m_hook(false, 1);
             if (!took) { const double tp0 = amrex::second(); rec.it_corr = pressure_scheme(false, t, dt, rec.perr_corr, rec.verr_corr); t_pres += amrex::second() - tp0; }
         }
         stage("c_press", {"HS", "DS"});
+        stage_raw("c_prevcorr", {"U", "V", "W", "US", "VS", "WS", "H", "HS", "FVX", "FVY", "FVZ"});   // velocity state seen by VELOCITY_CORRECTOR
         for_levels([&](int) { s_vcorr(); });
         stage("c_end", {"U", "W"});
         for_levels([&](int) { s_exchange(6, false); });
