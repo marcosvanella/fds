@@ -1,7 +1,7 @@
 ! rt_tag_kernels.F90: tagging kernels of the regrid_transport library (R4), K2 style (ADR-001): Fortran, flat explicit-shape arrays in the AMReX
 ! index space, no module variables, no I/O, no AMReX types. Host build: `parallel do` (or plain loops without OpenMP). Offload build
 ! (RT_OFFLOAD defined, or nvfortran -mp=gpu): `target teams distribute parallel do` with the device data given by is_device_ptr / has_device_addr, no map
-! of the big arrays (the AMReX arena owns them). The offload build is NOT tested here (no GPU compiler run); the host path is.
+! of the big arrays (the AMReX arena owns them). The offload source is checked by tests/tag_kernel_check.F90 (host default vs RT_OFFLOAD, bitwise; nvfortran -mp=gpu -gpu=mem:managed ran the 38 cases on an RTX 4070 with identical output). Linking it into the C++ library on a device needs an AMReX built with GPU support, so that TagBox/FArrayBox data are device pointers.
 !
 ! A tag is one byte (AMReX TagBox: CLEAR = 0, BUF = 1, SET = 2; only SET cells seed the tag buffer, so the value written here must be SET; TagOps.cpp static_asserts it). The kernels only SET tags (logical OR of the criteria); they never clear one.
 !   rt_tag_cells    : threshold or undivided-difference criterion on one cell field, with TAG_KEEP hysteresis from a "covered by the finer level" mask
