@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """CTest driver for the pressure backend harness. Parses the harness RESULT/CMP/CHECK lines.
-Subcommands: selector, exactsum, fftmlmg, frozen, decomp, repeat, singular, ulmat, ulmatgauge, meankind.
+Subcommands: selector, exactsum, fftmlmg, frozen, decomp, repeat, singular, ulmat, ulmatgauge, meankind,
+composite: compconv, compfull, compdecomp, comp3, compgrad, compns2d, compsel, compws (composite two-/three-level
+solves; manufactured solutions, see harness/composite_modes.cpp and frozen/composite-notes.md).
 Exit 0 = pass. ulmat/ulmatgauge/meankind compare against an independent numpy computation that follows FDS
 ULMAT (volume-scaled rows, arithmetic mean removal of F and of X, identity-pin reduced system, rho*volume gauge)."""
-import argparse, os, re, subprocess, sys
+import argparse, math, os, re, subprocess, sys
 import numpy as np
 
 ap = argparse.ArgumentParser()
@@ -13,6 +15,9 @@ ap.add_argument("--mpiexec", required=True)
 ap.add_argument("--work", required=True)
 ap.add_argument("--bc", default="neumann")
 ap.add_argument("--n", default="64 64 64")
+ap.add_argument("--ratio", type=int, default=2)
+ap.add_argument("--ns", default="32 64")       # coarse sizes for the composite convergence runs
+ap.add_argument("--plane", type=int, default=0)
 A = ap.parse_args()
 os.makedirs(A.work, exist_ok=True)
 fails = []
@@ -239,8 +244,105 @@ def meankind():
         a = open(outs[1][0] + f"_{f}.bin", "rb").read(); b = open(outs[3][0] + f"_{f}.bin", "rb").read()
         ok(a == b, f"{f} bitwise identical for np=1/mgs32 and np=3/mgs6")
 
+# ---------------------------------------------------------------------------------------------------------------
+# Composite (multi-level) tests. The harness prints COMP / UNIFORM / DECOMP / GRAD / REPEAT / NS2D lines and CHECK
+# PASS|FAIL lines; its exit code is nonzero when a CHECK fails.
+EPS_COMP = 1e-8          # composite eps_H: true residual (relative)
+
+def comp_run(np_, **kw):
+    rc, out = run(np_, mode="comp", bc=A.bc, **kw)
+    ok(rc == 0, f"composite harness exit 0 ({' '.join(f'{k}={v}' for k, v in kw.items())})")
+    if rc != 0: print(out)
+    return out
+
+def comp_lines(out):
+    c = kv(lines(out, "COMP")[0]); u = kv(lines(out, "UNIFORM")[0]) if lines(out, "UNIFORM") else {}
+    return c, u
+
+def compconv():
+    # Two-level refined patch (middle half of the box), error against the manufactured solution at two resolutions.
+    ns = [int(x) for x in A.ns.split()]
+    res = []
+    for n in ns:
+        out = comp_run(2, n=n, nlev=2, ratio=A.ratio, plane2d=A.plane, mgs=16 if n <= 32 else 32, dmkind=0)
+        c, u = comp_lines(out); res.append((n, c, u)); print(lines(out, "COMP")[0]); print(lines(out, "UNIFORM")[0])
+        ok(c["status"] == "Ok" and c["residual_ok"] == "1", f"n={n} status Ok, true composite residual within eps_H")
+        ok(float(c["true_rel2"]) <= EPS_COMP, f"n={n} composite true residual {c['true_rel2']} <= eps_H {EPS_COMP:g}")
+        ok(int(c["iters"]) <= 40, f"n={n} MLMG iterations {c['iters']} <= 40")
+    (n0, c0, u0), (n1, c1, u1) = res[0], res[1]
+    for key, what in (("err_l2", "composite error (all uncovered cells)"), ("comp_fine_err_l2", "composite error on the fine level")):
+        src0 = c0 if key in c0 else u0; src1 = c1 if key in c1 else u1
+        e0, e1 = float(src0[key]), float(src1[key]); order = math.log2(e0 / e1)
+        print(f"ORDER {A.bc} ratio={A.ratio} plane={A.plane} {what}: {e0:.4e} -> {e1:.4e} order {order:.3f}")
+        ok(order >= 1.8, f"{what}: order {order:.2f} >= 1.8")
+    d0, d1 = float(u0["diff_fine_l2_abs"]), float(u1["diff_fine_l2_abs"]); od = math.log2(d0 / d1)
+    print(f"ORDER {A.bc} composite vs uniform-fine solve on the fine region (abs L2): {d0:.4e} -> {d1:.4e} order {od:.3f}")
+    ok(od >= 1.8, f"difference to the uniform fine solve converges: order {od:.2f} >= 1.8")
+
+def compfull():
+    # Fine level over the whole domain equals the single-level fine solve; coarse = average-down.
+    for n, mgs in ((16, 8), (32, 16)):
+        out = comp_run(2, n=n, nlev=2, ratio=A.ratio, full=1, plane2d=A.plane, mgs=mgs)
+        c, u = comp_lines(out); print(lines(out, "COMP")[0]); print(lines(out, "UNIFORM")[0])
+        ok(c["status"] == "Ok" and float(c["true_rel2"]) <= EPS_COMP, f"n={n} Ok, true residual {c['true_rel2']}")
+        ok(float(u["diff_fine_l2_rel"]) <= 1e-10, f"n={n} full fine level vs single-level fine solve: rel L2 {u['diff_fine_l2_rel']} <= 1e-10")
+        ok(float(u["diff_fine_linf"]) <= 1e-10, f"n={n} max abs difference {u['diff_fine_linf']} <= 1e-10")
+
+def compdecomp():
+    # Decomposition independence in process (box split + mapping), then across rank counts via raw dumps, repeatability.
+    base = dict(n=32, nlev=2, ratio=A.ratio, plane2d=A.plane, uniform=0)
+    hashes = {}
+    dumps = {}
+    for np_, mgs, dmk in ((1, 32, 0), (2, 16, 1), (2, 8, 2), (3, 16, 0)):
+        pre = os.path.join(A.work, f"np{np_}_mgs{mgs}_dm{dmk}")
+        out = comp_run(np_, mgs=mgs, dmkind=dmk, out=pre, **base)
+        c, _ = comp_lines(out); print(lines(out, "COMP")[0])
+        dumps[(np_, mgs, dmk)] = pre + "_phi.bin"; hashes[(np_, mgs, dmk)] = c["hash"]
+        ok(float(c["true_rel2"]) <= EPS_COMP, f"np={np_} mgs={mgs} dmkind={dmk} true residual {c['true_rel2']}")
+    ref = np.fromfile(dumps[(1, 32, 0)])
+    for k, f in dumps.items():
+        a = np.fromfile(f); rel = np.linalg.norm(a - ref) / np.linalg.norm(ref)
+        print(f"DECOMP {k} vs np=1 mgs=32: rel L2 {rel:.3e}")
+        ok(rel <= EPS_COMP, f"{k}: rel L2 {rel:.2e} <= eps_H {EPS_COMP:g}")
+    out = comp_run(2, mgs=16, mgs2=8, dmkind=0, dmkind2=2, repeat=1, **base)
+    print(lines(out, "DECOMP")[0]); print(lines(out, "REPEAT")[0])
+    # run-to-run bitwise repeatability across processes
+    h1 = kv(lines(comp_run(2, mgs=16, dmkind=0, **base), "COMP")[0])["hash"]
+    h2 = kv(lines(comp_run(2, mgs=16, dmkind=0, **base), "COMP")[0])["hash"]
+    ok(h1 == h2, f"run-to-run bitwise repeatability across processes ({h1} == {h2})")
+
+def comp3():
+    # Three levels (2 then 2, and 2 then 4 via ratio), basic residual and error checks, grad checks.
+    out = comp_run(2, n=32, nlev=3, ratio=A.ratio, mgs=16, plane2d=A.plane, grad=1, mgs2=8, dmkind2=2)
+    print(out)
+    c, u = comp_lines(out)
+    ok(c["status"] == "Ok" and float(c["true_rel2"]) <= EPS_COMP, f"three levels: Ok, true residual {c['true_rel2']} <= eps_H")
+    ok(float(u["comp_fine_err_l2"]) < float(u["uni_coarse_err_l2"]), "three levels: finest-level error below the uniform coarse error")
+
+def compgrad():
+    out = comp_run(2, n=32, nlev=2, ratio=A.ratio, mgs=16, plane2d=A.plane, grad=1, uniform=0)
+    print(out)
+    out = comp_run(3, n=32, nlev=3, ratio=2, mgs=8, plane2d=A.plane, grad=1, uniform=0, dmkind=2)
+
+def compns2d():
+    for np_, mgs in ((1, 16), (2, 8), (4, 4)):
+        rc, out = run(np_, mode="comp_ns2d", mgs=mgs)
+        print(out); ok(rc == 0, f"ns2d_16 two-level checks, np={np_} mgs={mgs}")
+        l = kv(lines(out, "NS2D")[0]); ok(float(l["true_rel2"]) <= EPS_COMP, f"np={np_} true residual {l['true_rel2']}")
+
+def compsel():
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="comp_sel"); print(out); ok(rc == 0, f"composite selector checks, np={np_}")
+
+def compws():
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="comp_ws"); print(out); ok(rc == 0, f"workspace (D-058) checks, np={np_}")
+
+
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
- "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind}[A.cmd]()
+ "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
+ "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad,
+ "compns2d": compns2d, "compsel": compsel, "compws": compws}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

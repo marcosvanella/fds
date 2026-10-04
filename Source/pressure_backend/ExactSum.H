@@ -44,10 +44,19 @@ inline double from_i128 (i128 a, int e)
 }
 }
 
-inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double weight, int ncomp,
-                                 amrex::iMultiFab const* uncovered = nullptr,
-                                 amrex::iMultiFab const* label = nullptr,
-                                 amrex::MultiFab const* wfield = nullptr)
+// One term of a multi-MultiFab sum: weight * w(i,j,k) * x(i,j,k) over the selected cells of `mf`. Used for a
+// hierarchy: one term per level, one fixed-point scale for all of them (the grid is set by the global maximum
+// over every term), so the result does not depend on how the cells are split across levels, boxes or ranks.
+struct SumTerm {
+    amrex::MultiFab const* mf = nullptr;
+    int comp = 0;
+    double weight = 1.0;
+    amrex::iMultiFab const* uncovered = nullptr;
+    amrex::iMultiFab const* label = nullptr;
+    amrex::MultiFab const* wfield = nullptr;
+};
+
+inline ExactSumResult exact_sum_multi (std::vector<SumTerm> const& terms, int ncomp)
 {
     static_assert(sizeof(amrex::Real) == 8, "ExactSum assumes double precision");
     using namespace amrex;
@@ -58,19 +67,24 @@ inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double wei
     };
     // Pass 1: global max |w*x| and finiteness (both order independent).
     double red[2] = {0.0, 0.0};
-    for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
-        auto const& a = mf.const_array(mfi, comp);
-        Array4<int const> u, l;
-        Array4<Real const> wf;
-        if (uncovered) { u = uncovered->const_array(mfi); }
-        if (label) { l = label->const_array(mfi); }
-        if (wfield) { wf = wfield->const_array(mfi); }
-        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
-            int c;
-            if (!selected(u, l, i, j, k, c)) { return; }
-            const double t = wfield ? weight * wf(i,j,k) * a(i,j,k) : weight * a(i,j,k);
-            if (!std::isfinite(t)) { red[1] = 1.0; } else { red[0] = std::max(red[0], std::abs(t)); }
-        });
+    for (auto const& T : terms) {
+        MultiFab const& mf = *T.mf;
+        for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
+            auto const& a = mf.const_array(mfi, T.comp);
+            Array4<int const> u, l;
+            Array4<Real const> wf;
+            if (T.uncovered) { u = T.uncovered->const_array(mfi); }
+            if (T.label) { l = T.label->const_array(mfi); }
+            if (T.wfield) { wf = T.wfield->const_array(mfi); }
+            const double weight = T.weight;
+            const bool haswf = (T.wfield != nullptr);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                int c;
+                if (!selected(u, l, i, j, k, c)) { return; }
+                const double t = haswf ? weight * wf(i,j,k) * a(i,j,k) : weight * a(i,j,k);
+                if (!std::isfinite(t)) { red[1] = 1.0; } else { red[0] = std::max(red[0], std::abs(t)); }
+            });
+        }
     }
     ParallelDescriptor::ReduceRealMax(red, 2);
     ExactSumResult R;
@@ -80,22 +94,27 @@ inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double wei
     int e = 0;
     if (red[0] > 0.0) { std::frexp(red[0], &e); }   // |t| < 2^e
     std::vector<detail::i128> acc(ncomp, 0);
-    for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
-        auto const& a = mf.const_array(mfi, comp);
-        Array4<int const> u, l;
-        Array4<Real const> wf;
-        if (uncovered) { u = uncovered->const_array(mfi); }
-        if (label) { l = label->const_array(mfi); }
-        if (wfield) { wf = wfield->const_array(mfi); }
-        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
-            int c;
-            if (!selected(u, l, i, j, k, c)) { return; }
-            R.count[c] += 1;
-            const double t = wfield ? weight * wf(i,j,k) * a(i,j,k) : weight * a(i,j,k);
-            if (std::isfinite(t)) {
-                acc[c] += detail::to_i128(std::nearbyint(std::ldexp(t, detail::kFracBits - e)));
-            }
-        });
+    for (auto const& T : terms) {
+        MultiFab const& mf = *T.mf;
+        for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
+            auto const& a = mf.const_array(mfi, T.comp);
+            Array4<int const> u, l;
+            Array4<Real const> wf;
+            if (T.uncovered) { u = T.uncovered->const_array(mfi); }
+            if (T.label) { l = T.label->const_array(mfi); }
+            if (T.wfield) { wf = T.wfield->const_array(mfi); }
+            const double weight = T.weight;
+            const bool haswf = (T.wfield != nullptr);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                int c;
+                if (!selected(u, l, i, j, k, c)) { return; }
+                R.count[c] += 1;
+                const double t = haswf ? weight * wf(i,j,k) * a(i,j,k) : weight * a(i,j,k);
+                if (std::isfinite(t)) {
+                    acc[c] += detail::to_i128(std::nearbyint(std::ldexp(t, detail::kFracBits - e)));
+                }
+            });
+        }
     }
     // Integer reduction across ranks (order independent).
     std::vector<std::int64_t> mine(3*ncomp);
@@ -124,6 +143,17 @@ inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double wei
         R.sum[c] = R.finite ? detail::from_i128(s, e) : std::nan("");
     }
     return R;
+}
+
+// Single MultiFab: one term of the above (the original entry point; same algorithm, same bits).
+inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double weight, int ncomp,
+                                 amrex::iMultiFab const* uncovered = nullptr,
+                                 amrex::iMultiFab const* label = nullptr,
+                                 amrex::MultiFab const* wfield = nullptr)
+{
+    SumTerm t;
+    t.mf = &mf; t.comp = comp; t.weight = weight; t.uncovered = uncovered; t.label = label; t.wfield = wfield;
+    return exact_sum_multi({t}, ncomp);
 }
 
 } // namespace pb

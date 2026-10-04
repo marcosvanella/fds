@@ -2,6 +2,7 @@
 #include "PressureIface.H"
 #include "PressureBackend.H"
 #include "CommonLayer.H"
+#include "Composite.H"
 
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
@@ -63,6 +64,7 @@ std::string validate (PressureProblem const& p)
 Selection select_backend (PressureProblem const& p, BackendKind requested)
 {
     Selection s;
+    if (!p.levels.empty()) { return select_composite(p, requested); }
     if (p.nlevels != 1) {
         s.message = "composite (multi-level) pressure solve is not built"; return s;
     }
@@ -94,7 +96,7 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
     return s;
 }
 
-PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& o)
+PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws)
 {
     PressureResult R;
     auto fail = [&] (Status st, std::string const& msg) {
@@ -105,6 +107,15 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // Selector first: "not built" must be reported for unsupported requests whatever else is unset.
     Selection sel = select_backend(p, o.backend);
     if (!sel.ok) { return fail(Status::NotBuilt, sel.message); }
+    if (!p.levels.empty()) {
+        std::string badc = validate_composite(p);
+        if (!badc.empty()) { return fail(Status::InvalidInput, badc); }
+        R = solve_composite(p, o, ws);
+        if (R.status == Status::NotBuilt || R.status == Status::InvalidInput) {
+            if (o.verbose > 0) { Print() << "PRESSURE ERROR (" << to_string(R.status) << "): " << R.message << "\n"; }
+        }
+        return R;
+    }
     std::string bad = validate(p);
     if (!bad.empty()) { return fail(Status::InvalidInput, bad); }
 

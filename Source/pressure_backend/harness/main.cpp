@@ -8,6 +8,7 @@
 // mode=exactsum exact-sum and mean-removal decomposition checks on a deterministic wide-range field.
 // mode=meankind per-cell volume mean removal (both MeanKind) and the rho*volume, KRES gauge on a synthetic stretched
 //               volume field; writes raw files for the independent numpy check (see tests/pb_test.py, meankind).
+// mode=comp, comp_ns2d, comp_sel, comp_ws  composite (multi-level) pressure solve tests, see composite_modes.cpp.
 // mode=diff     compare two raw fields: a=<file> b=<file> n_cell="nx ny nz" (rel. L2, max abs, eps_H verdict).
 #include "PressureIface.H"
 #include "CommonLayer.H"
@@ -486,6 +487,8 @@ void run_meankind (ParmParse& pp)
 
 } // namespace
 
+int run_composite_mode (std::string const& mode, ParmParse& pp);   // composite_modes.cpp
+
 int main (int argc, char* argv[])
 {
     amrex::Initialize(argc, argv);
@@ -498,7 +501,11 @@ int main (int argc, char* argv[])
         else if (mode == "selector") { run_selector(); }
         else if (mode == "exactsum") { run_exactsum(pp); }
         else if (mode == "meankind") { run_meankind(pp); }
-        else { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind"); }
+        else {
+            const int cf = run_composite_mode(mode, pp);
+            if (cf < 0) { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind|comp|comp_ns2d|comp_sel|comp_ws"); }
+            g_fail += cf;
+        }
     }
     int fails = g_fail;
     amrex::Finalize();

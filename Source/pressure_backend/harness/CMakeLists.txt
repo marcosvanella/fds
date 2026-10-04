@@ -17,11 +17,12 @@ endforeach()
 
 set(PB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_library(pressure_backend STATIC
-  ${PB_DIR}/CommonLayer.cpp ${PB_DIR}/PressureIface.cpp ${PB_DIR}/FFTBackend.cpp ${PB_DIR}/MLMGBackend.cpp)
+  ${PB_DIR}/CommonLayer.cpp ${PB_DIR}/PressureIface.cpp ${PB_DIR}/FFTBackend.cpp ${PB_DIR}/MLMGBackend.cpp
+  ${PB_DIR}/CompositeSolve.cpp)
 target_include_directories(pressure_backend PUBLIC ${PB_DIR})
 target_link_libraries(pressure_backend PUBLIC AMReX::amrex)
 
-add_executable(pb_harness main.cpp)
+add_executable(pb_harness main.cpp composite_modes.cpp)
 target_link_libraries(pb_harness PRIVATE pressure_backend)
 
 enable_testing()
