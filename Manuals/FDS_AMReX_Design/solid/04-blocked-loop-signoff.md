@@ -1,6 +1,6 @@
 # 04 · Solid Phase sign-off on blocked-loop families (SP1-SP4)
 
-Owner: AMR Solid Phase Lead · Reviews `amrex/blocked-loop-families.md`, Solid Phase group · Source: FireX `36975d765f`, read-only.
+Owner: AMR Solid Phase Lead · Reviews `amrex/blocked-loop-families.md`, Solid Phase group · Source line numbers refer to FireX `36975d765f` (the working tree has since moved; for example the `OBSTRUCTION%MASS` reduction is at wall.f90:1378-1392 there).
 
 | Family | Verdict |
 |---|---|

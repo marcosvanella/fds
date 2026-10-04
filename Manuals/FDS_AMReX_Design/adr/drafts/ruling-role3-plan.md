@@ -57,3 +57,27 @@ Ruling: **accept as a documented Phase 3 limitation (option a)**; per-face ghost
 Finding from the FaceDivFree probe (AMReX 26.09, 3-D): ratios 2, 4 and mixed keep each parent's divergence; ratio 1 in any direction aborts; interface faces get a slope instead of the coarse value.
 
 Ruling: the driver's own normal-linear face prolongation replaces the "coarse injection plus post-regrid projection" fallback of Update (c), item 5. It handles ratio 1 (single-cell directions), keeps each parent's divergence to round-off, and the residual (variation of D inside a parent) is reported by max abs(div u - D) after each regrid. Interface faces keep the ruled rule (they take the coarse value), implemented by pre-fill plus mask. FaceDivFree stays in use where it applies only if the tests show identical behavior; otherwise one code path (the driver's) is used for all cases. Post-regrid projection stays off by default. The device (GPU) version is a later item; the Phase 3 host loops are accepted, with the GPU path listed in the Phase 4 backlog.
+
+## Update 2026-10-03 (f): species transfer, post-regrid projection, fine-level solid plan (D-062 to D-064)
+
+**1. Species transfer is mass-weighted (D-062).** Restriction, average-down and prolongation of species act on rho and rho*Z. Z (or Y) is derived from them; it is never averaged or interpolated linearly. Reason: linear Z averaging breaks species mass conservation (about 1e-4 relative in the earlier run; the negative control with linear Z breaks it by 1e-1). Implemented in Role 3 commit 7c85f23539 (`average_down_registry` and the coarse-fine ghost hook use it; rho, ZZ and ZZS on covered cells agree bitwise with Role 1's RegistryTransfer). The test has a negative control with linear Z, and the test fails against it.
+
+**2. Post-regrid composite projection (D-063).** Finding from the dynamic-regrid blob tests: where a regrid creates new fine faces next to retained old ones, max abs(div u - D) at the junction is of velocity-gradient size (1.0 in 3-D, 3.5 at ratio 4); all-new cells match the parent divergence to about 1e-14. This is not acceptable as a final state, because the next pressure RHS assumes div u = D.
+
+Ruling:
+- After such a regrid the driver runs a composite projection: solve Lap phi = div u - D on the whole hierarchy, u -= grad phi, and fine fluxes overwrite coarse.
+- Acceptance: max abs(div u - D) <= pressure tolerance on uncovered cells, with a negative control (projection off fails).
+- Re-prolonging a band of one parent cell around the retained faces is rejected.
+- Interim: the hook `project_after_regrid(levels, D)` is built with a mock solver. Until the composite MLMG lands (Role 2; its entry accepts an arbitrary per-level RHS) the test reports the number; once it lands the test asserts.
+- A regrid without projection support is not a gate case.
+- This changes the last sentence of Update (e) ("Post-regrid projection stays off by default") for regrids that retain faces. Where no old faces are retained, the projection is not needed.
+
+A GPU-enabled AMReX build is needed to use the offload tagging kernels inside the C++ library; this stays a Phase 4 backlog item.
+
+**3. Fine-level solid phase (D-064, plan `solid/05-fine-level-solid-plan.md`).**
+1. The CALCULATE_ZZ_F mass-flux block (`wall.f90` 1185-1320) may be extracted verbatim as a record-local routine by a guarded WITH_AMREX patch. It stays a DRAFT until oneAPI and GNU Debug validation, and until the Legacy Mapper confirms that the block has no hidden dependence on owner loop state. A6 is extended to cover it.
+2. Face key = (level, global integer index of the gas-side cell at that level's resolution, IOR in +-1..3), independent of mesh, box and rank. Sum order is deterministic: (level, k, j, i, IOR). The Spec Lead aligns FR-046 with this key.
+3. One accessor returns the mesh object of (NM, level) via POINT_TO_BOX (D-056). It is introduced by a guarded local patch at HEAT_TRANSFER_COEFFICIENT (`func.f90` 3156) and at the back-side MESHES(NM) lookups. It is not an upstream patch.
+4. Role 1 builds the fine-level OBST wall tables in Phase 5; Role 3 triggers the rebuild at regrid.
+5. Area-mean TMP_F against the FR-022 budget is deferred until the WP6 measurement.
+6. Thin-wall faces: records are never deeper than their owner.

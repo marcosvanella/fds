@@ -1,6 +1,6 @@
 # FDS-AMR roadmap
 
-Owner: Spec & Program Lead · Status: draft v0.4.31 (2026-10-02; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
+Owner: Spec & Program Lead · Status: draft v0.4.32 (2026-10-03; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
 
 No calendar dates are set. Durations are **estimates** in elapsed working weeks for the current team on the current box. Confidence is low until Phase 1 closes; they are re-estimated at every milestone. Requirement IDs refer to requirements.md; risk IDs to risks.md.
 
@@ -60,7 +60,7 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 ### Phase 3: Multi-level infrastructure, no physics subsystems
 - **Objective:** static and dynamic hierarchies with conservative scalar transport. Gas phase only: no OBST, particles or radiation; velocity from a simplified projection or a prescribed field, as the Pressure Lead chooses.
 - **Entry:** M2.
-- **Deliverables:** `&AMR` namelist (IR-003); tagging (FR-011); regridding with conservative transfer (FR-012); interface flux overwrite for scalars (FR-024, D-050); composite mass/species budget diagnostic; rejection of unsupported features (FR-004, FR-044).
+- **Deliverables:** `&AMR` namelist (IR-003); tagging (FR-011); regridding with conservative transfer (FR-012; t=0 hierarchy, face prolongation and conservative clipping per D-058 and D-060); tagging criteria per D-058; fine-level mesh objects by option B (D-056); the shared-ghost corner limitation (D-059) listed in the acceptance notes; interface flux overwrite for scalars (FR-024, D-050); composite mass/species budget diagnostic; rejection of unsupported features (FR-004, FR-044).
 - **Exit criteria:** FR-004, FR-010..013, FR-015, FR-020, FR-021, FR-024, FR-025, FR-044, IR-002..004, NFR-035 (distribution independence of the load-balance weights).
 - **Owners:** AMR Chief Architect (lead), AMReX Integration Lead, AMR Species & Combustion Lead (species transport; joined 2026-09-25), V&V Lead.
 - **Dependencies:** ADR-002 (time-stepping: single global `dt`, the minimum over all levels and ranks, same in both stages, D-050), R-04 mitigation design.
@@ -69,7 +69,7 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 ### Phase 4: Composite pressure solve
 - **Objective:** replace per-mesh FFT plus interface iteration with a composite solve across levels at both pressure solves per step. Per D-050: one global dt (minimum over all levels and ranks), no subcycling, MLMG (or HYPRE) composite solve.
 - **Entry:** M3; ADR-002 accepted.
-- **Deliverables:** composite Poisson operator and BCs; replacement for `PRESSURE_ITERATION_SCHEME` in AMR mode; composite divergence check; single-zone background pressure on composite volume.
+- **Deliverables:** device version of the face prolongation (D-060 backlog); 2-D and singular-case boundary mapping to the FFT and MLMG backends (D-057); composite Poisson operator and BCs; replacement for `PRESSURE_ITERATION_SCHEME` in AMR mode; composite divergence check; single-zone background pressure on composite volume.
 - **Exit criteria:** FR-014, FR-022 (gas), FR-023, FR-030..034 (FR-034 multi-zone with leakage included, per the FR-034 ruling, final), FR-036. Conservation check: if FR-014/022/023 fail or pass only marginally, the cause is fixed within Phase 4. No sync projection is needed under a global dt, so this is not an R-05 trigger; R-05's gate is now the Phase 6 sync-correction decision (subcycling is ruled out, D-050) (Pressure Lead, 2026-09-25). **R-26 shim-exit review** if ADR-001 adopts the shim: a kernel-extraction date is set, and the regrid rebuild measured in P3/Phase 3 is ≤ 10% of step time.
 - **Owners:** AMR Pressure Solver Lead (lead), V&V Lead.
 - **Dependencies:** ADR-002, ADR-003 (solid treatment in the operator).

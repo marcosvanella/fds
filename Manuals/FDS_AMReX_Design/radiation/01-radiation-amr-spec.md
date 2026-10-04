@@ -3,13 +3,13 @@
 **Status:** Draft outline (not reviewed, not approved). Rev 2026-09-26: owner decision on Q12, S-B default (see §2).
 **Author role:** Radiation Lead
 **Depends on:** requirements.md (FR-005, FR-006, FR-022, FR-040, FR-041, FR-060, FR-061, NFR-030/031, NFR-043/044, NFR-047), ADR-001, ADR-002 (leaning), ADR-003 v0.2.1, risks.md (R-16, R-36), amrex/mapping.md:287
-**Source pin:** FireX `36975d765f` (local branch `AMReX`, this repository (read-only)). Citations get re-pinned per milestone (D-034).
+**Source pin:** FireX `36975d765f` (local branch `AMReX`, this repository (read-only)). Citations get re-pinned per milestone (D-034). *Re-pin note:* the `radi.f90` citations in this file now follow the local branch after the upstream merge of `afb5e31a48` (RTE_SOURCE precompute): lines up to 3797 are unchanged, and lines after 3797 moved by +1 to +8 inside the band loop and by +4 from the end of the band loop onwards (file length 5,323 to 5,327). Other files are cited as before. See `02-radiation-gpu-candidates.md` Part B.
 **Legend:** [REC] recommended proposal · [ALT] alternative · [OPEN] undecided · [VERIFY] not yet confirmed in source. Every decision in this document is a proposal.
 
 ## 1. Current solver (FireX)
 
 **Structure and settings**
-- radi.f90 has 5,323 lines. The RAD module spans :2754-5322 and MIEV :331-2749. RADCAL lives separately in rcal.f90.
+- radi.f90 has 5,327 lines. The RAD module spans :2754-5326 and MIEV :331-2749. RADCAL lives separately in rcal.f90.
 - The namelist is READ_RADI (read.f90:10206-10371).
 - Defaults: NUMBER_RADIATION_ANGLES=100 (104 after the angle set is built), TIME_STEP_INCREMENT=3, and ANGLE_INCREMENT=MAX(1,MIN(5,NRA/15))=5 for gray. The 2D defaults are 60 angles and TSI=2.
 - The wide-band model uses NSB=6 and WSGG uses NSB=5. Both force ANGLE_INCREMENT=1.
@@ -17,41 +17,41 @@
 - Angles are set up in CALCULATE_FVM_ANGLES (:3301-3406) and CALCULATE_DIRECTION_COEFFICIENTS (:3431-3596). The optional random rotation is drawn on rank 0 and broadcast with MPI_BCAST (:3443-3447).
 - INTERPOLATE_IL (:3599-3717) remaps stored boundary intensities to the rotated angles.
 
-**Per step (RADIATION_FVM, :3772-5065)**
-- An update happens when MOD(RAD_CALL_COUNTER,TSI)==0, during initialization, at ICYC==1, or when UPDATE_ALL_ANGLES is set (:3855-3861). The counter is per mesh (mesh.f90:339).
-- Each update sweeps only the angle subset N = NRA-AIC+1, stepping down by ANGLE_INCREMENT (:4307-4313). That is about 21 of 104 angles, so a full angular cycle takes 15 steps at defaults.
-- UII is the sum of UIIDIM slots, and those slots have different ages (:4291-4295, :4957-4972).
-- κ comes from GET_KAPPA (:5170-5208). Particles add KAPPA_PART and KFST4_PART in the cell that contains them (:3979-3991).
-- Gray RTE source correction: the partial sums RAD_Q_SUM/KFST4_SUM (:4087-4124) are combined by MPI_ALLREDUCE at main.f90:1760-1761, then damped and clipped at main.f90:1767.
-- The 3D sweep is a hyperplane (i+j+k) wavefront with `!$OMP PARALLEL DO` on each plane (:4488-4716). Solid cells use the upwind override from CELL_ILW (:4536-4542).
-- Differencing: STEP is at :4617-4623. The FireX-only DIAMOND and EXPONENTIAL schemes are at :4630-4711 (commit 7d8dcb2707). No Verification input uses them.
-- Walls: WALL_LOOP1 sets the incoming boundary intensity (:4319-4364). WALL_LOOP2 stores ILW per wall, per angle, per band and updates INRAD_W (:4745-4773). Q_RAD_IN is set at :4900-4918.
-- QR = κ·UII − KFST4 (:4977-4984). QR enters the divergence at divg.f90:567/579.
+**Per step (RADIATION_FVM, :3772-5069)**
+- An update happens when MOD(RAD_CALL_COUNTER,TSI)==0, during initialization, at ICYC==1, or when UPDATE_ALL_ANGLES is set (:3856-3862). The counter is per mesh (mesh.f90:339).
+- Each update sweeps only the angle subset N = NRA-AIC+1, stepping down by ANGLE_INCREMENT (:4315-4321). That is about 21 of 104 angles, so a full angular cycle takes 15 steps at defaults.
+- UII is the sum of UIIDIM slots, and those slots have different ages (:4299-4303, :4961-4976).
+- κ comes from GET_KAPPA (:5174-5212). Particles add KAPPA_PART and KFST4_PART in the cell that contains them (:3980-3992).
+- Gray RTE source correction: the partial sums RAD_Q_SUM/KFST4_SUM (:4088-4125) are combined by MPI_ALLREDUCE at main.f90:1760-1761, then damped and clipped at main.f90:1767.
+- The 3D sweep is a hyperplane (i+j+k) wavefront with `!$OMP PARALLEL DO` on each plane (:4494-4718). Solid cells use the upwind override from CELL_ILW (:4542-4548).
+- Differencing: STEP is at :4621-4628. The FireX-only DIAMOND and EXPONENTIAL schemes are at :4635-4714 (commit 7d8dcb2707). No Verification input uses them.
+- Walls: WALL_LOOP1 sets the incoming boundary intensity (:4327-4372). WALL_LOOP2 stores ILW per wall, per angle, per band and updates INRAD_W (:4747-4775). Q_RAD_IN is set at :4902-4920.
+- QR = κ·UII − KFST4 (:4981-4988). QR enters the divergence at divg.f90:567/579.
 - Memory: intensity is not stored for all angles per cell. IL is one scratch array per angle. Per-angle storage exists only for wall cells (NRA×NSB per wall) and mesh-interface cells (IL_S/IL_R/IL_R_OLD, type.f90:1035-1039).
 
 **How sweeps cross meshes and MPI today**
-- Each mesh sweeps on its own. At an INTERPOLATED boundary, the ghost intensity is the arithmetic mean of the neighbour-mesh IL_R over NIC_MIN..NIC_MAX (:4345-4353).
+- Each mesh sweeps on its own. At an INTERPOLATED boundary, the ghost intensity is the arithmetic mean of the neighbour-mesh IL_R over NIC_MIN..NIC_MAX (:4353-4361).
   - At 2:1 in 3D, a coarse ghost averages 4 fine cells and a fine ghost copies 1 coarse cell (NIC setup main.f90:2093-2160).
-- After each angle, IL_S is packed for all other meshes (:4824-4841). The loop skips NM==NOM, so periodic self-coupling may never be filled [VERIFY].
+- After each angle, IL_S is packed for all other meshes (:4826-4843). The loop skips NM==NOM, so periodic self-coupling may never be filled [VERIFY].
 - MESH_EXCHANGE code 2 packs only angles with DLN(IOR,N)>0 from the current subset (main.f90:3486-3510). It uses persistent MPI_STARTALL on REQ5 (:3671-3674) and unpacks at :3815-3834. Same-rank meshes copy directly (:3507-3508).
 - With the default RADIATION_ITERATIONS=1, the exchange runs at the end of the step (main.f90:1110-1116). Intensity therefore lags by one angular cycle per mesh crossed. This is block-Jacobi in time and depends on the decomposition. The User Guide documents it (FDS_User_Guide.tex:5894).
-- RADIATION_ITERATIONS>1 repeats the whole solve K times per step, with a MESH_EXCHANGE(2) after each pass (main.f90:1022-1044). Each pass re-sweeps the same angle subset, because RAD_CALL_COUNTER advances only on the last pass (radi.f90:3865). So each extra pass carries intensity across one more mesh interface within the step, and costs a full extra radiation solve. After the first cycle only one exchange runs per pass, whatever ANGLE_INCREMENT is (`IF (ICYC>1) EXIT`, main.f90:1038-1041). Exchange happens only on intensity-update steps (EXCHANGE_RADIATION, radi.f90:3855-3861). INITIAL_RADIATION_ITERATIONS defaults to 3 (read.f90:10224).
+- RADIATION_ITERATIONS>1 repeats the whole solve K times per step, with a MESH_EXCHANGE(2) after each pass (main.f90:1022-1044). Each pass re-sweeps the same angle subset, because RAD_CALL_COUNTER advances only on the last pass (radi.f90:3866). So each extra pass carries intensity across one more mesh interface within the step, and costs a full extra radiation solve. After the first cycle only one exchange runs per pass, whatever ANGLE_INCREMENT is (`IF (ICYC>1) EXIT`, main.f90:1038-1041). Exchange happens only on intensity-update steps (EXCHANGE_RADIATION, radi.f90:3856-3862). INITIAL_RADIATION_ITERATIONS defaults to 3 (read.f90:10224).
 - Creating or removing an OBST sets UPDATE_ALL_ANGLES (main.f90:1795).
 - Restart writes UIID (dump.f90:3921) and RAD_Q_SUM/KFST4_SUM/RTE_SOURCE_CORRECTION_FACTOR (dump.f90:3950). Wall ILW is packed by PACK_BOUNDARY_RADIA (func.f90:5128-5146).
 
 **Interaction with in-scope features**
-- **Thin OBSTs** (zero thickness, ordinary WALL cells on both sides, per ADR-003) block radiation through the CELL_ILW override (:4354-4357, :4539-4541). Behaviour on box faces and C/F faces is [VERIFY].
+- **Thin OBSTs** (zero thickness, ordinary WALL cells on both sides, per ADR-003) block radiation through the CELL_ILW override (:4362-4365, :4545-4547). Behaviour on box faces and C/F faces is [VERIFY].
 - **HT3D thin walls** are deferred (wall.f90:473-490).
 - **Level set:** LEVEL_SET_MODE 1-3 turn radiation off. Modes 4 and 5 keep it on (read.f90:1986-2016), and all level-set modes set NO_PRESSURE_ZONES (:1983).
   - Boundary fuel absorbs through the wall Q_RAD_IN.
-  - Vegetation particles absorb and emit through KAPPA_PART/KFST4_PART (:3979-3991), so particle deposition must go to the owning level.
-- **Pressure zones:** only WSGG reads PBAR(K,PRESSURE_ZONE) (:4065). No Verification case uses WSGG.
+  - Vegetation particles absorb and emit through KAPPA_PART/KFST4_PART (:3980-3992), so particle deposition must go to the owning level.
+- **Pressure zones:** only WSGG reads PBAR(K,PRESSURE_ZONE) (:4066). No Verification case uses WSGG.
 - **HVAC:** no direct radiation coupling [VERIFY].
 - **Output quantities affected** (Smokeview and VTK, data.f90):
   - Cell quantities: ABSORPTION COEFFICIENT :146, INTEGRATED INTENSITY :154, RADIATION LOSS :158, RADIATION EMISSION :437.
   - Wall and device quantities: RADIATIVE/NET/GAUGE/INCIDENT HEAT FLUX :1364/1410/1424/1451, RADIANCE :1445, RADIOMETER :1459.
   - HRR column Q_RADI (dump.f90:863).
-  - Per-mesh angle-resolved RADF files (radi.f90:5042-5063) have no level rule yet [OPEN].
+  - Per-mesh angle-resolved RADF files (radi.f90:5046-5067) have no level rule yet [OPEN].
 - **Parallelism today:** only OpenMP; radi.f90 has no GPU directives.
 - **Global state:** the counters, UPDATE_ALL_ANGLES/EXCHANGE_RADIATION and WEIGH_CYL are host-global variables written at run time (inventory module_globals.csv). They block pure device kernels.
 
@@ -156,7 +156,7 @@
 - Q4 [OPEN]: What happens at regrid: a full-angle update or UIID/ILW prolongation? Does ILW become part of the FR-041 wall state?
 - Q5 [OPEN]: What is the RADF per-mesh output rule under AMR? Which radiation slice and boundary quantities go to refined-level Smokeview and VTK output?
 - Q6 [OPEN]: Do FireX DIAMOND/EXPONENTIAL and random rotation stay in scope without Verification coverage (D-003)?
-- Q7 [VERIFY]: Periodic self-coupling of IL_S (radi.f90:4824-4841).
+- Q7 [VERIFY]: Periodic self-coupling of IL_S (radi.f90:4826-4843).
 
 **Risks (proposed)**
 - (Retired with Q1 decision: S-A GPU and many-rank scaling applies only if the optional exact mode is built.)
