@@ -80,6 +80,15 @@ inline Box3 fds_with_ghosts (int ibar, int jbar, int kbar) { return Box3{{0, 0, 
 void pres_compute_rhs_div (Box3 const& b, F3 const& fvx, F3 const& fvy, F3 const& fvz, F3 const& dddt,
                            F1 const& rdx, F1 const& rdy, F1 const& rdz, F3 const& prhs);
 
+// R2 index mapping. An AMReX face array is indexed by the LOW face of a cell: x-face i lies between cells i-1 and i. FDS FVX(I) is the flux
+// on the HIGH face of cell I, i.e. AMReX x-face I+1 (FVX(I-1) = x-face I). fds_face_view(a, dir) returns the same data seen with FDS
+// indices (no copy: the lower bound in direction dir moves down by one), so that a nodal Array4 wrapped with F3::from_array4 can be given to
+// pres_compute_rhs_div. Wrapping the nodal array "as is" would be wrong by one cell and silent; pres_compute_rhs_div_faces takes the AMReX
+// layout directly. Requires the face arrays to cover the faces il..ih+1 (jl..jh+1, kl..kh+1) of the box.
+F3 fds_face_view (F3 const& amrex_face_array, int dir);
+void pres_compute_rhs_div_faces (Box3 const& b, F3 const& fx_amrex, F3 const& fy_amrex, F3 const& fz_amrex, F3 const& dddt,
+                                 F1 const& rdx, F1 const& rdy, F1 const& rdz, F3 const& prhs);
+
 // ---- L1207 ----------------------------------------------------------------------------------------------------------------------
 // HAND-WRITTEN L1207 pres.f90:758-764 (FireX 36975d7): P(I,J,K)=RHOP(I,J,K)*(HP(I,J,K)-KRES(I,J,K)) over the cells of b.
 // FDS passes the box with ghost cells, K=0..KBP1, J=0..JBP1, I=0..IBP1 (fds_with_ghosts): the ghost values of HP (after the H

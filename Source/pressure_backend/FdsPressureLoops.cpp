@@ -65,6 +65,25 @@ void pres_compute_rhs_div (Box3 const& b, F3 const& fvx, F3 const& fvy, F3 const
     }
 }
 
+// R2 adapter (not an upstream loop): AMReX low-face indexing -> FDS indexing, see the header.
+F3 fds_face_view (F3 const& a, int dir)
+{
+    if (dir < 0 || dir > 2) throw std::invalid_argument("fdsloops: fds_face_view direction must be 0, 1 or 2");
+    F3 r = a;
+#if PB_FDSLOOPS_MUTANT == 22
+    r.lo[dir] += 1;   // wrong direction of the shift
+#else
+    r.lo[dir] -= 1;   // FDS index i is AMReX face i+1: the element at p[i+1-lo] is addressed by i with lo-1
+#endif
+    return r;
+}
+
+void pres_compute_rhs_div_faces (Box3 const& b, F3 const& fx, F3 const& fy, F3 const& fz, F3 const& dddt,
+                                 F1 const& rdx, F1 const& rdy, F1 const& rdz, F3 const& prhs)
+{
+    pres_compute_rhs_div(b, fds_face_view(fx, 0), fds_face_view(fy, 1), fds_face_view(fz, 2), dddt, rdx, rdy, rdz, prhs);
+}
+
 // ---- L1207 ----------------------------------------------------------------------------------------------------------------------
 // HAND-WRITTEN L1207 pres.f90:758-764 (FireX 36975d7)
 void pres_p_from_h (Box3 const& b, F3 const& rhop, F3 const& hp, F3 const& kres, F3 const& p)
