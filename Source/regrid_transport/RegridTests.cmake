@@ -27,6 +27,10 @@ endif()
 add_test(NAME regrid_transport_blob_registry COMMAND test_blob_registry)
 add_test(NAME regrid_transport_blob_registry_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_blob_registry>)
 add_test(NAME regrid_transport_blob_registry_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_blob_registry> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
+# Phase 3 moving-blob rows (V&V plan 5.12: B01 to B05, C07, F03, F04) on the registry with the mock conservative transport (the real FDS stages need a driver build: tests/run_e2e_driver.sh)
+add_test(NAME regrid_transport_moving_blob_p3 COMMAND test_blob_registry --gates)
+add_test(NAME regrid_transport_moving_blob_p3_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_blob_registry> --gates)
+set_tests_properties(regrid_transport_moving_blob_p3 regrid_transport_moving_blob_p3_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1" LABELS "phase3_gate_mock_transport")
 set_tests_properties(regrid_transport_blob_registry regrid_transport_blob_registry_np4 regrid_transport_blob_registry_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
 # The post-regrid projection part of these tests runs on a MOCK composite solver (amrex::MLMG): not a Phase 3 gate until Role 2's composite solver replaces it (notes/r4-part2-results.md)
 set_tests_properties(regrid_transport_blob_registry regrid_transport_blob_registry_np4 regrid_transport_blob_registry_ranks PROPERTIES LABELS "projection_real_solver")
@@ -34,7 +38,7 @@ set_tests_properties(regrid_transport_blob_registry regrid_transport_blob_regist
 # R4 GPU path of the tagging kernels (K2 Fortran OpenMP target): the same kernel source built twice, host default and offload source (RT_OFFLOAD),
 # each against an independent reference, and their outputs compared bitwise. Without an accelerator the offload source runs its target regions on
 # the host (this checks the directive path and the has_device_addr/is_device_ptr clauses, not device memory). On a GPU machine configure with
-# -DRT_OFFLOAD_FLAGS="-mp=gpu;-gpu=mem:managed" (nvfortran) to run on the device.
+# -DRT_OFFLOAD_FLAGS="-mp=gpu;-gpu=mem:managed,nofma" (nvfortran; no fast-math flags, BF-02 and BF-03 of docs/tools) to run on the device.
 if (CMAKE_Fortran_COMPILER AND OpenMP_Fortran_FOUND)
     set(RT_OFFLOAD_FLAGS "" CACHE STRING "extra Fortran compile+link flags of the offload build of the tagging kernels (default: OpenMP only, host fallback)")
     set(RT_TK_SRC ${CMAKE_CURRENT_SOURCE_DIR}/rt_tag_kernels.F90 ${CMAKE_CURRENT_SOURCE_DIR}/tests/tag_kernel_check.F90)
