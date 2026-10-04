@@ -58,6 +58,15 @@ struct F3 {   // rank-3 view, first index fastest
 
 struct Box3 { int lo[3]; int hi[3]; };   // inclusive cell range
 
+// Thrown for a feature the translation does not cover (the product route reports it as NotBuilt, never silently as another feature).
+struct NotBuilt : std::runtime_error { using std::runtime_error::runtime_error; };
+
+// What the H boundary fill (L1220-L1222) needs to know about the whole mesh besides the box it fills.
+struct HFillOptions {
+    Box3 domain;                              // the whole cell extent of the mesh in all three directions (FDS: fds_interior)
+    bool tunnel_preconditioner = false;       // FDS TUNNEL_PRECONDITIONER: its add-back (pres.f90:436-445) is not translated -> NotBuilt
+};
+
 inline Box3 fds_interior (int ibar, int jbar, int kbar) { return Box3{{1, 1, 1}, {ibar, jbar, kbar}}; }
 inline Box3 fds_with_ghosts (int ibar, int jbar, int kbar) { return Box3{{0, 0, 0}, {ibar + 1, jbar + 1, kbar + 1}}; }
 
@@ -83,11 +92,14 @@ void pres_p_from_h (Box3 const& b, F3 const& rhop, F3 const& hp, F3 const& kres,
 // Codes (FISHPAK/Crayfishpak): 0 periodic, 1 Dirichlet-Dirichlet, 2 Dirichlet low / Neumann high, 3 Neumann-Neumann,
 // 4 Neumann low / Dirichlet high; the x direction (LBC) also has 5 (Dirichlet high, H(0)=H(1)) and 6 (Neumann high, H(0)=H(1)).
 // bxs/bxf are indexed (J,K) over the J,K range of b, bys/byf (I,K), bzs/bzf (I,J). dxi, deta, dzeta are the Poisson coordinate
-// spacings (FDS DXI, DETA, DZETA). Periodic (code 0) wraps inside b, so b must be the whole domain extent in that direction.
-// The statements are kept in the FDS order (later ones overwrite earlier ones where several apply).
-void pres_h_bc_x (Box3 const& b, int lbc, double dxi, F2 const& bxs, F2 const& bxf, F3 const& hp);
-void pres_h_bc_y (Box3 const& b, int mbc, double deta, F2 const& bys, F2 const& byf, F3 const& hp);
-void pres_h_bc_z (Box3 const& b, int nbc, double dzeta, F2 const& bzs, F2 const& bzf, F3 const& hp);
+// spacings (FDS DXI, DETA, DZETA). Periodic (code 0) wraps inside b, so b must be the whole domain extent in that direction:
+// opt.domain gives that extent and the function throws std::invalid_argument if code 0 is asked for with b.lo/b.hi different from
+// opt.domain.lo/hi in the direction (a per-box call on a decomposed level would silently wrap inside the box). With
+// opt.tunnel_preconditioner the functions throw NotBuilt (the add-back of H_BAR, BXS_BAR, BXF_BAR between the solve and the fill is
+// not translated). The statements are kept in the FDS order (later ones overwrite earlier ones where several apply).
+void pres_h_bc_x (Box3 const& b, HFillOptions const& opt, int lbc, double dxi, F2 const& bxs, F2 const& bxf, F3 const& hp);
+void pres_h_bc_y (Box3 const& b, HFillOptions const& opt, int mbc, double deta, F2 const& bys, F2 const& byf, F3 const& hp);
+void pres_h_bc_z (Box3 const& b, HFillOptions const& opt, int nbc, double dzeta, F2 const& bzs, F2 const& bzf, F3 const& hp);
 
 // ---- L1209 ----------------------------------------------------------------------------------------------------------------------
 // Constants of FDS cons.f90 used by the loop.
@@ -126,7 +138,8 @@ struct PoissonBcContext {  // the mesh data of pres.f90:65-228 (UU,VV,WW,HP are 
     F3 fvx, fvy, fvz, hp, kres, uu, vv, ww;
     F1 hx, hy, hz;                    // HX(0:IBP1), HY(0:JBP1), HZ(0:KBP1)
     F1 dx, dy, dz, rdxn, rdyn, rdzn;  // DX(1:IBAR).., RDXN(0:IBAR).. (RDXN(0), RDXN(IBAR)), ...
-    F1 u_wind, v_wind, w_wind;        // read at the wall's K only if open_wind_boundary
+    F1 u_wind, v_wind, w_wind;        // U_WIND(0:KBP1) etc.: read at the wall cell's KK (0 and KBP1 for z walls) if open_wind_boundary; must cover 0..KBP1
+    bool tunnel_preconditioner = false;   // FDS TUNNEL_PRECONDITIONER: not translated, NotBuilt
     double u0 = 0.0, v0 = 0.0, w0 = 0.0;
     bool open_wind_boundary = false;
     double t = 0.0, dt = 0.0, t_begin = 0.0;

@@ -96,9 +96,10 @@ void run_hbc (Case& c, Stat& st, bool vb, std::string const& fn)
     Rec h = c.at("H_IN");
     const Box3 b = fds_interior(ib, jb, kb);
     F3 hp = f3(h, 0, 0, 0);
-    pres_h_bc_x(b, ival(c, "LBC"), dval(c, "DXI"), f2(c.at("BXS")), f2(c.at("BXF")), hp);
-    pres_h_bc_y(b, ival(c, "MBC"), dval(c, "DETA"), f2(c.at("BYS")), f2(c.at("BYF")), hp);
-    pres_h_bc_z(b, ival(c, "NBC"), dval(c, "DZETA"), f2(c.at("BZS")), f2(c.at("BZF")), hp);
+    HFillOptions opt; opt.domain = b;
+    pres_h_bc_x(b, opt, ival(c, "LBC"), dval(c, "DXI"), f2(c.at("BXS")), f2(c.at("BXF")), hp);
+    pres_h_bc_y(b, opt, ival(c, "MBC"), dval(c, "DETA"), f2(c.at("BYS")), f2(c.at("BYF")), hp);
+    pres_h_bc_z(b, opt, ival(c, "NBC"), dval(c, "DZETA"), f2(c.at("BZS")), f2(c.at("BZF")), hp);
     compare(st, "H", h.d, c.at("H_OUT").d, vb, fn);
 }
 

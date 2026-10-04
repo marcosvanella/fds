@@ -15,6 +15,16 @@ namespace pressure_backend { namespace fdsloops {
 
 namespace {
 void need (bool ok, const char* what) { if (!ok) throw std::invalid_argument(std::string("fdsloops: view does not cover ") + what); }
+void check_hfill (Box3 const& b, HFillOptions const& opt, int dir, int code, const char* name)
+{
+#if PB_FDSLOOPS_MUTANT != 21
+    if (opt.tunnel_preconditioner) throw NotBuilt("fdsloops: TUNNEL_PRECONDITIONER is not built (the H_BAR/BXS_BAR/BXF_BAR add-back before the H boundary fill is not translated)");
+#endif
+#if PB_FDSLOOPS_MUTANT != 19
+    if (code == 0 && (b.lo[dir] != opt.domain.lo[dir] || b.hi[dir] != opt.domain.hi[dir]))
+        throw std::invalid_argument(std::string("fdsloops: periodic wrap in ") + name + " needs the box to be the whole domain extent in that direction");
+#endif
+}
 }
 
 // ---- L1211 ----------------------------------------------------------------------------------------------------------------------
@@ -83,8 +93,9 @@ void pres_p_from_h (Box3 const& b, F3 const& rhop, F3 const& hp, F3 const& kres,
 
 // ---- L1220, L1221, L1222 ---------------------------------------------------------------------------------------------------------
 // HAND-WRITTEN L1220 pres.f90:450-462 (FireX 36975d7)
-void pres_h_bc_x (Box3 const& b, int LBC, double DXI, F2 const& bxs, F2 const& bxf, F3 const& hp)
+void pres_h_bc_x (Box3 const& b, HFillOptions const& opt, int LBC, double DXI, F2 const& bxs, F2 const& bxf, F3 const& hp)
 {
+    check_hfill(b, opt, 0, LBC, "x");
     const int i0 = b.lo[0], i1 = b.hi[0], jl = b.lo[1], jh = b.hi[1], kl = b.lo[2], kh = b.hi[2];   // FDS: i0=1, i1=IBAR
     need(hp.covers(i0 - 1, i1 + 1, jl, jh, kl, kh), "HP(ILO-1:IHI+1,J,K)");
     need(bxs.covers(jl, jh, kl, kh) && bxf.covers(jl, jh, kl, kh), "BXS/BXF(J,K)");
@@ -112,8 +123,9 @@ void pres_h_bc_x (Box3 const& b, int LBC, double DXI, F2 const& bxs, F2 const& b
 }
 
 // HAND-WRITTEN L1221 pres.f90:466-477 (FireX 36975d7)
-void pres_h_bc_y (Box3 const& b, int MBC, double DETA, F2 const& bys, F2 const& byf, F3 const& hp)
+void pres_h_bc_y (Box3 const& b, HFillOptions const& opt, int MBC, double DETA, F2 const& bys, F2 const& byf, F3 const& hp)
 {
+    check_hfill(b, opt, 1, MBC, "y");
     const int il = b.lo[0], ih = b.hi[0], j0 = b.lo[1], j1 = b.hi[1], kl = b.lo[2], kh = b.hi[2];   // FDS: j0=1, j1=JBAR
     need(hp.covers(il, ih, j0 - 1, j1 + 1, kl, kh), "HP(I,JLO-1:JHI+1,K)");
     need(bys.covers(il, ih, kl, kh) && byf.covers(il, ih, kl, kh), "BYS/BYF(I,K)");
@@ -136,8 +148,9 @@ void pres_h_bc_y (Box3 const& b, int MBC, double DETA, F2 const& bys, F2 const& 
 }
 
 // HAND-WRITTEN L1222 pres.f90:481-492 (FireX 36975d7)
-void pres_h_bc_z (Box3 const& b, int NBC, double DZETA, F2 const& bzs, F2 const& bzf, F3 const& hp)
+void pres_h_bc_z (Box3 const& b, HFillOptions const& opt, int NBC, double DZETA, F2 const& bzs, F2 const& bzf, F3 const& hp)
 {
+    check_hfill(b, opt, 2, NBC, "z");
     const int il = b.lo[0], ih = b.hi[0], jl = b.lo[1], jh = b.hi[1], k0 = b.lo[2], k1 = b.hi[2];   // FDS: k0=1, k1=KBAR
     need(hp.covers(il, ih, jl, jh, k0 - 1, k1 + 1), "HP(I,J,KLO-1:KHI+1)");
     need(bzs.covers(il, ih, jl, jh) && bzf.covers(il, ih, jl, jh), "BZS/BZF(I,J)");
@@ -164,6 +177,9 @@ void pres_h_bc_z (Box3 const& b, int NBC, double DZETA, F2 const& bzs, F2 const&
 void pres_poisson_boundary_arrays (PoissonBcContext const& c, PoissonWall const* walls, int nwalls)
 {
     using namespace fdsconst;
+#if PB_FDSLOOPS_MUTANT != 21
+    if (c.tunnel_preconditioner) throw NotBuilt("fdsloops: TUNNEL_PRECONDITIONER is not built (the H_BAR/BXS_BAR/BXF_BAR add-back is not translated)");
+#endif
     const int IBAR = c.ibar, JBAR = c.jbar, KBAR = c.kbar, IBP1 = IBAR + 1, JBP1 = JBAR + 1, KBP1 = KBAR + 1;
     need(c.hp.covers(0, IBP1, 0, JBP1, 0, KBP1) && c.kres.covers(1, IBAR, 1, JBAR, 1, KBAR), "HP(0:IBP1,..) / KRES");
     need(c.fvx.covers(0, IBAR, 0, JBP1, 0, KBP1) && c.fvy.covers(0, IBP1, 0, JBAR, 0, KBP1) && c.fvz.covers(0, IBP1, 0, JBP1, 0, KBAR), "FVX/FVY/FVZ");
@@ -186,7 +202,12 @@ void pres_poisson_boundary_arrays (PoissonBcContext const& c, PoissonWall const*
     if (any_open) {
         need(c.uu.covers(0, IBAR, 1, JBAR, 1, KBAR) && c.vv.covers(1, IBAR, 0, JBAR, 1, KBAR) && c.ww.covers(1, IBAR, 1, JBAR, 0, KBAR), "UU/VV/WW");
         need(static_cast<bool>(c.evaluate_ramp), "evaluate_ramp (a callable)");
-        if (c.open_wind_boundary) need(c.u_wind.covers(1, KBAR) && c.v_wind.covers(1, KBAR) && c.w_wind.covers(1, KBAR), "U_WIND/V_WIND/W_WIND(K)");
+#if PB_FDSLOOPS_MUTANT == 20
+        if (c.open_wind_boundary) need(c.u_wind.covers(1, KBAR) && c.v_wind.covers(1, KBAR) && c.w_wind.covers(1, KBAR), "U_WIND/V_WIND/W_WIND(K)");   // the former guard
+#else
+        // FDS: U_WIND, V_WIND, W_WIND(0:KBP1); the loop reads them at the wall cell's KK, which is 0 or KBP1 for a z wall
+        if (c.open_wind_boundary) need(c.u_wind.covers(0, KBP1) && c.v_wind.covers(0, KBP1) && c.w_wind.covers(0, KBP1), "U_WIND/V_WIND/W_WIND(0:KBP1)");
+#endif
     }
 
     const F3& HP = c.hp; const F3& KRES = c.kres; const F3& UU = c.uu; const F3& VV = c.vv; const F3& WW = c.ww;
