@@ -59,6 +59,17 @@ std::string validate (PressureProblem const& p, bool structural = true)
     if (p.gauge_offset && (p.gauge_offset->boxArray() != p.ba || !(p.gauge_offset->DistributionMap() == p.dm) || p.gauge_offset->nComp() < 1)) {
         return "gauge_offset BoxArray/DistributionMapping differ from the problem or it has no component";
     }
+    if (p.cell_class) {
+        if (p.cell_class->boxArray() != p.ba || !(p.cell_class->DistributionMap() == p.dm) || p.cell_class->nComp() < 1) {
+            return "cell_class BoxArray/DistributionMapping differ from the problem or it has no component";
+        }
+        if (p.cell_class->min(0) < CellGas || p.cell_class->max(0) > CellKnown) {
+            return "cell_class has a code other than 0 (gas), 1 (solid) or 2 (known value); pinned and other classes are not built";
+        }
+    }
+    if (p.known_value && (p.known_value->boxArray() != p.ba || !(p.known_value->DistributionMap() == p.dm) || p.known_value->nComp() < 1)) {
+        return "known_value BoxArray/DistributionMapping differ from the problem or it has no component";
+    }
     for (int d = 0; d < 3; ++d) {
         if (!p.cell_width[d].empty()) {
             if (static_cast<int>(p.cell_width[d].size()) != p.geom.Domain().length(d)) { return "cell_width size differs from the domain length"; }
@@ -102,7 +113,9 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
         s.message = "variable coefficients (masked or non-unit operator) are not built"; return s;
     }
     if (p.component_id) { s.message = "driver-supplied component ids are not built (masked branch)"; return s; }
-    if (has_nonzero(p.cell_class)) { s.message = "masked cells (cell_class != 0: obstructed/solid, known-value or pinned cells) are not built (masked branch)"; return s; }
+    const bool masked = has_nonzero(p.cell_class);
+    if (masked && requested == BackendKind::FFT) { s.message = "masked cells (cell_class != 0) cannot go through FFT::Poisson (no mask in the transform); the masked branch is MLMG"; return s; }
+    if (masked && requested == BackendKind::HYPRE) { s.message = "masked cells with the HYPRE backend are not built (the masked branch is single-level MLMG; frozen/masked-notes.md)"; return s; }
     if (has_zero(p.uncovered)) { s.message = "covered cells (uncovered == 0) are not built"; return s; }
     // D-057: a Dirichlet face in a one-cell x or z direction keeps a non-zero operator term (-2 phi/dx^2) that neither
     // FFT::Poisson (factor 0 for a length-1 direction) nor the TWO_D convention reproduces: not built. In a one-cell y
@@ -114,7 +127,7 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
         }
     }
     s.ok = true;
-    s.kind = (requested == BackendKind::Auto) ? BackendKind::FFT : requested;
+    s.kind = (requested == BackendKind::Auto) ? (masked ? BackendKind::MLMG : BackendKind::FFT) : requested;
     return s;
 }
 
@@ -196,8 +209,17 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     const Real vol = p.geom.CellSize(0) * p.geom.CellSize(1) * p.geom.CellSize(2);
     ComponentMap cm = label_components(p, full);
 
+    const bool masked = is_masked(p);
+    if (masked && cm.comps.empty()) { return fail(Status::InvalidInput, "masked problem without a gas cell"); }
     MultiFab b(p.ba, p.dm, 1, 0);
     MultiFab::Copy(b, *p.rhs, 0, 0, 1, 0);
+    if (masked) {   // the right-hand side of Solid and Known cells is not part of the problem (label < 0): zero it, so norms and sums see gas cells only
+        for (MFIter mfi(b); mfi.isValid(); ++mfi) {
+            auto const& a = b.array(mfi);
+            auto const& l = cm.label.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (l(i,j,k) < 0) { a(i,j,k) = Real(0); } });
+        }
+    }
     if (o.remove_mean) {
         remove_mean(b, cm, p.uncovered, vol, nullptr, p.mean_kind, full);
     }
@@ -207,11 +229,24 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
 
     R.backend_status = be->solve(p, o, work, b);
     if (ws && sel.kind == BackendKind::FFT) { ws->note_fft(R.backend_status.plan_reused); }
+    if (masked) {   // H on the cells that are not unknowns: g on Known cells, 0 on Solid cells
+        iMultiFab cls = class_ghost(p);
+        MultiFab kv = known_ghost(p);
+        for (MFIter mfi(work); mfi.isValid(); ++mfi) {
+            auto const& f = work.array(mfi);
+            auto const& cl = cls.const_array(mfi);
+            auto const& g = kv.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (cl(i,j,k) == CellSolid) { f(i,j,k) = Real(0); } else if (cl(i,j,k) == CellKnown) { f(i,j,k) = g(i,j,k); }
+            });
+        }
+    }
 
     // Gauge, then the true residual of the problem the backend was given (mean-removed b).
     apply_gauge(work, cm, p.uncovered, vol, nullptr, p.gauge_weight, p.gauge_offset);
     if (o.check_residual && full) {
-        const bool sing = !cm.comps.empty() && cm.comps[0].singular;
+        bool sing = !cm.comps.empty() && cm.comps[0].singular;
+        if (masked) { sing = false; for (auto const& c : cm.comps) { sing = sing || c.singular; } }
         const IntVect pin = R.backend_status.pin_cell;
         ResidualSums S = residual_sums(p, work, b, sing, R.backend_status.pin_applied ? &pin : nullptr);
         S.what = "";

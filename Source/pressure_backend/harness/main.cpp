@@ -364,7 +364,12 @@ void run_selector ()
         iMultiFab cls(p.ba, p.dm, 1, 0); cls.setVal(0);
         for (MFIter mfi(cls); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); cls[mfi].setVal<RunOn::Host>(1, Box(sm, sm)); } }
         p.cell_class = &cls;
-        expect("masked cell not built", p, pb::Status::NotBuilt, K::Auto, K::Auto);
+        expect("masked cell (Solid) -> MLMG by Auto", p, pb::Status::Ok, K::MLMG, K::Auto);
+        expect("masked cell with explicit MLMG", p, pb::Status::Ok, K::MLMG, K::MLMG);
+        expect("masked cell with explicit FFT not built", p, pb::Status::NotBuilt, K::Auto, K::FFT);
+        { iMultiFab bad(p.ba, p.dm, 1, 0); bad.setVal(5);
+          pb::PressureProblem q = p; q.cell_class = &bad;
+          expect("cell_class code 5 invalid", q, pb::Status::InvalidInput, K::Auto, K::Auto); }
         iMultiFab zero(p.ba, p.dm, 1, 0); zero.setVal(0);
         p.cell_class = &zero;
         expect("all-zero cell_class is unmasked", p, pb::Status::Ok, K::FFT, K::Auto); }

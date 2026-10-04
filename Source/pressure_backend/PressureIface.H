@@ -17,8 +17,8 @@
 // BackendKind::HYPRE`, never selected by Auto). HYPRE assembles the same discrete operator as MLMG (including the
 // coarse/fine interface treatment) into an IJ matrix, see HypreBackend.H and frozen/hypre-notes.md.
 //
-// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells (obstructed/solid, known-value
-// or pinned cells), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
+// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on any path but the single-level MLMG (the masked
+// branch, see PressureProblem::cell_class and frozen/masked-notes.md), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
 // (cylindrical, RZ) geometry, variable coefficients, a Dirichlet face in a one-cell x or z direction, anisotropic refinement ratios (except ratio 1 in a one-cell direction), ratios other than 2 and 4,
 // composite on the FFT backend, and a multi-level request through the single-level fields (`nlevels` > 1 with an
 // empty `levels`).
@@ -35,7 +35,8 @@
 //    component, with rho = gauge_weight (default 1) and KRES = gauge_offset (default 0; then the plain volume-weighted
 //    mean of H is zero). A component that is not singular (some Dirichlet face) has a unique solution; nothing is
 //    shifted. Exact sums, so the constant does not depend on the decomposition up to the round-off of H itself.
-//  - Components: the whole domain (all levels) is one component until masked/driver-supplied components are built.
+//  - Components: without masks the whole domain (all levels) is one component. With a masked single-level problem the components are
+//    the flood-filled gas regions (gas-gas faces); mean removal and gauge are per component over its gas cells.
 #ifndef PB_PRESSURE_IFACE_H_
 #define PB_PRESSURE_IFACE_H_
 
@@ -58,6 +59,9 @@ enum class BackendKind { Auto, FFT, MLMG, HYPRE };   // Auto never selects HYPRE
 // Message of Status::NotBuilt when BackendKind::HYPRE is requested in a build without PB_WITH_HYPRE (README.md, "Build options").
 inline constexpr const char* kHypreNotBuilt = "built without HYPRE";
 enum class Status { Ok, NotBuilt, InvalidInput, NotConverged };
+
+// PressureProblem::cell_class codes (frozen/masked-notes.md).
+enum CellClass : int { CellGas = 0, CellSolid = 1, CellKnown = 2 };
 
 // Which zero mode of the right-hand side is removed from a singular component (see the header comment and
 // CommonLayer.H). Default Volume (D-067); ScaledArithmetic is the FDS parity switch.
@@ -128,11 +132,17 @@ struct PressureProblem {
     amrex::MultiFab const* cell_coef_a = nullptr;
     std::array<amrex::MultiFab const*,3> face_coef_b = {nullptr, nullptr, nullptr};
 
-    // Masks (same BoxArray/DistributionMapping as `ba`). cell_class: nonzero = special (unknown, OBST, gap,
-    // known-value or pinned) cell. uncovered: zero = covered by a finer level. Either one non-trivial: NotBuilt.
+    // Masks (same BoxArray/DistributionMapping as `ba`; frozen/masked-notes.md). cell_class codes (CellClass): 0 Gas (unknown), 1 Solid
+    // (OBST or gap cell: excluded, no flux through any of its faces), 2 Known (known-value cell behind a face-Dirichlet condition: not an
+    // unknown, holds the face value `known_value`; the gas neighbour gets the flux 2 (g - phi)/dx^2). Null or all zero: unmasked problem
+    // (unchanged code). Masked single-level problems are built for MLMG only (the selector picks MLMG for Auto; FFT, HYPRE and the
+    // composite paths: NotBuilt). Any other code: InvalidInput. uncovered: zero = covered by a finer level, NotBuilt.
     amrex::iMultiFab const* cell_class = nullptr;
     amrex::iMultiFab const* uncovered = nullptr;
-    // Driver-supplied component ids: M1 labels components itself; non-null is NotBuilt.
+    // Known values g of the Known cells (same BoxArray/DistributionMapping as `ba`, one component; read on Known cells only; null = 0).
+    // On return phi holds g on Known cells and 0 on Solid cells.
+    amrex::MultiFab const* known_value = nullptr;
+    // Driver-supplied component ids: the common layer labels components itself (flood fill over gas-gas faces); non-null is NotBuilt.
     amrex::iMultiFab const* component_id = nullptr;
 
     // Mean removal of the right-hand side of singular components (D-067): Volume (default) or the FDS parity switch

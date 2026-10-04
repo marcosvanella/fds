@@ -17,8 +17,19 @@ struct ComponentMap {
     std::vector<ComponentInfo> comps;
 };
 
+// ---- Masked branch (frozen/masked-notes.md) ---------------------------------------------------------------------------------
+// True when p.cell_class is set and has a non-zero cell (collective). An all-zero or null cell_class is the unmasked problem.
+bool is_masked (PressureProblem const& p);
+// cell_class / known_value with one ghost layer: periodic images are filled; cells outside a non-periodic domain face are
+// CellSolid (class) and 0 (value). Collective. known_ghost is all zero when p.known_value is null.
+amrex::iMultiFab class_ghost (PressureProblem const& p);
+amrex::MultiFab known_ghost (PressureProblem const& p);
+
 // M1: the whole box is one component (no masks); singular unless some face is Dirichlet. Records the pin
-// (lowest global index cell, x fastest) per component (skipped with record_pin = false: cheap path). Flood fill over beta != 0 faces is M2.
+// (lowest global index cell, x fastest) per component (skipped with record_pin = false: cheap path). With a masked problem
+// (is_masked) the components are the flood-filled gas regions (gas-gas faces, periodic wrap included): label = component id on gas
+// cells and -1 on Solid and Known cells; ids are ordered by the lowest global index of the component, which is its pin cell; a
+// component is singular unless a gas cell of it touches a domain Dirichlet face or a Known cell. The pin is always recorded.
 ComponentMap label_components (PressureProblem const& p, bool record_pin = true);
 
 // Which zero mode of the right-hand side is removed when cell volumes vary: `MeanKind` (PressureIface.H). The solved

@@ -3,6 +3,8 @@
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <AMReX_ParallelContext.H>
+#include <AMReX_iMultiFab.H>
 
 #include <algorithm>
 #include <cmath>
@@ -34,8 +36,149 @@ const char* to_string (BC b)
     return "?";
 }
 
+
+bool is_masked (PressureProblem const& p)
+{
+    if (!p.cell_class) { return false; }
+    return p.cell_class->max(0) != 0 || p.cell_class->min(0) != 0;
+}
+
+iMultiFab class_ghost (PressureProblem const& p)
+{
+    iMultiFab cls(p.ba, p.dm, 1, 1);
+    cls.setVal(CellSolid);                                   // outside a non-periodic domain face: nothing to couple to
+    if (p.cell_class) { iMultiFab::Copy(cls, *p.cell_class, 0, 0, 1, 0); } else { cls.setVal(CellGas, 0, 1, 0); }
+    cls.FillBoundary(p.geom.periodicity());
+    return cls;
+}
+
+MultiFab known_ghost (PressureProblem const& p)
+{
+    MultiFab kv(p.ba, p.dm, 1, 1);
+    kv.setVal(Real(0));
+    if (p.known_value) { MultiFab::Copy(kv, *p.known_value, 0, 0, 1, 0); }
+    kv.FillBoundary(p.geom.periodicity());
+    return kv;
+}
+
+namespace {
+// Masked components: flood fill over gas-gas faces (frozen/masked-notes.md). Collective.
+ComponentMap label_components_masked (PressureProblem const& p)
+{
+    const Box dom = p.geom.Domain();
+    const Long nx = dom.length(0), ny = dom.length(1);
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dom.numPts() < Long(std::numeric_limits<int>::max()), "masked labelling needs fewer than 2^31 cells");
+    const int big = std::numeric_limits<int>::max();
+    iMultiFab cls = class_ghost(p);
+    iMultiFab lab(p.ba, p.dm, 1, 1);
+    lab.setVal(big);
+    auto gidx = [&] (int i, int j, int k) { return int((i - dom.smallEnd(0)) + nx*((j - dom.smallEnd(1)) + ny*Long(k - dom.smallEnd(2)))); };
+    for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+        auto const& l = lab.array(mfi);
+        auto const& c = cls.const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (c(i,j,k) == CellGas) { l(i,j,k) = gidx(i,j,k); } });
+    }
+    for (;;) {
+        lab.FillBoundary(p.geom.periodicity());
+        Long changed = 0;
+        for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+            auto const& l = lab.array(mfi);
+            auto const& c = cls.const_array(mfi);
+            const Box vb = mfi.validbox();
+            const Dim3 lo = lbound(vb), hi = ubound(vb);
+            auto relax = [&] (int i, int j, int k) {
+                if (c(i,j,k) != CellGas) { return false; }
+                int m = l(i,j,k);
+                const int cand[6] = {c(i-1,j,k) == CellGas ? l(i-1,j,k) : big, c(i+1,j,k) == CellGas ? l(i+1,j,k) : big,
+                                     c(i,j-1,k) == CellGas ? l(i,j-1,k) : big, c(i,j+1,k) == CellGas ? l(i,j+1,k) : big,
+                                     c(i,j,k-1) == CellGas ? l(i,j,k-1) : big, c(i,j,k+1) == CellGas ? l(i,j,k+1) : big};
+                for (int q = 0; q < 6; ++q) { m = std::min(m, cand[q]); }
+                if (m < l(i,j,k)) { l(i,j,k) = m; return true; }
+                return false;
+            };
+            bool again = true;
+            while (again) {                                     // alternate sweeps inside the box until stable
+                again = false;
+                for (int k = lo.z; k <= hi.z; ++k) for (int j = lo.y; j <= hi.y; ++j) for (int i = lo.x; i <= hi.x; ++i) {
+                    if (relax(i,j,k)) { again = true; ++changed; }
+                }
+                for (int k = hi.z; k >= lo.z; --k) for (int j = hi.y; j >= lo.y; --j) for (int i = hi.x; i >= lo.x; --i) {
+                    if (relax(i,j,k)) { again = true; ++changed; }
+                }
+            }
+        }
+        ParallelDescriptor::ReduceLongSum(changed);
+        if (changed == 0) { break; }
+    }
+    // Roots (cells whose label is their own index) -> sorted unique list on every rank.
+    std::vector<int> roots;
+    for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+        auto const& l = lab.const_array(mfi);
+        auto const& c = cls.const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (c(i,j,k) == CellGas && l(i,j,k) == gidx(i,j,k)) { roots.push_back(l(i,j,k)); } });
+    }
+    std::vector<int> all_roots = roots;
+#ifdef AMREX_USE_MPI
+    {
+        const int np = ParallelContext::NProcsSub();
+        std::vector<int> cnt(np, 0), displ(np, 0);
+        int mine = int(roots.size());
+        MPI_Allgather(&mine, 1, MPI_INT, cnt.data(), 1, MPI_INT, ParallelContext::CommunicatorSub());
+        int tot = 0;
+        for (int r = 0; r < np; ++r) { displ[r] = tot; tot += cnt[r]; }
+        all_roots.assign(tot, 0);
+        MPI_Allgatherv(roots.data(), mine, MPI_INT, all_roots.data(), cnt.data(), displ.data(), MPI_INT, ParallelContext::CommunicatorSub());
+    }
+#endif
+    std::sort(all_roots.begin(), all_roots.end());
+    all_roots.erase(std::unique(all_roots.begin(), all_roots.end()), all_roots.end());
+    const int nc = int(all_roots.size());
+
+    ComponentMap cm;
+    cm.label.define(p.ba, p.dm, 1, 0);
+    cm.label.setVal(-1);
+    std::vector<Long> count(nc, 0);
+    std::vector<int> open(nc, 0);
+    std::array<BC,6> const ebc = effective_bc(p.bc, dom);
+    for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+        auto const& l = lab.const_array(mfi);
+        auto const& c = cls.const_array(mfi);
+        auto const& o = cm.label.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+            if (c(i,j,k) != CellGas) { return; }
+            const int id = int(std::lower_bound(all_roots.begin(), all_roots.end(), l(i,j,k)) - all_roots.begin());
+            o(i,j,k) = id;
+            count[id] += 1;
+            const int iv[3] = {i, j, k};
+            for (int d = 0; d < 3; ++d) {
+                int a[3] = {i, j, k}, b[3] = {i, j, k};
+                a[d] -= 1; b[d] += 1;
+                if (iv[d] == dom.smallEnd(d) && ebc[face_index(d,0)] == BC::Dirichlet) { open[id] = 1; }
+                if (iv[d] == dom.bigEnd(d) && ebc[face_index(d,1)] == BC::Dirichlet) { open[id] = 1; }
+                if (c(a[0],a[1],a[2]) == CellKnown || c(b[0],b[1],b[2]) == CellKnown) { open[id] = 1; }
+            }
+        });
+    }
+    if (nc > 0) {
+        ParallelDescriptor::ReduceLongSum(count.data(), nc);
+        ParallelDescriptor::ReduceIntMax(open.data(), nc);
+    }
+    for (int q = 0; q < nc; ++q) {
+        ComponentInfo ci;
+        ci.id = q;
+        ci.singular = (open[q] == 0);
+        ci.ncells = count[q];
+        const int r = all_roots[q];
+        ci.pin = IntVect(AMREX_D_DECL(int(r % nx) + dom.smallEnd(0), int((r / nx) % ny) + dom.smallEnd(1), int(r / (nx*ny)) + dom.smallEnd(2)));
+        cm.comps.push_back(ci);
+    }
+    return cm;
+}
+}
+
 ComponentMap label_components (PressureProblem const& p, bool record_pin)
 {
+    if (is_masked(p)) { return label_components_masked(p); }
     ComponentMap cm;
     cm.label.define(p.ba, p.dm, 1, 0);
     cm.label.setVal(0);
@@ -232,6 +375,40 @@ void apply_operator (PressureProblem const& p, MultiFab& phi, MultiFab& out)
     const auto dx = p.geom.CellSizeArray();
     Real idx2[3] = {1.0/(dx[0]*dx[0]), 1.0/(dx[1]*dx[1]), 1.0/(dx[2]*dx[2])};
     std::array<BC,6> bc = effective_bc(p.bc, dom);
+    if (is_masked(p)) {
+        // Masked operator (frozen/masked-notes.md): gas rows only; a face to a Solid cell carries nothing, a face to a Known cell
+        // carries 2 (g - phi)/dx^2, a domain face as in the unmasked operator. Zero on Solid and Known cells.
+        iMultiFab cls = class_ghost(p);
+        MultiFab kv = known_ghost(p);
+        for (MFIter mfi(out); mfi.isValid(); ++mfi) {
+            auto const& a = phi.const_array(mfi);
+            auto const& o = out.array(mfi);
+            auto const& cl = cls.const_array(mfi);
+            auto const& g = kv.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (cl(i,j,k) != CellGas) { o(i,j,k) = Real(0); return; }
+                const int iv[3] = {i, j, k};
+                const Real c = a(i,j,k);
+                Real r = 0.0;
+                for (int d = 0; d < 3; ++d) {
+                    for (int side = 0; side < 2; ++side) {
+                        int nb[3] = {i, j, k};
+                        nb[d] += (side == 0) ? -1 : 1;
+                        const bool edge = (side == 0) ? (iv[d] == dom.smallEnd(d)) : (iv[d] == dom.bigEnd(d));
+                        if (edge && bc[face_index(d,side)] != BC::Periodic) {
+                            if (bc[face_index(d,side)] == BC::Dirichlet) { r += Real(-2.0)*c*idx2[d]; }
+                            continue;
+                        }
+                        const int kc = cl(nb[0],nb[1],nb[2]);
+                        if (kc == CellGas) { r += (a(nb[0],nb[1],nb[2]) - c) * idx2[d]; }
+                        else if (kc == CellKnown) { r += Real(2.0) * (g(nb[0],nb[1],nb[2]) - c) * idx2[d]; }
+                    }
+                }
+                o(i,j,k) = r;
+            });
+        }
+        return;
+    }
     for (MFIter mfi(out); mfi.isValid(); ++mfi) {
         auto const& a = phi.const_array(mfi);
         auto const& o = out.array(mfi);
@@ -351,7 +528,25 @@ ResidualSums residual_sums (PressureProblem const& p, MultiFab& phi, MultiFab co
     } else {
         S.r2_nopin = S.r2; S.rmax_nopin = S.rmax;
     }
-    const double bn = rhs.norm2(0), pn = phi.norm2(0);
+    double pn = phi.norm2(0);
+    if (is_masked(p)) {
+        // Norms over gas cells only: r and rhs are zero on the other cells (the common layer zeroes b there); H is Known-valued/0 there.
+        iMultiFab cls = class_ghost(p);
+        MultiFab ph(p.ba, p.dm, 1, 0);
+        MultiFab::Copy(ph, phi, 0, 0, 1, 0);
+        Long ngas = 0;
+        for (MFIter mfi(ph); mfi.isValid(); ++mfi) {
+            auto const& a = ph.array(mfi);
+            auto const& cl = cls.const_array(mfi);
+            Long n = 0;
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (cl(i,j,k) != CellGas) { a(i,j,k) = Real(0); } else { ++n; } });
+            ngas += n;
+        }
+        ParallelDescriptor::ReduceLongSum(ngas);
+        pn = ph.norm2(0);
+        S.sumw = double(ngas);
+    }
+    const double bn = rhs.norm2(0);
     S.b2 = bn*bn; S.phi2 = pn*pn; S.bmax = rhs.norm0(0);
     const auto dx = p.geom.CellSizeArray();
     const Box dom = p.geom.Domain();

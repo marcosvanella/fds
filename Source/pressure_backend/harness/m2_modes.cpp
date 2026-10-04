@@ -695,6 +695,100 @@ void run_bcmap (ParmParse&)
 
 } // namespace
 
+
+// --------------------------------------------------------------------------------------------------------------
+// mode=masked: masked single-level problem (frozen/masked-notes.md). Random Solid cells (solid_frac), an optional full Solid plane at
+// k = slab that splits the box, random Known cells above the slab (known_frac, value 0.3 + smooth), a noisy right-hand side that is also
+// non-zero on excluded cells, optional rho/KRES gauge fields. Writes <out>_{class,known,rhs,phi,label,rho,kres}.bin (doubles, x fastest)
+// and prints MASKED lines; tests/pb_test.py masked rebuilds the problem densely with numpy and compares.
+// --------------------------------------------------------------------------------------------------------------
+void run_masked (ParmParse& pp)
+{
+    Vector<int> n{12, 10, 8}; pp.queryarr("n_cell", n);
+    int mgs = 8; pp.query("mgs", mgs);
+    std::string bcs = "NN,NN,ND"; pp.query("bcpairs", bcs);
+    double solid_frac = 0.10; pp.query("solid_frac", solid_frac);
+    double known_frac = 0.0; pp.query("known_frac", known_frac);
+    int slab = -1; pp.query("slab", slab);
+    int seed = 1; pp.query("seed", seed);
+    int gauge_rho = 0; pp.query("gauge_rho", gauge_rho);
+    std::string be = "mlmg"; pp.query("backend", be);
+    std::string out; pp.query("out", out);
+    double tol = 1.0e-12; pp.query("tol_rel", tol);
+    int max_iter = 200; pp.query("max_iter", max_iter);
+    S1 s = make_s1(n, bcs, mgs);
+    iMultiFab cls(s.ba, s.dm, 1, 0);
+    MultiFab kv(s.ba, s.dm, 1, 0), rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1), rho(s.ba, s.dm, 1, 0), kres(s.ba, s.dm, 1, 0);
+    for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+        auto const& c = cls.array(mfi);
+        auto const& g = kv.array(mfi);
+        auto const& r = rhs.array(mfi);
+        auto const& ro = rho.array(mfi);
+        auto const& kr = kres.array(mfi);
+        const Real dx = s.dx;
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+            const double h1 = 0.5*(hash_noise(i + 7*seed, j, k) + 1.0);          // in [0,1]
+            const double h2 = 0.5*(hash_noise(i, j + 11*seed, k + 3) + 1.0);
+            int cc = int(pb::CellGas);
+            if (k == slab) { cc = pb::CellSolid; }
+            else if (h1 < solid_frac) { cc = pb::CellSolid; }
+            else if (known_frac > 0.0 && k > slab && h2 < known_frac) { cc = pb::CellKnown; }
+            c(i,j,k) = cc;
+            const Real x = (i+0.5)*dx, y = (j+0.5)*dx, z = (k+0.5)*dx;
+            g(i,j,k) = Real(0.3) + smooth_rhs(x, y, z);
+            r(i,j,k) = smooth_rhs(x, y, z) + Real(0.5)*hash_noise(i, j, k) + Real(0.2);
+            ro(i,j,k) = Real(1.0) + Real(0.5)*Real(std::sin(3.0*x + y)) * Real(std::cos(2.0*z));
+            kr(i,j,k) = Real(0.5)*(x*x + y*y + z*z);
+        });
+    }
+    phi.setVal(0.0);
+    pb::PressureProblem p = problem_of(s, rhs, phi);
+    p.cell_class = &cls;
+    p.known_value = &kv;
+    if (gauge_rho) { p.gauge_weight = &rho; p.gauge_offset = &kres; }
+    pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9;   // the rhs is deliberately incompatible
+    o.backend = (be == "fft") ? pb::BackendKind::FFT : (be == "hypre") ? pb::BackendKind::HYPRE : (be == "mlmg") ? pb::BackendKind::MLMG : pb::BackendKind::Auto;
+    o.tol_rel = tol; o.max_iter = max_iter;
+    pb::ComponentMap cm = pb::label_components(p);
+    pb::PressureResult r = pb::solve_pressure(p, o);
+    Print() << std::setprecision(8) << "MASKED status=" << pb::to_string(r.status) << " backend=" << (r.backend.empty() ? std::string("none") : r.backend)
+            << " iters=" << r.backend_status.iterations << " ncomp=" << r.components.size() << " residual_ok=" << int(r.residual_ok) << " nwarn=" << r.warnings.size()
+            << " true_rel2=" << r.residual_rel2 << " limit=" << r.residual_limit << " msg=[" << r.message << "]\n";
+    for (auto const& c : r.components) {
+        Print() << std::setprecision(17) << "MASKEDCOMP id=" << c.id << " singular=" << int(c.singular) << " ncells=" << c.ncells << " pin=" << c.pin[0] << "," << c.pin[1] << "," << c.pin[2]
+                << " removed_mean=" << c.removed_mean << " gauge_shift=" << c.gauge_shift << "\n";
+    }
+    if (r.status == pb::Status::Ok || r.status == pb::Status::NotConverged) {
+        // exact checks done here: excluded cells hold 0 / g
+        double e_solid = 0.0, e_known = 0.0;
+        for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+            auto const& f = phi.const_array(mfi);
+            auto const& c = cls.const_array(mfi);
+            auto const& g = kv.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (c(i,j,k) == pb::CellSolid) { e_solid = std::max(e_solid, std::abs(double(f(i,j,k)))); }
+                if (c(i,j,k) == pb::CellKnown) { e_known = std::max(e_known, std::abs(double(f(i,j,k)) - double(g(i,j,k)))); }
+            });
+        }
+        ParallelDescriptor::ReduceRealMax(e_solid); ParallelDescriptor::ReduceRealMax(e_known);
+        mcheck(e_solid == 0.0 && e_known == 0.0, "masked: H is 0 on Solid cells and g on Known cells");
+    }
+    if (!out.empty()) {
+        MultiFab clsd(s.ba, s.dm, 1, 0), lab(s.ba, s.dm, 1, 0);
+        for (MFIter mfi(clsd); mfi.isValid(); ++mfi) {
+            auto const& d = clsd.array(mfi); auto const& c = cls.const_array(mfi); auto const& l = lab.array(mfi); auto const& cl = cm.label.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { d(i,j,k) = c(i,j,k); l(i,j,k) = cl(i,j,k); });
+        }
+        write_field(out + "_class.bin", gather_s(clsd, s.domain));
+        write_field(out + "_known.bin", gather_s(kv, s.domain));
+        write_field(out + "_rhs.bin", gather_s(rhs, s.domain));
+        write_field(out + "_phi.bin", gather_s(phi, s.domain));
+        write_field(out + "_label.bin", gather_s(lab, s.domain));
+        write_field(out + "_rho.bin", gather_s(rho, s.domain));
+        write_field(out + "_kres.bin", gather_s(kres, s.domain));
+    }
+}
+
 int run_m2_mode (std::string const& mode, ParmParse& pp)
 {
     if (mode == "trigger1") { run_trigger1(pp); }
@@ -704,6 +798,7 @@ int run_m2_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "bcdata") { run_bcdata(pp); }
     else if (mode == "fftraw") { run_fftraw(pp); }
     else if (mode == "bcmap") { run_bcmap(pp); }
+    else if (mode == "masked") { run_masked(pp); }
     else { return -1; }
     return g_m2fail;
 }
