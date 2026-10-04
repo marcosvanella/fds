@@ -25,5 +25,10 @@ target_link_libraries(pressure_backend PUBLIC AMReX::amrex)
 add_executable(pb_harness main.cpp composite_modes.cpp m2_modes.cpp)
 target_link_libraries(pb_harness PRIVATE pressure_backend)
 
+# M4: FDS-derived frozen cases (own main, reads FDS dumps; frozen/fds_*/README.md)
+add_executable(pb_fds_frozen m4_modes.cpp)
+target_link_libraries(pb_fds_frozen PRIVATE pressure_backend)
+
 enable_testing()
 add_subdirectory(${PB_DIR}/tests ${CMAKE_CURRENT_BINARY_DIR}/tests)
+include(${PB_DIR}/tests/m4_fds_frozen.cmake)   # pb_fds_frozen_* tests
