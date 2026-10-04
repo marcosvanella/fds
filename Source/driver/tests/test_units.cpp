@@ -38,6 +38,7 @@
 #include "ExactSum.H"
 #include "LevelRegistry.H"
 #include "PressureBcMap.H"
+#include "tests/two_level_transport.H"
 #include "RegistryTransfer.H"
 
 using namespace fdsamr;
@@ -978,6 +979,196 @@ long test_registry_transfer(int nranks)
 
 }  // namespace
 
+// ---- S12: two-level setup shared by the transport and the species-average tests (periodic x and z, 16 x 1 x 16 coarse cells, 4 boxes; fine patches by coarse index range)
+struct TwoLevelSetup {
+    Level0 l0;
+    std::unique_ptr<Fields> F0;
+    std::unique_ptr<SideData> sd0;
+    std::unique_ptr<LevelRegistry> reg;
+    std::unique_ptr<RegistryTransfer> tr;
+    amrex::IntVect rr{2, 1, 2};
+    double plo[3] = {-1.0, -1.0, -1.0};
+    explicit TwoLevelSetup(int nranks, bool nonuniform_rho = true)
+    {
+        Layout L0{"ns2d", {16, 1, 16}, {2, 1, 2}, {1, 0, 1}};
+        l0 = make_level0(L0, nranks);
+        F0.reset(new Fields(l0, 2));
+        sd0.reset(new SideData(l0, layout_cell_walls(l0)));
+        reg.reset(new LevelRegistry(l0.dom, 2));
+        reg->adopt_level0(l0, *F0, *sd0);
+        const double PI = 3.14159265358979323846;
+        const double dx0 = l0.dx[0], dz0 = l0.dx[2];
+        const double amp = 0.3;
+        auto psi = [&](int i, int k) { return amp * std::sin(2.0 * PI * (plo[0] + i * dx0) / 8.0) * std::cos(2.0 * PI * (plo[2] + k * dz0) / 2.0); };
+        auto rho_f = [&](double x, double z) { return 1.0 + (nonuniform_rho ? 0.1 : 0.0) * std::sin(2.0 * PI * x / 8.0) * std::cos(2.0 * PI * z / 2.0); };
+        auto z0_f = [&](double x, double z) { return 0.35 + 0.2 * std::cos(2.0 * PI * x / 8.0) * std::sin(2.0 * PI * z / 2.0); };
+        for (amrex::MFIter mfi((*F0)["RHO"]); mfi.isValid(); ++mfi) {
+            auto r = (*F0)["RHO"].array(mfi); auto rs = (*F0)["RHOS"].array(mfi); auto t = (*F0)["TMP"].array(mfi); auto z = (*F0)["ZZ"].array(mfi); auto zs = (*F0)["ZZS"].array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                const double x = plo[0] + (i + 0.5) * dx0, zc = plo[2] + (k + 0.5) * dz0;
+                r(i, j, k) = rho_f(x, zc); rs(i, j, k) = r(i, j, k); t(i, j, k) = 300.0 + 10.0 * x;
+                z(i, j, k, 0) = z0_f(x, zc); z(i, j, k, 1) = 1.0 - z0_f(x, zc); zs(i, j, k, 0) = z(i, j, k, 0); zs(i, j, k, 1) = z(i, j, k, 1);
+            });
+        }
+        for (amrex::MFIter mfi((*F0)["U"]); mfi.isValid(); ++mfi) {
+            auto u = (*F0)["U"].array(mfi); auto us = (*F0)["US"].array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { u(i, j, k) = (psi(i, k + 1) - psi(i, k)) / dz0; us(i, j, k) = u(i, j, k); });
+        }
+        for (amrex::MFIter mfi((*F0)["W"]); mfi.isValid(); ++mfi) {
+            auto w = (*F0)["W"].array(mfi); auto ws = (*F0)["WS"].array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { w(i, j, k) = -(psi(i + 1, k) - psi(i, k)) / dx0; ws(i, j, k) = w(i, j, k); });
+        }
+        for (const char* nm : {"U", "W", "US", "WS", "RHO", "RHOS", "TMP", "ZZ", "ZZS", "V", "VS"}) (*F0)[nm].FillBoundary(l0.geom.periodicity());
+        tr.reset(new RegistryTransfer(*reg, 2));
+    }
+    fdsrt::LevelLayout fine_layout(int level, int x0, int x1, int z0, int z1, int nbx) const
+    {
+        fdsrt::LevelLayout fl;
+        fl.level = level; fl.ref_ratio_from_parent = rr;
+        amrex::Box fdom = amrex::refine(l0.geom.Domain(), rr);
+        amrex::RealBox rb(l0.geom.ProbLo(), l0.geom.ProbHi());
+        amrex::Array<int, 3> per{l0.dom.periodic[0], l0.dom.periodic[1], l0.dom.periodic[2]};
+        fl.geom.define(fdom, rb, 0, per);
+        amrex::BoxList bl;
+        const int nx = 2 * (x1 - x0 + 1);
+        for (int q = 0; q < nbx; ++q) bl.push_back(amrex::Box(amrex::IntVect(2 * x0 + nx * q / nbx, 0, 2 * z0), amrex::IntVect(2 * x0 + nx * (q + 1) / nbx - 1, 0, 2 * z1 + 1)));
+        fl.ba.define(bl); fl.dm.define(fl.ba);
+        return fl;
+    }
+    void make_fine(const fdsrt::LevelLayout& f) { reg->begin_regrid(); reg->make_level(f); tr->fill_new_level(f); tr->hierarchy_done(false); reg->end_regrid(); }
+    void remake_fine(const fdsrt::LevelLayout& f) { reg->begin_regrid(); reg->remake_level(f); tr->fill_remade_level(f); tr->hierarchy_done(false); reg->end_regrid(); }
+};
+
+struct TwoLevelResult { double rel_rho = 0, rel_rz[2] = {0, 0}, rel_after_regrid = 0, max_div = 0, worst_if_mean = 0; long steps = 0; };
+
+TwoLevelResult run_two_level(int nranks, bool overwrite, int nsteps, bool regrid)
+{
+    TwoLevelSetup S(nranks);
+    S.make_fine(S.fine_layout(1, 4, 11, 4, 11, 2));
+    TwoLevelResult R;
+    // coarse interface-face velocity = mean of the fine faces that tile it (all x faces of the covered region; the z faces likewise)
+    {
+        const Level& lv = S.reg->level(1);
+        Fields& F1 = S.reg->fields(1); Fields& F0 = *S.F0;
+        amrex::BoxArray cbx = lv.ba; cbx.coarsen(S.rr); cbx.surroundingNodes(0);
+        amrex::MultiFab uc(cbx, lv.dm, 1, 0); uc.ParallelCopy(F0["U"], 0, 0, 1, 0, 0);
+        amrex::BoxArray cbz = lv.ba; cbz.coarsen(S.rr); cbz.surroundingNodes(2);
+        amrex::MultiFab wc(cbz, lv.dm, 1, 0); wc.ParallelCopy(F0["W"], 0, 0, 1, 0, 0);
+        double worst = 0.0;
+        for (amrex::MFIter mfi(F1["U"]); mfi.isValid(); ++mfi) {
+            auto u = F1["U"].const_array(mfi); auto c = uc.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                if (i % 2 != 0 || k % 2 != 0) return;   // the first fine face of the pair that tiles coarse face (i/2, k/2)
+                const double mean = 0.5 * (u(i, j, k) + u(i, j, k + 1));
+                worst = std::max(worst, std::abs(mean - c(i / 2, 0, k / 2)));
+            });
+        }
+        for (amrex::MFIter mfi(F1["W"]); mfi.isValid(); ++mfi) {
+            auto w = F1["W"].const_array(mfi); auto c = wc.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                if (i % 2 != 0 || k % 2 != 0) return;
+                const double mean = 0.5 * (w(i, j, k) + w(i + 1, j, k));
+                worst = std::max(worst, std::abs(mean - c(i / 2, 0, k / 2)));
+            });
+        }
+        amrex::ParallelAllReduce::Max(worst, amrex::ParallelContext::CommunicatorSub());
+        R.worst_if_mean = worst;
+    }
+    const double umax = 0.3 * 3.14159265358979 * 1.0;   // amplitude * pi (x velocity bound)
+    const double dt = 0.4 * (0.5 / 2.0) / umax;
+    fdstest::RegTransport T(*S.reg, *S.tr, dt, 0.005);
+    T.set_overwrite(overwrite);
+    T.pull();
+    const auto m0 = T.totals();
+    const double rho0 = m0[0] + m0[1];
+    double worst_regrid = 0.0;
+    for (int s = 1; s <= nsteps; ++s) {
+        T.step();
+        ++R.steps;
+        if (regrid && (s == nsteps / 3 || s == 2 * nsteps / 3)) {
+            S.remake_fine(s == nsteps / 3 ? S.fine_layout(1, 3, 12, 4, 11, 5) : S.fine_layout(1, 6, 13, 5, 12, 2));
+            T.rebuild(); T.set_overwrite(overwrite); T.pull();
+            const auto mm = T.totals();
+            worst_regrid = std::max(worst_regrid, std::abs(mm[0] + mm[1] - rho0) / rho0);
+        }
+    }
+    const auto m1 = T.totals();
+    R.rel_rho = std::abs(m1[0] + m1[1] - rho0) / rho0;
+    for (int n = 0; n < 2; ++n) R.rel_rz[n] = std::abs(m1[n] - m0[n]) / m0[n];
+    R.rel_after_regrid = worst_regrid;
+    for (int l = 0; l < S.reg->num_levels(); ++l) R.max_div = std::max(R.max_div, T.max_divergence_error(l));
+    return R;
+}
+
+long test_two_level_transport(int nranks)
+{
+    const bool io = amrex::ParallelDescriptor::IOProcessor();
+    const TwoLevelResult on = run_two_level(nranks, true, 45, true);
+    const TwoLevelResult off = run_two_level(nranks, false, 45, false);
+    if (io) std::printf("TWOLEVEL (pre-validation) overwrite ON, %ld steps, 2 regrids: composite rho change %.3e, rho*Z1 %.3e, rho*Z2 %.3e (relative), after a regrid %.3e, max|div u - D| %.3e, interface velocity vs mean of fine faces %.3e\n",
+                        on.steps, on.rel_rho, on.rel_rz[0], on.rel_rz[1], on.rel_after_regrid, on.max_div, on.worst_if_mean);
+    if (io) std::printf("TWOLEVEL (pre-validation) overwrite OFF (negative control), %ld steps: composite rho change %.3e, rho*Z1 %.3e, rho*Z2 %.3e\n", off.steps, off.rel_rho, off.rel_rz[0], off.rel_rz[1]);
+    CHECK_MSG(on.worst_if_mean < 1e-13, "coarse interface-face velocity equals the mean of the fine faces (worst " + std::to_string(on.worst_if_mean) + ")");
+    CHECK_MSG(on.rel_rho < 1e-12 && on.rel_rz[0] < 1e-12 && on.rel_rz[1] < 1e-12, "composite mass and rho*Z conserved with the overwrite ON (rho " + std::to_string(on.rel_rho) + ")");
+    CHECK_MSG(on.rel_after_regrid < 1e-12, "composite mass unchanged by the regrids (" + std::to_string(on.rel_after_regrid) + ")");
+    CHECK_MSG(on.max_div < 1e-10, "max |div u - D| of the composite velocity (" + std::to_string(on.max_div) + ")");
+    CHECK_MSG(off.rel_rho > 1e-8 || off.rel_rz[0] > 1e-8, "negative control: without the overwrite the composite mass drifts (" + std::to_string(off.rel_rz[0]) + ")");
+    return 0;
+}
+
+// Architect ruling: species are averaged down mass-weighted (rho*Z), never as Z. Non-uniform rho and Z across the children of every parent: after hierarchy_done the coarse rho*Z must be
+// the plain mean of the children's rho*Z to round-off. A linear average of Z would break this by ~1e-3 (shown here by computing what it would give), so the test fails for it.
+long test_species_average(int nranks)
+{
+    TwoLevelSetup S(nranks);
+    S.make_fine(S.fine_layout(1, 4, 11, 4, 11, 2));
+    Fields& F1 = S.reg->fields(1); Fields& F0 = *S.F0;
+    const double PI = 3.14159265358979323846;
+    for (amrex::MFIter mfi(F1["RHO"]); mfi.isValid(); ++mfi) {
+        auto r = F1["RHO"].array(mfi); auto z = F1["ZZ"].array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            r(i, j, k) = 1.0 + 0.5 * std::sin(1.3 * i + 0.7 * k + 0.2);                 // strongly non-uniform across the children of a parent
+            z(i, j, k, 0) = 0.5 + 0.4 * std::cos(0.9 * i - 1.1 * k + PI / 7.0); z(i, j, k, 1) = 1.0 - z(i, j, k, 0);
+        });
+    }
+    // expected: mean of the children of rho*Z (what is conserved) and, for the comparison, rho_mean * Z_linear_mean (what a linear Z average would give)
+    amrex::BoxArray cba = S.reg->level(1).ba; cba.coarsen(S.rr);
+    amrex::MultiFab want(cba, S.reg->level(1).dm, 4, 0);   // 0,1: mean rho*Z_n; 2,3: mean rho * mean Z_n (linear)
+    for (amrex::MFIter mfi(F1["RHO"]); mfi.isValid(); ++mfi) {
+        auto r = F1["RHO"].const_array(mfi); auto z = F1["ZZ"].const_array(mfi); auto w = want.array(mfi);
+        const amrex::Box cb = amrex::coarsen(mfi.validbox(), S.rr);
+        amrex::LoopOnCpu(cb, [&](int ic, int jc, int kc) {
+            double sr = 0, srz[2] = {0, 0}, sz[2] = {0, 0}; int cnt = 0;
+            for (int k = kc * 2; k < kc * 2 + 2; ++k) for (int i = ic * 2; i < ic * 2 + 2; ++i) {
+                ++cnt; sr += r(i, 0, k);
+                for (int n = 0; n < 2; ++n) { srz[n] += r(i, 0, k) * z(i, 0, k, n); sz[n] += z(i, 0, k, n); }
+            }
+            for (int n = 0; n < 2; ++n) { w(ic, jc, kc, n) = srz[n] / cnt; w(ic, jc, kc, 2 + n) = (sr / cnt) * (sz[n] / cnt); }
+        });
+    }
+    S.tr->hierarchy_done(false);
+    double worst_mw = 0.0, worst_lin = 0.0, scale = 0.0;
+    amrex::MultiFab w0(S.l0.ba, S.l0.dm, 4, 0); w0.setVal(-1.0e300); w0.ParallelCopy(want, 0, 0, 4, 0, 0);
+    for (amrex::MFIter mfi(F0["RHO"]); mfi.isValid(); ++mfi) {
+        auto r = F0["RHO"].const_array(mfi); auto z = F0["ZZ"].const_array(mfi); auto w = w0.const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            if (w(i, j, k, 0) < -1.0e299) return;
+            for (int n = 0; n < 2; ++n) {
+                worst_mw = std::max(worst_mw, std::abs(r(i, j, k) * z(i, j, k, n) - w(i, j, k, n)));
+                worst_lin = std::max(worst_lin, std::abs(w(i, j, k, 2 + n) - w(i, j, k, n)));
+                scale = std::max(scale, std::abs(w(i, j, k, n)));
+            }
+        });
+    }
+    amrex::ParallelAllReduce::Max(worst_mw, amrex::ParallelContext::CommunicatorSub());
+    amrex::ParallelAllReduce::Max(worst_lin, amrex::ParallelContext::CommunicatorSub());
+    amrex::ParallelAllReduce::Max(scale, amrex::ParallelContext::CommunicatorSub());
+    if (amrex::ParallelDescriptor::IOProcessor()) std::printf("SPECIES-AVG coarse rho*Z vs mean of children: %.3e (scale %.3f); a linear-Z average would differ by %.3e\n", worst_mw, scale, worst_lin);
+    CHECK_MSG(worst_mw < 1e-14 * std::max(scale, 1.0), "coarse rho*Z equals the mean of the children's rho*Z to round-off (worst " + std::to_string(worst_mw) + ")");
+    CHECK_MSG(worst_lin > 1e-4, "the test is sensitive: a linear Z average would violate the conservation by " + std::to_string(worst_lin));
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     amrex::Initialize(argc, argv, false);
@@ -1005,6 +1196,8 @@ int main(int argc, char** argv)
             fails += test_exact_sum(nranks);
             fails += test_levels(nranks);
             fails += test_registry_transfer(nranks);
+            fails += test_species_average(nranks);
+            fails += test_two_level_transport(nranks);
             fails += test_pressure_bc_map(nranks);
             if (amrex::ParallelDescriptor::IOProcessor()) std::printf("%s: %ld failing checks\n", fails == 0 ? "ALL PASS" : "SOME FAILED", fails);
         }

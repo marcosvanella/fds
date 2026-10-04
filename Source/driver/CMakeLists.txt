@@ -47,6 +47,7 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/MLMGBackend.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tests/selftest_fds.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tests/kernelcheck.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tests/level_bind_check.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90
@@ -63,6 +64,10 @@ target_sources(fds PRIVATE
 set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_box_obj.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_flux_hooks.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_wall_seam.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_amrex_hooks.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
     PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
+# Role 2's composite (multi-level) solve lives in its own file once it exists (PressureIface.cpp then references pb::solve_composite); listed only when the file is present.
+if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeSolve.cpp)
+    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeSolve.cpp)
+endif()
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 
@@ -73,6 +78,10 @@ file(READ ${_fds_mesh_f90} _fds_mesh_src)
 if (_fds_mesh_src MATCHES "FINE_LEVEL_TYPE")
     target_compile_definitions(fds PRIVATE "$<$<COMPILE_LANGUAGE:Fortran>:FDS_FINE_B>")
     message(STATUS "Patch 0007 found in Source/mesh.f90: FDS_FINE_B defined")
+    # Fine-level mesh objects (BUILD_FINE_BOX, fds_fine_level_create/destroy) for TimeLoop::bind_level; FDS_HAVE_FINE_LEVEL tells the C++ side that they exist.
+    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/fds_fine_level.f90)
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_fine_level.f90 PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
+    target_compile_definitions(fds PRIVATE FDS_HAVE_FINE_LEVEL)
 endif()
 
 # D-056 option B DRAFT (patch 0007, mesh.f90): needs the patch applied to the tree; OFF by default and not used for physics. Adds draft/fds_fine_mesh_b.f90 and the
@@ -105,7 +114,9 @@ add_executable(driver_unit_tests
     ${CMAKE_CURRENT_LIST_DIR}/RegistryTransfer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/CellTransfer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/FaceTransfer.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/LevelOps.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/LevelOps.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/FluxOverrideOps.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/FluxStageRunner.cpp)
 target_include_directories(driver_unit_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend)
 target_compile_options(driver_unit_tests PRIVATE -Wall -Wextra)
 target_link_libraries(driver_unit_tests PRIVATE AMReX::amrex MPI::MPI_CXX)

@@ -21,6 +21,7 @@
 #include "FdsSetup.H"
 #include "PressureBcMap.H"
 #include "TimeLoop.H"
+namespace fdsamr { int level_bind_check(TimeLoop& loop, const Level0& l0, double dt0); }   // tests/level_bind_check.cpp
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
 extern "C" void fds_p_params(int* ip, double* rp);
@@ -115,6 +116,14 @@ int main(int argc, char** argv)
                 const int nfail = fds_selftest(l0);
                 amrex::Print() << (nfail == 0 ? "SELFTEST PASS" : "SELFTEST FAIL") << "\n";
             }
+            if (argc > 2 && std::strcmp(argv[2], "--level-bind-check") == 0) {
+                // S12: ratio-1 copy of level 0 bound through TimeLoop::bind_level, stage by stage comparison with level 0 (tests/level_bind_check.cpp)
+                fdsamr::RunOptions ro;
+                ro.quiet = true;
+                fdsamr::TimeLoop loop(l0, dt, ro);
+                const int nfail = fdsamr::level_bind_check(loop, l0, dt);
+                if (nfail != 0) amrex::Abort("level bind check failed");
+            }
             if (argc > 2 && std::strcmp(argv[2], "--run") == 0) {
                 // --run [--steps N] [--outdir D] [--chid C] [--quiet] [--exact-zone-sums]: the C++ time loop (S5)
                 fdsamr::RunOptions ro;
@@ -134,6 +143,7 @@ int main(int argc, char** argv)
                 if (fine_shadow && fds_fine_b_shadow_enable(fine_build) != 0) amrex::Abort("--fine-b-shadow needs a single level-0 mesh");
 #else
                 if (fine_shadow) amrex::Abort("--fine-b-shadow needs a build with -DFDS_AMR_FINE_B_DRAFT=ON (patches 0007 and 0008)");
+                (void)fine_build;   // only the draft build reads it
 #endif
                 fdsamr::TimeLoop loop(l0, dt, ro);
                 int nfail = loop.run();

@@ -70,6 +70,18 @@ public:
     LevelRegistry& registry() { return *m_reg; }
     // Levels that advance() steps: those with an FDS binding. 1 until fine-level FDS MESH_TYPE objects exist; the registry may hold more levels (layout, Fields, SideData).
     int num_levels() const;
+    // ---- S12 level binding. bind_level(lev): the registry level `lev` (made by LevelRegistry::make_level, data filled by the transfer) gets FDS fine-box mesh objects (BUILD_FINE_BOX of
+    // fds_fine_level.f90, patch 0007 DRAFT), views onto its Fields (FDS_FINE_B_SET_VIEW), a BcStep (ext_ghost on) and the clip scratch; afterwards every per-level stage entry point and the
+    // flux hooks accept `lev` (FDS mesh number of box i is fds0 + i + 1 > NMESHES). Levels are bound in order; only the top bound level can be rebound (call it again after a regrid that remade it,
+    // or unbind_level first when it was cleared). A tree without patch 0007 aborts with a message. The registry level object must stay alive while bound. advance() refuses to run with a bound level > 0
+    // (the composite pressure solve is not built): drive the stage entry points instead. The single-level path (no bind_level call) is unchanged.
+    // The global FDS state the kernels read (PREDICTOR/CORRECTOR, FIRST_PASS, ICYC, density limits) as advance() sets it before a stage, and the reset of the divergence integrals
+    // (INIT_DIV) that advance() does before WALL_BC of the predictor. A driver that runs the per-level stage entry points itself calls them at the same places.
+    void stage_state(bool predictor, bool first_pass);
+    void stage_init_divergence();
+    void bind_level(int lev);
+    void unbind_level(int lev);
+    bool level_bound(int lev) const;
     // Per-level stage entry points. Each is the exact body that advance() runs for that level at that position of MAIN_LOOP (same calls, same order), on the level's boxes
     // of this rank. `predictor` selects the stage (true = predictor). t and dt are the loop's current time and step. A level without an FDS binding aborts with a
     // message naming the missing piece (no fine-level physics is faked). The pressure solve, the zone sums and the outputs are NOT per level: they stay global
@@ -122,20 +134,24 @@ private:
     std::vector<StepRecord> m_steps;
 };
 
-// Adapter that implements the three-phase fdsrt::FluxAccess protocol (RegridInterface.H) on a TimeLoop. FDS orders the work of one stage as
-// viscosity, DENSITY (advective fluxes, cell update), DIVERGENCE_PART_1 (diffusive fluxes), so the adapter maps the phases as follows:
-//   compute_stage_fluxes(l, p)  flux_readout_adv: ADV face fluxes of the stage, no cell update (stage_viscosity must have run);
-//   apply_flux_divergence(l, p) stage_density with the ADV override list, then DIVERGENCE_PART_1 with a DIF readout (DIF arrays valid after this call);
-//   run_divergence_part1(l)     after apply_flux_divergence: the DIF override list is applied (DIVERGENCE_PART_1 re-run, zone sums restored; a no-op
-//                               without a list). Without a preceding apply_flux_divergence on the level it is a plain stage_divergence1 (new levels after a regrid).
-// With no override set the sequence is bitwise the one-call result (tests/run_flux_hook_check.sh). stage_flux(l, Adv, d) is valid after
-// compute_stage_fluxes, stage_flux(l, Dif, d) after apply_flux_divergence. The Role 3 loop therefore reads ADV and sets ADV overrides before apply_flux_divergence and
-// reads DIF and sets DIF overrides between apply_flux_divergence and run_divergence_part1. max_divergence_error (D-058) is max |div u - D| over the valid cells of the level on this rank (uniform Cartesian differences of the level's U, V, W and D).
+// Adapter that implements the fdsrt::FluxAccess protocol (RegridInterface.H) on a TimeLoop. FDS orders the work of one stage as viscosity, DENSITY (advective fluxes, cell update),
+// exchanges / boundary steps / velocity flux / WALL_BC, DIVERGENCE_PART_1 (diffusive fluxes); the adapter maps the phases as follows (D-061, notes/flux-stage-wiring.md, S12 order):
+//   compute_stage_fluxes(l, p)  flux_readout_adv: ADV face fluxes of the stage, no cell update (stage_viscosity must have run); stage_flux(l, Adv, d) valid afterwards;
+//   apply_flux_divergence(l, p) stage_density with the ADV override list (cell update only; NO divergence-1 here);
+//   readout_dif(l)              after the exchange / boundary / velocity-flux / WALL_BC positions: DIVERGENCE_PART_1 with the DIF read-out; stage_flux(l, Dif, d) valid afterwards;
+//   run_divergence_part1(l)     after readout_dif: the DIF override list is applied (DIVERGENCE_PART_1 re-run, zone sums restored; a no-op without a list). Without a preceding
+//                               readout_dif on the level it is a plain stage_divergence1 (new levels after a regrid).
+// The caller therefore reads ADV and sets the ADV overrides before apply_flux_divergence, and reads DIF and sets the DIF overrides between readout_dif and run_divergence_part1, every
+// phase over all levels (finest first for the apply phases) before the next. With no override set the sequence is bitwise the plain stage (tests/run_flux_hook_check.sh).
+// max_divergence_error (D-058) is max |div u - D| over the valid cells of the level on this rank (uniform Cartesian differences of the level's U, V, W and D).
 class FluxStages : public fdsrt::FluxAccess {
 public:
     explicit FluxStages(TimeLoop& tl) : m_tl(tl) {}
     void compute_stage_fluxes(int level, bool predictor) override;
     void apply_flux_divergence(int level, bool predictor) override;
+    // D-061 order (notes/flux-stage-wiring.md): the DIF read-out is its own phase, after the exchange / boundary / velocity-flux / WALL_BC positions of the stage. readout_dif(level) runs it
+    // (DIVERGENCE_PART_1 with the DIF read-out); stage_flux(level, Dif, d) is valid after it; run_divergence_part1(level) then applies the DIF override (re-run) or, without a read-out, is a plain divergence-1.
+    void readout_dif(int level);
     const amrex::MultiFab& stage_flux(int level, fdsrt::FluxKind kind, int dir) const override;
     void set_flux_override(int level, fdsrt::FluxKind kind, const std::vector<std::vector<fdsrt::FluxOverride>>& per_local_box) override;
     double local_dt(int level) const override;

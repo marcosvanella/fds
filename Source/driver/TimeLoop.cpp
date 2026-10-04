@@ -98,6 +98,11 @@ void fds_p_get_err(int nm, double* pe, double* ve, double* ptb);
 void fds_p_set_wall_counter(int n);
 // fds_flux_hooks.f90 (notes/flux-hooks-design.md)
 void fds_flux_reserve(int ntot);
+int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext, void* p);   // fds_box_obj.f90: 0 ok, 3 no fine-level support in this tree
+#ifdef FDS_HAVE_FINE_LEVEL
+int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
+int fds_fine_level_destroy(int lev);
+#endif
 int fds_wseam_refresh(int nm);
 void fds_wseam_counts(int nm, int* next, int* nint);
 int fds_wseam_upload(int nm);
@@ -179,6 +184,90 @@ struct TimeLoop::Impl {
         select(0);
     }
     int total_boxes() const { return lc.empty() ? 0 : lc.back().off + lc.back().nbox; }
+
+    // ---- S12 level binding (TimeLoop::bind_level): a registry level > 0 gets FDS fine-box mesh objects (fds_fine_level.f90, patch 0007), views onto its Fields, a BcStep and the
+    // scratch MultiFabs of the D-031 clip, and becomes level `lev` of lc. Only the top bound level can be unbound / rebound (mesh numbers of the levels above would move).
+    struct OwnLevel { std::unique_ptr<amrex::MultiFab> drho, dzz; std::unique_ptr<BcStep> bc; };
+    std::vector<OwnLevel> own;                                   // own[lev-1]
+    static int view_code(const std::string& n)
+    {
+        static const char* names[22] = {"U", "V", "W", "US", "VS", "WS", "D", "DS", "H", "HS", "KRES", "FVX", "FVY", "FVZ", "RHO", "RHOS", "MU", "TMP", "Q", "RSUM", "ZZ", "ZZS"};
+        for (int i = 0; i < 22; ++i) if (n == names[i]) return i + 1;
+        return 0;
+    }
+    void bind_level(int lev)
+    {
+#ifndef FDS_HAVE_FINE_LEVEL
+        die("bind_level(" + std::to_string(lev) + "): this build has no fine-level mesh objects (patch 0007 is not applied to Source/mesh.f90; see notes/level-interface.md section 3)");
+#else
+        if (lev < 1) die("bind_level: level 0 is bound at construction");
+        if (!L.m_reg || !L.m_reg->has_level(lev)) die("bind_level(" + std::to_string(lev) + "): the level is not in the registry (make_level first)");
+        if (lev > static_cast<int>(lc.size())) die("bind_level(" + std::to_string(lev) + "): levels are bound in order, the next one is " + std::to_string(lc.size()));
+        if (lev < static_cast<int>(lc.size()) - 1) die("bind_level(" + std::to_string(lev) + "): only the top bound level can be rebound");
+        if (lev == static_cast<int>(lc.size()) - 1) unbind_level(lev);
+        const Level& Lv = L.m_reg->level(lev);
+        Fields& F = L.m_reg->fields(lev);
+        const int nb = static_cast<int>(Lv.ba.size());
+        const int me = amrex::ParallelDescriptor::MyProc();
+        std::vector<int> ijk(3 * nb), loc(nb);
+        std::vector<double> xb(6 * nb);
+        for (int i = 0; i < nb; ++i) {
+            const amrex::Box b = Lv.ba[i];
+            for (int d = 0; d < 3; ++d) {
+                ijk[3 * i + d] = b.length(d);
+                xb[6 * i + 2 * d] = Lv.geom.ProbLo(d) + b.smallEnd(d) * Lv.dx[d];
+                xb[6 * i + 2 * d + 1] = Lv.geom.ProbLo(d) + (b.bigEnd(d) + 1) * Lv.dx[d];
+            }
+            loc[i] = (Lv.dm[i] == me) ? 1 : 0;
+        }
+        int nm0 = 0;
+        {
+            const int ierr = fds_fine_level_create(lev, nb, ijk.data(), xb.data(), loc.data(), &nm0);
+            if (ierr != 0) die("bind_level(" + std::to_string(lev) + "): fds_fine_level_create failed (code " + std::to_string(ierr) + (ierr == 3 ? ": the level-0 meshes of this rank have more than one pressure zone" : "") + ")");
+        }
+        for (const auto& sp : field_table()) {
+            const int which = view_code(sp.name);
+            if (which == 0 || !F.has(sp.name)) continue;
+            amrex::MultiFab& mf = F[sp.name];
+            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                const amrex::Box cb = Lv.ba[mfi.index()];
+                const FdsBounds nbd = fds_bounds(sp, cb);
+                const int lb[4] = {nbd.lb[0], nbd.lb[1], nbd.lb[2], 1};
+                const int ext[4] = {nbd.ext[0], nbd.ext[1], nbd.ext[2], mf[mfi].nComp()};
+                if (fds_fine_b_set_view(lev, mfi.index() + 1, which, lb, ext, mf[mfi].dataPtr()) != 0)
+                    die(std::string("bind_level: cannot bind the view of ") + sp.name + " on level " + std::to_string(lev));
+            }
+        }
+        own.resize(lev);
+        OwnLevel& o = own[lev - 1];
+        o.drho.reset(new amrex::MultiFab(Lv.ba, Lv.dm, 1, 1));
+        o.dzz.reset(new amrex::MultiFab(Lv.ba, Lv.dm, std::max(1, ns), 0));
+        o.drho->setVal(0.0); o.dzz->setVal(0.0);
+        o.bc.reset(new BcStep(Lv, F));
+        o.bc->ext_ghost = true;   // requirement of levels > 0 (BcStep::exchange): the driver saves the face velocities, MATCH_VELOCITY is not run
+        LevelCtx x;
+        x.lev = &Lv; x.F = &F; x.bc = o.bc.get(); x.sd = &L.m_reg->side_data(lev); x.drho = o.drho.get(); x.dzz = o.dzz.get();
+        x.nbox = nb; x.fds0 = nm0; x.off = total_boxes();
+        lc.push_back(x);      // may move lc: c is reset below
+        dt_new.resize(total_boxes(), L.m_dt);
+        chg.resize(total_boxes(), 0);
+        select(0);
+#endif
+    }
+    void unbind_level(int lev)
+    {
+#ifdef FDS_HAVE_FINE_LEVEL
+        if (lev < 1 || lev != static_cast<int>(lc.size()) - 1) die("unbind_level(" + std::to_string(lev) + "): only the top bound level (> 0) can be unbound");
+        if (fds_fine_level_destroy(lev) != 0) die("unbind_level: fds_fine_level_destroy failed");
+        lc.pop_back();
+        own.resize(lev - 1);
+        if (static_cast<int>(sfx.size()) > lev) sfx.resize(lev);   // the stage flux arrays of the level are re-registered with the next bind
+        dt_new.resize(total_boxes()); chg.resize(total_boxes());
+        select(0);
+#else
+        die("unbind_level: no fine-level support in this build");
+#endif
+    }
     bool local(int i) const { return c ? c->lev->dm[i] == amrex::ParallelDescriptor::MyProc() : is_local(l0, i); }
 
     // ------------------------------------------------------------ setup
@@ -363,7 +452,7 @@ struct TimeLoop::Impl {
     bool ext_ghost = true;   // EXTERNAL_GHOSTS_FILLED (patches 0003/0004); FDSTL_EXTGHOST=0 returns to the OMESH-average route of FDS
     void iface(bool on, bool all = false)
     {
-        if (!iface_mode) return;
+        if (!iface_mode || lev_of_c() > 0) return;   // a fine box has no FDS WALL cells and no box-interface walls (its faces are filled by the ghost hook)
         const amrex::Box dom = c->lev->geom.Domain();
         each_local([&](int nm) {
             const amrex::Box b = c->lev->ba[bi(nm)];
@@ -833,6 +922,7 @@ struct TimeLoop::Impl {
     // ------------------------------------------------------------ one MAIN_LOOP iteration
     bool advance()
     {
+        if (lc.size() > 1) die("advance(): level " + std::to_string(lc.size() - 1) + " is bound but the composite pressure solve across levels is not built (Role 2); drive the per-level stage entry points instead");
         select(0);
         StepRecord rec;
         zone_rel_step = 0.0;
@@ -1265,6 +1355,11 @@ void TimeLoop::bind_fields(bool copy_setup_state)
 
 // ---- S9 per-level entry points (thin wrappers on the Impl stage bodies; level 0 is the current level again on return)
 int TimeLoop::num_levels() const { return static_cast<int>(m->lc.size()); }
+void TimeLoop::stage_state(bool predictor, bool first_pass) { m->state(predictor, first_pass); }
+void TimeLoop::stage_init_divergence() { fds_p_init_div(); }
+void TimeLoop::bind_level(int lev) { m->bind_level(lev); }
+void TimeLoop::unbind_level(int lev) { m->unbind_level(lev); }
+bool TimeLoop::level_bound(int lev) const { return lev >= 0 && lev < static_cast<int>(m->lc.size()); }
 #define FDSTL_LEVEL_STAGE(lev, body) do { m->select(lev); body; m->select(0); } while (0)
 void TimeLoop::stage_viscosity(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_visc_mfd(predictor)); }
 void TimeLoop::stage_density(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->density(predictor, m_t, m_dt)); }
@@ -1342,8 +1437,15 @@ int TimeLoop::run()
 void FluxStages::compute_stage_fluxes(int level, bool) { m_tl.flux_readout_adv(level); }
 void FluxStages::apply_flux_divergence(int level, bool predictor)
 {
-    m_tl.stage_density(level, predictor);   // consumes the ADV override list when one is set
-    m_tl.flux_readout_dif(level);           // DIVERGENCE_PART_1 plus the DIF readout
+    // Density update only (consumes the ADV override list when one is set). DIVERGENCE_PART_1 is NOT run here: in FDS order it follows the exchange of RHOS/ZZS, the boundary steps, the
+    // velocity flux and WALL_BC (and on several levels the coarse-fine ghost hook has to have filled the fine ghosts of the stage first), so the DIF read-out is a separate phase:
+    // readout_dif(level) on every level, runner.set_overrides(Dif), run_divergence_part1(level) on every level (notes/flux-stage-wiring.md steps 3 to 6; D-061).
+    m_tl.stage_density(level, predictor);
+    if (level < static_cast<int>(m_div1_pending.size())) m_div1_pending[level] = 0;
+}
+void FluxStages::readout_dif(int level)
+{
+    m_tl.flux_readout_dif(level);           // DIVERGENCE_PART_1 plus the DIF read-out; stage_flux(level, Dif, d) is valid afterwards
     if (static_cast<int>(m_div1_pending.size()) <= level) m_div1_pending.resize(level + 1, 0);
     m_div1_pending[level] = 1;
 }
