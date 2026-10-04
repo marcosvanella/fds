@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 
+#include "FluxOverrideOps.H"
 #include "FluxStageRunner.H"
 #include "GhostShare.H"
 #include "LevelOps.H"
@@ -213,6 +214,84 @@ void test_E()
     CHECK_MSG(s == 1, "level 1 differs from the single-level run");
 }
 
+// G/H: patch touching periodic domain edges (interface faces at both the low and the high side of the domain), and the species-sum property of the override
+void test_G_H()
+{
+    const double dt = 0.2 * (1.0 / 32);
+    for (int use_overwrite = 1; use_overwrite >= 0; --use_overwrite) {
+        mock::Transport T; build_2d(T, 2, false);
+        // replace the patch by one that touches the low x edge and the high z edge of the periodic domain: coarse cells [0..3] x [12..15]
+        T.lv[1].ba = amrex::BoxArray(amrex::refine(amrex::Box(amrex::IntVect(0, 0, 12), amrex::IntVect(3, 0, 15)), amrex::IntVect(2, 1, 2)));
+        T.lv[1].ba.maxSize(amrex::IntVect(4, 1, 4));
+        auto q0 = [](double x, double y, double z, int n) {   // blob across the periodic corner (x = 0, z = 1)
+            (void)y;
+            auto wrap = [](double d) { return d - std::round(d); };
+            const double dx = wrap(x - 0.0), dz = wrap(z - 1.0);
+            return 1.0 + (1.0 + n) * std::exp(-(dx * dx + dz * dz) / (0.1 * 0.1));
+        };
+        const Result r = run(T, 2, use_overwrite == 1, 20, 0.01, q0, psi_vel, dt);
+        if (amrex::ParallelDescriptor::IOProcessor()) std::printf("  H patch on periodic edges, overwrite %s: drift %s (entries %ld)\n", use_overwrite ? "ON " : "OFF", sci(r.maxdrift).c_str(), r.entries);
+        if (use_overwrite) { CHECK_MSG(r.maxdrift < 1e-13, sci(r.maxdrift)); CHECK(r.entries > 0); }
+        else CHECK_MSG(r.maxdrift > 1e-7, sci(r.maxdrift));
+    }
+    {   // G: the override of a face whose fine fluxes sum to zero over the species sums to zero (the species-sum fix survives the area mean), and equals the plain mean
+        amrex::Box d0(amrex::IntVect(0, 0, 0), amrex::IntVect(7, 0, 7));
+        amrex::Geometry cg = amrex::Geometry(d0, amrex::RealBox({0., 0., 0.}, {1., 0.125, 1.}), 0, {1, 1, 1});
+        amrex::BoxArray cba(d0);
+        cba.maxSize(amrex::IntVect(4, 1, 4));
+        amrex::DistributionMapping cdm(cba);
+        const amrex::IntVect r(2, 1, 2);
+        amrex::BoxArray fba(amrex::refine(amrex::Box(amrex::IntVect(2, 0, 2), amrex::IntVect(5, 0, 5)), r));
+        fba.maxSize(amrex::IntVect(4, 1, 4));
+        amrex::DistributionMapping fdm(fba);
+        amrex::MultiFab ff[3];
+        for (int d = 0; d < 3; ++d) {
+            amrex::IntVect nodal(0); nodal[d] = 1;
+            ff[d].define(amrex::convert(fba, nodal), fdm, 3, 0);
+            for (amrex::MFIter mfi(ff[d]); mfi.isValid(); ++mfi) {
+                auto a = ff[d].array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                    a(i, j, k, 0) = std::sin(1.3 * i + 0.7 * k + d);
+                    a(i, j, k, 1) = std::cos(0.9 * i - 0.4 * k + 2 * d);
+                    a(i, j, k, 2) = -(a(i, j, k, 0) + a(i, j, k, 1));
+                });
+            }
+        }
+        const amrex::MultiFab* fl[3] = {&ff[0], &ff[1], &ff[2]};
+        OverrideStats st;
+        auto lists = build_flux_overrides(cba, cdm, cg, fba, fdm, r, fl, &st);
+        double worst_sum = 0, worst_mean = 0;
+        long nface = 0;
+        int ib = 0;
+        for (amrex::MFIter mfi(cba, cdm); mfi.isValid(); ++mfi, ++ib)
+            for (const FluxOverride& o : lists[ib])
+                for (size_t f = 0; f < o.face.size(); ++f) {
+                    ++nface;
+                    worst_sum = std::max(worst_sum, std::abs(o.value[f * 3] + o.value[f * 3 + 1] + o.value[f * 3 + 2]));
+                    // independent mean of the fine faces tiling this coarse face (face index a is the low face of cell a; fine face a*r_d in the normal direction)
+                    const int d = o.dir;
+                    int lo[3], hi[3];
+                    const int cc[3] = {o.face[f][0], o.face[f][1], o.face[f][2]};
+                    for (int e = 0; e < 3; ++e) { lo[e] = cc[e] * r[e]; hi[e] = lo[e] + r[e] - 1; }
+                    lo[d] = hi[d] = cc[d] * r[d];
+                    double m0 = 0; int cnt = 0;
+                    for (int k = lo[2]; k <= hi[2]; ++k) for (int j = lo[1]; j <= hi[1]; ++j) for (int i = lo[0]; i <= hi[0]; ++i) {
+                        // find the fine value: any fine box holding the face (global lookup through the analytic definition used above)
+                        m0 += std::sin(1.3 * i + 0.7 * k + d); ++cnt;
+                    }
+                    worst_mean = std::max(worst_mean, std::abs(o.value[f * 3] - m0 / cnt));
+                }
+        long tot = nface;
+        amrex::ParallelAllReduce::Sum(tot, amrex::ParallelContext::CommunicatorSub());
+        amrex::ParallelAllReduce::Max(worst_sum, amrex::ParallelContext::CommunicatorSub());
+        amrex::ParallelAllReduce::Max(worst_mean, amrex::ParallelContext::CommunicatorSub());
+        if (amrex::ParallelDescriptor::IOProcessor()) std::printf("  G override faces %ld: max |species sum| %s, max deviation from the independent mean %s\n", tot, sci(worst_sum).c_str(), sci(worst_mean).c_str());
+        CHECK(tot > 0);
+        CHECK_MSG(worst_sum < 1e-15, sci(worst_sum));
+        CHECK_MSG(worst_mean < 1e-15, sci(worst_mean));
+    }
+}
+
 // D-059: shared ghost cells
 long conflicts_from_levelops(const amrex::BoxArray& fine_ba, const amrex::IntVect& r, const amrex::Geometry& cg, const amrex::BoxArray& cba)
 {
@@ -267,6 +346,7 @@ int main(int argc, char** argv)
         test_C();
         test_D();
         test_E();
+        test_G_H();
         test_F();
     }
     const long nfail = fdstest::report("flux_stage");
