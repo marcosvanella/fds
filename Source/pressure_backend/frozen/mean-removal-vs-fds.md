@@ -1,5 +1,10 @@
 # Mean removal and gauge: FDS ULMAT/UGLMAT/GLMAT versus the pressure backend
 
+**Update (D-067, project coordinator's ruling).** The study below stands. The defaults changed afterwards: the common layer now
+removes the composite volume-weighted mean by default (`MeanKind::Volume`), and the FDS arithmetic removal of the volume-scaled
+right-hand side is the runtime parity switch `PressureProblem::mean_kind = MeanKind::ScaledArithmetic` (section 8). The gauge is
+always applied to a singular component, for FFT, single-level MLMG and the composite path alike (section 8).
+
 Plain-language note. FDS line numbers are `Source/pres.f90` of this worktree (identical to the FireX reference
 commit used for the runs); our line numbers are in `Source/pressure_backend`. Numbers come from
 `stretched_study_results.txt` (all cases) and from the CTests named below.
@@ -44,8 +49,8 @@ Can the backends solve it? **No.** `FFT::Poisson` assumes uniform spacing, and `
 
 For that path the common layer already takes per-cell volumes (`MeanKind`, `CommonLayer.H`):
 
-* `ScaledArithmetic` (default when a volume field is given): `b_k -= mean(F)/V_k`, `F = V b`. This is FDS.
-* `Volume`: `b -= sum(V b)/sum(V)`.
+* `ScaledArithmetic` (FDS parity switch): `b_k -= mean(F)/V_k`, `F = V b`. This is FDS.
+* `Volume` (default, D-067): `b -= sum(V b)/sum(V)`.
 
 Both make `sum(F) = 0`; they differ by a multiple of `(V_k - mean V)`. Test `pb_meankind_stretched` (12x10x9, volume
 ratio 4.7): both kinds equal the numpy formulas to 1e-14, the sum of the scaled RHS is zero, both are idempotent
@@ -126,6 +131,25 @@ mean is **not** removed. The fallback X-mean at 3553-3555 has the same pattern. 
 With a compatible RHS (round-off mean) the effect is invisible; with an incompatible RHS the HYPRE pin makes the
 solution depend on which row is dropped. The fix is one line (`SUM_FH(2) = SUM_FH(1)` for one rank). To be flagged to the
 Pressure Solver Lead and the Chief Architect; the reference tree is untouched.
+
+## 8. Alignment with D-067 (implemented)
+
+* Default mean removal: `PressureProblem::mean_kind = MeanKind::Volume`, the exact composite volume-weighted mean over the uncovered
+  cells of the component (single level, per-cell volumes and the composite hierarchy). `MeanKind::ScaledArithmetic` removes the
+  arithmetic mean of `F = v*b` from `F` (FDS). On uniform cells the two are the same operation up to rounding (test
+  `pb_meankind_uniform_*`: solutions equal to 1e-12, removed mean of the parity switch = Volume value times the cell volume); with
+  per-cell volumes (`pb_meankind_stretched`) or on a hierarchy (`pb_comp_gauge_*`) they differ whenever `b` is not already
+  compatible. `remove_mean()` now defaults to `Volume` too. The FDS-parity tests (`pb_ulmat_equiv_*`, `pb_ulmat_gauge_*`,
+  `pb_meankind_stretched`) select the parity switch explicitly (`mean_kind=scaled` in the harness); on a compatible
+  right-hand side either kind passes, as the study predicts.
+* Default gauge: `sum(rho*V*(KRES - H)) = 0` per singular component over the uncovered cells, always applied, also after the FFT
+  backend (the FFT zero mode is arbitrary). rho defaults to 1 and KRES to 0, which is the plain volume-weighted mean zero (the
+  behaviour before this change; all earlier tests hold). Composite: `PressureLevel::gauge_weight` and `gauge_offset`
+  (see `composite-notes.md`).
+* Pressure zones and connected components: the whole domain (all levels) is one component until masked or driver-supplied
+  component ids are built (`NotBuilt`). The sums and the shift are already per component, so those inputs will not change the
+  formulas.
+* Not relied on: AMReX `makeSolvable` (count-weighted, skipped with a pin).
 
 ## 7. Reproduce
 

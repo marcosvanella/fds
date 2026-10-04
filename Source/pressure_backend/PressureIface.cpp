@@ -128,7 +128,7 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     MultiFab b(p.ba, p.dm, 1, 0);
     MultiFab::Copy(b, *p.rhs, 0, 0, 1, 0);
     if (o.remove_mean) {
-        remove_mean(b, cm, p.uncovered, vol);
+        remove_mean(b, cm, p.uncovered, vol, nullptr, p.mean_kind);
     }
     MultiFab work(p.ba, p.dm, 1, 1);
     work.setVal(0.0);

@@ -8,7 +8,7 @@
 // mode=exactsum exact-sum and mean-removal decomposition checks on a deterministic wide-range field.
 // mode=meankind per-cell volume mean removal (both MeanKind) and the rho*volume, KRES gauge on a synthetic stretched
 //               volume field; writes raw files for the independent numpy check (see tests/pb_test.py, meankind).
-// mode=comp, comp_ns2d, comp_sel, comp_ws  composite (multi-level) pressure solve tests, see composite_modes.cpp.
+// mode=comp, comp_ns2d, comp_sel, comp_ws, comp_gauge  composite (multi-level) pressure solve tests, see composite_modes.cpp.
 // mode=diff     compare two raw fields: a=<file> b=<file> n_cell="nx ny nz" (rel. L2, max abs, eps_H verdict).
 #include "PressureIface.H"
 #include "CommonLayer.H"
@@ -209,6 +209,8 @@ void run_solve (ParmParse& pp)
     pp.query("verbose", o.verbose);
     double inject = 0.0; pp.query("rhs_offset", inject);   // adds a constant to the RHS before the solve
     int gauge_rho = 0; pp.query("gauge_rho", gauge_rho);   // 1: rho-weighted gauge with KRES offset (FDS SYMM_INDEFINITE)
+    std::string mean_kind = "volume"; pp.query("mean_kind", mean_kind);   // volume (D-067 default) | scaled (FDS parity switch)
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(mean_kind == "volume" || mean_kind == "scaled", "mean_kind must be volume|scaled");
 
     Print() << "PB solve: n_cell=" << s.domain.length(0) << "x" << s.domain.length(1) << "x" << s.domain.length(2)
             << " bc=" << pb::to_string(s.bc[0]) << " nboxes=" << s.ba.size() << " nranks=" << ParallelDescriptor::NProcs()
@@ -239,6 +241,7 @@ void run_solve (ParmParse& pp)
         pb::PressureProblem p;
         p.ba = s.ba; p.dm = s.dm; p.geom = s.geom; p.bc = s.bc;
         p.rhs = &rhs;
+        p.mean_kind = (mean_kind == "scaled") ? pb::MeanKind::ScaledArithmetic : pb::MeanKind::Volume;
         if (gauge_rho) { p.gauge_weight = &rho; p.gauge_offset = &kres; }
         auto phi = std::make_unique<MultiFab>(s.ba, s.dm, 1, 1);
         phi->setVal(0.0);
@@ -503,7 +506,7 @@ int main (int argc, char* argv[])
         else if (mode == "meankind") { run_meankind(pp); }
         else {
             const int cf = run_composite_mode(mode, pp);
-            if (cf < 0) { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind|comp|comp_ns2d|comp_sel|comp_ws"); }
+            if (cf < 0) { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind|comp|comp_ns2d|comp_sel|comp_ws|comp_gauge"); }
             g_fail += cf;
         }
     }

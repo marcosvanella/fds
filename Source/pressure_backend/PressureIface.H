@@ -16,8 +16,22 @@
 // or pinned cells), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
 // (cylindrical, RZ) geometry, variable coefficients, mixed open/closed domain faces (single level and
 // composite), anisotropic refinement ratios (except ratio 1 in a one-cell direction), ratios other than 2 and 4,
-// composite on the FFT backend, composite gauge weight/offset, and a multi-level request through the
-// single-level fields (`nlevels` > 1 with an empty `levels`).
+// composite on the FFT backend, and a multi-level request through the single-level fields (`nlevels` > 1 with an
+// empty `levels`).
+//
+// Mean removal and gauge (D-067). Singular components (all faces Neumann or periodic) are made solvable by the common
+// layer before the backend runs, and the solution constant is fixed after it, for every backend (FFT, MLMG, composite).
+//  - Mean removal, default `MeanKind::Volume`: the composite volume-weighted mean of the right-hand side over the
+//    uncovered cells of the component is subtracted (exact sum, one fixed-point scale, bitwise independent of
+//    decomposition). `MeanKind::ScaledArithmetic` is the FDS parity switch: the arithmetic mean of the volume-scaled
+//    right-hand side F = v*b is removed from F (b_k -= mean(F)/v_k), which is what FDS ULMAT/UGLMAT do. On uniform
+//    cells both are the same operation up to rounding; they differ on a hierarchy (cell volumes differ between levels)
+//    and on stretched cells, and only when the right-hand side is not already compatible.
+//  - Gauge, always applied to a singular component: sum(rho*V*(KRES - H)) = 0 over the uncovered cells of the
+//    component, with rho = gauge_weight (default 1) and KRES = gauge_offset (default 0; then the plain volume-weighted
+//    mean of H is zero). A component that is not singular (some Dirichlet face) has a unique solution; nothing is
+//    shifted. Exact sums, so the constant does not depend on the decomposition up to the round-off of H itself.
+//  - Components: the whole domain (all levels) is one component until masked/driver-supplied components are built.
 #ifndef PB_PRESSURE_IFACE_H_
 #define PB_PRESSURE_IFACE_H_
 
@@ -39,6 +53,12 @@ enum class BC { Neumann, Periodic, Dirichlet };   // Dirichlet: homogeneous in M
 enum class BackendKind { Auto, FFT, MLMG };
 enum class Status { Ok, NotBuilt, InvalidInput, NotConverged };
 
+// Which zero mode of the right-hand side is removed from a singular component (see the header comment and
+// CommonLayer.H). Default Volume (D-067); ScaledArithmetic is the FDS parity switch.
+//   Volume:           b -= sum(v*b)/sum(v)        (constant shift of b; the scaled F = v*b changes by c*v)
+//   ScaledArithmetic: b_k -= mean(F)/v_k          (F = v*b, arithmetic mean over the uncovered cells; FDS ULMAT/UGLMAT)
+enum class MeanKind { Volume, ScaledArithmetic };
+
 // Domain face index: side*3 + dir (side 0 = low, 1 = high; dir 0..2 = x,y,z).
 inline int face_index (int dir, int side) { return side*3 + dir; }
 
@@ -55,6 +75,12 @@ struct PressureLevel {
     amrex::IntVect ref_ratio{1};                  // ratio to the next COARSER level; ignored on level 0
     amrex::MultiFab const* rhs = nullptr;         // in: right-hand side, valid cells (covered cells are ignored)
     amrex::MultiFab* phi = nullptr;               // out: valid cells; in: initial guess if use_initial_guess
+    // Optional gauge inputs of this level (D-067): rho (FDS RHOP: RHO in the predictor, RHOS in the corrector) and KRES.
+    // Same BoxArray/DistributionMapping as `ba`, one component, valid cells; only the uncovered cells are read.
+    // Either both given on every level, or one of them on every level, or none (null = rho 1 / KRES 0). The gauge
+    // constant is sum(V_l*rho*(phi - KRES)) / sum(V_l*rho) over the uncovered cells of all levels (one exact sum).
+    amrex::MultiFab const* gauge_weight = nullptr;
+    amrex::MultiFab const* gauge_offset = nullptr;
 };
 
 class PressureWorkspace;                          // opaque, below
@@ -87,10 +113,16 @@ struct PressureProblem {
     // Driver-supplied component ids: M1 labels components itself; non-null is NotBuilt.
     amrex::iMultiFab const* component_id = nullptr;
 
+    // Mean removal of the right-hand side of singular components (D-067): Volume (default) or the FDS parity switch
+    // ScaledArithmetic. See the header comment at the top of this file.
+    MeanKind mean_kind = MeanKind::Volume;
+
     // Optional gauge inputs for singular components (FDS SYMM_INDEFINITE gauge, pres.f90 ~1830-1878): after the
     // solve, phi -= sum(w*(phi - g)) / sum(w) with w = cell volume * gauge_weight and g = gauge_offset. FDS passes
     // gauge_weight = RHOP (RHO predictor, RHOS corrector) and gauge_offset = KRES. Null = weight 1 / offset 0,
     // which is the plain volume-weighted mean removal. Same BoxArray/DistributionMapping as `ba`, one component.
+    // Single-level API only; for a composite hierarchy use PressureLevel::gauge_weight/gauge_offset (these two
+    // fields set together with `levels` are NotBuilt, to avoid an ambiguous layout).
     amrex::MultiFab const* gauge_weight = nullptr;
     amrex::MultiFab const* gauge_offset = nullptr;
 

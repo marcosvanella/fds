@@ -67,7 +67,7 @@ ComponentMap label_components (PressureProblem const& p)
 }
 
 namespace {
-struct MeanInfo { std::vector<double> mean; std::vector<double> rms; std::vector<Long> n; };
+struct MeanInfo { std::vector<double> mean; std::vector<double> rms; std::vector<Long> n; std::vector<double> sum; };
 
 // Exact volume-weighted mean per component (sum(v*x) / (v*count)) and rms of x.
 MeanInfo exact_mean (MultiFab const& mf, ComponentMap const& cm, iMultiFab const* uncovered, Real vol)
@@ -85,6 +85,7 @@ MeanInfo exact_mean (MultiFab const& mf, ComponentMap const& cm, iMultiFab const
     for (int c = 0; c < nc; ++c) {
         const double n = static_cast<double>(s.count[c]);
         m.n.push_back(s.count[c]);
+        m.sum.push_back(s.sum[c]);
         m.mean.push_back(n > 0 ? s.sum[c] / (vol*n) : 0.0);
         m.rms.push_back(n > 0 ? std::sqrt(s2.sum[c] / n) : 0.0);
     }
@@ -122,9 +123,13 @@ void remove_mean (MultiFab& rhs, ComponentMap& cm, iMultiFab const* uncovered, R
         for (int c = 0; c < nc; ++c) {
             ComponentInfo& ci = cm.comps[c];
             if (!ci.singular) { continue; }
-            if (std::abs(m.mean[c]) > floor_) { shift[c] = m.mean[c]; }
-            ci.removed_mean = shift[c];
-            ci.removed_rel = (m.rms[c] > 0.0) ? std::abs(m.mean[c]) / m.rms[c] : 0.0;   // measured, also when not removed
+            // ScaledArithmetic literally: arithmetic mean of F = vol*b, divided by vol to give the shift of b.
+            double mean = m.mean[c];
+            if (kind == MeanKind::ScaledArithmetic && m.n[c] > 0) { mean = (m.sum[c] / double(m.n[c])) / vol; }
+            if (std::abs(mean) > floor_) { shift[c] = mean; }
+            // removed_mean: the constant subtracted from b (Volume) or the mean of F = vol*b (ScaledArithmetic).
+            ci.removed_mean = (kind == MeanKind::ScaledArithmetic) ? shift[c] * vol : shift[c];
+            ci.removed_rel = (m.rms[c] > 0.0) ? std::abs(mean) / m.rms[c] : 0.0;   // measured, also when not removed
         }
         subtract_per_component(rhs, cm, uncovered, shift);
         return;

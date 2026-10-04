@@ -14,10 +14,13 @@ CPU. FFT and single-level MLMG backends behind `PressureIface.H`; the common lay
 | `tests/` | CTest registrations and `pb_test.py` |
 | `frozen/` | see `frozen/README.md`; `mean-removal-vs-fds.md` (note), `stretched_study.py`, `fds_dump_hook.py`, `fds_cases/` (FDS study) |
 
-Mean removal and gauge (`CommonLayer.H`): exact sums, per singular component. On uniform cells `remove_mean` is the
-ULMAT arithmetic mean removal of the volume-scaled RHS; `apply_gauge` takes optional `gauge_weight` (rho) and
-`gauge_offset` (KRES) for the FDS gauge. Per-cell volumes (`MeanKind`) are implemented for the future volume-scaled
-backends. See `frozen/mean-removal-vs-fds.md`.
+Mean removal and gauge (D-067; `PressureIface.H` header comment, `CommonLayer.H`): exact sums, per singular component.
+Default mean removal is the composite volume-weighted mean over the uncovered cells (`PressureProblem::mean_kind =
+MeanKind::Volume`); the FDS arithmetic removal of the volume-scaled right-hand side is the runtime parity switch
+`MeanKind::ScaledArithmetic` (same operation on uniform cells up to rounding). The gauge `sum(rho*V*(KRES - H)) = 0` is always
+applied to a singular component, after any backend; `gauge_weight` (rho, default 1) and `gauge_offset` (KRES, default 0) are
+`PressureProblem` fields on a single level and `PressureLevel` fields in a composite hierarchy. See `frozen/mean-removal-vs-fds.md`
+(section 8) and `frozen/composite-notes.md`.
 
 Composite solve (milestone M2, first version): fill `PressureProblem::levels` (one `PressureLevel` per level: `ba`, `dm`,
 `geom`, `ref_ratio` to the next coarser level, `rhs`, `phi`; coarse to fine). When `levels` is non-empty it is

@@ -176,7 +176,7 @@ def ulmat():
     for offset in (0.0, 0.75):                      # compatible RHS, and RHS with a large nonzero mean
         tag = f"off{offset}"
         rc, out = run(2, **base(max_grid_size=4, backends="fft mlmg", rhs_file=pre + "_rhs.bin", rhs_offset=offset,
-                                out=os.path.join(A.work, tag)))
+                                mean_kind="scaled", out=os.path.join(A.work, tag)))
         ok(rc == 0, f"harness exit 0 (rhs offset {offset})"); print(out)
         rhs = read_field(pre + "_rhs.bin", n) + offset
         H, rel, meanF = ulmat_like(rhs, n, h, A.bc)
@@ -195,7 +195,7 @@ def ulmatgauge():
     pre = os.path.join(A.work, "gen")
     rc, out = run(1, mode="gen", n_cell=n, bc=A.bc, max_grid_size=16, out=pre); ok(rc == 0, "generator exit 0")
     outp = os.path.join(A.work, "g")
-    rc, out = run(2, **base(max_grid_size=4, backends="fft mlmg", rhs_file=pre + "_rhs.bin", rhs_offset=0.4, gauge_rho=1, out=outp))
+    rc, out = run(2, **base(max_grid_size=4, backends="fft mlmg", rhs_file=pre + "_rhs.bin", rhs_offset=0.4, gauge_rho=1, mean_kind="scaled", out=outp))
     ok(rc == 0, "harness exit 0"); print(out)
     rhs = read_field(pre + "_rhs.bin", n) + 0.4
     rho = read_field(outp + "_rho.bin", n); kres = read_field(outp + "_kres.bin", n)
@@ -243,6 +243,29 @@ def meankind():
     for f in fl:
         a = open(outs[1][0] + f"_{f}.bin", "rb").read(); b = open(outs[3][0] + f"_{f}.bin", "rb").read()
         ok(a == b, f"{f} bitwise identical for np=1/mgs32 and np=3/mgs6")
+
+def meankind_uniform():
+    """Single level, uniform cells: Volume (default) and the FDS parity switch ScaledArithmetic are the same operation
+    up to rounding, for FFT and MLMG, with a nonzero removed mean; the gauge (default, rho=1/KRES=0) is applied to both."""
+    n = A.n; vol = (1.0 / max(int(x) for x in n.split())) ** 3
+    sols = {}
+    for mk in ("volume", "scaled"):
+        pre = os.path.join(A.work, mk)
+        rc, out = run(2, **base(max_grid_size=4, backends="fft mlmg", rhs_offset=0.75, mean_kind=mk, out=pre))
+        ok(rc == 0, f"mean_kind={mk}: harness exit 0"); print(out)
+        for l in lines(out, "RESULT"):
+            name = l.split()[1]; r = kv(l)
+            sols[(mk, name)] = (read_field(f"{pre}_{name}.bin", n), float(np.frombuffer(bytes.fromhex(r["comp0_removed_mean"]), ">f8")[0]), float(r["comp0_removed_rel"]))
+            ok(r["status"] == "Ok" and r["residual_ok"] == "1", f"{mk} {name}: status Ok, true residual within tolerance")
+    for name in ("fft", "mlmg"):
+        (pv, mv, rv), (ps, ms, rs) = sols[("volume", name)], sols[("scaled", name)]
+        d = relL2(ps, pv)
+        print(f"MEANKIND uniform {A.bc} {name}: rel L2 scaled vs volume {d:.2e}; removed mean volume {mv:.15g}, scaled (mean of F) {ms:.15g}, ratio {ms / mv / vol:.15f}")
+        ok(d <= 1e-12, f"{name}: ScaledArithmetic and Volume give the same solution on uniform cells (rel L2 {d:.1e})")
+        ok(abs(ms - mv * vol) <= 1e-13 * abs(mv * vol), f"{name}: removed mean of ScaledArithmetic = Volume value times the cell volume")
+        ok(abs(rv - rs) <= 1e-12 * abs(rv), f"{name}: relative removed mean identical for both kinds")
+        ok(abs(pv.mean()) <= 1e-12 * np.abs(pv).max(), f"{name}: default gauge leaves a zero volume-weighted mean")
+
 
 # ---------------------------------------------------------------------------------------------------------------
 # Composite (multi-level) tests. The harness prints COMP / UNIFORM / DECOMP / GRAD / REPEAT / NS2D lines and CHECK
@@ -355,6 +378,84 @@ def compns2d():
         print(out); ok(rc == 0, f"ns2d_16 two-level checks, np={np_} mgs={mgs}")
         l = kv(lines(out, "NS2D")[0]); ok(float(l["true_rel2"]) <= EPS_COMP, f"np={np_} true residual {l['true_rel2']}")
 
+def read_levels(path, n, nlev, ratio, plane):
+    """Level-concatenated full-domain dumps written by mode=comp_gauge (x fastest, zeros outside the BoxArray)."""
+    raw = np.fromfile(path, dtype="<f8"); off = 0; out = []
+    for l in range(nlev):
+        r = ratio ** l
+        nx, nz = n * r, n * r; ny = 1 if plane else n * r
+        cnt = nx * ny * nz
+        out.append(raw[off:off + cnt].reshape(nz, ny, nx).transpose(2, 1, 0)); off += cnt
+    assert off == raw.size
+    return out
+
+def compgauge():
+    """D-067 composite mean removal and gauge: independent numpy formulas on level dumps of a two-level hierarchy."""
+    n, nlev, ratio = (32 if A.ratio == 2 else 16), 2, A.ratio
+    pre = os.path.join(A.work, "g")
+    rc, out = run(2, mode="comp_gauge", n=n, nlev=nlev, ratio=ratio, mgs=8 if A.ratio == 4 else 16, dmkind=1, bc=A.bc, plane2d=A.plane, out=pre)
+    ok(rc == 0, "comp_gauge harness checks"); print(out)
+    g = kv(lines(out, "GAUGE")[0])
+    vol = [float(g[f"vol{l}"]) for l in range(nlev)]
+    rhs, rho, kres, unc, pA, pB, pC = (read_levels(f"{pre}_{f}.bin", n, nlev, ratio, A.plane) for f in ("rhs", "rho", "kres", "unc", "phiA", "phiB", "phiC"))
+    inside = [r != 0 for r in rho]                       # rho > 0 inside the BoxArray, 0 outside
+    sel = [(u != 0) & i for u, i in zip(unc, inside)]
+    def S(fields, weights=None):
+        tot = np.longdouble(0)
+        for l in range(nlev):
+            t = fields[l][sel[l]].astype(np.longdouble) * np.longdouble(vol[l])
+            if weights is not None: t = t * weights[l][sel[l]].astype(np.longdouble)
+            tot += t.sum()
+        return float(tot)
+    nunc = sum(int(s_.sum()) for s_ in sel)
+    ok(nunc == int(g["nunc"]), f"uncovered cell count {nunc} matches the solver")
+    if A.bc == "dirichlet":
+        ok(float(g["shiftA"]) == 0 and float(g["shiftB"]) == 0, "Dirichlet: no gauge shift (unique solution)")
+        return
+    Vtot = S([np.ones_like(r) for r in rho])
+    meanV = S(rhs) / Vtot
+    meanF = sum(float(vol[l]) * float(rhs[l][sel[l]].astype(np.longdouble).sum()) for l in range(nlev)) / nunc
+    print(f"numpy: volume-weighted mean of b {meanV:.15g} (library {float(g['removedV_val']):.15g}); mean of F {meanF:.6e} (library {float(g['removedS_val']):.6e})")
+    ok(abs(meanV - float(g["removedV_val"])) <= 1e-13 * abs(meanV), "removed mean (Volume) equals the independent exact volume-weighted mean of b")
+    ok(abs(meanF - float(g["removedS_val"])) <= 1e-13 * abs(meanF), "removed mean (ScaledArithmetic) equals the independent arithmetic mean of v*b")
+    ok(abs(meanV - meanF / vol[0]) > 1e-3 * abs(meanV), "the two zero modes differ on the hierarchy (test is sensitive)")
+    # default gauge: zero volume-weighted mean
+    ok(abs(S(pA)) <= 1e-13 * S([np.abs(f) for f in pA]), "default gauge: volume-weighted mean of phi is zero over the uncovered cells")
+    # weighted gauge
+    W = [r for r in rho]
+    c = S([pA[l] - kres[l] for l in range(nlev)], W) / S(W)
+    print(f"numpy gauge constant c = {c:.12e}; library shiftB - shiftA = {float(g['shiftB']) - float(g['shiftA']):.12e}")
+    ok(abs(c) > 1e-3, f"weighted gauge constant {c:.3e} differs from the plain gauge (test is sensitive)")
+    ok(abs((float(g["shiftB"]) - float(g["shiftA"])) - c) <= 1e-12 * max(abs(c), 1e-3), "library gauge constant equals the numpy sum(V rho (phi-KRES))/sum(V rho)")
+    dev = max(np.abs((pB[l] - (pA[l] - c))[inside[l]]).max() for l in range(nlev))
+    ok(dev <= 1e-13 * max(np.abs(f[i]).max() for f, i in zip(pA, inside)), f"phi with rho/KRES gauge = phi with plain gauge - c on all cells (max dev {dev:.2e})")
+    res = S([kres[l] - pB[l] for l in range(nlev)], W)
+    scale = S([np.abs(kres[l] - pB[l]) for l in range(nlev)], W)
+    ok(abs(res) <= 1e-13 * scale, f"sum(rho V (KRES - H)) = {res:.2e} (scale {scale:.2e}) is zero over the uncovered cells")
+
+def compgaugedecomp():
+    """Removed mean bitwise and gauge constants to round-off across rank counts, box sizes and distribution mappings."""
+    runs = {}
+    for np_, mgs, dmk, layout in ((1, 32, 0, 0), (2, 16, 1, 0), (3, 8, 2, 0), (2, 16, 0, 2), (1, 16, 0, 2), (4, 8, 2, 2)):
+        rc, out = run(np_, mode="comp_gauge", n=32, nlev=2, ratio=2, mgs=mgs, dmkind=dmk, layout=layout, bc=A.bc, plane2d=A.plane)
+        ok(rc == 0, f"np={np_} mgs={mgs} dmkind={dmk} layout={layout}: harness checks")
+        if rc != 0: print(out)
+        runs[(np_, mgs, dmk, layout)] = (kv(lines(out, "GAUGE")[0]), kv(lines(out, "GAUGE_EXACT")[0]))
+    for layout in (0, 2):
+        keys = [k for k in runs if k[3] == layout]
+        r0 = runs[keys[0]]
+        for k in keys:
+            g, e = runs[k]
+            print(f"DECOMP layout={layout} {k}: removedV={g['removedV']} removedS={g['removedS']} shiftA={g['shiftA']} shiftB={g['shiftB']} exact_shift={e['shift']}")
+            ok(g["removedV"] == r0[0]["removedV"] and g["removedS"] == r0[0]["removedS"], f"{k}: removed means (Volume and ScaledArithmetic) bitwise identical")
+            ok(e == r0[1], f"{k}: exact gauge sums of a fixed analytic field bitwise identical")
+            for key in ("shiftA", "shiftB", "shiftC"):
+                a, b = float(g[key]), float(r0[0][key])
+                d = abs(a - b); sc = max(abs(a), abs(b), 1e-2)
+                print(f"   {key}: |diff| = {d:.2e}")
+                ok(d <= 1e-12 * sc, f"{k}: gauge constant {key} agrees with {keys[0]} to {d:.1e} (round-off of the solve)")
+
+
 def compsel():
     for np_ in (1, 2):
         rc, out = run(np_, mode="comp_sel"); print(out); ok(rc == 0, f"composite selector checks, np={np_}")
@@ -367,7 +468,7 @@ def compws():
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
- "compns2d": compns2d, "compsel": compsel, "compws": compws}[A.cmd]()
+ "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

@@ -237,7 +237,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     if (has_nonzero_mask(p.cell_class)) { s.message = "composite with masked cells (cell_class != 0) is not built (masked branch)"; return s; }
     if (has_zero_mask(p.uncovered)) { s.message = "composite with a caller-supplied covered-cell mask is not built: covered cells are derived from the level BoxArrays"; return s; }
     if (p.gauge_weight || p.gauge_offset) {
-        s.message = "gauge_weight/gauge_offset are single-level fields; a composite gauge weight is not built (plain volume-weighted gauge only)"; return s;
+        s.message = "PressureProblem::gauge_weight/gauge_offset are single-level fields; with `levels` set use PressureLevel::gauge_weight/gauge_offset"; return s;
     }
     int nopen = 0;
     for (int f = 0; f < 6; ++f) { nopen += (p.bc[f] == BC::Dirichlet) ? 1 : 0; }
@@ -285,6 +285,13 @@ std::string validate_composite (PressureProblem const& p)
         if (!(L.rhs->boxArray() == L.ba) || !(L.phi->boxArray() == L.ba)) { return tag + "rhs/phi BoxArray differ from the level BoxArray"; }
         if (!(L.rhs->DistributionMap() == L.dm) || !(L.phi->DistributionMap() == L.dm)) { return tag + "rhs/phi DistributionMapping differ from the level"; }
         if (L.rhs->nComp() < 1 || L.phi->nComp() < 1) { return tag + "rhs/phi need at least one component"; }
+        if ((L.gauge_weight != nullptr) != (p.levels[0].gauge_weight != nullptr)) { return tag + "gauge_weight must be given on every level or on none"; }
+        if ((L.gauge_offset != nullptr) != (p.levels[0].gauge_offset != nullptr)) { return tag + "gauge_offset must be given on every level or on none"; }
+        for (MultiFab const* g : {L.gauge_weight, L.gauge_offset}) {
+            if (g && (!(g->boxArray() == L.ba) || !(g->DistributionMap() == L.dm) || g->nComp() < 1)) {
+                return tag + "gauge_weight/gauge_offset BoxArray/DistributionMapping differ from the level or they have no component";
+            }
+        }
         if (!L.geom.Domain().contains(L.ba.minimalBox())) { return tag + "BoxArray outside the level domain"; }
         if (!L.ba.isDisjoint()) { return tag + "BoxArray is not disjoint"; }
         for (int d = 0; d < 3; ++d) {
@@ -502,23 +509,48 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         if (o.use_initial_guess) { MultiFab::Copy(*phi[l], *p.levels[l].phi, 0, 0, 1, 0); }
     }
 
-    // Mean removal: composite compatibility is sum over uncovered cells of v*b = 0 (v = cell volume of the level).
+    // Mean removal (D-067): composite compatibility is sum over uncovered cells of v*b = 0 (v = cell volume of the level).
+    //  Volume (default): the same constant sum(v*b)/sum(v) is subtracted on every level.
+    //  ScaledArithmetic (FDS parity): the arithmetic mean of F = v*b is removed from F, b_k -= mean(F)/v_l.
     if (o.remove_mean) {
-        double mean = 0.0, rms = 0.0;
-        hierarchy_mean(W, b, mean, rms);
-        const double floor_ = std::ldexp(max_abs_uncovered(W, b), -52);   // idempotence: below round-off of b itself, leave alone
-        const double shift = (std::abs(mean) > floor_ && ci.singular) ? mean : 0.0;
+        std::vector<double> shift_lev(nlev, 0.0);     // constant subtracted from b on each level
+        double mean = 0.0, rms = 0.0, removed = 0.0, floor_ = 0.0;
+        if (p.mean_kind == MeanKind::Volume) {
+            hierarchy_mean(W, b, mean, rms);
+            floor_ = std::ldexp(max_abs_uncovered(W, b), -52);   // idempotence: below round-off of b itself, leave alone
+            removed = mean;
+            if (std::abs(mean) > floor_ && ci.singular) { for (int l = 0; l < nlev; ++l) { shift_lev[l] = mean; } }
+            else { removed = 0.0; }
+        } else {
+            LevelMFs F;
+            for (int l = 0; l < nlev; ++l) {
+                F.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+                MultiFab::Copy(*F[l], *b[l], 0, 0, 1, 0);
+                F[l]->mult(W.vol[l], 0, 1, 0);
+            }
+            ExactSumResult sF = exact_sum_multi(terms_of(W, F, false), 1);
+            LevelMFs Fq = squares_of(W, F);
+            ExactSumResult sF2 = exact_sum_multi(terms_of(W, Fq, false), 1);
+            const double n = double(sF.count[0]);
+            mean = (n > 0) ? sF.sum[0] / n : 0.0;                 // arithmetic mean of F
+            rms = (n > 0) ? std::sqrt(sF2.sum[0] / n) : 0.0;      // rms of F
+            floor_ = std::ldexp(max_abs_uncovered(W, F), -52);
+            if (std::abs(mean) > floor_ && ci.singular) {
+                removed = mean;
+                for (int l = 0; l < nlev; ++l) { shift_lev[l] = mean / W.vol[l]; }
+            }
+        }
         if (ci.singular) {
-            ci.removed_mean = shift;
+            ci.removed_mean = removed;      // Volume: constant subtracted from b; ScaledArithmetic: mean of F = v*b
             ci.removed_rel = (rms > 0.0) ? std::abs(mean) / rms : 0.0;
         }
-        if (shift != 0.0) {
-            for (int l = 0; l < nlev; ++l) {
-                for (MFIter mfi(*b[l]); mfi.isValid(); ++mfi) {
-                    auto const& a = b[l]->array(mfi);
-                    auto const& u = W.unc[l]->const_array(mfi);
-                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (u(i,j,k) != 0) { a(i,j,k) -= shift; } });
-                }
+        for (int l = 0; l < nlev; ++l) {
+            if (shift_lev[l] == 0.0) { continue; }
+            const double shift = shift_lev[l];
+            for (MFIter mfi(*b[l]); mfi.isValid(); ++mfi) {
+                auto const& a = b[l]->array(mfi);
+                auto const& u = W.unc[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (u(i,j,k) != 0) { a(i,j,k) -= shift; } });
             }
         }
     }
@@ -557,13 +589,39 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     R.backend_status = bs;
     if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *phix[l], *phi[l]); } }
 
-    // Gauge: exact volume-weighted mean of phi over the uncovered cells, removed from all cells; then the covered
-    // coarse cells take the average-down of the fine solution.
+    // Gauge (D-067): sum(V*rho*(phi - KRES)) / sum(V*rho) over the uncovered cells of the hierarchy (exact sums, one
+    // fixed-point scale per sum) is removed from phi on all levels; with rho = 1 and KRES = 0 this is the plain exact
+    // volume-weighted mean. Then the covered coarse cells take the average-down of the fine solution. A component
+    // that is not singular is not shifted.
     if (ci.singular) {
-        double mean = 0.0, rms = 0.0;
-        hierarchy_mean(W, phi, mean, rms);
-        ci.gauge_shift = mean;
-        for (int l = 0; l < nlev; ++l) { phi[l]->plus(Real(-mean), 0, 1, 0); }
+        const bool has_w = (p.levels[0].gauge_weight != nullptr), has_g = (p.levels[0].gauge_offset != nullptr);
+        double shift = 0.0;
+        if (!has_w && !has_g) {
+            double rms = 0.0;
+            hierarchy_mean(W, phi, shift, rms);
+        } else {
+            LevelMFs X;                                               // phi - KRES
+            std::vector<SumTerm> num, den;
+            for (int l = 0; l < nlev; ++l) {
+                X.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+                MultiFab::Copy(*X[l], *phi[l], 0, 0, 1, 0);
+                if (has_g) { MultiFab::Subtract(*X[l], *p.levels[l].gauge_offset, 0, 0, 1, 0); }
+                SumTerm tn;
+                tn.mf = X[l].get(); tn.weight = double(W.vol[l]); tn.uncovered = W.unc[l].get();
+                tn.wfield = has_w ? p.levels[l].gauge_weight : nullptr;
+                num.push_back(tn);
+                if (has_w) {
+                    SumTerm td;
+                    td.mf = p.levels[l].gauge_weight; td.weight = double(W.vol[l]); td.uncovered = W.unc[l].get();
+                    den.push_back(td);
+                }
+            }
+            const double sn = exact_sum_multi(num, 1).sum[0];
+            const double sd = has_w ? exact_sum_multi(den, 1).sum[0] : total_volume(W);
+            shift = (sd > 0.0) ? sn / sd : 0.0;
+        }
+        ci.gauge_shift = shift;
+        for (int l = 0; l < nlev; ++l) { phi[l]->plus(Real(-shift), 0, 1, 0); }
     }
     average_down_all(W, phi);
 

@@ -832,8 +832,23 @@ void run_comp_sel ()
     }
     {
         MultiFab a;
-        expect("composite gauge weight not built", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
-            a.define(p.levels[0].ba, p.levels[0].dm, 1, 0); a.setVal(1.0); p.gauge_weight = &a; }, K::Auto, "gauge");
+        expect("single-level gauge_weight with levels not built (use PressureLevel fields)", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
+            a.define(p.levels[0].ba, p.levels[0].dm, 1, 0); a.setVal(1.0); p.gauge_weight = &a; }, K::Auto, "PressureLevel");
+    }
+    {
+        std::vector<std::unique_ptr<MultiFab>> g;
+        auto field = [&g] (pb::PressureProblem& p, int l) { g.push_back(std::make_unique<MultiFab>(p.levels[l].ba, p.levels[l].dm, 1, 0)); g.back()->setVal(1.0); return g.back().get(); };
+        expect("per-level gauge fields on every level Ok", c, S::Ok, [&] (pb::PressureProblem& p) {
+            for (int l = 0; l < 2; ++l) { p.levels[l].gauge_weight = field(p, l); p.levels[l].gauge_offset = field(p, l); } }, K::Auto, "");
+        expect("gauge_weight on one level only invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
+            p.levels[0].gauge_weight = field(p, 0); }, K::Auto, "every level");
+        expect("gauge_offset on the fine level only invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
+            p.levels[1].gauge_offset = field(p, 1); }, K::Auto, "every level");
+        expect("gauge field with another BoxArray invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
+            for (int l = 0; l < 2; ++l) { p.levels[l].gauge_weight = field(p, l); }
+            BoxArray b2(p.levels[0].ba.minimalBox()); b2.maxSize(4);
+            g.push_back(std::make_unique<MultiFab>(b2, DistributionMapping(b2), 1, 0)); g.back()->setVal(1.0);
+            p.levels[0].gauge_weight = g.back().get(); }, K::Auto, "differ from the level");
     }
     expect("ratio 3 not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.levels[1].ref_ratio = IntVect(3); }, K::Auto, "ratio");
     expect("anisotropic ratio not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.levels[1].ref_ratio = IntVect(2,2,4); }, K::Auto, "anisotropic");
@@ -924,6 +939,186 @@ void run_comp_ws ()
     }
 }
 
+
+// --------------------------------------------------------------------------------------------------------------
+// mode=comp_gauge: D-067 mean removal (Volume / ScaledArithmetic) and gauge (rho, KRES) on a hierarchy.
+//   Solves the same hierarchy with (A) Volume, no gauge fields, (B) Volume with per-level rho and KRES, (C) the FDS
+//   parity switch ScaledArithmetic without gauge fields. RHS = manufactured RHS + rhs_offset (so that a mean is
+//   removed). Writes level-concatenated full-domain dumps for the independent numpy check in tests/pb_test.py.
+// --------------------------------------------------------------------------------------------------------------
+Real gauge_rho_fn (Real x, Real y, Real z)
+{
+    return Real(1.2)*(Real(1.0) + Real(0.3)*std::sin(Real(2.)*kPi*x)*std::cos(kPi*y) + Real(0.2)*z);
+}
+Real gauge_kres_fn (Real x, Real y, Real z) { return Real(0.05)*(x*x + Real(2.)*y - z); }
+Real probe_phi_fn (Real x, Real y, Real z) { return std::cos(Real(3.)*x + y) + z*z + Real(0.7) + Real(1.0e-3)*std::sin(Real(40.)*x*y); }
+
+std::string hexd_c (double x) { std::uint64_t u; std::memcpy(&u, &x, 8); return hx(u); }
+
+void run_comp_gauge (ParmParse& pp)
+{
+    Cfg c;
+    pp.query("n", c.n); pp.query("nlev", c.nlev); pp.query("ratio", c.ratio);
+    int plane = 0; pp.query("plane2d", plane); c.plane2d = plane != 0;
+    std::string bcs = "neumann"; pp.query("bc", bcs); c.set_bc(cparse_bc(bcs));
+    pp.query("mgs", c.mgs); pp.query("layout", c.layout);
+    c.kx = 2; c.ky = c.plane2d ? 0 : 1; c.kz = 2;
+    int dmkind = 0; pp.query("dmkind", dmkind);
+    double offset = 0.37; pp.query("rhs_offset", offset);
+    double tol_rel = 1e-13; pp.query("tol_rel", tol_rel);
+    std::string out; pp.query("out", out);
+
+    Hier h = build_hier(c, dmkind);
+    for (auto& r : h.rhs) { r->plus(Real(offset), 0, 1, 0); }
+    // per-level gauge fields and an analytic probe field
+    std::vector<std::unique_ptr<MultiFab>> rho, kres, probe;
+    for (int l = 0; l < c.nlev; ++l) {
+        rho.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+        kres.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+        probe.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+        auto const dxa = h.geom[l].CellSizeArray(); auto const lo = h.geom[l].ProbLoArray();
+        for (MFIter mfi(*rho[l]); mfi.isValid(); ++mfi) {
+            auto const& r = rho[l]->array(mfi); auto const& k_ = kres[l]->array(mfi); auto const& q = probe[l]->array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const Real x = lo[0] + (i+0.5)*dxa[0], y = lo[1] + (j+0.5)*dxa[1], z = lo[2] + (k+0.5)*dxa[2];
+                r(i,j,k) = gauge_rho_fn(x, y, z); k_(i,j,k) = gauge_kres_fn(x, y, z); q(i,j,k) = probe_phi_fn(x, y, z);
+            });
+        }
+    }
+    pb::PressureOptions o; o.tol_rel = tol_rel; o.removed_mean_warn = 1.0e3; o.residual_tol = 1e-8; o.verbose = 1;
+    auto solve = [&] (pb::MeanKind mk, bool gauge, std::vector<double>& dump) {
+        pb::PressureProblem p = make_problem(c, h);
+        p.mean_kind = mk;
+        if (gauge) { for (int l = 0; l < c.nlev; ++l) { p.levels[l].gauge_weight = rho[l].get(); p.levels[l].gauge_offset = kres[l].get(); } }
+        for (auto& f : h.phi) { f->setVal(0.0); }
+        pb::PressureResult r = pb::solve_pressure(p, o);
+        dump = hier_gather(h, c.nlev);
+        return r;
+    };
+    std::vector<double> phiA, phiB, phiC;
+    pb::PressureResult rA = solve(pb::MeanKind::Volume, false, phiA);
+    pb::PressureResult rB = solve(pb::MeanKind::Volume, true, phiB);
+    pb::PressureResult rC = solve(pb::MeanKind::ScaledArithmetic, false, phiC);
+    ccheck(rA.status == pb::Status::Ok && rB.status == pb::Status::Ok && rC.status == pb::Status::Ok, "all three composite solves Ok");
+    ccheck(rA.residual_ok && rB.residual_ok && rC.residual_ok, "true composite residual within eps_H in all three");
+    auto const& cA = rA.components[0]; auto const& cB = rB.components[0]; auto const& cC = rC.components[0];
+    ccheck(cA.removed_mean == cB.removed_mean, "gauge fields do not change the removed mean (bitwise)");
+    if (cA.singular) {
+        ccheck(std::abs(cA.gauge_shift) > 0.0 && cA.gauge_shift != cB.gauge_shift, "weighted gauge constant differs from the plain one (test is sensitive)");
+    } else {
+        // A component with an open face has a unique solution: no mean removal, no gauge, gauge fields are ignored.
+        ccheck(cA.removed_mean == 0.0 && cC.removed_mean == 0.0, "non-singular component: nothing removed from the RHS");
+        ccheck(cA.gauge_shift == 0.0 && cB.gauge_shift == 0.0 && cC.gauge_shift == 0.0, "non-singular component: no gauge shift");
+        ccheck(phiA == phiB, "non-singular component: gauge fields leave the solution bitwise unchanged");
+    }
+    Print() << std::setprecision(17) << "GAUGE bc=" << bcs << " nranks=" << ParallelDescriptor::NProcs() << " mgs=" << c.mgs << " dmkind=" << dmkind
+            << " nlev=" << c.nlev << " ratio=" << c.ratio << " plane2d=" << plane << " offset=" << offset
+            << " removedV=" << hexd_c(cA.removed_mean) << " removedS=" << hexd_c(cC.removed_mean)
+            << " removedV_val=" << cA.removed_mean << " removedS_val=" << cC.removed_mean
+            << " removed_relV=" << cA.removed_rel << " removed_relS=" << cC.removed_rel
+            << " shiftA=" << cA.gauge_shift << " shiftB=" << cB.gauge_shift << " shiftC=" << cC.gauge_shift
+            << " nunc=" << rA.ncells_uncovered << " iters=" << rA.backend_status.iterations;
+    for (int l = 0; l < c.nlev; ++l) {
+        auto const dxa = h.geom[l].CellSizeArray();
+        Print() << std::setprecision(17) << " vol" << l << "=" << double(dxa[0])*double(dxa[1])*double(dxa[2]);
+    }
+    Print() << "\n";
+
+    // Building block, decomposition independent by construction: the gauge numerator and denominator of a fixed analytic
+    // field with the same exact sums the solver uses. Printed as hex for bitwise comparison across rank counts and layouts.
+    {
+        std::vector<pb::SumTerm> num, den;
+        std::vector<std::unique_ptr<MultiFab>> X;
+        for (int l = 0; l < c.nlev; ++l) {
+            X.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+            MultiFab::Copy(*X[l], *probe[l], 0, 0, 1, 0);
+            MultiFab::Subtract(*X[l], *kres[l], 0, 0, 1, 0);
+            auto const dxa = h.geom[l].CellSizeArray();
+            const double v = double(dxa[0])*double(dxa[1])*double(dxa[2]);
+            pb::SumTerm tn; tn.mf = X[l].get(); tn.weight = v; tn.uncovered = h.unc[l].get(); tn.wfield = rho[l].get(); num.push_back(tn);
+            pb::SumTerm td; td.mf = rho[l].get(); td.weight = v; td.uncovered = h.unc[l].get(); den.push_back(td);
+        }
+        const double sn = pb::exact_sum_multi(num, 1).sum[0], sd = pb::exact_sum_multi(den, 1).sum[0];
+        Print() << std::setprecision(17) << "GAUGE_EXACT num=" << hexd_c(sn) << " den=" << hexd_c(sd) << " shift=" << hexd_c(sn/sd) << " shift_val=" << sn/sd << "\n";
+    }
+
+    // Independent divergence check of the ScaledArithmetic solution: div(grad phi_C) must equal b - mean(F)/v_l on the
+    // uncovered cells, with mean(F) computed here from the dumped RHS (not from the library). The Volume zero mode is the
+    // negative control: it must NOT match (volumes differ between levels).
+    if (c.nlev > 1 && cA.singular) {
+        for (int l = 0; l < c.nlev; ++l) { h.phi[l]->setVal(0.0); }
+        pb::PressureProblem p = make_problem(c, h);
+        p.mean_kind = pb::MeanKind::ScaledArithmetic;
+        pb::PressureResult r = pb::solve_pressure(p, o);
+        ccheck(r.status == pb::Status::Ok, "ScaledArithmetic solve for the divergence check Ok");
+        GradOut g = make_grad(c, h);
+        pb::PressureResult gr = pb::face_gradient_composite(p, g.ptr);
+        ccheck(gr.status == pb::Status::Ok, "face_gradient_composite status Ok");
+        double sF = 0.0, sV = 0.0, sVb = 0.0; double cnt = 0.0;
+        for (int l = 0; l < c.nlev; ++l) {
+            auto const dxa = h.geom[l].CellSizeArray(); const double v = double(dxa[0])*double(dxa[1])*double(dxa[2]);
+            for (MFIter mfi(*h.rhs[l]); mfi.isValid(); ++mfi) {
+                auto const& b = h.rhs[l]->const_array(mfi); auto const& u = h.unc[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (u(i,j,k)) { sF += v*b(i,j,k); sV += v; cnt += 1.0; (void)sVb; } });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(sF); ParallelDescriptor::ReduceRealSum(sV); ParallelDescriptor::ReduceRealSum(cnt);
+        const double meanF = sF/cnt, meanV = sF/sV;
+        const int hd = c.plane2d ? 1 : -1;
+        auto div_err = [&] (bool scaled) {
+            double r2 = 0.0, b2 = 0.0;
+            for (int l = 0; l < c.nlev; ++l) {
+                auto const dxa = h.geom[l].CellSizeArray(); const double v = double(dxa[0])*double(dxa[1])*double(dxa[2]);
+                const double shift = scaled ? meanF/v : meanV;
+                for (MFIter mfi(*h.rhs[l]); mfi.isValid(); ++mfi) {
+                    auto const& b = h.rhs[l]->const_array(mfi); auto const& u = h.unc[l]->const_array(mfi);
+                    auto const& gx = g.ptr[l][0]->const_array(mfi); auto const& gy = g.ptr[l][1]->const_array(mfi); auto const& gz = g.ptr[l][2]->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                        if (!u(i,j,k)) { return; }
+                        double div = (gx(i+1,j,k) - gx(i,j,k))/dxa[0] + (gz(i,j,k+1) - gz(i,j,k))/dxa[2];
+                        if (hd != 1) { div += (gy(i,j+1,k) - gy(i,j,k))/dxa[1]; }
+                        const double bb = b(i,j,k) - shift;
+                        r2 += v*(bb-div)*(bb-div); b2 += v*bb*bb;
+                    });
+                }
+            }
+            ParallelDescriptor::ReduceRealSum(r2); ParallelDescriptor::ReduceRealSum(b2);
+            return std::sqrt(r2/b2);
+        };
+        const double es = div_err(true), ev = div_err(false);
+        Print() << std::setprecision(6) << "GAUGE_DIV scaled_zero_mode=" << es << " volume_zero_mode_control=" << ev << " meanF=" << meanF << " meanV=" << meanV << "\n";
+        ccheck(es <= 1e-8, "ScaledArithmetic solution: div(grad phi) equals b - mean(v*b)/v on uncovered cells (independent formula), rel2 " + std::to_string(es));
+        ccheck(ev > 100*std::max(es, 1e-12), "negative control: the Volume zero mode does not match the ScaledArithmetic solution (test is sensitive)");
+    }
+
+    if (!out.empty()) {
+        auto w = [&] (std::string const& name, std::vector<double> const& v) {
+            if (ParallelDescriptor::IOProcessor()) {
+                std::ofstream ofs(out + name, std::ios::binary);
+                ofs.write(reinterpret_cast<const char*>(v.data()), static_cast<std::streamsize>(v.size()*sizeof(double)));
+            }
+        };
+        auto gatherl = [&] (std::vector<std::unique_ptr<MultiFab>> const& f) {
+            std::vector<double> all;
+            for (int l = 0; l < c.nlev; ++l) { auto v = gather_box(*f[l], h.geom[l].Domain()); all.insert(all.end(), v.begin(), v.end()); }
+            return all;
+        };
+        std::vector<std::unique_ptr<MultiFab>> uncd;
+        for (int l = 0; l < c.nlev; ++l) {
+            uncd.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+            for (MFIter mfi(*uncd[l]); mfi.isValid(); ++mfi) {
+                auto const& a = uncd[l]->array(mfi); auto const& u = h.unc[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = double(u(i,j,k)); });
+            }
+        }
+        w("_phiA.bin", phiA); w("_phiB.bin", phiB); w("_phiC.bin", phiC);
+        w("_rho.bin", gatherl(rho)); w("_kres.bin", gatherl(kres)); w("_unc.bin", gatherl(uncd));
+        std::vector<std::unique_ptr<MultiFab>> rr;
+        for (int l = 0; l < c.nlev; ++l) { rr.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0)); MultiFab::Copy(*rr[l], *h.rhs[l], 0, 0, 1, 0); }
+        w("_rhs.bin", gatherl(rr));
+    }
+}
+
 } // anonymous namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp)
@@ -932,6 +1127,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_ns2d") { run_comp_ns2d(pp); }
     else if (mode == "comp_sel") { run_comp_sel(); }
     else if (mode == "comp_ws") { run_comp_ws(); }
+    else if (mode == "comp_gauge") { run_comp_gauge(pp); }
     else { return -1; }
     return g_cfail;
 }
