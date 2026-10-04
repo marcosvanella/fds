@@ -22,7 +22,7 @@ the preprocessor output with the macro undefined is unchanged). `git apply --che
   `.out` pressure-iteration lines equal to the baseline); driver tests, decomposition check, kernel checks and the csmag_32 FISHPAK_BC comparison pass as before.
 
 ## Not done here
-No oneAPI validation. Slice/boundary/particle files and restart files are not written by the driver.
+Validated with patches 0005 to 0009 (oneAPI ifx 2026.1.1: 0 warnings, OFF bitwise equal to unpatched, driver tests pass; GNU Debug pass; see 0007 for the evidence list). Slice/boundary/particle files and restart files are not written by the driver.
 
 ## Re-check on the committed tree (after the Architect applied 0006)
 `git archive` of the repository HEAD (with 0001 to 0006 applied, no `WITH_AMREX`), built out of tree with the reference options, `tests/check_off_bitwise.sh`:

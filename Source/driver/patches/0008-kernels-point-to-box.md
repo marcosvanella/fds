@@ -1,6 +1,6 @@
-# Patch 0008 (DRAFT, with 0007): `velo.f90`, `mass.f90`, `divg.f90`, `wall.f90`, `turb.f90`, kernels find their box through `POINT_TO_BOX`
+# Patch 0008 (VALIDATED, with 0007): `velo.f90`, `mass.f90`, `divg.f90`, `wall.f90`, `turb.f90`, kernels find their box through `POINT_TO_BOX`
 
-**Status: DRAFT, goes with 0007 (same oneAPI validation request; not validated with `ifx` here, gfortran 14.2 only).** It needs only `POINT_TO_BOX` of patch 0005; it is independent of
+**Status: VALIDATED, goes with 0007 (oneAPI and GNU Debug).** Evidence: oneAPI (ifx 2026.1.1, Intel MPI 2021.18.1): 0 warnings (also with -check all -traceback -fpe0 -init=snan), OFF output bitwise equal to the unpatched tree, driver tests pass (including the checked-bounds build). GNU Debug (gfortran 14.2, -fcheck=all, FP traps): fine guard, fine-b shadow and flux hook checks pass. The fine-b shadow check runs on a single level-0 mesh, 1 rank only. The amended 0007 (DT_NEW(*) dummies in velo.f90) is commit a72d491fb9. It needs only `POINT_TO_BOX` of patch 0005; it is independent of
 0007 but is only useful with it (without 0007 `POINT_TO_BOX` is the 0005 routine and a level-0 mesh number gives the same result as `POINT_TO_MESH`).
 
 ## What it does

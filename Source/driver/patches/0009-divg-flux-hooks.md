@@ -1,6 +1,6 @@
-# Patch 0009 (DRAFT): `divg.f90`, diffusive face-flux read-out and override hook
+# Patch 0009 (VALIDATED): `divg.f90`, diffusive face-flux read-out and override hook
 
-**Status: DRAFT (gfortran 14.2 only, not validated with `ifx`).** Applies to the HEAD `Source/divg.f90` and on top of 0008. Independent of 0007, but the hook is only useful with the AMR driver.
+**Status: VALIDATED (oneAPI and GNU Debug).** Evidence: oneAPI (ifx 2026.1.1, Intel MPI 2021.18.1): 0 warnings (also with -check all -traceback -fpe0 -init=snan), OFF output bitwise equal to the unpatched tree, driver tests pass (including the checked-bounds build). GNU Debug (gfortran 14.2, -fcheck=all, FP traps): fine guard, fine-b shadow and flux hook checks pass. The fine-b shadow check runs on a single level-0 mesh, 1 rank only. The amended 0007 (DT_NEW(*) dummies in velo.f90) is commit a72d491fb9. Applies to the HEAD `Source/divg.f90` and on top of 0008. Independent of 0007, but the hook is only useful with the AMR driver.
 Design: `notes/flux-hooks-design.md`. This patch was first announced as 0008; 0008 is the kernel-routing patch, so the flux hook is 0009.
 
 ## What it does

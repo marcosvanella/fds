@@ -1,6 +1,6 @@
-# Patch 0007 (DRAFT): `mesh.f90`, fine-level mesh objects for `POINT_TO_BOX` (D-056, option B)
+# Patch 0007 (VALIDATED): `mesh.f90`, fine-level mesh objects for `POINT_TO_BOX` (D-056, option B)
 
-**Status: DRAFT (applied to HEAD as a draft, commit 10c2a3b7b0), not validated with the oneAPI compilers (`ifx`/`ifort` are not available on this box), NOT used for physics.** Condition of D-056: patch 0005 must pass oneAPI validation
+**Status: VALIDATED (oneAPI and GNU Debug; the gate for level>0 physics is lifted). Applied to HEAD as commit 10c2a3b7b0, amended by a72d491fb9.** Evidence: oneAPI (ifx 2026.1.1, Intel MPI 2021.18.1): 0 warnings (also with -check all -traceback -fpe0 -init=snan), OFF output bitwise equal to the unpatched tree, driver tests pass (including the checked-bounds build). GNU Debug (gfortran 14.2, -fcheck=all, FP traps): fine guard, fine-b shadow and flux hook checks pass. The fine-b shadow check runs on a single level-0 mesh, 1 rank only. The amended 0007 (DT_NEW(*) dummies in velo.f90) is commit a72d491fb9. Condition of D-056: patch 0005 must pass oneAPI validation
 first (the Architect is arranging it); this patch grows 0005 and has the same validation requirement plus the points under "What oneAPI has to confirm". If 0005 or 0007 fails, fix it or
 carry fine boxes on the alias route (`fds_shim_bind`); option A (a longer `MESHES`) is not an alternative without asking. 0005 itself is not edited: 0007 applies on top of it (the file
 index line `172704f` of the tree with 0005 applied is the base).
@@ -63,7 +63,7 @@ See "Results" below.
   `vcorr`, `p_mfd`, `p_dens`, `p_dens_pre`, `baroclinic`, `noflux`, flag set/clear call `POINT_TO_BOX` through the patched files and use `BOX_OBJ(NM)` (driver module `fds_box_obj.f90`:
   `MESHES(NM)` or `FINE_LEVEL(L)%BOX(IB)`) instead of `MESHES(NM)`; every other NM-taking `fds_p_*` wrapper calls `FDS_HOOK_L0_ONLY` and aborts for a fine number (this closes the gap that
   the S9.6 guard covered only the `fds_k_*` entry names). The CMake auto-detection defines `FDS_FINE_B` for the driver Fortran when `Source/mesh.f90` declares `FINE_LEVEL_TYPE`.
-  `fds_hook_set_fine_ready(1)` is still not called by any production code path: fine boxes are not used for physics before 0007 and 0008 are validated.
+  `fds_hook_set_fine_ready(1)` is still not called by any production code path: fine boxes were not used for physics before 0007 and 0008 were validated; they are now validated (see Status).
 - `FDS_FINE_B_SET_VIEW(L,IB,WHICH,LB,EXT,P)` (C name `fds_fine_b_set_view`) binds fields of `FINE_LEVEL(L)%VIEW(IB)` to AMReX data, as `fds_hook_set_view` does for level 0.
 - Contents of a built box (`BUILD_FINE_BOX` in the draft): metrics with the FDS arithmetic, `CELL_INDEX`/`CELL` with a solid-exterior ghost ring, `EDGE(0:0)`, zero-size wall tables,
   `INTERPOLATED_MESH`, all state, field and work arrays, LES filter width and `CSD2`, background pressure and atmosphere. Not built: obstructions (none at fine levels), `OMESH`, interface walls
