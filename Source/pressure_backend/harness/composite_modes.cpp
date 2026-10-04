@@ -1461,6 +1461,102 @@ void run_hypre_cmp (ParmParse& pp)
     }
 }
 
+// Where the error of a hierarchy sits: per level, uncovered cells classed by the nearest of {C/F interface, closed domain face (N),
+// open domain face (D), interior} and the distance in cells (0 = adjacent, 3 = three or more). Composite error against the
+// manufactured solution, the uniform finest-grid error on the same cells, and their difference (frozen/mixed-nd-hierarchy-note.md).
+void run_err_map (ParmParse& pp)
+{
+    std::string bcs;
+    Cfg c = cfg_from_pp(pp, bcs);
+    int dmkind = 0; pp.query("dmkind", dmkind);
+    Hier h = build_hier(c, dmkind);
+    pb::PressureProblem p = make_problem(c, h);
+    pb::PressureOptions o; o.tol_rel = 1e-11; o.removed_mean_warn = 1e9; o.residual_tol = 1e-8; o.verbose = 0;
+    apply_backend_opts(pp, o);
+    pb::PressureResult r = pb::solve_pressure(p, o);
+    ccheck(r.status == pb::Status::Ok, "composite solve Ok (" + std::string(pb::to_string(r.status)) + ": " + r.message + ", iters " + std::to_string(r.backend_status.iterations) + ")");
+    int fr = 1; for (int l = 1; l < c.nlev; ++l) { fr *= c.ratio; }
+    Cfg u = c; u.nlev = 1; u.n = c.n*fr; u.full = false;
+    Hier hu = build_hier(u, 0);
+    pb::PressureProblem pu = make_single_problem(u, hu);
+    pb::PressureOptions ou = o; ou.backend = pb::BackendKind::Auto;
+    pb::PressureResult ru = pb::solve_pressure(pu, ou);
+    ccheck(ru.status == pb::Status::Ok, "uniform fine solve Ok");
+    auto uni = gather_box(*hu.phi[0], hu.geom[0].Domain());
+    const bool sing = c.singular();
+    for (int l = 0; l < c.nlev; ++l) {
+        const Box dom = h.geom[l].Domain();
+        auto phi = gather_box(*h.phi[l], dom);
+        MultiFab um(h.ba[l], h.dm[l], 1, 0);
+        for (MFIter mfi(um); mfi.isValid(); ++mfi) {
+            auto const& a = um.array(mfi); auto const& q = h.unc[l]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = q(i,j,k); });
+        }
+        auto unc = gather_box(um, dom);
+        if (!ParallelDescriptor::IOProcessor()) { continue; }
+        const auto dxa = h.geom[l].CellSizeArray(); const auto lo = h.geom[l].ProbLoArray();
+        const int nx = dom.length(0), ny = dom.length(1);
+        auto at = [&] (std::vector<double> const& v, int i, int j, int k) { return v[i + nx*(j + Long(ny)*k)]; };
+        auto inside = [&] (int i, int j, int k) { return i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < dom.length(2); };
+        auto ex = [&] (int i, int j, int k) { return double(exact_fn(c, lo[0] + (i+0.5)*dxa[0], c.plane2d ? Real(0.5) : lo[1] + (j+0.5)*dxa[1], lo[2] + (k+0.5)*dxa[2])); };
+        // uniform solution on the cells of this level (level l cell = fr_l^3 block of the finest grid; compare on the finest level only)
+        const bool finest = (l == c.nlev - 1);
+        auto uvalue = [&] (int i, int j, int k) { return at(uni, i, j, k); };
+        double mean_c = 0.0, mean_u = 0.0, sv = 0.0;
+        if (sing) {
+            for (int k = 0; k < dom.length(2); ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
+                if (at(unc, i, j, k) == 0.0) { continue; }
+                sv += 1.0; mean_c += at(phi, i, j, k) - ex(i, j, k);
+                if (finest) { mean_u += uvalue(i, j, k) - ex(i, j, k); }
+            }
+            mean_c /= sv; mean_u /= sv;
+        }
+        struct Acc { long n = 0; double s2c = 0, mxc = 0, s2u = 0, s2d = 0; };
+        std::map<std::string, Acc> acc;
+        Acc all;
+        for (int k = 0; k < dom.length(2); ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
+            if (at(unc, i, j, k) == 0.0) { continue; }
+            const int cell[3] = {i, j, k};
+            int bestd = 99; std::string kind = "interior";
+            for (int d = 0; d < 3; ++d) {
+                if (c.plane2d && d == 1) { continue; }
+                const int len = dom.length(d);
+                const int dl = cell[d], dh = len - 1 - cell[d];
+                if (c.bcd[d] != pb::BC::Periodic) {
+                    if (dl < bestd || (dl == bestd && kind == "interior")) { bestd = dl; kind = (c.bcd[d] == pb::BC::Dirichlet) ? "domD" : "domN"; }
+                    if (dh < bestd) { bestd = dh; kind = (c.bchi[d] == pb::BC::Dirichlet) ? "domD" : "domN"; }
+                }
+            }
+            // C/F: nearest cell of this level that is not an unknown (covered by the finer level) or not in the level (finer levels' outer neighbour)
+            for (int m = 1; m <= 3; ++m) {
+                bool hit = false;
+                for (int d = 0; d < 3 && !hit; ++d) for (int sd = -1; sd <= 1 && !hit; sd += 2) {
+                    int q[3] = {i, j, k}; q[d] += sd*m;
+                    if (!inside(q[0], q[1], q[2])) { if (c.bcd[d] == pb::BC::Periodic) { q[d] = (q[d] + dom.length(d)) % dom.length(d); } else { continue; } }
+                    const bool in_level = h.ba[l].contains(IntVect(q[0], q[1], q[2]));
+                    if (!in_level) { hit = true; }
+                    else if (at(unc, q[0], q[1], q[2]) == 0.0) { hit = true; }
+                }
+                if (hit) { if (m - 1 <= bestd) { bestd = m - 1; kind = "CF"; } break; }
+            }
+            const double ec = at(phi, i, j, k) - ex(i, j, k) - mean_c;
+            const double eu = finest ? uvalue(i, j, k) - ex(i, j, k) - mean_u : 0.0;
+            const std::string key = kind + (kind == "interior" ? std::string("") : std::to_string(std::min(bestd, 3)));
+            for (Acc* a : {&acc[key], &all}) {
+                ++a->n; a->s2c += ec*ec; a->mxc = std::max(a->mxc, std::abs(ec));
+                if (finest) { a->s2u += eu*eu; a->s2d += (ec - eu)*(ec - eu); }
+            }
+        }
+        for (auto const& kv : acc) {
+            Print() << std::setprecision(4) << "ERRMAP bc=" << bcs << " ratio=" << c.ratio << " layout=" << c.layout << " full=" << int(c.full) << " level=" << l << " class=" << kv.first
+                    << " n=" << kv.second.n << " rms_comp=" << std::sqrt(kv.second.s2c/kv.second.n) << " max_comp=" << kv.second.mxc
+                    << " rms_uniform=" << (finest ? std::sqrt(kv.second.s2u/kv.second.n) : -1.0) << " rms_diff=" << (finest ? std::sqrt(kv.second.s2d/kv.second.n) : -1.0) << "\n";
+        }
+        Print() << std::setprecision(4) << "ERRMAP bc=" << bcs << " ratio=" << c.ratio << " layout=" << c.layout << " full=" << int(c.full) << " level=" << l << " class=ALL n=" << all.n
+                << " rms_comp=" << std::sqrt(all.s2c/all.n) << " max_comp=" << all.mxc << " rms_uniform=" << (finest ? std::sqrt(all.s2u/all.n) : -1.0) << " rms_diff=" << (finest ? std::sqrt(all.s2d/all.n) : -1.0) << "\n";
+    }
+}
+
 } // anonymous namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp)
@@ -1473,6 +1569,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_trigger") { run_comp_trigger(); }
     else if (mode == "hypre_op") { run_hypre_op(pp); }
     else if (mode == "hypre_cmp") { run_hypre_cmp(pp); }
+    else if (mode == "err_map") { run_err_map(pp); }
     else { return -1; }
     return g_cfail;
 }
