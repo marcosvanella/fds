@@ -9,3 +9,9 @@ target_include_directories(test_flux_stage PRIVATE tests ${DRV}/tests)
 add_test(NAME regrid_transport_flux_stage COMMAND test_flux_stage)
 add_test(NAME regrid_transport_flux_stage_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_flux_stage>)
 set_tests_properties(regrid_transport_flux_stage regrid_transport_flux_stage_np4 PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
+
+# Driver-level checks need a driver build (RT_DRIVER_BUILD = directory with fds_amr). Without it they SKIP (exit code 77) with a message.
+set(RT_DRIVER_BUILD "" CACHE PATH "Build directory of the AMR driver (contains fds_amr); enables the driver-level regrid_transport tests")
+add_test(NAME regrid_transport_single_level_equiv COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/tests/run_single_level_equiv.sh "${RT_DRIVER_BUILD}")
+add_test(NAME regrid_transport_e2e_driver COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/tests/run_e2e_driver.sh "${RT_DRIVER_BUILD}")
+set_tests_properties(regrid_transport_single_level_equiv regrid_transport_e2e_driver PROPERTIES SKIP_RETURN_CODE 77)
