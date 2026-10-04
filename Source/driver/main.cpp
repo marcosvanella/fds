@@ -16,7 +16,13 @@
 #include <cstdlib>
 
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
+
+#ifdef FDSRT_DRIVER_MODES
+#include "InputConverter.H"   // D-076 input converter (Source/regrid_transport), added to the target by regrid_transport/DriverSources.cmake
+#endif
 
 #include "FdsSetup.H"
 #include "PressureBcMap.H"
@@ -73,6 +79,46 @@ void print_pressure_bc(const fdsamr::Level0& l0, const char* name)
     }
     amrex::Print() << line << "\n";
 }
+
+#ifdef FDSRT_DRIVER_MODES
+// D-076 pre-pass. Every rank reads the input and converts it (pure functions, same result everywhere). Without finer meshes and without &AMR groups the converted text equals the
+// input and the original file is used (the single-level path is untouched). Otherwise rank 0 writes the level-0-only input next to the working directory as
+// <stem>_amr_level0.fds, all ranks wait for it, and `fds_input` names it for the unchanged FDS set-up. Errors (misaligned or non-nested finer mesh, finer mesh without an &AMR
+// line, ...) are printed by rank 0 and the run stops before FDS reads anything.
+bool prepare_amr_input(const char* path, fdsrt::ConvertResult& conv, std::string& fds_input)
+{
+    int rank = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    std::ifstream f(path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    fdsrt::Report rep;
+    const std::string text = ss.str();
+    const bool ok = f && fdsrt::convert_input(text, conv, rep) && rep.ok();
+    if (rank == 0) {
+        if (!f) std::fprintf(stderr, "fds_amr ERROR: cannot read the input file %s\n", path);
+        for (const auto& w : rep.warnings) std::fprintf(stderr, "fds_amr input converter warning: %s\n", w.c_str());
+        for (const auto& e : rep.errors) std::fprintf(stderr, "fds_amr input converter ERROR: %s\n", e.c_str());
+    }
+    if (!ok) return false;
+    fds_input = path;
+    if (conv.level0_text != text) {
+        std::string stem = path;
+        const size_t sl = stem.find_last_of('/');
+        if (sl != std::string::npos) stem = stem.substr(sl + 1);
+        const size_t dot = stem.find_last_of('.');
+        if (dot != std::string::npos) stem = stem.substr(0, dot);
+        fds_input = stem + "_amr_level0.fds";
+        if (rank == 0) {
+            std::ofstream o(fds_input);
+            o << conv.level0_text;
+            if (!o) { std::fprintf(stderr, "fds_amr ERROR: cannot write %s\n", fds_input.c_str()); MPI_Abort(MPI_COMM_WORLD, 1); }
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+    return true;
+}
+#endif
 }  // namespace
 int fds_selftest(const fdsamr::Level0& l0);   // tests/selftest_fds.cpp
 int fds_kernelcheck(const fdsamr::Level0& l0, const std::string& dump, bool window, const std::string& ghost);   // tests/kernelcheck.cpp
@@ -91,15 +137,27 @@ int main(int argc, char** argv)
     {
         // build_parm_parse = false: argv[1] is the FDS input file, not an AMReX inputs file.
         amrex::Initialize(argc, argv, false, MPI_COMM_WORLD);
+        std::string fds_input_s = argv[1];   // the file FDS reads (the converted level-0 input when finer meshes / &AMR groups were taken out)
         int mode_end = 2;  // 2 = FDS setup-only stop message (S1 has no time loop yet)
         {
             double dt = 0.;
-            fds_setup(0, argv[1], &dt);
+            const char* fds_input = argv[1];
+#ifdef FDSRT_DRIVER_MODES
+            // D-076: finer &MESH lines (and the &AMR groups) are taken out of the input FDS reads; the hierarchy built from them is `conv.hierarchy` with the parameters
+            // `conv.params`, for the regrid core (RegridAmrCore(conv.hierarchy, conv.params); TwoLevelRun.cpp builds the same objects from a level-0 mesh list today). The
+            // FDS set-up, build_level0 and assemble_level0 below then see level-0 meshes only (equal cell size, the cover meshes included).
+            fdsrt::ConvertResult conv;
+            if (!prepare_amr_input(argv[1], conv, fds_input_s)) { MPI_Abort(MPI_COMM_WORLD, 1); return 1; }
+            fds_input = fds_input_s.c_str();
+            amrex::Print() << "FDS-AMReX: input converter: " << conv.meshes.size() << " meshes, " << conv.level0_meshes.size() << " level-0 meshes, " << conv.removed_meshes.size()
+                           << " finer meshes removed, " << conv.cover_boxes.size() << " cover meshes added, hierarchy levels " << conv.hierarchy.top + 1 << "\n";
+#endif
+            fds_setup(0, fds_input, &dt);
 
             fdsamr::Level0 l0 = fdsamr::build_level0();
             fdsamr::print_level0(l0);
             amrex::Print() << "FDS-AMReX: initial dt from FDS set-up = " << dt << "\n";
-            if (argc > 2 && std::strcmp(argv[2], "--pressure-bc") == 0) print_pressure_bc(l0, argv[1]);
+            if (argc > 2 && std::strcmp(argv[2], "--pressure-bc") == 0) print_pressure_bc(l0, fds_input_s.c_str());
             if (argc > 2 && std::strcmp(argv[2], "--fine-guard-test") == 0) {
                 // D-056: a kernel wrapper called with a fine-level mesh number (above NMESHES) must stop the run with a clear message (non-zero exit); this call does not return
                 amrex::Print() << "FINE-GUARD-TEST: calling fds_k_visc with mesh number 1000000\n";
@@ -201,7 +259,7 @@ int main(int argc, char** argv)
             }
         }
         amrex::Finalize();
-        fds_setup(mode_end, argv[1], nullptr);  // does not return
+        fds_setup(mode_end, fds_input_s.c_str(), nullptr);  // does not return
     }
     return 0;
 }
