@@ -3,6 +3,7 @@
 
 #include <AMReX_Print.H>
 #include <AMReX_RealBox.H>
+#include <algorithm>
 
 #include "TagOps.H"
 
@@ -46,7 +47,7 @@ amrex::AmrInfo make_amr_info(const Hierarchy& h, const AmrParams& p)
 }
 
 RegridAmrCore::RegridAmrCore(const Hierarchy& h, const AmrParams& p)
-    : amrex::AmrCore(make_level0_geometry(h), make_amr_info(h, p)), h_(h)
+    : amrex::AmrCore(make_level0_geometry(h), make_amr_info(h, p)), h_(h), post_mode_(p.post_regrid_projection)
 {
 }
 
@@ -208,7 +209,35 @@ bool RegridAmrCore::regrid_dynamic(amrex::Real time)
     for (int l = 1; !changed && l <= old_finest; ++l) changed = !(boxArray(l) == old_ba[l]);
     if (changed) ++stats_.n_changed;
     if (transfer_) transfer_->hierarchy_done(false);
+    // D-063: retained fine data next to new fine cells (cell counts of the intersection of the old and the new grids, per level >= 1)
+    RegridOutcome out;
+    out.changed = changed;
+    out.finest = finestLevel();
+    for (int l = 1; l <= std::min(old_finest, finestLevel()); ++l) {
+        const long n_new = boxArray(l).numPts();
+        long ret = 0;
+        if (!old_ba[l].empty() && !boxArray(l).empty()) ret = amrex::intersect(boxArray(l), old_ba[l]).numPts();
+        out.retained_cells += ret;
+        out.new_cells += n_new - ret;
+        if (ret > 0 && n_new > ret) out.retained_and_new = true;
+    }
+    for (int l = old_finest + 1; l <= finestLevel(); ++l) out.new_cells += boxArray(l).numPts();
+    last_outcome_ = out;
+    if (post_hook_ && projection_wanted(post_mode_, out)) {
+        ++hook_calls_;
+        post_hook_(out);
+    }
     return changed;
+}
+
+bool RegridAmrCore::projection_wanted(PostRegridProjection mode, const RegridOutcome& o)
+{
+    switch (mode) {
+        case PostRegridProjection::Off: return false;
+        case PostRegridProjection::On: return o.changed;
+        case PostRegridProjection::Auto: return o.changed && o.retained_and_new;
+    }
+    return false;
 }
 
 }  // namespace fdsrt

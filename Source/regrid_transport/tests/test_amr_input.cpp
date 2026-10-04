@@ -94,6 +94,16 @@ int main()
         Report r8;
         parse("&AMR MAX_LEVEL=1, VELOCITY_TRANSFER='NOPE' /", r8);
         CHECK(r8.has_error_containing("VELOCITY_TRANSFER"));
+        {   // POST_REGRID_PROJECTION (D-063): default AUTO, ON/OFF/logicals accepted, anything else is an error
+            Report ra, rb, rc, rd, re;
+            CHECK(parse("&AMR MAX_LEVEL=1 /", ra).post_regrid_projection == PostRegridProjection::Auto);
+            CHECK(parse("&AMR MAX_LEVEL=1, POST_REGRID_PROJECTION='ON' /", rb).post_regrid_projection == PostRegridProjection::On);
+            CHECK(parse("&AMR MAX_LEVEL=1, POST_REGRID_PROJECTION='off' /", rc).post_regrid_projection == PostRegridProjection::Off);
+            CHECK(parse("&AMR MAX_LEVEL=1, POST_REGRID_PROJECTION=.FALSE. /", rd).post_regrid_projection == PostRegridProjection::Off);
+            parse("&AMR MAX_LEVEL=1, POST_REGRID_PROJECTION='SOMETIMES' /", re);
+            CHECK(re.has_error_containing("POST_REGRID_PROJECTION"));
+            CHECK(!ra.has_error_containing("POST_REGRID") && !rb.has_error_containing("POST_REGRID"));
+        }
         Report r9;
         parse("&AMR MAX_LEVEL=1, MAX_LEVEL=abc /", r9);
         CHECK(r9.has_error_containing("MAX_LEVEL must be one integer"));

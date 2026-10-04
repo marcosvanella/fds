@@ -8,10 +8,10 @@
 // Acceptance: max |div u - D| over all uncovered cells is at most the pressure tolerance. The band re-prolongation is NOT used.
 //
 // project_after_regrid does the bookkeeping (average-down of faces, divergence, right-hand side, update, check) and calls a CompositePoissonSolver for the linear solve.
-// The solver is the plug-in point of Role 2's composite MLMG: its entry points are PressureWorkspace::rebuild (hierarchy changed, keeps no pointers to old
-// MultiFabs) and a PressureLevel vector. Those names are not in Source/pressure_backend yet (only the single-level PressureIface exists); ProjectionLevel and
-// CompositePoissonSolver::rebuild/solve are the corresponding names on this side and will be renamed or wrapped when the headers land. Tests use the mock in
-// tests/MlmgCompositeSolver.H (amrex::MLMG, periodic).
+// The solver is the plug-in point of Role 2's composite MLMG. PressureBackendSolver.{H,cpp} binds it: rebuild() fills a pb::PressureProblem (levels of pb::PressureLevel) and
+// calls pb::PressureWorkspace::rebuild; solve() calls pb::solve_pressure(..., workspace) and pb::face_gradient_composite (single-cell directions zeroed, fine-flux overwrite
+// included). tests/MlmgCompositeSolver.H (amrex::MLMG, periodic) stays as a test-only fallback (blob test option --mock-solver). The regrid flow calls this through the hook of
+// RegridAmrCore (setting POST_REGRID_PROJECTION, see DriverAdapter.H install_post_regrid_projection).
 //
 // Sign and discretisation contract of a solver: solve() returns, on every valid face of every level, the gradient of ITS OWN solution, g = (phi_hi - phi_lo) / dx in the
 // normal direction, evaluated with the solver's own coarse-fine treatment (a fine face on a coarse-fine interface uses the solver's interpolated ghost value), so that

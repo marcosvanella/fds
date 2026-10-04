@@ -32,6 +32,10 @@ struct RegionSpec {
 
 enum class VelocityTransfer { FaceDivFree, FaceLinear, FaceConservative };
 
+// POST_REGRID_PROJECTION (ruling D-063): Auto = run the composite projection after a regrid that creates new fine faces next to retained fine faces
+// (some level >= 1 keeps part of its old grids and also gets new cells); On = after every regrid that changed the grids; Off = never (the Phase 3 behaviour before D-063).
+enum class PostRegridProjection { Auto, On, Off };
+
 // &AMR. Per-level vectors hold the values as entered (one value for all levels, or one per level; see expand()).
 struct AmrParams {
     bool present = false;        // an &AMR line was found
@@ -45,6 +49,7 @@ struct AmrParams {
     double grid_eff = 0.7;       // GRID_EFF: grid efficiency of the clustering
     int output_level_cap = -1;   // OUTPUT_LEVEL_CAP (L_out, IR-008 (b)); -1 = MAX_LEVEL
     VelocityTransfer velocity_transfer = VelocityTransfer::FaceDivFree;  // VELOCITY_TRANSFER, provisional default (FR-012)
+    PostRegridProjection post_regrid_projection = PostRegridProjection::Auto;  // POST_REGRID_PROJECTION: 'AUTO' (default, D-063), 'ON' or 'OFF'
     std::vector<RegionSpec> regions;        // &AMR_REGION lines
 
     // Value for level `lev` of a per-level vector (a single entry applies to every level).

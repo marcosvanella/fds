@@ -99,4 +99,45 @@ void average_down_registry(fdsamr::LevelRegistry& reg, const std::vector<std::st
     }
 }
 
+std::vector<ProjectionLevel> registry_projection_levels(fdsamr::LevelRegistry& reg, const RegridAmrCore& core, const std::function<const amrex::MultiFab*(int level)>& D)
+{
+    std::vector<ProjectionLevel> lv;
+    for (int l = 0; l <= core.finestLevel(); ++l) {
+        fdsamr::Fields& F = reg.fields(l);
+        ProjectionLevel pl;
+        pl.geom = core.Geom(l);
+        pl.ref_ratio = l > 0 ? core.refRatio(l - 1) : amrex::IntVect(1);
+        pl.vel = {&F["U"], &F["V"], &F["W"]};
+        pl.D = D ? D(l) : nullptr;
+        pl.covered = reg.covered_mask(l);
+        lv.push_back(pl);
+    }
+    return lv;
+}
+
+void install_post_regrid_projection(RegridAmrCore& core, fdsamr::LevelRegistry& reg, PostRegridProjectionState& state)
+{
+    RegridAmrCore* cp = &core;
+    fdsamr::LevelRegistry* rp = &reg;
+    PostRegridProjectionState* sp = &state;
+    core.set_post_regrid_hook([cp, rp, sp](const RegridOutcome&) {
+        std::vector<ProjectionLevel> lv = registry_projection_levels(*rp, *cp, sp->D);
+        if (sp->before) sp->before(lv);
+        ProjectionOptions o = sp->options;
+        o.enabled = true;
+        sp->last = project_after_regrid(lv, sp->solver, o);
+        ++sp->calls;
+        if (sp->last.ran && sp->last.solved) {
+            const char* st[3] = {"US", "VS", "WS"};
+            const char* vn[3] = {"U", "V", "W"};
+            for (int l = 0; l < static_cast<int>(lv.size()); ++l) {
+                fdsamr::Fields& F = rp->fields(l);
+                for (int d = 0; d < 3; ++d)
+                    if (F.has(st[d])) amrex::MultiFab::Copy(F[st[d]], F[vn[d]], 0, 0, 1, 0);
+            }
+        }
+        if (sp->after) sp->after(sp->last, lv);
+    });
+}
+
 }  // namespace fdsrt

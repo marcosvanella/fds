@@ -193,7 +193,7 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
 {
     AmrParams p;
     const std::vector<std::string> keys = {"MAX_LEVEL", "REF_RATIO", "REGRID_INTERVAL", "BLOCKING_FACTOR", "MAX_GRID_SIZE", "N_ERROR_BUF",
-                                           "N_PROPER", "GRID_EFF", "OUTPUT_LEVEL_CAP", "VELOCITY_TRANSFER"};
+                                           "N_PROPER", "GRID_EFF", "OUTPUT_LEVEL_CAP", "VELOCITY_TRANSFER", "POST_REGRID_PROJECTION"};
     int n_amr = 0;
     for (const auto& g : scan_namelists(text)) {
         if (g.name == "AMR") {
@@ -219,6 +219,14 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
                 else if (v == "FACE_LINEAR") p.velocity_transfer = VelocityTransfer::FaceLinear;
                 else if (v == "FACE_CONSERVATIVE") p.velocity_transfer = VelocityTransfer::FaceConservative;
                 else rep.error(at_line(g) + "VELOCITY_TRANSFER must be 'FACE_DIV_FREE', 'FACE_LINEAR' or 'FACE_CONSERVATIVE'");
+            }
+            auto pr = g.values.find("POST_REGRID_PROJECTION");
+            if (pr != g.values.end()) {
+                std::string v = pr->second.size() == 1 ? upper(pr->second[0]) : std::string();
+                if (v == "AUTO") p.post_regrid_projection = PostRegridProjection::Auto;
+                else if (v == "ON" || v == ".TRUE." || v == "T") p.post_regrid_projection = PostRegridProjection::On;
+                else if (v == "OFF" || v == ".FALSE." || v == "F") p.post_regrid_projection = PostRegridProjection::Off;
+                else rep.error(at_line(g) + "POST_REGRID_PROJECTION must be 'AUTO', 'ON' or 'OFF' (or .TRUE./.FALSE.)");
             }
         }
     }

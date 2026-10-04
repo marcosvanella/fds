@@ -35,6 +35,15 @@ struct RegridStats {
     std::vector<long> buffer_blocks_discarded;          // blocks added by the tag buffer outside the region and removed (blocks of bf/ratio cells)
 };
 
+// What a regrid did, for the post-regrid hook (ruling D-063).
+struct RegridOutcome {
+    bool changed = false;               // the grids of some level changed (or the number of levels)
+    bool retained_and_new = false;      // some level >= 1 kept part of its old grids AND gained new cells: new fine faces next to retained ones
+    long retained_cells = 0;            // cells of levels >= 1 present in both the old and the new grids
+    long new_cells = 0;                 // cells of levels >= 1 in the new grids that were not in the old ones
+    int finest = 0;
+};
+
 class RegridAmrCore : public amrex::AmrCore {
 public:
     // Fills `tags` of level `lev` from the fields of that level (field ghost layer filled by the caller). Static boxes and the region clip are applied afterwards.
@@ -62,6 +71,16 @@ public:
     // Between full steps: re-tag all levels, rebuild the grids of levels 1.. and fill the data (begin_regrid, make/remake/clear, end_regrid, hierarchy_done).
     // Returns true if the grids of some level changed. Does nothing (false) when MAX_LEVEL = 0.
     bool regrid_dynamic(amrex::Real time);
+
+    // Post-regrid hook (D-063): called at the end of regrid_dynamic, after hierarchy_done(false) and before control returns to the time loop (so before the next dt),
+    // when POST_REGRID_PROJECTION asks for it: AUTO (default) when RegridOutcome::retained_and_new, ON whenever the grids changed, OFF never. The driver installs
+    // the composite projection here (PostRegridProjection.H, DriverAdapter.H: install_post_regrid_projection).
+    using PostRegridHook = std::function<void(const RegridOutcome&)>;
+    void set_post_regrid_hook(PostRegridHook f) { post_hook_ = std::move(f); }
+    const RegridOutcome& last_outcome() const { return last_outcome_; }
+    int hook_calls() const { return hook_calls_; }
+    // The decision alone (also used by the tests): does the setting ask for the projection after this outcome?
+    static bool projection_wanted(PostRegridProjection mode, const RegridOutcome& o);
 
     // 1 where the cell of level `lev` lies under level lev+1 (for the TAG_KEEP hysteresis); all zero if lev is the finest level.
     amrex::iMultiFab covered_mask(int lev) const;
@@ -93,6 +112,10 @@ private:
     amrex::DistributionMapping level0_dm_;
     bool have_level0_dm_ = false;
     RegridStats stats_;
+    PostRegridProjection post_mode_ = PostRegridProjection::Auto;
+    PostRegridHook post_hook_;
+    RegridOutcome last_outcome_;
+    int hook_calls_ = 0;
     std::vector<bool> reported_discard_;
 };
 

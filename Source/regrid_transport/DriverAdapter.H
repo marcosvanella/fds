@@ -10,6 +10,8 @@
 
 #include "GhostExchange.H"
 #include "LevelRegistry.H"
+#include "PostRegridProjection.H"
+#include "RegridAmrCore.H"
 
 namespace fdsrt {
 
@@ -40,6 +42,27 @@ fdsamr::CfGhostHook make_cf_ghost_hook(fdsamr::LevelRegistry& reg, const ThermoP
 // through the whole hierarchy. Covered coarse cells only. Species: RHO with ZZ (and RHOS with ZZS) are restricted by average_down_species (rho and rho*Z averaged,
 // Z rebuilt as rho*Z/rho); the mass fractions are NEVER averaged linearly (that breaks the species mass, ~1e-4 relative at a flame front). Other fields: volume mean.
 void average_down_registry(fdsamr::LevelRegistry& reg, const std::vector<std::string>& names = {});
+
+// ---- Post-regrid composite projection (ruling D-063) in the regrid flow ------------------------------------------------------------------------------------------
+// The levels of the registry as ProjectionLevels: face velocities U, V, W, the covered masks, the geometry and ratios of the AmrCore; `D` (optional) gives the target divergence
+// MultiFab of a level (cell-centred, one component) or nullptr for D = 0.
+std::vector<ProjectionLevel> registry_projection_levels(fdsamr::LevelRegistry& reg, const RegridAmrCore& core, const std::function<const amrex::MultiFab*(int level)>& D = nullptr);
+
+// Per-run state of the installed hook: options, the target divergence provider, optional observers (before: velocity and registry as they enter the projection, after: report),
+// and the last report. After a successful projection the predictor copies US, VS, WS (when the registry has them) are set equal to U, V, W.
+struct PostRegridProjectionState {
+    CompositePoissonSolver* solver = nullptr;
+    ProjectionOptions options;                                   // options.enabled is forced true: the setting POST_REGRID_PROJECTION decides whether the hook runs
+    std::function<const amrex::MultiFab*(int level)> D;
+    std::function<void(std::vector<ProjectionLevel>&)> before;
+    std::function<void(const ProjectionReport&, std::vector<ProjectionLevel>&)> after;
+    ProjectionReport last;
+    int calls = 0;
+};
+
+// Installs the hook on `core` (RegridAmrCore::set_post_regrid_hook): after a regrid, when POST_REGRID_PROJECTION asks for it (AUTO default: new fine faces next to retained ones),
+// before control returns to the time loop, it runs project_after_regrid on the registry. `state` must outlive the core.
+void install_post_regrid_projection(RegridAmrCore& core, fdsamr::LevelRegistry& reg, PostRegridProjectionState& state);
 
 }  // namespace fdsrt
 
