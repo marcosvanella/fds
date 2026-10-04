@@ -114,9 +114,18 @@ Concrete descriptions, in order of use to radiation.
 
 ## 7. Test run and commits
 
-Final run status and commit hashes are in `RESULT.md`-style form in the report to the lead and are recorded at the end of this file.
+Run on the worktree at `743dbce961` plus the uncommitted radiation files, with `(local workspace)/s5venv/bin/python` and gfortran 14.
 
-(Filled in at commit time; see §9.)
+| Check | Result |
+|---|---|
+| Fast checks (`test_mesh_rad.py`: generation, golden, write sets, rewrite/overlap/drift refusals, nine pinned refusals) | all PASS, no FAIL line |
+| Bitwise program, six flag sets (O0, O2, O0omp, O2omp, O2omp_off, O2omp_dpd), 1/4/8 threads, 8632 cases each | **PASS in all six**: 0 mismatches, 0 kernels with too few non-vacuous cases, 148 guard-skipped cases; run by `test_mesh_rad.py --all` under the shared lock `.s5gen.lock` ("radiation bitwise test passes in all six flag sets") |
+| Spec mutant (flat chain `Q += ILW(n)` for L1243) | **detected**: clean build 0 mismatches, `-DRAD_MUT_FLATSUM` build 51 mismatches (private output directory, O2omp) |
+| 17 generated-kernel mutants | the sweep runs under the same lock after the bitwise stage; see the line below |
+
+Test bug found and fixed on the way: the serial flag sets (O0, O2) failed to link because the generated test called `omp_set_num_threads` without the `!$` sentinel. Fixed in `make_rad_tests.py` (two lines). The five sets other than the first O2omp run were first run in private output directories while the lock was held by other jobs for over an hour; the final claim above is from the run under the lock.
+
+Mutant sweep status and commit hashes: see the report; commits are local only.
 
 ## 8. Shared-file requests (not made by me; I own none of these)
 

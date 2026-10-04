@@ -1,6 +1,6 @@
 # FDS-AMR roadmap
 
-Owner: Spec & Program Lead · Status: draft v0.4.32 (2026-10-03; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
+Owner: Spec & Program Lead · Status: draft v0.4.33 (2026-10-04; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
 
 No calendar dates are set. Durations are **estimates** in elapsed working weeks for the current team on the current box. Confidence is low until Phase 1 closes; they are re-estimated at every milestone. Requirement IDs refer to requirements.md; risk IDs to risks.md.
 
@@ -60,7 +60,7 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 ### Phase 3: Multi-level infrastructure, no physics subsystems
 - **Objective:** static and dynamic hierarchies with conservative scalar transport. Gas phase only: no OBST, particles or radiation; velocity from a simplified projection or a prescribed field, as the Pressure Lead chooses.
 - **Entry:** M2.
-- **Deliverables:** `&AMR` namelist (IR-003); tagging (FR-011); regridding with conservative transfer (FR-012; t=0 hierarchy, face prolongation and conservative clipping per D-058 and D-060); tagging criteria per D-058; fine-level mesh objects by option B (D-056); the shared-ghost corner limitation (D-059) listed in the acceptance notes; interface flux overwrite for scalars (FR-024, D-050); composite mass/species budget diagnostic; rejection of unsupported features (FR-004, FR-044).
+- **Deliverables:** `&AMR` namelist (IR-003); tagging (FR-011); regridding with conservative transfer (FR-012; t=0 hierarchy, face prolongation and conservative clipping per D-058 and D-060); tagging criteria per D-058; fine-level mesh objects by option B (D-056); mass-weighted species transfer (D-062); the post-regrid projection hook `project_after_regrid` with a mock solver, reporting `max|div u - D|` (D-063); the shared-ghost corner limitation (D-059) listed in the acceptance notes; acceptance cases and thresholds in `vv/test-plan.md` §5.12 (F05 to F09 gate at Phase 4); interface flux overwrite for scalars (FR-024, D-050); composite mass/species budget diagnostic; rejection of unsupported features (FR-004, FR-044).
 - **Exit criteria:** FR-004, FR-010..013, FR-015, FR-020, FR-021, FR-024, FR-025, FR-044, IR-002..004, NFR-035 (distribution independence of the load-balance weights).
 - **Owners:** AMR Chief Architect (lead), AMReX Integration Lead, AMR Species & Combustion Lead (species transport; joined 2026-09-25), V&V Lead.
 - **Dependencies:** ADR-002 (time-stepping: single global `dt`, the minimum over all levels and ranks, same in both stages, D-050), R-04 mitigation design.
@@ -69,7 +69,7 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 ### Phase 4: Composite pressure solve
 - **Objective:** replace per-mesh FFT plus interface iteration with a composite solve across levels at both pressure solves per step. Per D-050: one global dt (minimum over all levels and ranks), no subcycling, MLMG (or HYPRE) composite solve.
 - **Entry:** M3; ADR-002 accepted.
-- **Deliverables:** device version of the face prolongation (D-060 backlog); 2-D and singular-case boundary mapping to the FFT and MLMG backends (D-057); composite Poisson operator and BCs; replacement for `PRESSURE_ITERATION_SCHEME` in AMR mode; composite divergence check; single-zone background pressure on composite volume.
+- **Deliverables:** the composite projection after a regrid that retains faces, with the composite MLMG taking an arbitrary per-level right-hand side, replacing the Phase 3 mock solver and turning the Phase 3 report into an assertion (D-063; Pressure Backend Implementer); pressure gauge `sum(rho*V*(KRES-H)) = 0` per zone and connected component and composite mean removal, with the FDS-arithmetic parity switch (D-067); device version of the face prolongation (D-060 backlog); 2-D and singular-case boundary mapping to the FFT and MLMG backends (D-057); composite Poisson operator and BCs; replacement for `PRESSURE_ITERATION_SCHEME` in AMR mode; composite divergence check; single-zone background pressure on composite volume.
 - **Exit criteria:** FR-014, FR-022 (gas), FR-023, FR-030..034 (FR-034 multi-zone with leakage included, per the FR-034 ruling, final), FR-036. Conservation check: if FR-014/022/023 fail or pass only marginally, the cause is fixed within Phase 4. No sync projection is needed under a global dt, so this is not an R-05 trigger; R-05's gate is now the Phase 6 sync-correction decision (subcycling is ruled out, D-050) (Pressure Lead, 2026-09-25). **R-26 shim-exit review** if ADR-001 adopts the shim: a kernel-extraction date is set, and the regrid rebuild measured in P3/Phase 3 is ≤ 10% of step time.
 - **Owners:** AMR Pressure Solver Lead (lead), V&V Lead.
 - **Dependencies:** ADR-002, ADR-003 (solid treatment in the operator).
@@ -78,7 +78,7 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 ### Phase 5: Walls and obstructions on refined levels
 - **Objective:** OBST, VENT and wall-cell physics on every level, per ADR-003.
 - **Entry:** M4.
-- **Deliverables:** per-level solid masks and wall arrays with the FR-040 snap rule (D-009); stateful-wall coverage freeze in tagging/regrid (FR-041a, D-010), with no cross-level wall-state transfer in this phase; solid-boundary pressure treatment (the iteration is kept only if immersed-boundary forcing, E-1, is kept); obstruction creation/removal.
+- **Deliverables:** per-level solid masks and wall arrays with the FR-040 snap rule (D-009); stateful-wall coverage freeze in tagging/regrid (FR-041a, D-010), with no cross-level wall-state transfer in this phase; solid-boundary pressure treatment (the iteration is kept only if immersed-boundary forcing, E-1, is kept); obstruction creation/removal; fine-level solid phase per D-064 (face key, accessor for the mesh object of (NM, level), fine-level OBST wall tables built by the Data Layout Implementer, rebuild triggered at regrid) and the wall translation rulings of D-065 (snapshot back-wall coefficient, retired `NIC>1` branch behind a guard, host wall pass for HVAC cases).
 - **Exit criteria:** FR-035, FR-040, FR-041a, FR-042, FR-043, FR-045, FR-046, FR-047, FR-022 (walls), NFR-048 (b). FR-041b (cross-level transfer) is deferred until after Phase 6 (R-33).
 - **Owners:** AMR Chief Architect (lead), AMR Solid Phase Lead (walls and solid phase: FR-040..043, FR-045..047, FR-022 walls, FR-041b design; joined 2026-09-25), Legacy Mapper, Pressure Lead, V&V Lead.
 - **Dependencies:** ADR-003.
@@ -147,6 +147,24 @@ No calendar dates are set. Durations are **estimates** in elapsed working weeks 
 | M9 | Output/restart | FR-070..074, FR-076, FR-077, FR-080, FR-081 | 3–6 wk |
 | M10 | Release candidate (CPU AMR) | FR-003 full, FR-006 full, NFR-030..034, NFR-042; owner sign-off | 3–6 wk |
 | M11 | GPU full time step | NFR-043 (compile-only + host fallback here; device T2 on GPU hardware, acceptance TBD(project owner, Q11)) | TBD (ADR-001 S4) |
+
+
+### Dated forecast and GPU stage-1 plan (owner estimates, unmeasured; 2026-10-04)
+
+These are the implementers' and the Integration Lead's own estimates and depend on each other. Treat them as ranges, not commitments; they are not yet on the critical-path arithmetic below.
+
+| Item | Forecast | Depends on |
+|---|---|---|
+| M2a (Phase 2 demo) | closed, signed off by the Chief Architect (D-054) | none |
+| oneAPI validation of patches 0005 to 0009 | passed (ifx 2026.1.1, Intel MPI 2021.18.1, 0 warnings, OFF build bitwise unchanged); GNU Debug validation pending (D-067) | GNU Build Chief |
+| Data Layout Implementer: time loop level binding (`bind_level`) and prescribed-velocity two-level transport test | target 9 to 14 Oct | none |
+| M2 (uniform-grid equivalence) | no slip beyond the pressure dependency below | composite pressure solve for the full two-level `ns2d_16` run with `div u - D` numbers (date to come from the Pressure Backend Implementer via the Chief Architect) |
+| Regrid Implementer: driver-level two-level runs (FR-016 gate cases) | about 1 week after `bind_level` | `bind_level`; oneAPI validation of patches 0007 to 0009 (passed) |
+| Regrid Implementer: t = 0 hierarchy, tagging and regrid on the real FDS stages | about 1 to 2 weeks after the two-level runs | Data Layout entry points; Pressure Backend "hierarchy changed, rebuild" entry point (does not exist yet) |
+| M3 (multi-level transport) | not before the two steps above plus the FR-016 and moving-blob gate cases on the real driver: about 3 to 4 weeks after `bind_level`, that is about 30 Oct to 11 Nov (derived) | the Pressure Backend entry point and the Chief Architect's ruling on the interface-face divergence residual not slipping |
+| Output patches 0010 and 0011 | wait for the Legacy Mapper's check of line numbers | Legacy Mapper |
+| GPU stage 1 (spike plan `amrex/stage1-gpu-spike-plan.md`, D-066) | **55 to 68 work-days, ESTIMATE** (6 to 9 calendar weeks over four owners; a few GPU hours on the test machine). Stage-1 exit (cell kernels, wall kernels and seam, device FFT, host hand-offs, first end-to-end periodic single-box number): about 45 to 56 work-days. Device-AMR hooks (WP9, WP9b, WP12): about 10 to 12 work-days, separate, because they need a two-level case. Three work-days of the total are not itemised | Generator work package WP3 (main uncertainty); A-57 tooling before the first new kernel |
+| Loop translation (tracker `tracker/loop-tracker.md`) | 53 translated loops (8.3% of eligible time) at the last regeneration; 54 loops and about 9.2% of total modelled time once the four finished mass-flux wall nests are merged to the generator branch (Legacy Mapper) | merge of the four wall nests; owners for the 182 unowned loops |
 
 Critical path (estimate): M0 → M1 → M2 → M3 → M4 → M5 → M9 → M10 → M11. Phases 6-8 can run in parallel after M5 if staffing allows. Summing the phase estimates on the critical path, with Phases 6-8 overlapping, gives roughly 7-14 months of elapsed time (**estimate, low confidence**). That figure excludes Phase 11 (GPU porting, D-027), which is TBD until ADR-001 S4 and adds substantially to scope. It will be re-estimated at M1.
 

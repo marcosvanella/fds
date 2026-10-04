@@ -107,3 +107,15 @@ D-067 pressure gauge and mean removal (source: `pressure/06-meanremoval-masked-s
 - The FDS single-rank GLMAT gauge defect (the one-rank periodic test 7 leaves a constant of +0.0304 and moves the mass-fraction slice by up to 1.5e-5 in 0.05 s) goes to the owner as an upstream patch file under D-051, not as a local change.
 - The composite `gauge_weight`/offset is an open implementation item for the Pressure Backend role.
 - Intel validation: draft patches 0005-0009, including the 0007 `DT_NEW(*)` amendment (`a72d491fb9`), pass oneAPI validation (0 warnings, OFF bitwise, driver tests, decomposition check with a max(2e-15, 1 ulp) gate, outputs check against a same-compiler reference). GNU Debug validation is pending. The kernelcheck driver-fill csmag DIV1 difference is an open item under bisection.
+
+## Update 2026-10-04 (i): A-57 tooling, GPU spike plan follow-ups, patch validation, projection setting (D-068)
+
+D-068 A-57 tooling and GPU spike plan follow-ups.
+- Accepted: the tools in `docs/tools/` (`k2_ci_check.py`, `kernel_lint.py`, `zone_sum_order.py`, `port_kernel_map.py`, `kernel_registry.toml`).
+- `AMReX_CUDA_FASTMATH=OFF` is pinned in the driver CUDA configure with FORCE, and the configure fails if it is ON. The lint checks the pin.
+- `reduction(max:)` and `reduction(min:)` are added to the D-029 clause list (exact, order independent; a kernel using them counts as ported only after a device run). `reduction(+)` is forbidden except through the D-053 zone-sum order.
+- Waivers: the hand-written S4 prototypes, the taskwait and do-concurrent variants and the 19 K1 sites are category `prototype` (evaluation code, expiry when replaced by generator output, not in production builds). The waivers for the rule-7 violations `s4k2_face_values` and `s4k2_clip_terms` are rejected: fix them, or keep them prototype-only with an expiry. `--strict` must pass for production kernels.
+- The kernel header-note definition is accepted: a provenance comment `file.f90:a-b` above the kernel, plus passive-scalar and cylindrical notes for hand-written files.
+- Design constraint: "streams per box" means host threads per box for K2 launches. K2 launches block and do not wait for AMReX streams.
+- Patches 0005 to 0009 pass oneAPI validation and GNU Debug validation (amended 0007 is `a72d491fb9`; the fine-b shadow check runs on a single level-0 mesh and 1 rank only). The gate on level>0 physics is lifted.
+- Setting for D-063: `POST_REGRID_PROJECTION = AUTO (default) | ON | OFF`. AUTO projects when some fine level both keeps old cells and gains new ones. ON always projects. OFF is diagnostics-only: it prints a warning in the output and the run is not a gate run.

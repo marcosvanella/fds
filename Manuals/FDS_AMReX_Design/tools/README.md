@@ -56,3 +56,112 @@ categories `pack`, `gather`, `scatter`, `checksum` are the data-movement kernels
 other category (`reference`, `test-harness`, `physics-fallback`) is always printed as WAIVED. `[[waiver]]` entries accept a K2 finding for now.
 `status = "proposed"` means nobody has accepted the reason yet: the tool exits 0 and prints it, `--strict` exits 1.
 Exit codes: 0 pass, 1 findings, 2 usage or tool error.
+
+## 2. `kernel_lint.py` - build-flag and clause-list lint
+
+    python3 tools/kernel_lint.py [--tree DIR] [--build-only | --clauses-only] [--amrex-build DIR] [--strict] [--json OUT.json] [FILE ...]
+
+**Build flags (BF).** Scans every `CMakeLists.txt`, `*.cmake` and `*.sh` under `amrex/` (shell variables are expanded, last assignment wins;
+CMake comments, option descriptions and cache docstrings are ignored). The goal is that device code never fuses a multiply and an add
+(FMA) and never uses fast math, because FDS results must be bitwise reproducible (NFR-050, NFR-051).
+
+| Rule | Fails when |
+|---|---|
+| BF-01 | a CUDA compile (or CUDA CMake target) lacks `--fmad=false`, uses `--fmad=true`, or a CMake option that guards the flag defaults to ON |
+| BF-02 | an nvfortran GPU compile (`-mp=gpu`) lacks `nofma` in its `-gpu=` list |
+| BF-03 | a fast-math flag appears: `-fast`, `-Ofast`, `-ffast-math`, `-Mfast`, `--use_fast_math`, `fastmath` in `-gpu=` |
+| BF-04 | a host compile lacks `-ffp-contract=off`, or uses `-ffp-contract=fast` unguarded (behind an option that defaults to OFF it is a NOTE) |
+| BF-05 | `AMReX_CUDA_FASTMATH=OFF` is not written in any scanned build file; with `--amrex-build DIR` (or env `AMREX_CUDA_BUILD`) the `CMakeCache.txt` of an AMReX build is read as well: ON fails, OFF turns the failure into a warning ("holds, but is not recorded in the repo") |
+| BF-06 | (warning) `mem:managed` managed memory is used; it is a bring-up aid, not for acceptance runs |
+
+**Clause lists (CL).** For every target region of the K2 files (same file set and compiler profiles as tool 1), the `private` and device-address
+lists are checked against what the loop body does (D-029; rule 1 of the generator design: read loop-invariant values directly, do not copy
+or privatise them):
+
+| Rule | Fails when |
+|---|---|
+| CL-01 | a `private` item is a dummy argument |
+| CL-02 | a `private` item is only read in the body (it has no value on the device) |
+| CL-03 | a `private` scalar is assigned only from loop-invariant values (a pointless private copy; loop indices, array reads and calls count as varying) |
+| CL-04 | a `private` item is read before its first assignment |
+| CL-05 | a local scalar or array, or a dummy scalar, is written in the region but is not `private`; or an array element with loop-independent subscripts is written by every iteration (a data race). A one-trip nest (`DO K = RED_K, RED_K`) is exempt |
+| CL-06 | (warning) a `private` item is unused, listed twice or undeclared |
+| CL-07 | the device-address list has a duplicate, a non-dummy, a scalar, or lacks an array that the body uses |
+
+Waivers and exit codes work as for tool 1 (`tools/kernel_registry.toml`, rule names `BF-xx` and `CL-xx`).
+A finding for an uncommitted or other engineers' build script is reported, not edited.
+
+## 3. `zone_sum_order.py` - zone-sum order (D-053)
+
+    python3 tools/zone_sum_order.py                       # upstream divg.f90 of the tree + the K2 kernels
+    python3 tools/zone_sum_order.py source FILE... [--array NAME]
+    python3 tools/zone_sum_order.py k2 [FILE...]
+    python3 tools/zone_sum_order.py log LOGFILE...
+    python3 tools/zone_sum_order.py toy [--seed N] [--fortran] [--write-log FILE]
+
+The rule is the P1 text of `amrex/blocked-loop-families.md`. FDS adds into each zone entry one term at a time, left to right, so the value is
+the rounded result of one serial chain per zone: the cells of a mesh in K,J,I ascending order (`DSUM(IPZ) = DSUM(IPZ) + VC*DP(I,J,K)`,
+`PSUM(IPZ) = PSUM(IPZ) + ...`), then the walls in ascending `IW` (`USUM(IPZ) = USUM(IPZ) + U_NORMAL*AREA`), then the cut faces; the meshes of
+a process one after the other; then `MPI_ALLREDUCE(MPI_SUM)`. Addition of floating-point numbers is not associative, so any other order
+(a tree, a reordered loop, atomics, an unordered `reduction(+)`) gives other last bits. The D-053 default keeps the adds serial and lets the
+device compute only the elementwise terms. The optional exact fixed-point sum is not bitwise equal to FDS and is not checked here.
+
+| Rule | Fails when |
+|---|---|
+| ZS-01 | an accumulation is not a plain running sum: the accumulator is not the first operand, terms are pre-summed, `SUM`/`DOT_PRODUCT` or an array section is used |
+| ZS-02 | the cell nest is not K outermost, J, I innermost; a loop has a negative step (a step that is not a literal is a warning); an accumulation sits in no recognised nest (warning) |
+| ZS-03 | for one array the nests are not in the order cells, walls, cut faces |
+| ZS-04 | an accumulation sits inside `omp parallel`, `target`, `simd`, `do concurrent` or under `atomic`/`critical` |
+| ZS-05 | (`k2`) a target region writes a zone-sum array, adds into an array element whose subscript holds no loop index, or has `reduction(+)` or `atomic` |
+| ZS-10 | (`log`) the terms of a zone are not applied in the FDS order |
+| ZS-11 | (`log`) the reported `result` is not, bit for bit, the serial chain of the logged terms (only a warning with several ranks) |
+| ZS-12 | (`log`) a log line cannot be read |
+
+Term log format (one term per line in the order a program applied it; `#` starts a comment; values as C99 hex floats are exact):
+`rank zone mesh kind index value`, with kind `C` and index `i,j,k` (cell), `W` and `iw` (wall) or `F` and `icf` (cut face); an optional line
+`result zone value` is compared bit for bit with the chain. The existing tests do not write such a log yet; a test that wants this check
+writes its terms in this format. The cross-process combine is chosen by the MPI library, so with more than one rank the tool adds the rank
+sums in ascending rank order and reports a difference only as a warning.
+
+The default run on the tree reads `Source/divg.f90` (routine `DIVERGENCE_PART_1`) and prints which accumulations it checked; the `k2` part
+scans the generated kernels and goldens. `toy` is the bitwise reference check: a built-in case with two zones and two meshes, whose terms
+span 18 decades. With `--fortran` a small gfortran program (loops in FDS order, `-O0 -ffp-contract=off`) is compiled and run on the same bit
+patterns; its sums must equal the float64 chain bit for bit, and the reversed, walls-first, I-outer, pairwise-tree and exactly rounded sums
+must all differ. The tests also mutate the Fortran toy (I outermost, walls descending) and show that the sums change and the tool objects.
+
+## 4. `port_kernel_map.py` - kernel to FDS routine, route and status
+
+    python3 tools/port_kernel_map.py [--tree DIR] [--md OUT.md] [--json OUT.json] [--no-gate] [-v]
+    python3 tools/port_kernel_map.py --md inventory/port_kernel_status.md --json inventory/port_kernel_status.json    # refresh the committed snapshot
+
+Reads the kernel list from `s5_markers.toml` and every `markers/*.toml` sidecar, the golden `markers/golden_signatures.json`, the generated
+`s5gen_k2.F90`/`.H`/`s5gen_args.json` and the sidecar text goldens `test/*.golden` (nothing is edited). For each kernel it writes the FDS
+routine and `file:lines` (from the marker), the loop ids `L0001...` that overlap those lines (`inventory/gpu_candidate_loops.csv`), the route
+(K2, or K1 for the registry entries of `kernel_registry.toml`), where the kernel text lives, the host bitwise suites that cover it and
+whether a device run is on record (both from `vv-runs/gpu_gate`, found next to the docs repository or through `GPU_GATE_DIR`; `--no-gate`
+leaves those columns empty), and a one-word status (device, host, generated, sidecar-only, pending, no-text). The Markdown table and the JSON
+have the same rows; the JSON is stable (no clock time) so a refresh shows only real changes. The existing routine-level table
+`inventory/port_kernel_map.csv` is not touched; differences to its `generated_kernels` column are listed in the Markdown for its owner.
+
+Self-check (exit 1 on a failure):
+
+| Rule | Fails when |
+|---|---|
+| PM-01 | a kernel of the golden has no marker entry, or its entry lacks the FDS file, routine or a two-number line range |
+| PM-02 | a kernel of a committed marker file is neither in the golden nor in a sidecar text golden (in a sidecar golden only it is a NOTE; a golden kernel whose marker file is not committed is a warning) |
+| PM-03 | the same kernel name appears in two marker files with a different file, routine or lines |
+| PM-04 | a golden kernel has no kernel text (neither in `generated/s5gen_k2.F90` nor in a `test/*.golden`) |
+| PM-05 | (warning) a golden kernel is missing from the argument manifest or the header; the gate registry disagrees with the map |
+
+"Device run on record" repeats what `check_device_logs.py` lists for the kernel set; it is a registry note, not a check of log files.
+
+## Quick start
+
+    cd docs
+    python3 -m unittest discover -s tools/tests          # all tests (about 10 seconds)
+    python3 tools/k2_ci_check.py                          # tool 1
+    python3 tools/kernel_lint.py --amrex-build <AMReX CUDA build dir>      # tool 2
+    python3 tools/zone_sum_order.py                       # tool 3 (add `toy --fortran` for the bitwise reference case)
+    python3 tools/port_kernel_map.py --md inventory/port_kernel_status.md --json inventory/port_kernel_status.json   # tool 4
+
+For a CI job that should block on every open point, add `--strict` to tools 1 to 3 (proposed waivers then fail too).
