@@ -7,7 +7,7 @@ uniform cells (dx = dy = dz = 0.56549/32), all six faces periodic, no obstructio
 | Item | Value |
 |---|---|
 | FDS | FireX 36975d765f (`FDS-6.11.1-1244-g36975d765f`), GNU 14.2 / Open MPI 5.0.7, Release, OpenMP on, HYPRE and SUNDIALS off (not used by the case), 1 rank, 1 thread |
-| Patch | upstream patch 0009 (`docs/upstream-patches/UP-0011-pressure-rhs-dump.patch`, rationale in `UP-0011-pressure-rhs-dump.signoff.md`), enabled with `FDS_PDUMP_STEPS=1,3,10` |
+| Patch | upstream patch UP-0011 (`docs/upstream-patches/UP-0011-pressure-rhs-dump.patch`, rationale in `UP-0011-pressure-rhs-dump.signoff.md`), enabled with `FDS_PDUMP_STEPS=1,3,10` |
 | Input | `fds_csmag32.fds` (here): the V&V case `csmag_32` with `FISHPAK_BC=0,0,0` (FFT Poisson solver, periodic in x, y, z), `CHID='fds_csmag32'` and `SIG_FIGS=17` added to `&DUMP`. It also needs `cbc32_uvw.csv` (870916 bytes, not committed): `vv-runs/baseline/gnu_ompi_firex-36975d7/csmag_32__fishpak_bc000/cbc32_uvw.csv` |
 | Step, stage | step (ICYC) 3, t = 4.8932e-2 s, dt = 1.7363e-2 s; stage P (predictor, H) and stage C (corrector, HS) |
 | Solver in FDS | `PRES_FLAG` 0 (FFT, FISHPAK `H3CZSS`), `IPS` 0, `LBC=MBC=NBC=0` (periodic) |
@@ -37,7 +37,7 @@ Result (step 3, corrector, 1 rank; the predictor and 2 ranks agree at the same l
 | FDS H in the interface operator: max abs residual / max abs (rhs - mean) | 6.0e-16 | |
 
 ## Regenerate
-Apply patch 0009 to a scratch copy of FireX 36975d765f, build, then in a directory with `fds_csmag32.fds` and `cbc32_uvw.csv`:
+Apply patch UP-0011 to a scratch copy of FireX 36975d765f, build, then in a directory with `fds_csmag32.fds` and `cbc32_uvw.csv`:
 `FDS_PDUMP_STEPS=3 mpirun -np 1 fds fds_csmag32.fds`.
 
 ## Multi-mesh
