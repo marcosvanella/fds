@@ -1,6 +1,11 @@
 #!/bin/bash
 # S7 writer check: the FDS output files written by the driver (CHID_devc.csv, _hrr.csv, _mass.csv, _steps.csv, _cpu.csv, .out; main.f90 patch 0006) on the M2a cases.
-# usage: run_outputs_check.sh <driver-build> <work>
+# usage: [REF_FDS=<same-compiler USE_AMREX=OFF fds> [REF_MPI_OPTS=<opts>]] [MPI_OPTS=<opts>] run_outputs_check.sh <driver-build> <work>
+# Same-compiler reference (optional): the gfortran baseline is only a valid reference for a gfortran driver build; for any other compiler (oneAPI, ...) the 1e-8 _hrr.csv gate and the
+# bitwise _mass.csv / pressure-iteration gates compare against round-off that is the compiler's, not the driver's. With REF_FDS set, the shunn3_32 and csmag_32 references are
+# produced here by running that USE_AMREX=OFF fds (same compiler and flags as the driver build, 1 rank) on the same inputs in <work>/ref/, and every gate below compares against them.
+# Without REF_FDS nothing changes (the $BASELINE / $CSMAG_DIR references are used). MPI_OPTS (default '--bind-to none --oversubscribe', Open MPI) is the mpirun option string for every
+# run, set it to '--bind-to none' for Intel MPI (Hydra has no --oversubscribe). REF_MPI_OPTS defaults to MPI_OPTS.
 # Checks (no tolerance is loosened for the physics gates; the HRR tolerance below is only for the writer check):
 #   shunn3_32 (1 rank): _mass.csv bitwise equal to the baseline; _hrr.csv time column and all columns equal to the baseline within 1e-8 of the column scale (the
 #       full-step solution differs from FDS at round-off, T2); .out pressure-iteration lines equal to the baseline; _steps.csv has the same number of rows as the baseline.
@@ -9,17 +14,28 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd); source "$HERE/env.sh" > /dev/null 2>&1
 B=$1; W=$2; rc=0
+MPI_OPTS=${MPI_OPTS---bind-to none --oversubscribe}; REF_MPI_OPTS=${REF_MPI_OPTS:-$MPI_OPTS}; REF_FDS=${REF_FDS:-}
 CSDIR=${CSMAG_DIR:-/workspace/fds-amr/scratch/role1-s3-work/ref_runs/csmag_32}
 run() { # dir src np
   rm -rf "$1"; mkdir -p "$1"; local c; c=$(basename "$2" .fds); cp "$2" "$1/"
   for f in "$(dirname "$2")"/*uvw*.csv; do [ -f "$f" ] && cp "$f" "$1/"; done
-  (cd "$1" && mpirun --bind-to none --oversubscribe -np "$3" "$B/fds_amr" "$c.fds" --run --outdir . --chid "$c" --quiet > stdout.txt 2> stderr.txt) || { echo "RUN FAILED $1"; rc=1; }
+  (cd "$1" && mpirun $MPI_OPTS -np "$3" "$B/fds_amr" "$c.fds" --run --outdir . --chid "$c" --quiet > stdout.txt 2> stderr.txt) || { echo "RUN FAILED $1"; rc=1; }
 }
+BLREF=$BASELINE; CSREF=$CSDIR
+if [ -n "$REF_FDS" ]; then   # same-compiler reference runs (USE_AMREX=OFF fds), OMP_NUM_THREADS from the caller (1 in the oneAPI set-up)
+  refrun() { # case dir-with-inputs
+    local d="$W/ref/$1"; rm -rf "$d"; mkdir -p "$d"; cp "$2/$1.fds" "$d/"; for f in "$2"/*uvw*.csv; do [ -f "$f" ] && cp "$f" "$d/"; done
+    (cd "$d" && mpirun $REF_MPI_OPTS -np 1 "$REF_FDS" "$1.fds" > stdout.txt 2> stderr.txt) || { echo "REFERENCE RUN FAILED $d"; rc=1; }
+  }
+  refrun shunn3_32 "$BASELINE/shunn3_32"; refrun csmag_32 "$CSDIR"
+  BLREF=$W/ref; CSREF=$W/ref/csmag_32
+  echo "INFO reference: same-compiler FDS $REF_FDS (runs in $W/ref); the $BASELINE / $CSDIR references are not used for the gates"
+fi
 run "$W/sh1" "$BASELINE/shunn3_32/shunn3_32.fds" 1
 run "$W/m1" "$BASELINE/shunn3_4mesh_32/shunn3_4mesh_32.fds" 1
 run "$W/m4" "$BASELINE/shunn3_4mesh_32/shunn3_4mesh_32.fds" 4
 run "$W/cs" "$CSDIR/csmag_32.fds" 1
-python3 - "$W" "$BASELINE" "$CSDIR" <<'PY' || rc=1
+python3 - "$W" "$BLREF" "$CSREF" <<'PY' || rc=1
 import sys, re, numpy as np
 W, BL, CS = sys.argv[1:4]
 ok = True

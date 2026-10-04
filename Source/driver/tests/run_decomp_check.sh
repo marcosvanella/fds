@@ -31,8 +31,10 @@ for run in ['dec2_np1', 'dec4_np1', 'dec2_np4', 'dec4_np4']:
     for t in near:
         a = np.fromfile('%s/stage_%s.bin' % (ref_s, t)); b = np.fromfile('%s/stage_%s.bin' % (d, t))
         nd = int((a != b).sum())
-        if nd > 1 or np.abs(a - b).max() > 2e-15: nn.append((t, nd, float(np.abs(a - b).max())))
-    print('%-9s reduction-free stages: %d of %d bitwise%s; DS/D/DDDT: %s' % (run, len(exact) - len(nb), len(exact), (' DIFFER ' + str(nb)) if nb else '', 'within 1 cell / 2e-15' if not nn else 'FAIL ' + str(nn)))
+        # tolerance: 2e-15 absolute, or 1 ulp of the larger value where that is bigger (D/DDDT reach |x| > 16 where 1 ulp = 3.6e-15)
+        tol = np.maximum(2e-15, np.spacing(np.maximum(np.abs(a), np.abs(b))))
+        if nd > 1 or (np.abs(a - b) > tol).any(): nn.append((t, nd, float(np.abs(a - b).max())))
+    print('%-9s reduction-free stages: %d of %d bitwise%s; DS/D/DDDT: %s' % (run, len(exact) - len(nb), len(exact), (' DIFFER ' + str(nb)) if nb else '', 'within 1 cell / max(2e-15, 1 ulp)' if not nn else 'FAIL ' + str(nn)))
     bad += len(nb) + len(nn)
     worst = 0.0
     for n in ['U', 'W', 'H', 'HS', 'D', 'DS', 'RHO', 'TMP', 'ZZ2']:
