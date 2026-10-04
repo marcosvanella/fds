@@ -3,6 +3,7 @@
 // uncovered cells of all levels with one fixed-point scale (ExactSum.H). See frozen/composite-notes.md.
 #include "Composite.H"
 #include "ExactSum.H"
+#include "PbWorkspaceImpl.H"
 
 #include <AMReX_MLMG.H>
 #include <AMReX_MLPoisson.H>
@@ -22,47 +23,21 @@ using namespace amrex;
 // ---------------------------------------------------------------------------------------------------------------
 // Workspace
 // ---------------------------------------------------------------------------------------------------------------
-struct PressureWorkspace::Impl {
-    int nlev = 0;
-    std::vector<BoxArray> ba;
-    std::vector<DistributionMapping> dm;
-    std::vector<Geometry> geom;
-    std::vector<IntVect> ratio;                       // ratio[l]: level l to level l-1 (ratio[0] = 1)
-    std::array<BC,6> bc{};
-    int hidden = -1;                                  // one-cell direction (extruded for the MLMG solve), or -1
-    // One-cell direction: the solve runs on an extruded copy of the hierarchy (that direction made periodic with
-    // ext_n * product(ratios) isotropic cells, same boxes otherwise and same DistributionMapping). AMReX's
-    // "hidden dimension" mode was tried first and is not used: with more than one AMR level it converged slowly
-    // or diverged (see frozen/composite-notes.md).
-    int ext_n = 4;
-    std::vector<BoxArray> eba;
-    std::vector<Geometry> egeom;
-    std::vector<std::unique_ptr<iMultiFab>> unc;      // 1 = uncovered
-    std::vector<Real> vol;                            // cell volume per level
-    std::vector<Long> nunc;                           // number of uncovered cells per level
-    std::unique_ptr<MLPoisson> mlp;
-    std::unique_ptr<MLMG> mlmg;                       // refers to *mlp: declared after it, destroyed first
-};
-
 PressureWorkspace::PressureWorkspace () = default;
 PressureWorkspace::~PressureWorkspace () = default;
 PressureWorkspace::PressureWorkspace (PressureWorkspace&&) noexcept = default;
 PressureWorkspace& PressureWorkspace::operator= (PressureWorkspace&&) noexcept = default;
-bool PressureWorkspace::built () const { return m_impl && m_impl->nlev > 0; }
+bool PressureWorkspace::built () const { return m_impl && (m_impl->nlev > 0 || m_impl->fft); }
 int PressureWorkspace::num_levels () const { return m_impl ? m_impl->nlev : 0; }
+bool PressureWorkspace::fft_plan_built () const { return m_impl && m_impl->fft; }
+void PressureWorkspace::discard () { m_impl.reset(); }
+PressureWorkspace::Impl& PressureWorkspace::ensure_impl ()
+{
+    if (!m_impl) { m_impl = std::make_unique<Impl>(); }
+    return *m_impl;
+}
 
 namespace {
-
-bool same_geom (Geometry const& a, Geometry const& b)
-{
-    if (a.Domain() != b.Domain()) { return false; }
-    for (int d = 0; d < 3; ++d) {
-        if (a.isPeriodic(d) != b.isPeriodic(d)) { return false; }
-        if (std::abs(a.ProbLo(d) - b.ProbLo(d)) > 1.0e-12*a.ProbLength(d)) { return false; }
-        if (std::abs(a.ProbHi(d) - b.ProbHi(d)) > 1.0e-12*a.ProbLength(d)) { return false; }
-    }
-    return true;
-}
 
 LinOpBCType lin_bc (BC b)
 {
@@ -176,7 +151,7 @@ bool impl_matches (PressureWorkspace::Impl const& W, PressureProblem const& p)
     if (W.nlev != n || W.bc != p.bc) { return false; }
     for (int l = 0; l < n; ++l) {
         PressureLevel const& L = p.levels[l];
-        if (!(W.ba[l] == L.ba) || !(W.dm[l] == L.dm) || !same_geom(W.geom[l], L.geom)) { return false; }
+        if (!(W.ba[l] == L.ba) || !(W.dm[l] == L.dm) || !same_geometry(W.geom[l], L.geom)) { return false; }
         if (l > 0 && W.ratio[l] != L.ref_ratio) { return false; }
     }
     return true;
@@ -186,14 +161,16 @@ bool impl_matches (PressureWorkspace::Impl const& W, PressureProblem const& p)
 
 bool PressureWorkspace::matches (PressureProblem const& p) const
 {
-    return built() && !p.levels.empty() && impl_matches(*m_impl, p);
+    if (p.levels.empty()) { return m_impl && m_impl->fft && m_impl->fft->plan_matches(p); }
+    return m_impl && m_impl->nlev > 0 && impl_matches(*m_impl, p);
 }
 
 Status PressureWorkspace::rebuild (PressureProblem const& p, std::string* message)
 {
+    if (p.levels.empty()) { return rebuild_single_level(*this, p, message); }
     m_impl.reset();
+    mark_regrid();
     auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
-    if (p.levels.empty()) { return fail(Status::InvalidInput, "workspace rebuild needs a problem with levels"); }
     Selection sel = select_composite(p, BackendKind::MLMG);
     if (!sel.ok) { return fail(Status::NotBuilt, sel.message); }
     std::string bad = validate_composite(p);
@@ -273,7 +250,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     return s;
 }
 
-std::string validate_composite (PressureProblem const& p)
+std::string validate_composite (PressureProblem const& p, bool structural)
 {
     const int n = static_cast<int>(p.levels.size());
     for (int l = 0; l < n; ++l) {
@@ -292,13 +269,16 @@ std::string validate_composite (PressureProblem const& p)
                 return tag + "gauge_weight/gauge_offset BoxArray/DistributionMapping differ from the level or they have no component";
             }
         }
-        if (!L.geom.Domain().contains(L.ba.minimalBox())) { return tag + "BoxArray outside the level domain"; }
-        if (!L.ba.isDisjoint()) { return tag + "BoxArray is not disjoint"; }
+        if (structural) {
+            if (!L.geom.Domain().contains(L.ba.minimalBox())) { return tag + "BoxArray outside the level domain"; }
+            if (!L.ba.isDisjoint()) { return tag + "BoxArray is not disjoint"; }
+        }
         for (int d = 0; d < 3; ++d) {
             const bool lo = p.bc[face_index(d,0)] == BC::Periodic, hi = p.bc[face_index(d,1)] == BC::Periodic;
             if (lo != hi) { return "periodic BC must be set on both faces of a direction"; }
             if (lo != (L.geom.isPeriodic(d) != 0)) { return tag + "Geometry periodicity does not match the BC"; }
         }
+        if (!structural) { continue; }     // cheap path with a matching workspace: the layout was validated when the workspace was built
         if (l == 0) {
             if (L.ba.minimalBox() != L.geom.Domain() || L.ba.numPts() != L.geom.Domain().numPts()) {
                 return tag + "level 0 BoxArray does not cover the domain exactly";
@@ -395,14 +375,16 @@ double total_volume (PressureWorkspace::Impl const& W)
     return v;
 }
 
-// Volume-weighted exact mean and rms over the uncovered cells of the hierarchy.
-void hierarchy_mean (PressureWorkspace::Impl const& W, LevelMFs const& f, double& mean, double& rms)
+// Volume-weighted exact mean (and, if wanted, rms) over the uncovered cells of the hierarchy.
+void hierarchy_mean (PressureWorkspace::Impl const& W, LevelMFs const& f, double& mean, double& rms, bool want_rms = true)
 {
     const double V = total_volume(W);
     ExactSumResult s = exact_sum_multi(terms_of(W, f, true), 1);
+    mean = (V > 0.0) ? s.sum[0] / V : 0.0;
+    rms = 0.0;
+    if (!want_rms) { return; }
     LevelMFs q = squares_of(W, f);
     ExactSumResult s2 = exact_sum_multi(terms_of(W, q, true), 1);
-    mean = (V > 0.0) ? s.sum[0] / V : 0.0;
     rms = (V > 0.0) ? std::sqrt(s2.sum[0] / V) : 0.0;
 }
 
@@ -451,14 +433,14 @@ template <class V> Vector<MultiFab*> ptrs (V const& v)
 // ---------------------------------------------------------------------------------------------------------------
 // Solve
 // ---------------------------------------------------------------------------------------------------------------
-PressureResult solve_composite (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws)
+PressureResult solve_composite (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws, bool full)
 {
     PressureResult R;
     R.backend = "MLMG";
     PressureWorkspace local;
     if (!ws) { ws = &local; }
     if (!ws->matches(p)) {
-        R.workspace_rebuilt = ws->built();
+        R.workspace_rebuilt = ws->num_levels() > 0;
         std::string msg;
         Status st = ws->rebuild(p, &msg);
         if (st != Status::Ok) { R.status = st; R.message = msg; return R; }
@@ -473,7 +455,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     ci.id = 0; ci.singular = !open;
     for (int l = 0; l < nlev; ++l) { ci.ncells += W.nunc[l]; }
     R.ncells_uncovered = ci.ncells;
-    {   // pin: lowest index (x fastest) uncovered cell of the coarsest level that has one; recorded, not applied
+    if (full) {   // pin: lowest index (x fastest) uncovered cell of the coarsest level that has one; recorded, not applied
         for (int l = 0; l < nlev; ++l) {
             if (W.nunc[l] == 0) { continue; }
             Box const& dom = W.geom[l].Domain();
@@ -516,7 +498,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         std::vector<double> shift_lev(nlev, 0.0);     // constant subtracted from b on each level
         double mean = 0.0, rms = 0.0, removed = 0.0, floor_ = 0.0;
         if (p.mean_kind == MeanKind::Volume) {
-            hierarchy_mean(W, b, mean, rms);
+            hierarchy_mean(W, b, mean, rms, full);
             floor_ = std::ldexp(max_abs_uncovered(W, b), -52);   // idempotence: below round-off of b itself, leave alone
             removed = mean;
             if (std::abs(mean) > floor_ && ci.singular) { for (int l = 0; l < nlev; ++l) { shift_lev[l] = mean; } }
@@ -529,11 +511,13 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
                 F[l]->mult(W.vol[l], 0, 1, 0);
             }
             ExactSumResult sF = exact_sum_multi(terms_of(W, F, false), 1);
-            LevelMFs Fq = squares_of(W, F);
-            ExactSumResult sF2 = exact_sum_multi(terms_of(W, Fq, false), 1);
             const double n = double(sF.count[0]);
             mean = (n > 0) ? sF.sum[0] / n : 0.0;                 // arithmetic mean of F
-            rms = (n > 0) ? std::sqrt(sF2.sum[0] / n) : 0.0;      // rms of F
+            if (full) {
+                LevelMFs Fq = squares_of(W, F);
+                ExactSumResult sF2 = exact_sum_multi(terms_of(W, Fq, false), 1);
+                rms = (n > 0) ? std::sqrt(sF2.sum[0] / n) : 0.0;  // rms of F
+            }
             floor_ = std::ldexp(max_abs_uncovered(W, F), -52);
             if (std::abs(mean) > floor_ && ci.singular) {
                 removed = mean;
@@ -542,7 +526,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         }
         if (ci.singular) {
             ci.removed_mean = removed;      // Volume: constant subtracted from b; ScaledArithmetic: mean of F = v*b
-            ci.removed_rel = (rms > 0.0) ? std::abs(mean) / rms : 0.0;
+            ci.removed_rel = (full && rms > 0.0) ? std::abs(mean) / rms : 0.0;
         }
         for (int l = 0; l < nlev; ++l) {
             if (shift_lev[l] == 0.0) { continue; }
@@ -598,7 +582,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         double shift = 0.0;
         if (!has_w && !has_g) {
             double rms = 0.0;
-            hierarchy_mean(W, phi, shift, rms);
+            hierarchy_mean(W, phi, shift, rms, false);
         } else {
             LevelMFs X;                                               // phi - KRES
             std::vector<SumTerm> num, den;
@@ -628,7 +612,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     // True residual: composite b - L phi on the uncovered cells, computed fresh from the final phi
     // (MLMG::compResidual: level residuals, reflux of the fine fluxes to the coarse cells, C/F ghost values from the
     // coarse solution), independent of the iteration's own residual.
-    if (o.check_residual) {
+    if (o.check_residual && full) {
         LevelMFs res, resx;
         for (int l = 0; l < nlev; ++l) {
             res.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0)); res[l]->setVal(0.0);
@@ -654,7 +638,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
             R.warnings.push_back(m.str());
         }
     }
-    if (ci.singular && ci.removed_rel > o.removed_mean_warn) {
+    if (full && ci.singular && ci.removed_rel > o.removed_mean_warn) {
         std::ostringstream m;
         m << "removed mean of component " << ci.id << " is " << ci.removed_rel << " of rms(b), above " << o.removed_mean_warn;
         R.warnings.push_back(m.str());

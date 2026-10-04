@@ -67,3 +67,12 @@ endforeach()
 foreach(bc neumann periodic)
   pb_add_test(pb_meankind_uniform_${bc} meankind_uniform --bc ${bc} --n "8 6 5")
 endforeach()
+
+# FR-039 solve-trigger points (full checks versus the cheap path) and FFT plan caching in PressureWorkspace.
+foreach(bc "NN,NN,NN" "PP,PP,PP")
+  string(REPLACE "," "" bcn ${bc})
+  pb_add_test(pb_trigger_single_${bcn} trigger1 --bc ${bc} --n "16 16 16")
+endforeach()
+pb_add_test(pb_comp_trigger comptrigger)
+pb_add_test(pb_fftcache_neumann fftcache --bc "NN,NN,NN" --n "32 32 32")
+pb_add_test(pb_fftcache_periodic fftcache --bc "PP,PP,PP" --n "32 32 32")

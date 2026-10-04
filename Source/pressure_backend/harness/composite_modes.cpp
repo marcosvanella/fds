@@ -941,6 +941,70 @@ void run_comp_ws ()
 
 
 // --------------------------------------------------------------------------------------------------------------
+// mode=comp_trigger: FR-039 trigger points on a hierarchy (full checks versus the cheap path)
+// --------------------------------------------------------------------------------------------------------------
+void run_comp_trigger ()
+{
+    for (pb::BC bc : {pb::BC::Neumann, pb::BC::Periodic}) {
+        Cfg c; c.n = 16; c.nlev = 2; c.ratio = 2; c.mgs = 8; c.set_bc(bc);
+        const std::string tag = (bc == pb::BC::Neumann ? "neumann: " : "periodic: ");
+        Hier h = build_hier(c, 0);
+        pb::PressureProblem p = make_problem(c, h);
+        auto gather_all = [&] () {
+            std::vector<double> all;
+            for (int l = 0; l < c.nlev; ++l) {
+                std::vector<double> v = gather_box(*h.phi[l], h.geom[l].Domain());
+                all.insert(all.end(), v.begin(), v.end());
+            }
+            return all;
+        };
+        auto run = [&] (pb::PressureOptions const& oo, pb::PressureWorkspace* ws, std::vector<double>& out) {
+            for (int l = 0; l < c.nlev; ++l) { h.phi[l]->setVal(0.0); }
+            pb::PressureResult r = pb::solve_pressure(p, oo, ws);
+            out = gather_all();
+            return r;
+        };
+        pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0; o.residual_tol = 1e-8;
+        std::vector<double> ref, v;
+        pb::PressureResult r0 = run(o, nullptr, ref);
+        ccheck(r0.status == pb::Status::Ok && r0.full_checks && r0.residual_checked && r0.triggers == pb::SolveDebug && r0.residual_rel2 <= 1e-8, tag + "default options: full checks on a hierarchy");
+        pb::PressureOptions oc = o; oc.trigger = pb::SolveRoutine;
+        pb::PressureResult r1 = run(oc, nullptr, v);
+        ccheck(r1.status == pb::Status::Ok && !r1.full_checks && !r1.residual_checked && v == ref, tag + "Routine, no workspace: cheap path, solution bitwise equal");
+        ccheck(r1.components.size() == r0.components.size() && r1.components[0].removed_mean == r0.components[0].removed_mean && r1.components[0].gauge_shift == r0.components[0].gauge_shift, tag + "cheap path: same removed mean and gauge constant (bitwise)");
+        pb::PressureWorkspace ws;
+        pb::PressureResult a = run(oc, &ws, v);
+        ccheck(a.full_checks && (a.triggers & pb::SolveFirst) && a.residual_checked && v == ref, tag + "workspace, first solve: full checks");
+        pb::PressureResult b = run(oc, &ws, v);
+        ccheck(!b.full_checks && !b.residual_checked && v == ref, tag + "workspace, second solve: cheap path, bitwise equal");
+        std::string msg;
+        ccheck(ws.rebuild(p, &msg) == pb::Status::Ok && ws.regrid_pending(), tag + "rebuild() after a regrid marks the next solve (" + msg + ")");
+        pb::PressureResult c1 = run(oc, &ws, v);
+        ccheck(c1.full_checks && (c1.triggers & pb::SolveFirstAfterRegrid) && c1.residual_checked && v == ref, tag + "first solve after rebuild: full checks");
+        ccheck(!run(oc, &ws, v).full_checks, tag + "following solve: cheap again");
+        pb::PressureOptions od = oc; od.trigger = pb::SolveDebug;
+        ccheck(run(od, &ws, v).full_checks, tag + "Debug flag: full checks");
+        // a changed hierarchy seen by solve_pressure counts as a regrid
+        {
+            Cfg c2 = c; c2.mgs = 4;
+            Hier h2 = build_hier(c2, 0);
+            pb::PressureProblem p2 = make_problem(c2, h2);
+            pb::PressureResult d = pb::solve_pressure(p2, oc, &ws);
+            ccheck(d.status == pb::Status::Ok && d.workspace_rebuilt && d.full_checks && (d.triggers & pb::SolveFirstAfterRegrid), tag + "new decomposition in a solve: detected as regrid, full checks");
+        }
+        // the cheap path still reports non-convergence and unsupported input
+        {
+            pb::PressureProblem bad = p; bad.cylindrical = true;
+            pb::PressureResult e = pb::solve_pressure(bad, oc, &ws);
+            ccheck(e.status == pb::Status::NotBuilt && !e.message.empty(), tag + "cheap path: NotBuilt still reported");
+            pb::PressureOptions ot = oc; ot.max_iter = 1; ot.tol_rel = 1e-14;
+            pb::PressureResult nc = run(ot, nullptr, v);
+            ccheck(nc.status == pb::Status::NotConverged, tag + "cheap path: NotConverged still reported");
+        }
+    }
+}
+
+// --------------------------------------------------------------------------------------------------------------
 // mode=comp_gauge: D-067 mean removal (Volume / ScaledArithmetic) and gauge (rho, KRES) on a hierarchy.
 //   Solves the same hierarchy with (A) Volume, no gauge fields, (B) Volume with per-level rho and KRES, (C) the FDS
 //   parity switch ScaledArithmetic without gauge fields. RHS = manufactured RHS + rhs_offset (so that a mean is
@@ -1128,6 +1192,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_sel") { run_comp_sel(); }
     else if (mode == "comp_ws") { run_comp_ws(); }
     else if (mode == "comp_gauge") { run_comp_gauge(pp); }
+    else if (mode == "comp_trigger") { run_comp_trigger(); }
     else { return -1; }
     return g_cfail;
 }

@@ -9,6 +9,7 @@
 // mode=meankind per-cell volume mean removal (both MeanKind) and the rho*volume, KRES gauge on a synthetic stretched
 //               volume field; writes raw files for the independent numpy check (see tests/pb_test.py, meankind).
 // mode=comp, comp_ns2d, comp_sel, comp_ws, comp_gauge  composite (multi-level) pressure solve tests, see composite_modes.cpp.
+// mode=trigger1, fftcache, ...  M2 single-level modes (m2_modes.cpp).
 // mode=diff     compare two raw fields: a=<file> b=<file> n_cell="nx ny nz" (rel. L2, max abs, eps_H verdict).
 #include "PressureIface.H"
 #include "CommonLayer.H"
@@ -491,6 +492,7 @@ void run_meankind (ParmParse& pp)
 } // namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp);   // composite_modes.cpp
+int run_m2_mode (std::string const& mode, ParmParse& pp);          // m2_modes.cpp
 
 int main (int argc, char* argv[])
 {
@@ -505,8 +507,9 @@ int main (int argc, char* argv[])
         else if (mode == "exactsum") { run_exactsum(pp); }
         else if (mode == "meankind") { run_meankind(pp); }
         else {
-            const int cf = run_composite_mode(mode, pp);
-            if (cf < 0) { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind|comp|comp_ns2d|comp_sel|comp_ws|comp_gauge"); }
+            int cf = run_m2_mode(mode, pp);
+            if (cf < 0) { cf = run_composite_mode(mode, pp); }
+            if (cf < 0) { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind|comp|comp_ns2d|comp_sel|comp_ws|comp_gauge|comp_trigger|trigger1|fftcache|..."); }
             g_fail += cf;
         }
     }

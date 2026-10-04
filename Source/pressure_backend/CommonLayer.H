@@ -18,8 +18,8 @@ struct ComponentMap {
 };
 
 // M1: the whole box is one component (no masks); singular unless some face is Dirichlet. Records the pin
-// (lowest global index cell, x fastest) per component. Flood fill over beta != 0 faces is M2.
-ComponentMap label_components (PressureProblem const& p);
+// (lowest global index cell, x fastest) per component (skipped with record_pin = false: cheap path). Flood fill over beta != 0 faces is M2.
+ComponentMap label_components (PressureProblem const& p, bool record_pin = true);
 
 // Which zero mode of the right-hand side is removed when cell volumes vary: `MeanKind` (PressureIface.H). The solved
 // system is the unit operator L (cell-centred 7-point, uniform cells), or, for a future non-uniform mesh, the
@@ -38,9 +38,11 @@ ComponentMap label_components (PressureProblem const& p);
 //  - cell_volume == nullptr: uniform cells of volume `cell_volume_uniform`; both kinds are the same operation up to
 //    rounding (volume-weighted mean of b, i.e. the arithmetic mean of v*b divided by v).
 //  - cell_volume != nullptr: per-cell volumes (same BoxArray/DistributionMapping), `kind` selects the zero mode.
+//  - measure = false skips the rms of the right-hand side: removed_rel is then 0 (cheap path); the removed constant, and so the
+//    result, is bitwise the same.
 void remove_mean (amrex::MultiFab& rhs, ComponentMap& cm, amrex::iMultiFab const* uncovered,
                   amrex::Real cell_volume_uniform, amrex::MultiFab const* cell_volume = nullptr,
-                  MeanKind kind = MeanKind::Volume);
+                  MeanKind kind = MeanKind::Volume, bool measure = true);
 
 // Gauge after the solve, per singular component: phi -= sum(W*(phi - g)) / sum(W) over uncovered cells, with
 // W = v*rho. v is the cell volume (per-cell field or the uniform value), rho is `gauge_weight` (null = 1) and

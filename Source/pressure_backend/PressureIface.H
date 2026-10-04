@@ -130,6 +130,16 @@ struct PressureProblem {
     amrex::MultiFab* phi = nullptr;               // out: H on valid cells (gauge-fixed); in: initial guess if used
 };
 
+// FR-039 trigger points for the expensive checks. The caller (driver) says what kind of solve this is by OR-ing flags into
+// PressureOptions::trigger; a PressureWorkspace adds FirstSolve (its first solve) and FirstAfterRegrid (first solve after
+// rebuild(), explicit or automatic) by itself. If any flag of the solve is in PressureOptions::full_checks_on the solve runs
+// the FULL checks, otherwise only the cheap path.
+//   Full checks: structural validation of the layout, component bookkeeping (pin), compatibility diagnostic (rms of the
+//                right-hand side, removed-mean warning), true residual b - L H (if check_residual).
+//   Cheap path:  selector, layout consistency of rhs/phi, mean removal, backend, gauge, convergence status. The solution is
+//                bitwise the same as on the full path; removed_mean and gauge_shift are still reported.
+enum SolveTrigger : unsigned { SolveRoutine = 0u, SolveFirst = 1u, SolveFirstAfterRegrid = 2u, SolveDebug = 4u };
+
 struct PressureOptions {
     BackendKind backend = BackendKind::Auto;      // Auto = selector rule; FFT/MLMG = request, still rule-checked
     double tol_rel = 1.0e-12;                     // backend relative tolerance
@@ -139,6 +149,11 @@ struct PressureOptions {
     bool check_residual = true;                   // true composite residual b - L phi of the mean-removed problem
     double residual_tol = 1.0e-12;                // warn above this relative 2-norm
     double removed_mean_warn = 1.0e-10;           // warn when removed mean (rel. to rms b) exceeds this
+    // Trigger points (FR-039). Default: every solve is a Debug solve, i.e. full checks always (the behaviour before this option).
+    // A driver sets SolveRoutine for ordinary solves (FDS solves up to 10 times per step) and passes SolveFirst /
+    // SolveFirstAfterRegrid / SolveDebug when it wants the full checks.
+    unsigned trigger = SolveDebug;
+    unsigned full_checks_on = SolveFirst | SolveFirstAfterRegrid | SolveDebug;
     int verbose = 1;                              // 0 silent, 1 prints WARNING and error lines; >= 3 (composite) also the MLMG iteration history
 };
 
@@ -156,6 +171,7 @@ struct BackendStatus {
     bool converged = false;
     int iterations = 0;                           // 0 for direct backends
     double own_residual = -1.0;                   // backend-reported relative residual (-1: none)
+    bool plan_reused = false;                     // FFT: the plan cached in the PressureWorkspace was used (not built for this solve)
 };
 
 struct PressureResult {
@@ -169,6 +185,8 @@ struct PressureResult {
     double residual_relmax = 0.0;                 // max|b - L H| / max|b|; composite: over uncovered cells
     bool residual_ok = true;
     std::vector<std::string> warnings;
+    unsigned triggers = 0;                        // effective trigger flags of this solve (options OR workspace-detected)
+    bool full_checks = true;                      // the full checks ran (false: cheap path; residual_checked is then false, removed_rel is 0)
     bool workspace_rebuilt = false;               // composite: the workspace passed in did not match and was rebuilt
     int nlevels = 1;                              // composite: number of levels solved
     amrex::Long ncells_uncovered = 0;             // composite: number of uncovered cells over all levels
@@ -179,13 +197,19 @@ struct PressureResult {
 struct Selection { bool ok = false; BackendKind kind = BackendKind::Auto; std::string message; };
 Selection select_backend (PressureProblem const& p, BackendKind requested);
 
-// Hierarchy-dependent solver setup for the composite path (D-058): the covered-cell masks, the cell volumes and the
-// MLMG hierarchy (MLPoisson with its multigrid levels and bottom solver). Build it once per hierarchy and pass it to
-// solve_pressure() for every solve until the hierarchy (BoxArrays, DistributionMappings, geometries, ratios or BC)
-// changes; then call rebuild(). It stores copies of the layout only: no pointer or reference into any rhs/phi
-// MultiFab of the problem survives a call, so the old MultiFabs may be destroyed at once after a regrid.
-// If a solve is given a workspace that does not match the problem it is rebuilt automatically
-// (PressureResult::workspace_rebuilt = true), so a stale workspace is never used.
+// Per-layout solver set-up that outlives one solve (D-058). Two independent parts, both keyed by the layout and discarded by
+// rebuild():
+//  - composite path: the covered-cell masks, the cell volumes and the MLMG hierarchy (MLPoisson with its multigrid levels and
+//    bottom solver), for a problem with `levels`;
+//  - single-level FFT path: the FFT::Poisson plan and its spectral work arrays, keyed by BoxArray, DistributionMapping,
+//    Geometry and the six boundary types of the single-level fields (FDS solves up to ten times per step on one layout).
+// Build it once per layout and pass it to solve_pressure() for every solve until the layout (BoxArrays, DistributionMappings,
+// geometries, ratios or BC) changes; then call rebuild(). A workspace stores copies of the layout only: no pointer or
+// reference into any rhs/phi MultiFab of the problem survives a call, so the old MultiFabs may be destroyed at once after a
+// regrid. A solve given a workspace that does not match the problem rebuilds the stale part automatically
+// (PressureResult::workspace_rebuilt = true), so a stale workspace is never used. Results are bitwise the same with or
+// without a workspace. The workspace also counts solves and pending regrids, which supply the FR-039 trigger flags
+// SolveFirst and SolveFirstAfterRegrid (see PressureOptions::trigger).
 class PressureWorkspace {
 public:
     PressureWorkspace ();
@@ -195,23 +219,45 @@ public:
     PressureWorkspace (PressureWorkspace const&) = delete;
     PressureWorkspace& operator= (PressureWorkspace const&) = delete;
 
-    // Discard the old setup and build it for `p.levels`. Collective. Returns Ok, or NotBuilt/InvalidInput with
-    // `message` (the same checks as the solve). The workspace is empty after a non-Ok return.
+    // Discard the old setup (composite and FFT) and build it for `p`: `p.levels` non-empty = composite hierarchy, otherwise
+    // the single-level fields (the FFT plan is built now if the selector picks FFT; MLMG single level has nothing to cache).
+    // Collective. Returns Ok, or NotBuilt/InvalidInput with `message` (the same checks as the solve). The workspace is empty
+    // after a non-Ok return. Marks a regrid as pending (FirstAfterRegrid for the next solve).
     Status rebuild (PressureProblem const& p, std::string* message = nullptr);
-    bool built () const;
-    int num_levels () const;
-    // True when the workspace was built for the layout of `p` (ba, dm, geom, ratios, bc).
+    bool built () const;                          // composite set-up or FFT plan present
+    int num_levels () const;                      // composite levels, 0 when only an FFT plan (or nothing) is built
+    // True when the workspace was built for the layout of `p` (composite: ba, dm, geom, ratios, bc; single level: the FFT
+    // plan key).
     bool matches (PressureProblem const& p) const;
 
+    // FR-039 bookkeeping. Counts completed solves that used this workspace; regrid_pending() is true after rebuild() until the
+    // next solve completes; auto_triggers() = the flags this workspace adds to the next solve.
+    unsigned long num_solves () const { return m_nsolves; }
+    bool regrid_pending () const { return m_regrid; }
+    unsigned auto_triggers () const { return (m_nsolves == 0 ? unsigned(SolveFirst) : 0u) | (m_regrid ? unsigned(SolveFirstAfterRegrid) : 0u); }
+    // FFT plan counters (single-level path): plans constructed, solves that reused the cached plan.
+    int fft_plan_builds () const { return m_fft_builds; }
+    int fft_plan_reuses () const { return m_fft_reuses; }
+    bool fft_plan_built () const;
+
+    // Internal (used by solve_pressure).
+    void note_solve_done () { ++m_nsolves; m_regrid = false; }
+    void note_fft (bool reused) { if (reused) { ++m_fft_reuses; } else { ++m_fft_builds; } }
+    void mark_regrid () { m_regrid = true; }
+    void discard ();                              // drop all set-up (counters are kept)
     struct Impl;
     Impl* impl () { return m_impl.get(); }
+    Impl& ensure_impl ();
 private:
     std::unique_ptr<Impl> m_impl;
+    unsigned long m_nsolves = 0;
+    bool m_regrid = false;
+    int m_fft_builds = 0, m_fft_reuses = 0;
 };
 
 // Full solve: selector, components and pins, mean removal, backend, gauge, checks. Collective. On any
-// status other than Ok/NotConverged the phi field is not modified. `ws` is used only by the composite path
-// (null = build the hierarchy setup and discard it after the call).
+// status other than Ok/NotConverged the phi field is not modified. `ws` holds the composite hierarchy set-up and the FFT plan
+// (null = build the set-up for this call and discard it after the call). Which checks run: see SolveTrigger.
 PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws = nullptr);
 
 // Face-centred dphi/dn of the composite solution, one component, valid faces, for every level, in the sign

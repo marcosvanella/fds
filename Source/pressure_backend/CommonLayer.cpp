@@ -33,7 +33,7 @@ const char* to_string (BC b)
     return "?";
 }
 
-ComponentMap label_components (PressureProblem const& p)
+ComponentMap label_components (PressureProblem const& p, bool record_pin)
 {
     ComponentMap cm;
     cm.label.define(p.ba, p.dm, 1, 0);
@@ -45,6 +45,7 @@ ComponentMap label_components (PressureProblem const& p)
     ci.singular = !open;
     ci.ncells = p.ba.numPts();
 
+    if (!record_pin) { cm.comps.push_back(ci); return cm; }
     // Pin: lowest global index (x fastest) of the component, from the labelled cells.
     const Box dom = p.geom.Domain();
     const Long nx = dom.length(0), ny = dom.length(1);
@@ -70,17 +71,21 @@ namespace {
 struct MeanInfo { std::vector<double> mean; std::vector<double> rms; std::vector<Long> n; std::vector<double> sum; };
 
 // Exact volume-weighted mean per component (sum(v*x) / (v*count)) and rms of x.
-MeanInfo exact_mean (MultiFab const& mf, ComponentMap const& cm, iMultiFab const* uncovered, Real vol)
+MeanInfo exact_mean (MultiFab const& mf, ComponentMap const& cm, iMultiFab const* uncovered, Real vol, bool want_rms = true)
 {
     const int nc = static_cast<int>(cm.comps.size());
     ExactSumResult s = exact_sum(mf, 0, vol, nc, uncovered, &cm.label);
-    MultiFab sq(mf.boxArray(), mf.DistributionMap(), 1, 0);
-    for (MFIter mfi(sq); mfi.isValid(); ++mfi) {
-        auto const& q = sq.array(mfi);
-        auto const& a = mf.const_array(mfi);
-        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { q(i,j,k) = a(i,j,k)*a(i,j,k); });
+    ExactSumResult s2;
+    s2.sum.assign(nc, 0.0); s2.count.assign(nc, 0);
+    if (want_rms) {
+        MultiFab sq(mf.boxArray(), mf.DistributionMap(), 1, 0);
+        for (MFIter mfi(sq); mfi.isValid(); ++mfi) {
+            auto const& q = sq.array(mfi);
+            auto const& a = mf.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { q(i,j,k) = a(i,j,k)*a(i,j,k); });
+        }
+        s2 = exact_sum(sq, 0, 1.0, nc, uncovered, &cm.label);
     }
-    ExactSumResult s2 = exact_sum(sq, 0, 1.0, nc, uncovered, &cm.label);
     MeanInfo m;
     for (int c = 0; c < nc; ++c) {
         const double n = static_cast<double>(s.count[c]);
@@ -111,12 +116,12 @@ void subtract_per_component (MultiFab& mf, ComponentMap const& cm, iMultiFab con
 }
 
 void remove_mean (MultiFab& rhs, ComponentMap& cm, iMultiFab const* uncovered, Real vol,
-                  MultiFab const* cell_volume, MeanKind kind)
+                  MultiFab const* cell_volume, MeanKind kind, bool measure)
 {
     const int nc = static_cast<int>(cm.comps.size());
     if (!cell_volume) {
         // Uniform cells: volume-weighted mean of b and arithmetic mean of vol*b differ only by the constant vol.
-        MeanInfo m = exact_mean(rhs, cm, uncovered, vol);
+        MeanInfo m = exact_mean(rhs, cm, uncovered, vol, measure);
         const double bmax = rhs.norm0(0);
         const double floor_ = std::ldexp(bmax, -52);      // idempotence: below round-off of b itself, leave alone
         std::vector<double> shift(nc, 0.0);

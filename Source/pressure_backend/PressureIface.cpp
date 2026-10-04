@@ -3,6 +3,7 @@
 #include "PressureBackend.H"
 #include "CommonLayer.H"
 #include "Composite.H"
+#include "PbWorkspaceImpl.H"
 
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
@@ -27,16 +28,18 @@ bool has_zero (iMultiFab const* m)
     return m->min(0) == 0;
 }
 
-std::string validate (PressureProblem const& p)
+std::string validate (PressureProblem const& p, bool structural = true)
 {
     if (!p.rhs || !p.phi) { return "rhs and phi are required"; }
     if (p.ba.empty()) { return "empty BoxArray"; }
     if (p.rhs->boxArray() != p.ba || p.phi->boxArray() != p.ba) { return "rhs/phi BoxArray differ from problem BoxArray"; }
     if (!(p.rhs->DistributionMap() == p.dm) || !(p.phi->DistributionMap() == p.dm)) { return "rhs/phi DistributionMapping differ"; }
     if (p.rhs->nComp() < 1 || p.phi->nComp() < 1) { return "rhs/phi need at least one component"; }
-    if (!p.geom.Domain().contains(p.ba.minimalBox())) { return "BoxArray outside the geometry domain"; }
-    if (p.ba.minimalBox() != p.geom.Domain() || p.ba.numPts() != p.geom.Domain().numPts()) {
-        return "BoxArray does not cover the domain exactly (box domain required)";
+    if (structural) {   // skipped on the cheap path when a workspace was built (hence validated) for this layout
+        if (!p.geom.Domain().contains(p.ba.minimalBox())) { return "BoxArray outside the geometry domain"; }
+        if (p.ba.minimalBox() != p.geom.Domain() || p.ba.numPts() != p.geom.Domain().numPts()) {
+            return "BoxArray does not cover the domain exactly (box domain required)";
+        }
     }
     if (p.gauge_weight && (p.gauge_weight->boxArray() != p.ba || !(p.gauge_weight->DistributionMap() == p.dm) || p.gauge_weight->nComp() < 1)) {
         return "gauge_weight BoxArray/DistributionMapping differ from the problem or it has no component";
@@ -96,6 +99,25 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
     return s;
 }
 
+Status rebuild_single_level (PressureWorkspace& ws, PressureProblem const& p, std::string* message)
+{
+    auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
+    ws.discard();
+    ws.mark_regrid();
+    Selection sel = select_backend(p, BackendKind::Auto);
+    if (!sel.ok) { return fail(Status::NotBuilt, sel.message); }
+    std::string bad = validate(p);
+    if (!bad.empty()) { return fail(Status::InvalidInput, bad); }
+    if (sel.kind == BackendKind::FFT) {
+        PressureWorkspace::Impl& W = ws.ensure_impl();
+        W.fft = make_fft_backend();
+        W.fft->prepare(p);
+        ws.note_fft(false);
+    }
+    if (message) { message->clear(); }
+    return Status::Ok;
+}
+
 PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws)
 {
     PressureResult R;
@@ -107,38 +129,62 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // Selector first: "not built" must be reported for unsupported requests whatever else is unset.
     Selection sel = select_backend(p, o.backend);
     if (!sel.ok) { return fail(Status::NotBuilt, sel.message); }
+    // A workspace built for another layout is a regrid (its stale part is rebuilt by this solve).
+    if (ws) {
+        if (!p.levels.empty()) { if (ws->num_levels() > 0 && !ws->matches(p)) { ws->mark_regrid(); } }
+        else if (sel.kind == BackendKind::FFT && ws->fft_plan_built() && !ws->matches(p)) { ws->mark_regrid(); }
+    }
+    // FR-039 trigger points: the options say what kind of solve this is, the workspace adds first solve / first after regrid.
+    const unsigned trig = o.trigger | (ws ? ws->auto_triggers() : 0u);
+    const bool full = (trig & o.full_checks_on) != 0u;
+    R.triggers = trig; R.full_checks = full;
     if (!p.levels.empty()) {
-        std::string badc = validate_composite(p);
+        const bool structural = full || !(ws && ws->matches(p));
+        std::string badc = validate_composite(p, structural);
         if (!badc.empty()) { return fail(Status::InvalidInput, badc); }
-        R = solve_composite(p, o, ws);
+        R = solve_composite(p, o, ws, full);
+        R.triggers = trig; R.full_checks = full;
         if (R.status == Status::NotBuilt || R.status == Status::InvalidInput) {
             if (o.verbose > 0) { Print() << "PRESSURE ERROR (" << to_string(R.status) << "): " << R.message << "\n"; }
-        }
+        } else if (ws) { ws->note_solve_done(); }
         return R;
     }
-    std::string bad = validate(p);
+    // Single level. With a workspace the FFT plan is cached; the layout was validated when the plan was built.
+    const bool plan_ok = (ws && sel.kind == BackendKind::FFT && ws->matches(p));
+    std::string bad = validate(p, full || !plan_ok);
     if (!bad.empty()) { return fail(Status::InvalidInput, bad); }
 
-    std::unique_ptr<PressureBackend> be = (sel.kind == BackendKind::FFT) ? make_fft_backend() : make_mlmg_backend();
+    std::unique_ptr<PressureBackend> local;
+    PressureBackend* be = nullptr;
+    if (sel.kind == BackendKind::FFT && ws) {
+        PressureWorkspace::Impl& W = ws->ensure_impl();
+        if (!W.fft) { W.fft = make_fft_backend(); }
+        be = W.fft.get();
+        R.workspace_rebuilt = (!plan_ok && ws->fft_plan_builds() > 0);
+    } else {
+        local = (sel.kind == BackendKind::FFT) ? make_fft_backend() : make_mlmg_backend();
+        be = local.get();
+    }
     R.backend = be->name();
 
     const Real vol = p.geom.CellSize(0) * p.geom.CellSize(1) * p.geom.CellSize(2);
-    ComponentMap cm = label_components(p);
+    ComponentMap cm = label_components(p, full);
 
     MultiFab b(p.ba, p.dm, 1, 0);
     MultiFab::Copy(b, *p.rhs, 0, 0, 1, 0);
     if (o.remove_mean) {
-        remove_mean(b, cm, p.uncovered, vol, nullptr, p.mean_kind);
+        remove_mean(b, cm, p.uncovered, vol, nullptr, p.mean_kind, full);
     }
     MultiFab work(p.ba, p.dm, 1, 1);
     work.setVal(0.0);
     if (o.use_initial_guess) { MultiFab::Copy(work, *p.phi, 0, 0, 1, 0); }
 
     R.backend_status = be->solve(p, o, work, b);
+    if (ws && sel.kind == BackendKind::FFT) { ws->note_fft(R.backend_status.plan_reused); }
 
     // Gauge, then the true residual of the problem the backend was given (mean-removed b).
     apply_gauge(work, cm, p.uncovered, vol, nullptr, p.gauge_weight, p.gauge_offset);
-    if (o.check_residual) {
+    if (o.check_residual && full) {
         ResidualNorms rn = true_residual(p, work, b);
         R.residual_checked = true;
         R.residual_rel2 = rn.rel2; R.residual_relmax = rn.relmax;
@@ -149,11 +195,13 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
             R.warnings.push_back(m.str());
         }
     }
-    for (auto const& c : cm.comps) {
-        if (c.singular && c.removed_rel > o.removed_mean_warn) {
-            std::ostringstream m;
-            m << "removed mean of component " << c.id << " is " << c.removed_rel << " of rms(b), above " << o.removed_mean_warn;
-            R.warnings.push_back(m.str());
+    if (full) {
+        for (auto const& c : cm.comps) {
+            if (c.singular && c.removed_rel > o.removed_mean_warn) {
+                std::ostringstream m;
+                m << "removed mean of component " << c.id << " is " << c.removed_rel << " of rms(b), above " << o.removed_mean_warn;
+                R.warnings.push_back(m.str());
+            }
         }
     }
     if (o.verbose > 0) { for (auto const& w : R.warnings) { Print() << "PRESSURE WARNING: " << w << "\n"; } }
@@ -163,6 +211,7 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
         if (o.verbose > 0) { Print() << "PRESSURE WARNING: backend did not converge\n"; }
     }
     MultiFab::Copy(*p.phi, work, 0, 0, 1, 0);
+    if (ws) { ws->note_solve_done(); }
     return R;
 }
 

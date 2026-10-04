@@ -22,7 +22,7 @@ add_library(pressure_backend STATIC
 target_include_directories(pressure_backend PUBLIC ${PB_DIR})
 target_link_libraries(pressure_backend PUBLIC AMReX::amrex)
 
-add_executable(pb_harness main.cpp composite_modes.cpp)
+add_executable(pb_harness main.cpp composite_modes.cpp m2_modes.cpp)
 target_link_libraries(pb_harness PRIVATE pressure_backend)
 
 enable_testing()

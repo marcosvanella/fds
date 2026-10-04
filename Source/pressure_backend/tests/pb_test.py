@@ -464,11 +464,26 @@ def compws():
     for np_ in (1, 2):
         rc, out = run(np_, mode="comp_ws"); print(out); ok(rc == 0, f"workspace (D-058) checks, np={np_}")
 
+def trigger1():
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="trigger1", n_cell=A.n, bcpairs=A.bc, mgs=4 if np_ > 1 else 8)
+        print(out); ok(rc == 0, f"FR-039 single-level trigger checks, bcpairs={A.bc}, np={np_}")
+
+def comptrigger():
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="comp_trigger"); print(out); ok(rc == 0, f"FR-039 composite trigger checks, np={np_}")
+
+def fftcache():
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="fftcache", n_cell=A.n, mgs=16, nsolve=6, bcpairs=A.bc); print(out)
+        ok(rc == 0, f"FFT plan cache checks (bitwise identical, counters, invalidation), np={np_}")
+        l = lines(out, "FFTCACHE")
+        ok(len(l) == 1, "timing line present")
 
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
- "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp}[A.cmd]()
+ "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

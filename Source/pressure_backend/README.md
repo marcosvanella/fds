@@ -46,3 +46,9 @@ cmake --build /workspace/pb-build -j6
 (cd /workspace/pb-build && ctest --output-on-failure)
 ```
 Single run: `mpirun -np 4 pb_harness n_cell="64 64 64" bc=neumann max_grid_size=32 backends="fft mlmg"`.
+
+## M2 additions (see frozen/m2-notes.md)
+
+- `PressureOptions::trigger` / `full_checks_on` (FR-039): full checks versus the cheap path.
+- `PressureWorkspace` caches the FFT plan (keyed by ba/dm/geom/bc); `PbWorkspaceImpl.H` is private. The class layout changed: recompile dependants.
+- Harness modes `trigger1`, `comp_trigger`, `fftcache`; ctests `pb_trigger_single_*`, `pb_comp_trigger`, `pb_fftcache_*`.
