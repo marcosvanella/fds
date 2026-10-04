@@ -35,4 +35,6 @@ working area and are not in this repository.
 | `upstream-patches/0003-mass-check-density-two-pass.patch` | 8140 (8 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/0004-divg-solid-dp-b1-index.patch` | 7123 (7 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/0005-glmat-singlerank-mean-removal.patch` | 9129 (9 KiB) |  | not Markdown or CSV | not recorded |
+| `upstream-patches/0006-r2b-driver-e2e-hook.patch` | 3252 (3 KiB) |  | not Markdown or CSV | not recorded |
+| `upstream-patches/0007-r2b-fill-om-bounds.patch` | 1187 (1 KiB) |  | not Markdown or CSV | not recorded |
 | `.gitignore` | 76 (0 KiB) |  | hidden file | not recorded |

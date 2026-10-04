@@ -119,3 +119,13 @@ D-068 A-57 tooling and GPU spike plan follow-ups.
 - Design constraint: "streams per box" means host threads per box for K2 launches. K2 launches block and do not wait for AMReX streams.
 - Patches 0005 to 0009 pass oneAPI validation and GNU Debug validation (amended 0007 is `a72d491fb9`; the fine-b shadow check runs on a single level-0 mesh and 1 rank only). The gate on level>0 physics is lifted.
 - Setting for D-063: `POST_REGRID_PROJECTION = AUTO (default) | ON | OFF`. AUTO projects when some fine level both keeps old cells and gains new ones. ON always projects. OFF is diagnostics-only: it prints a warning in the output and the run is not a gate run.
+
+## Update 2026-10-04 (j): Intel build flags for bitwise comparison with the driver (D-069)
+
+D-069 Intel build flags for bitwise comparison with the driver.
+- FDS ghost values of TMP, RSUM, ZZ and ZZS are computed in ASSIGN_GHOST_VALUE (`RHO_ZZ_OTHER_2/RHO_OTHER_2` and `PBAR_P_2/(RSUM_TMP*RHOP)`) and are not bit-copies of the interior values. The ifx default approximate division makes DENS, DENSCLIP and DIV1 differ against the driver's exact-copy ghost fill.
+- The fix is flags only: build the Fortran of both the reference FDS and the driver with `-O2 -prec-div` (or `-fp-model=precise`), with identical Fortran flags on both sides. The C++ keeps `-fp-model=precise` (compiler `mpiicpx`; the icx default reassociation breaks `tile_race`).
+- Kernelcheck references must come from a `-prec-div` ifx FDS build.
+- The earlier csmag DIV1 difference was a reference-dump reconstruction error (`FDSREF_STEPS` must be 2,3 to match the recorded dump), not a compiler effect.
+- Remaining known: the plain (no-BC) full/face VISC/VFLUX snapshot effect (the dump is not the exact pre-boundary-step state; `+strips` removes it), the same as with gfortran. The decomposition check `p1_div_DDDT` differs by 1 ulp, covered by the `max(2e-15, 1 ulp)` gate.
+- D-063 context: Role 3 driver-level regrid conservation (R2b): advection with interface flux overwrite closes to 2e-14 (off: 4.3e-5); the diffusion corrector residual of 4.4e-7 (scales with dt^2) is open and not acceptable for the Phase 3 gate.
