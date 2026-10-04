@@ -7,6 +7,10 @@
 #include "TimeLoop.H"
 #include "LevelRegistry.H"
 #include "PressureBcMap.H"
+#include "CompositeOps.H"
+#include "FluxStageRunner.H"
+#include "DriverAdapter.H"
+#include "PostRegridProjection.H"
 
 #include <AMReX_BLassert.H>
 #include <AMReX_ParallelContext.H>
@@ -88,6 +92,7 @@ int fds_p_iter_baro();
 void fds_p_set_iter_baro(int f);
 void fds_p_clear_attached(int nm);
 void fds_p_baroclinic(double t, int nm);
+
 void fds_p_noflux(double dt, int nm, int zero);
 void fds_p_rhs(double t, double dt, int nm);
 void fds_p_get_prhs(int nm, double* buf);
@@ -250,6 +255,7 @@ struct TimeLoop::Impl {
         x.lev = &Lv; x.F = &F; x.bc = o.bc.get(); x.sd = &L.m_reg->side_data(lev); x.drho = o.drho.get(); x.dzz = o.dzz.get();
         x.nbox = nb; x.fds0 = nm0; x.off = total_boxes();
         lc.push_back(x);      // may move lc: c is reset below
+        ++layout_gen;
         dt_new.resize(total_boxes(), L.m_dt);
         chg.resize(total_boxes(), 0);
         select(0);
@@ -261,6 +267,7 @@ struct TimeLoop::Impl {
         if (lev < 1 || lev != static_cast<int>(lc.size()) - 1) die("unbind_level(" + std::to_string(lev) + "): only the top bound level (> 0) can be unbound");
         if (fds_fine_level_destroy(lev) != 0) die("unbind_level: fds_fine_level_destroy failed");
         lc.pop_back();
+        ++layout_gen;
         own.resize(lev - 1);
         if (static_cast<int>(sfx.size()) > lev) sfx.resize(lev);   // the stage flux arrays of the level are re-registered with the next bind
         dt_new.resize(total_boxes()); chg.resize(total_boxes());
@@ -776,6 +783,12 @@ struct TimeLoop::Impl {
     void solve_poisson_impl(bool pred)
     {
         Fields& F = *L.m_F;
+        level0_rhs_and_check();
+        solve_level0(pred, F);
+    }
+    // PRHS of the level-0 boxes (as FDS computed it, fds_p_rhs) into `rhs`, and the check that the Poisson boundary data are homogeneous (every solve)
+    void level0_rhs_and_check()
+    {
         for (amrex::MFIter mfi(*rhs); mfi.isValid(); ++mfi) {
             const int nm = mfi.index() + 1;
             const amrex::Box vb = mfi.validbox();
@@ -802,6 +815,9 @@ struct TimeLoop::Impl {
             all_max(bm);
             if (bm > 0.0) die("inhomogeneous Poisson boundary data (BXS..BZF /= 0): needs the S6 pressure interface extension (see notes/pressure-iface-review.md)");
         }
+    }
+    void solve_level0(bool pred, Fields& F)
+    {
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] bc_type %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), bc_type[0], bc_type[1], bc_type[2], bc_type[3], bc_type[4], bc_type[5]);
         pb::PressureProblem p;
         p.ba = l0.ba; p.dm = l0.dm; p.geom = l0.geom;
@@ -872,8 +888,346 @@ struct TimeLoop::Impl {
         }
     }
 
+    // ------------------------------------------------------------ S14 composite (several bound levels)
+    // One time step over a hierarchy: the stage pieces run per level (for_levels), the pressure is ONE composite Poisson solve over all levels (pressure_backend, Role 2), the
+    // velocity of a fine face overwrites the coarse faces under it, the fine ghost faces come from the coarse level, and (comp_overwrite) the interface flux overwrite of the
+    // scalar fluxes (D-050) runs between the read-out and the cell update. Same dt on every level, no subcycling (D-050). Without a second bound level none of this runs.
+    bool multi() const { return lc.size() > 1; }
+    bool comp_overwrite = true;                         // interface flux overwrite (FDSTL_OVERWRITE=0: negative control)
+    int layout_gen = 0, comp_gen = -1;
+    std::unique_ptr<pb::PressureWorkspace> pws;
+    std::unique_ptr<fdsrt::FluxStageRunner> runner;
+    std::vector<std::unique_ptr<amrex::MultiFab>> crhs, cphi;   // by level (index 0 unused: level 0 has rhs / phi)
+    TimeLoop::CompositeReport crep;
+    void ensure_comp()
+    {
+        if (comp_gen == layout_gen && !crhs.empty()) return;
+        const int nl = static_cast<int>(lc.size());
+        crhs.clear(); cphi.clear();
+        crhs.resize(nl); cphi.resize(nl);
+        std::vector<fdsrt::StageLevel> sl;
+        for (int l = 0; l < nl; ++l) {
+            const Level& lv = *lc[l].lev;
+            if (l > 0) {
+                crhs[l].reset(new amrex::MultiFab(lv.ba, lv.dm, 1, 0));
+                cphi[l].reset(new amrex::MultiFab(lv.ba, lv.dm, 1, 0));
+                crhs[l]->setVal(0.0); cphi[l]->setVal(0.0);
+            }
+            fdsrt::StageLevel x; x.geom = lv.geom; x.ba = lv.ba; x.dm = lv.dm; x.ratio_from_parent = l == 0 ? amrex::IntVect(1) : lv.ref_ratio_from_parent;
+            sl.push_back(x);
+        }
+        if (const char* e = std::getenv("FDSTL_OVERWRITE")) comp_overwrite = std::atoi(e) != 0;
+        runner.reset(new fdsrt::FluxStageRunner(sl, comp_overwrite));
+        pws.reset(new pb::PressureWorkspace());
+        comp_gen = layout_gen;
+    }
+    // Composite pressure solve of the stage: PRHS of every level, one solve, H (pred) / HS (corrector) of every level, the face gradient at the interface into the fine ghost cells.
+    void solve_composite(bool pred)
+    {
+        ensure_comp();
+        LevelRegistry& reg = *L.m_reg;
+        const int nl = static_cast<int>(lc.size());
+        level0_rhs_and_check();
+        for (int l = 1; l < nl; ++l) composite_fine_pressure_rhs(*lc[l].F, *lc[l].lev, *crhs[l]);
+        if (std::getenv("FDSTL_GHOSTDBG") && nl > 1) {   // composite right-hand side by level: its sum must vanish for a periodic domain
+            for (int l = 0; l < nl; ++l) {
+                const amrex::MultiFab& r = l == 0 ? *rhs : *crhs[l];
+                const amrex::iMultiFab* cov = reg.covered_mask(l);
+                const Level& lv = *lc[l].lev; const double vol = lv.dx[0] * lv.dx[1] * lv.dx[2];
+                double s = 0.0, sa = 0.0, sc = 0.0;
+                for (amrex::MFIter mfi(r); mfi.isValid(); ++mfi) {
+                    auto a = r.const_array(mfi); amrex::Array4<const int> ca; if (cov) ca = cov->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (cov && ca(i, j, k) != 0) { sc += a(i, j, k) * vol; return; } s += a(i, j, k) * vol; sa += std::abs(a(i, j, k)) * vol; });
+                }
+                amrex::Print() << "RHSSUM " << (pred ? "pred" : "corr") << " L" << l << " sum(rhs*vol) uncovered " << s << " covered " << sc << " all " << s + sc << " sum|rhs|vol " << sa << "\n";
+            }
+        }
+        if (std::getenv("FDSTL_GHOSTDBG") && nl > 1) {   // net outflow of FV through the boundary of the fine box, from the fine and from the coarse array (one fine box, x-z plane)
+            const Level& lf = *lc[1].lev; const Level& l0v = *lc[0].lev;
+            for (amrex::MFIter mfi((*lc[1].F)["FVX"]); mfi.isValid(); ++mfi) {
+                const amrex::Box fb = mfi.validbox(); amrex::Box cb = fb; cb.coarsen(lf.ref_ratio_from_parent);
+                auto fx = (*lc[1].F)["FVX"].const_array(mfi); auto fz = (*lc[1].F)["FVZ"].const_array(mfi);
+                double bf = 0.0, nlo = 0.0, nhi = 0.0;
+                for (int k = fb.smallEnd(2); k <= fb.bigEnd(2); ++k) { bf += (fx(fb.bigEnd(0), 0, k) - fx(fb.smallEnd(0) - 1, 0, k)) * lf.dx[2] * lf.dx[1]; nlo += fx(fb.smallEnd(0) - 1, 0, k); nhi += fx(fb.bigEnd(0), 0, k); }
+                for (int i = fb.smallEnd(0); i <= fb.bigEnd(0); ++i) bf += (fz(i, 0, fb.bigEnd(2)) - fz(i, 0, fb.smallEnd(2) - 1)) * lf.dx[0] * lf.dx[1];
+                amrex::Print() << "FLUXBND fine: net outflow " << bf << " (mean FVX at low face " << nlo / fb.length(2) << ", high face " << nhi / fb.length(2) << ")\n";
+            }
+            amrex::Box cb = lf.ba[0]; cb.coarsen(lf.ref_ratio_from_parent);
+            for (amrex::MFIter m0((*lc[0].F)["FVX"]); m0.isValid(); ++m0) {
+                auto cx = (*lc[0].F)["FVX"].const_array(m0); auto cz = (*lc[0].F)["FVZ"].const_array(m0);
+                double bc = 0.0, clo = 0.0, chi = 0.0;
+                for (int k = cb.smallEnd(2); k <= cb.bigEnd(2); ++k) { bc += (cx(cb.bigEnd(0), 0, k) - cx(cb.smallEnd(0) - 1, 0, k)) * l0v.dx[2] * l0v.dx[1]; clo += cx(cb.smallEnd(0) - 1, 0, k); chi += cx(cb.bigEnd(0), 0, k); }
+                for (int i = cb.smallEnd(0); i <= cb.bigEnd(0); ++i) bc += (cz(i, 0, cb.bigEnd(2)) - cz(i, 0, cb.smallEnd(2) - 1)) * l0v.dx[0] * l0v.dx[1];
+                {   // periodic wrap of level 0: FV at the low and high domain face
+                    const amrex::Box dom = l0v.geom.Domain(); double a = 0, b = 0, c = 0, d = 0;
+                    for (int k = dom.smallEnd(2); k <= dom.bigEnd(2); ++k) { a += cx(dom.smallEnd(0) - 1, 0, k); b += cx(dom.bigEnd(0), 0, k); }
+                    for (int i = dom.smallEnd(0); i <= dom.bigEnd(0); ++i) { c += cz(i, 0, dom.smallEnd(2) - 1); d += cz(i, 0, dom.bigEnd(2)); }
+                    amrex::Print() << "WRAPCHK level 0: sum FVX low " << a << " high " << b << "; sum FVZ low " << c << " high " << d << "\n";
+                }
+                amrex::Print() << "FLUXBND coarse: net outflow " << bc << " (mean FVX at low face " << clo / cb.length(2) << ", high face " << chi / cb.length(2) << ")\n";
+            }
+        }
+        pb::PressureProblem p;
+        for (int f = 0; f < 6; ++f) p.bc[f] = static_cast<pb::BC>(bc_type[f]);
+        p.levels.resize(nl);
+        for (int l = 0; l < nl; ++l) {
+            pb::PressureLevel& pl = p.levels[l];
+            const Level& lv = *lc[l].lev;
+            pl.ba = lv.ba; pl.dm = lv.dm; pl.geom = lv.geom;
+            pl.ref_ratio = l == 0 ? amrex::IntVect(1) : lv.ref_ratio_from_parent;
+            pl.rhs = l == 0 ? rhs.get() : crhs[l].get();
+            pl.phi = l == 0 ? phi.get() : cphi[l].get();
+            pl.phi->setVal(0.0);
+        }
+        pb::PressureOptions o;
+        o.backend = pb::BackendKind::Auto;
+        o.verbose = std::getenv("FDSTL_PBV") ? 1 : 0;
+        o.check_residual = std::getenv("FDSTL_PBV") != nullptr;
+        o.trigger = pb::SolveRoutine;
+        const pb::PressureResult r = pb::solve_pressure(p, o, pws.get());
+        if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("composite pressure solve: ") + pb::to_string(r.status) + ": " + r.message);
+        ++crep.solves;
+        for (const auto& ci : r.components) { crep.removed_mean = std::max(crep.removed_mean, std::abs(ci.removed_mean)); crep.removed_rel = std::max(crep.removed_rel, ci.removed_rel); }
+        crep.iterations += r.backend_status.iterations;
+        crep.backend = r.backend;
+        std::vector<std::array<amrex::MultiFab*, 3>> grad(nl);
+        std::vector<std::unique_ptr<amrex::MultiFab>> gown;
+        for (int l = 0; l < nl; ++l)
+            for (int d = 0; d < 3; ++d) {
+                amrex::BoxArray fb = lc[l].lev->ba; fb.surroundingNodes(d);
+                gown.emplace_back(new amrex::MultiFab(fb, lc[l].lev->dm, 1, 0));
+                gown.back()->setVal(0.0);
+                grad[l][d] = gown.back().get();
+            }
+        const pb::PressureResult rg = pb::face_gradient_composite(p, grad);
+        if (rg.status != pb::Status::Ok) die(std::string("composite face gradient: ") + pb::to_string(rg.status) + ": " + rg.message);
+        const char* hn = pred ? "H" : "HS";
+        for (int l = 0; l < nl; ++l) {
+            amrex::MultiFab& H = (*lc[l].F)[hn];
+            const amrex::MultiFab& q = *p.levels[l].phi;
+            for (amrex::MFIter mfi(H); mfi.isValid(); ++mfi) {
+                auto h = H.array(mfi); auto a = q.const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { h(i, j, k) = a(i, j, k); });
+            }
+            H.FillBoundary(0, 1, H.nGrowVect(), lc[l].lev->geom.periodicity());
+            if (l == 0) {
+                select(0);
+                each_local([&](int nm) { int fl[6]; physical_flags(nm - 1, fl); fds_p_h_ghost(nm, pred ? 1 : 0, fl); });
+            } else {
+                crep.h_ghost_cells += composite_set_fine_h_ghosts(*lc[l].lev, H, grad[l]);
+                mirror_domain_edges(*lc[l].lev, H, -1);
+            }
+        }
+        (void)reg;
+    }
+    int pressure_scheme_composite(bool pred, double t, double dt, double& perr_out, double& verr_out)
+    {
+        // IP[0] (PRESSURE_ITERATIONS) is not iterated: the composite solve is one Poisson solve per stage (the FFT/MLMG solve is exact for the periodic and Neumann faces of Phase 3)
+        LevelRegistry& reg = *L.m_reg;
+        const int nl = static_cast<int>(lc.size());
+        perr_out = 0.0; verr_out = 0.0;
+        fds_p_iter_init();
+        fds_p_iter_inc();
+        select(0);
+        if (IP[4]) for_levels([&](int) { each_local([&](int nm) { fds_p_baroclinic(t, nm); }); });   // BAROCLINIC_CORRECTION of every level (reads H/HS and RHO with the ghost layers of the level)
+        L.m_bc->exchange_om();
+        each_local([&](int nm) { fds_g_match_flux(nm); });
+        for_levels([&](int) { each_local([&](int nm) { fds_p_noflux(dt, nm, 1); }); });
+        composite_average_down_flux(reg, nl);
+        select(0);
+        each_local([&](int nm) { fds_p_rhs(t, dt, nm); });
+        const double ts0 = amrex::second();
+        solve_composite(pred);
+        t_solve += amrex::second() - ts0;
+        return 1;
+    }
+    // the density pieces of a stage over all levels: with the flux overwrite (several levels) the ADV read-out of every level, the override lists, then the cell update finest first
+    void stage_density_all(bool pred, double t, double dt)
+    {
+        if (!multi() || !comp_overwrite) { for_levels([&](int) { density(pred, t, dt); }); return; }
+        ensure_comp();
+        FluxStages fs(L);
+        const int nl = static_cast<int>(lc.size());
+        for (int l = 0; l < nl; ++l) fs.compute_stage_fluxes(l, pred);
+        runner->set_overrides(fs, fdsrt::FluxKind::Adv);
+        for (int l = nl - 1; l >= 0; --l) fs.apply_flux_divergence(l, pred);
+    }
+    // DIVERGENCE_PART_1 over all levels; with the flux overwrite: the DIF read-out of every level, the override lists, then the re-run where a list was set
+    void divergence1_all()
+    {
+        if (!multi() || !comp_overwrite) { for_levels([&](int) { s_div1(); }); return; }
+        ensure_comp();
+        FluxStages fs(L);
+        const int nl = static_cast<int>(lc.size());
+        for (int l = 0; l < nl; ++l) fs.readout_dif(l);
+        runner->set_overrides(fs, fdsrt::FluxKind::Dif);
+        for (int l = nl - 1; l >= 0; --l) fs.run_divergence_part1(l);
+    }
+    void avg_down_vel(bool pred)
+    {
+        if (!multi()) return;
+        if (pred) composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"US", "VS", "WS"});
+        else composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"U", "V", "W"});
+    }
+    // One corrector-form pass without the density update on all levels: the D, DS, KRES, MU, ... of a previous stage that a newly made level does not have (notes/level-binding.md)
+    // FDSTL_GHOSTDBG: min/max of the scalars over the valid cells and over the whole FAB (ghost layers included), per level
+    void ghost_report(const char* tag)
+    {
+        if (!std::getenv("FDSTL_GHOSTDBG")) return;
+        nan_fields(tag);
+        field_ranges(tag);
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l)
+            for (const char* nm : {"RHO", "RHOS", "TMP", "RSUM", "ZZ", "ZZS"}) {
+                const amrex::MultiFab& mf = (*lc[l].F)[nm];
+                amrex::Print() << "GHOSTDBG " << tag << " L" << l << " " << nm << " valid [" << mf.min(0, 0) << ", " << mf.max(0, 0) << "] with ghosts [" << mf.min(0, mf.nGrow()) << ", " << mf.max(0, mf.nGrow()) << "]\n";
+            }
+    }
+    // FDSTL_GHOSTDBG: max |div u - D*| over the uncovered cells by level, for the predicted (US.., DS) or the corrected (U.., D) velocity
+    void div_report(const char* tag, bool pred)
+    {
+        if (!std::getenv("FDSTL_GHOSTDBG") || !multi()) return;
+        (void)0;
+        std::vector<fdsrt::ProjectionLevel> lv;
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l) {
+            Fields& F = *lc[l].F;
+            fdsrt::ProjectionLevel pl;
+            pl.geom = L.m_reg->level(l).geom;
+            pl.ref_ratio = l > 0 ? L.m_reg->level(l).ref_ratio_from_parent : amrex::IntVect(1);
+            pl.vel = pred ? std::array<amrex::MultiFab*, 3>{&F["US"], &F["VS"], &F["WS"]} : std::array<amrex::MultiFab*, 3>{&F["U"], &F["V"], &F["W"]};
+            pl.D = pred ? &F["DS"] : &F["D"];
+            pl.covered = L.m_reg->covered_mask(l);
+            lv.push_back(pl);
+        }
+        std::vector<double> bl;
+        const double e = fdsrt::composite_divergence_error(lv, &bl);
+        amrex::Print() << "DIVERR " << tag << " " << e << " (L0 " << bl[0] << ", L1 " << (bl.size() > 1 ? bl[1] : 0.0) << ")\n";
+        if (std::atoi(std::getenv("FDSTL_GHOSTDBG")) >= 3)
+            for (int l = 0; l < static_cast<int>(lc.size()); ++l) {   // where is the worst cell (x-z plane, one box per rank)
+                Fields& F = *lc[l].F;
+                const amrex::MultiFab& u = F[pred ? "US" : "U"]; const amrex::MultiFab& w = F[pred ? "WS" : "W"]; const amrex::MultiFab& d = F[pred ? "DS" : "D"];
+                const amrex::Geometry& g = L.m_reg->level(l).geom;
+                const amrex::iMultiFab* cov = L.m_reg->covered_mask(l);
+                for (amrex::MFIter mfi(d); mfi.isValid(); ++mfi) {
+                    auto ua = u.const_array(mfi); auto wa = w.const_array(mfi); auto da = d.const_array(mfi);
+                    const amrex::Box b = mfi.validbox(); double worst = -1.0; int wi = 0, wk = 0;
+                    amrex::Array4<const int> ca; if (cov) ca = cov->const_array(mfi);
+                    amrex::LoopOnCpu(b, [&](int i, int j, int k) {
+                        if (cov && ca(i, j, k) != 0) return;
+                        const double dv = (ua(i + 1, j, k) - ua(i, j, k)) / g.CellSize(0) + (wa(i, j, k + 1) - wa(i, j, k)) / g.CellSize(2) - da(i, j, k);
+                        if (std::abs(dv) > worst) { worst = std::abs(dv); wi = i; wk = k; }
+                    });
+                    if (pred) {   // does the stored pressure satisfy lap(H) = -div(FV) - DDDT on the cells away from the box edge?
+                        const amrex::MultiFab& h = F["H"]; const amrex::MultiFab& fx = F["FVX"]; const amrex::MultiFab& fz = F["FVZ"]; const amrex::MultiFab& dd = F["DDDT"];
+                        auto ha = h.const_array(mfi); auto fxa = fx.const_array(mfi); auto fza = fz.const_array(mfi); auto dda = dd.const_array(mfi);
+                        double rw = -1.0, ri = -1.0; int ri_i = 0, ri_k = 0; const double dx = g.CellSize(0), dz = g.CellSize(2);
+                        amrex::LoopOnCpu(b, [&](int i, int j, int k) {
+                            if (cov && ca(i, j, k) != 0) return;
+                            const double lap = (ha(i + 1, j, k) - 2 * ha(i, j, k) + ha(i - 1, j, k)) / (dx * dx) + (ha(i, j, k + 1) - 2 * ha(i, j, k) + ha(i, j, k - 1)) / (dz * dz);
+                            const double res = lap + (fxa(i, j, k) - fxa(i - 1, j, k)) / dx + (fza(i, j, k) - fza(i, j, k - 1)) / dz + dda(i, j, k);
+                            (void)res;
+                            const double r2 = std::abs(lap + (fxa(i + 1, j, k) - fxa(i, j, k)) / dx + (fza(i, j, k + 1) - fza(i, j, k)) / dz + dda(i, j, k));
+                            const double r1 = std::abs(res);
+                            const bool inner = i > b.smallEnd(0) + 1 && i < b.bigEnd(0) - 1 && k > b.smallEnd(2) + 1 && k < b.bigEnd(2) - 1;
+                            if (inner && std::min(r1, r2) > ri) { ri = std::min(r1, r2); ri_i = i; ri_k = k; }
+                            if (!inner && std::min(r1, r2) > rw) rw = std::min(r1, r2);
+                        });
+                        amrex::Print() << "PRESRES " << tag << " L" << l << " interior worst " << ri << " at i " << ri_i << " k " << ri_k << ", box-edge cells worst " << rw << " (min over the two FV index conventions)\n";
+                    }
+                    if (pred) {
+                        auto uo = F["U"].const_array(mfi); auto wo = F["W"].const_array(mfi); auto ha = F["H"].const_array(mfi); auto fxa = F["FVX"].const_array(mfi); auto fza = F["FVZ"].const_array(mfi);
+                        const double dx = g.CellSize(0), dz = g.CellSize(2); const int i = wi, k = wk;
+                        const double divU = (uo(i + 1, 0, k) - uo(i, 0, k)) / dx + (wo(i, 0, k + 1) - wo(i, 0, k)) / dz;
+                        const double lap = (ha(i + 1, 0, k) - 2 * ha(i, 0, k) + ha(i - 1, 0, k)) / (dx * dx) + (ha(i, 0, k + 1) - 2 * ha(i, 0, k) + ha(i, 0, k - 1)) / (dz * dz);
+                        const double dfA = (fxa(i + 1, 0, k) - fxa(i, 0, k)) / dx + (fza(i, 0, k + 1) - fza(i, 0, k)) / dz, dfB = (fxa(i, 0, k) - fxa(i - 1, 0, k)) / dx + (fza(i, 0, k) - fza(i, 0, k - 1)) / dz;
+                        amrex::Print() << "CELLCHK " << tag << " L" << l << " (" << i << "," << k << ") divU " << divU << " lapH " << lap << " divFV(lo-face conv) " << dfA << " divFV(hi-face conv) " << dfB << " dt " << L.m_dt << " DS " << da(i, 0, k)
+                                       << " => divUS expected " << divU - L.m_dt * (dfA + lap) << " / " << divU - L.m_dt * (dfB + lap) << "\n";
+                    }
+                    amrex::Print() << "DIVWORST " << tag << " L" << l << " box " << b << " worst " << worst << " at i " << wi << " k " << wk << "\n";
+                }
+            }
+    }
+    // FDSTL_GHOSTDBG=2: valid-cell min/max of the velocity, flux, pressure and divergence fields per level
+    void field_ranges(const char* tag)
+    {
+        const char* e = std::getenv("FDSTL_GHOSTDBG");
+        if (!e || std::atoi(e) < 2) return;
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l)
+            for (const char* nm : {"U", "W", "US", "WS", "FVX", "FVZ", "H", "HS", "D", "DS", "DDDT", "MU", "KRES"}) {
+                if (!lc[l].F->has(nm)) continue;
+                const amrex::MultiFab& mf = (*lc[l].F)[nm];
+                amrex::Print() << "RANGE " << tag << " L" << l << " " << nm << " [" << mf.min(0, 0) << ", " << mf.max(0, 0) << "]\n";
+            }
+    }
+    void nan_fields(const char* tag)
+    {
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l)
+            for (const char* nm : {"RHO", "RHOS", "ZZ", "ZZS", "TMP", "D", "DS", "KRES", "MU", "RSUM", "Q", "U", "V", "W", "US", "VS", "WS", "H", "HS"}) {
+                if (!lc[l].F->has(nm)) continue;
+                const amrex::MultiFab& mf = (*lc[l].F)[nm];
+                if (mf.contains_nan(0, mf.nComp(), 0)) amrex::Print() << "PRIMEDBG " << tag << ": level " << l << " " << nm << " has NaN in its valid cells\n";
+            }
+    }
+    void nan_report(const char* tag)
+    {
+        if (!std::getenv("FDSTL_PRIMEDBG")) return;
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l) {   // the Fortran-side scratch arrays (fds_k_xfer mode 3)
+            select(l);
+            for (const auto& nr : std::initializer_list<std::pair<const char*, int>>{{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"WORK7", 3}, {"WORK8", 3}, {"WORK9", 3},
+                                                                                        {"SWORK1", 4}, {"SWORK2", 4}, {"SWORK3", 4}, {"SWORK4", 4}, {"DEL_RHO_D_DEL_Z", 4}, {"FX", 4}, {"FY", 4}, {"FZ", 4}})
+                each_local([&](int nm) {
+                    int lb[4] = {1, 1, 1, 1}, ub[4] = {1, 1, 1, 1}, ierr = 0; long n = 0, bad = 0;
+                    fds_k_xfer(nm, nr.first, nr.second, lb, ub, nullptr, 2, &n, &bad, &ierr);
+                    if (ierr != 0) return;
+                    std::size_t cnt = 1;
+                    bool sane = true;
+                    for (int d = 0; d < nr.second; ++d) { const long ext = static_cast<long>(ub[d]) - lb[d] + 1; if (ext < 1 || ext > 100000) sane = false; else cnt *= static_cast<std::size_t>(ext); }
+                    if (!sane || cnt > 100000000u) return;
+                    std::vector<double> buf(cnt);
+                    fds_k_xfer(nm, nr.first, nr.second, lb, ub, buf.data(), 3, &n, &bad, &ierr);
+                    if (ierr != 0) return;
+                    long nn = 0; for (double x : buf) if (std::isnan(x)) ++nn;
+                    if (nn) amrex::Print() << "PRIMEDBG " << tag << ": level " << l << " scratch " << nr.first << " has " << nn << " NaN of " << cnt << "\n";
+                });
+        }
+        select(0);
+        nan_fields(tag);
+    }
+    // The state a newly bound level lacks before its first predictor: the ghost layers of the scalars (coarse-fine hook, domain-edge mirror) and of the velocities. The scalar and velocity
+    // ghosts are those of the corrector end of a previous step (exchange 6 and 4). `full`: also the corrector-form stage pieces without the density update (viscosity, velocity flux, wall BC,
+    // DIVERGENCE_PART_1/2) that fill D, DS, KRES, MU (FDSTL_PRIME_FULL=1; kept for the D_PBAR_DT binding investigation, notes/level-binding.md).
+    void prime_levels()
+    {
+        const int nl = static_cast<int>(lc.size());
+        const bool full = std::getenv("FDSTL_PRIME_FULL") != nullptr;
+        state(false, false);
+        nan_report("start");
+        for (int l = 1; l < nl; ++l) {
+            composite_fill_fine_face_ghosts(*L.m_reg, l, {"U", "V", "W"});
+            composite_fill_fine_face_ghosts(*L.m_reg, l, {"US", "VS", "WS"});
+        }
+        for_levels([&](int) { s_exchange(6, false); });
+        for_levels([&](int) { s_after(6); });
+        nan_report("exchange 6");
+        if (full) for_levels([&](int) { s_visc_mfd(false); });
+        nan_report("viscosity");
+        for_levels([&](int) { s_exchange(4, false); });
+        for_levels([&](int) { s_after(4); });
+        nan_report("exchange 4");
+        if (!full) return;
+        for_levels([&](int) { s_vflux(false); });
+        nan_report("vflux");
+        fds_p_init_div();
+        for_levels([&](int) { s_wall_bc(false); });
+        nan_report("wall_bc");
+        for_levels([&](int) { s_div1(); });
+        nan_report("div1");
+        for_levels([&](int) { s_div2(); });
+        nan_report("div2");
+    }
+
     int pressure_scheme(bool pred, double t, double dt, double& perr_out, double& verr_out)
     {
+        if (multi()) return pressure_scheme_composite(pred, t, dt, perr_out, verr_out);
         Fields& F = *L.m_F;
         BcStep& bc = *L.m_bc;
         const char* hn = pred ? "H" : "HS";
@@ -921,7 +1275,15 @@ struct TimeLoop::Impl {
 
     // ------------------------------------------------------------ per-level stage bodies (S9): the exact calls advance() makes, on the current level c
     void s_visc_mfd(bool pred) { each_local([&](int nm) { fds_k_visc(nm, pred ? 0 : 1); fds_p_mfd(nm); }); }
-    void s_exchange(int code, bool pred) { c->bc->exchange(code, pred); }
+    void s_exchange(int code, bool pred)
+    {
+        c->bc->exchange(code, pred);
+        const int l = static_cast<int>(c - lc.data());
+        if (l > 0 && (code == 3 || code == 6)) {
+            if (code == 3) composite_fill_fine_face_ghosts(*L.m_reg, l, {"US", "VS", "WS"});
+            else composite_fill_fine_face_ghosts(*L.m_reg, l, {"U", "V", "W"});
+        }
+    }
     void s_after(int code) { c->bc->after_exchange(code, L.m_t, L.m_dt); }
     void s_vflux(bool pred)
     {
@@ -946,7 +1308,6 @@ struct TimeLoop::Impl {
     // ------------------------------------------------------------ one MAIN_LOOP iteration
     bool advance()
     {
-        if (lc.size() > 1) die("advance(): level " + std::to_string(lc.size() - 1) + " is bound but the composite pressure solve across levels is not built (Role 2); drive the per-level stage entry points instead");
         select(0);
         StepRecord rec;
         zone_rel_step = 0.0;
@@ -960,6 +1321,7 @@ struct TimeLoop::Impl {
         // ---------------- predictor
         state(true, true);
         for_levels([&](int) { s_visc_mfd(true); });
+        div_report("start of step", false);
         first_pass = true;
         passes = 0;
         int stop = 0;
@@ -973,19 +1335,25 @@ struct TimeLoop::Impl {
                 stage_scratch("static", {{"MU_RSQMW_Z", 2}, {"K_RSQMW_Z", 2}, {"CP_Z", 2}, {"H_SENS_Z", 2}, {"RSQ_MW_Z", 1}, {"MWR_Z", 1}, {"MW", 1}}, true);
             }
             stage_raw(passes == 1 ? "p1_pre_dens" : "p2_pre_dens", {"RHO", "ZZ", "TMP", "U", "V", "W", "H", "HS", "MU", "KRES"});
-            for_levels([&](int) { density(true, t, dt); });
+            ghost_report("p_predens");
+            stage_density_all(true, t, dt);
+            ghost_report("p_dens");
             stage(passes == 1 ? "p1_dens" : "p2_dens", {"RHOS", "ZZS"});
             stage_raw(passes == 1 ? "p1_a_dens" : "p2_a_dens", {"RHOS", "TMP"});
             for_levels([&](int) { s_exchange(1, true); });
+            ghost_report("p_exch1");
             stage_raw(passes == 1 ? "p1_b_fill" : "p2_b_fill", {"RHOS", "TMP"});
             for_levels([&](int) { s_after(1); });
+            ghost_report(passes == 1 ? "p1_after1" : "p2_after1");
             stage_raw(passes == 1 ? "p1_c_visc" : "p2_c_visc", {"RHOS", "TMP"});
             stage_raw(passes == 1 ? "p1_prevflux" : "p2_prevflux", {"RHO", "RHOS", "U", "V", "W", "MU", "KRES", "H", "HS", "ZZ", "TMP"});
             if (const char* e = std::getenv("FDSTL_EDGES")) if (std::atoi(e) == L.m_icyc && passes == 1) each_local([&](int nm) { const std::string fn = dir + "/edges_p1_b" + std::to_string(nm) + ".bin"; fds_p_edge_dump(nm, fn.c_str(), static_cast<int>(fn.size())); });
             for_levels([&](int) { s_vflux(true); });
             stage(passes == 1 ? "p1_vflux" : "p2_vflux", {"FVX", "FVZ", "MU"});
+            ghost_report("pd_vflux");
             fds_p_init_div();
             for_levels([&](int) { s_wall_bc(true); });
+            ghost_report("pd_wallbc");
             if (std::getenv("FDSTL_WALLS") && L.m_icyc == std::atoi(std::getenv("FDSTL_WALLS")) && passes == 1)
                 {   // SCRATCH PATCH: print plane FDSTL_WALLS_K (default 5, <0 = all planes); FDSTL_WALLTAB=1 also writes walltab_b<box>.bin (all external + internal walls)
                     const char* kk = std::getenv("FDSTL_WALLS_K"); const int k0 = kk ? std::atoi(kk) : 5;
@@ -993,18 +1361,22 @@ struct TimeLoop::Impl {
                         if (std::getenv("FDSTL_WALLTAB")) fds_p_wall_table_dump(nm, b.smallEnd(0), b.smallEnd(2)); });
                 }
             stage_raw(passes == 1 ? "p1_prediv" : "p2_prediv", {"RHOS", "ZZS", "TMP", "RSUM", "U", "V", "W", "MU", "KRES", "D"});
-            for_levels([&](int) { s_div1(); });
+            divergence1_all();
+            ghost_report("pd_div1"); nan_report("pd_div1");
             stage(passes == 1 ? "p1_div1" : "p2_div1", {"DS", "MU", "KRES", "TMP", "RSUM"});
             if (passes == 1) stage_scratch("p1_div1", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"WORK7", 3}, {"WORK8", 3}, {"WORK9", 3},
                                                        {"SWORK1", 4}, {"SWORK2", 4}, {"SWORK3", 4}, {"SWORK4", 4}, {"DEL_RHO_D_DEL_Z", 4}});
             zone_sums(true);
+            ghost_report("pd_zone");
             for_levels([&](int) { s_div2(); });
+            ghost_report("pd_div2");
             stage(passes == 1 ? "p1_div" : "p2_div", {"D", "DS", "DDDT"});
             state(true, first_pass);
             bool took = L.m_hook && L.m_hook(true, passes);
             if (!took) { const double tp0 = amrex::second(); rec.it_pred = pressure_scheme(true, t, dt, rec.perr_pred, rec.verr_pred); t_pres += amrex::second() - tp0; }
             // velocity predictor of every box, then the global DT decision (MIN over boxes and ranks)
             stage(passes == 1 ? "p1_press" : "p2_press", {"H", "FVX", "FVZ"});
+            ghost_report("p_press");
             // (S9: the vectors hold every bound level, slot off + box; every box has one owner, so the Sum reduction is a gather; dt_at_step_start / dt_after_pass take the
             // MIN over all of them: one global dt over levels and ranks, the same in both stages, D-050)
             const int ntot = total_boxes();
@@ -1024,6 +1396,9 @@ struct TimeLoop::Impl {
         }
         rec.passes = passes;
         stage("pred_end", {"US", "WS", "RHOS"});
+        ghost_report("pred_end");
+        avg_down_vel(true);
+        div_report("after predictor", true);
         for_levels([&](int) { s_exchange(3, true); });
         for_levels([&](int) { s_after(3); });
         stage("pred_match", {"US", "WS"});
@@ -1034,10 +1409,11 @@ struct TimeLoop::Impl {
         state(false, first_pass);
         for_levels([&](int) { s_visc_mfd(false); });
         stage_raw("c_pre", {"RHOS", "TMP", "RHO", "US", "VS", "WS", "H", "HS"});
-        for_levels([&](int) { density(false, t, dt); });
+        stage_density_all(false, t, dt);
         stage("c_dens", {"RHO", "ZZ"});
         for_levels([&](int) { s_exchange(4, false); });
         for_levels([&](int) { s_after(4); });
+        ghost_report("c_after4");
         stage_raw("c_prevflux", {"RHOS", "US", "VS", "WS", "MU", "KRES", "H", "HS", "ZZS", "TMP", "RHO"});
         for_levels([&](int) { s_vflux(false); });
         stage("c_vflux", {"FVX", "FVZ"});
@@ -1048,7 +1424,7 @@ struct TimeLoop::Impl {
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();
         stage_raw("c_fv_wallbc", {"FVX", "FVY", "FVZ"});   // FVX/FVY/FVZ bracket: where do they change after c_vflux (WP1b)
-        for_levels([&](int) { s_div1(); });
+        divergence1_all();
         zone_sums(false);
         stage_raw("c_fv_div1", {"FVX", "FVY", "FVZ"});
         for_levels([&](int) { s_div2(); });
@@ -1060,7 +1436,11 @@ struct TimeLoop::Impl {
         }
         stage("c_press", {"HS", "DS"});
         stage_raw("c_prevcorr", {"U", "V", "W", "US", "VS", "WS", "H", "HS", "FVX", "FVY", "FVZ"});   // velocity state seen by VELOCITY_CORRECTOR
+        ghost_report("before_vcorr");
         for_levels([&](int) { s_vcorr(); });
+        ghost_report("after_vcorr");
+        avg_down_vel(false);
+        div_report("after corrector", false);
         stage("c_end", {"U", "W"});
         for_levels([&](int) { s_exchange(6, false); });
         for_levels([&](int) { s_after(6); });
@@ -1446,6 +1826,10 @@ void TimeLoop::set_cf_ghost_hook(int lev, CfGhostHook h)
     m->c->bc->cf_ghost_hook = std::move(h);
     m->select(0);
 }
+
+const TimeLoop::CompositeReport& TimeLoop::composite_report() const { return m->crep; }
+void TimeLoop::prime_levels() { m->prime_levels(); }
+void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
 
 bool TimeLoop::advance() { const double t0 = amrex::second(); const bool ok = m->advance(); m->t_loop += amrex::second() - t0; return ok; }
 

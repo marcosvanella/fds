@@ -73,8 +73,8 @@ public:
     // ---- S12 level binding. bind_level(lev): the registry level `lev` (made by LevelRegistry::make_level, data filled by the transfer) gets FDS fine-box mesh objects (BUILD_FINE_BOX of
     // fds_fine_level.f90, patch 0007 DRAFT), views onto its Fields (FDS_FINE_B_SET_VIEW), a BcStep (ext_ghost on) and the clip scratch; afterwards every per-level stage entry point and the
     // flux hooks accept `lev` (FDS mesh number of box i is fds0 + i + 1 > NMESHES). Levels are bound in order; only the top bound level can be rebound (call it again after a regrid that remade it,
-    // or unbind_level first when it was cleared). A tree without patch 0007 aborts with a message. The registry level object must stay alive while bound. advance() refuses to run with a bound level > 0
-    // (the composite pressure solve is not built): drive the stage entry points instead. The single-level path (no bind_level call) is unchanged.
+    // or unbind_level first when it was cleared). A tree without patch 0007 aborts with a message. The registry level object must stay alive while bound. advance() with a bound level > 0
+    // runs the composite step (S14, below). The single-level path (no bind_level call) is unchanged.
     // The global FDS state the kernels read (PREDICTOR/CORRECTOR, FIRST_PASS, ICYC, density limits) as advance() sets it before a stage, and the reset of the divergence integrals
     // (INIT_DIV) that advance() does before WALL_BC of the predictor. A driver that runs the per-level stage entry points itself calls them at the same places.
     void stage_state(bool predictor, bool first_pass);
@@ -111,6 +111,19 @@ public:
     double global_dt(const std::vector<double>& local_dt_per_level) const;
     // Coarse-fine ghost hook of level `lev` (Role 3 plan item 4): called by stage_exchange after the same-level fill of every exchange code. See CfGhostRequest.
     void set_cf_ghost_hook(int lev, CfGhostHook h);
+    // ---- S14 composite step. With a second bound level advance() runs the hierarchy: per-level stages, ONE composite pressure solve (pressure_backend, PressureProblem::levels, one
+    // PressureWorkspace kept per layout and rebuilt after bind_level), fine faces overwrite the coarse faces under them (velocity, FVX/FVY/FVZ), fine ghost faces from the coarse level,
+    // and the interface flux overwrite of the scalar fluxes (Role 3 FluxStageRunner; FDSTL_OVERWRITE=0 or set_flux_overwrite(false) is the negative control). One dt for all levels.
+    // Not built for several levels: the pressure iteration (PRESSURE_ITERATIONS), BAROCLINIC, zone sums over the fine level, outputs of the fine level (the files hold level 0).
+    // prime_levels(): one corrector-form pass without the density update on every level (D, DS, KRES, MU of a newly bound level); call it after bind_level and set_state.
+    struct CompositeReport {
+        long solves = 0, iterations = 0, h_ghost_cells = 0;
+        double removed_mean = 0.0, removed_rel = 0.0;   // largest over the solves (backend: mean actually removed from the RHS, relative to its rms)
+        std::string backend;
+    };
+    const CompositeReport& composite_report() const;
+    void prime_levels();
+    void set_flux_overwrite(bool on);
     double time() const { return m_t; }
     double dt() const { return m_dt; }
     int icyc() const { return m_icyc; }

@@ -41,6 +41,9 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp
     ${CMAKE_CURRENT_LIST_DIR}/LevelRegistry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/TimeLoop.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/CompositeOps.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/TwoLevelRun.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/PressureBackendSolver.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CommonLayer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/PressureIface.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/FFTBackend.cpp
@@ -68,7 +71,21 @@ set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_C
 if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeSolve.cpp)
     target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeSolve.cpp)
 endif()
+# Role 2's HYPRE backend (HypreBackend.cpp) needs an AMReX built with HYPRE; without it the link stub provides the symbols (selecting HYPRE then reports "not built").
+if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/HypreBackend.cpp)
+    if (AMReX_HYPRE_FOUND)
+        target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/HypreBackend.cpp)
+    else()
+        target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/HypreStub.cpp)
+    endif()
+endif()
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
+# Role 3 driver-level end-to-end modes (regrid_transport/DriverSources.cmake): `fds_amr <case> --rt-e2e <test>`
+if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/DriverSources.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/DriverSources.cmake)
+    # Role 3's tag kernel has lines longer than gfortran's default 132 columns
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/rt_tag_kernels.F90 PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
+endif()
 target_compile_options(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra>")
 
 # D-056 option B: FDS_FINE_B is defined for the driver Fortran when the tree carries patch 0007 (Source/mesh.f90 declares FINE_LEVEL_TYPE); fds_box_obj.f90 then resolves fine

@@ -21,6 +21,10 @@
 #include "FdsSetup.H"
 #include "PressureBcMap.H"
 #include "TimeLoop.H"
+#include "TwoLevelRun.H"
+#ifdef FDSRT_DRIVER_MODES
+#include "DriverModes.H"
+#endif
 namespace fdsamr { int level_bind_check(TimeLoop& loop, const Level0& l0, double dt0); }   // tests/level_bind_check.cpp
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
@@ -123,6 +127,38 @@ int main(int argc, char** argv)
                 fdsamr::TimeLoop loop(l0, dt, ro);
                 const int nfail = fdsamr::level_bind_check(loop, l0, dt);
                 if (nfail != 0) amrex::Abort("level bind check failed");
+            }
+#ifdef FDSRT_DRIVER_MODES
+            if (argc > 2 && std::strcmp(argv[2], "--rt-e2e") == 0) {
+                // Role 3 end-to-end modes (regrid_transport/DriverModes.cpp): level 1 over the level-0 case, stage entry points, FluxStageRunner
+                fdsamr::RunOptions ro;
+                ro.quiet = true;
+                fdsamr::TimeLoop loop(l0, dt, ro);
+                const int nfail = fdsrt::driver_mode(argc, argv, loop, l0, dt);
+                if (nfail != 0) amrex::Abort("rt-e2e failed");
+            }
+#endif
+            if (argc > 2 && std::strcmp(argv[2], "--two-level-run") == 0) {
+                // --two-level-run [--steps N] [--patch i0 i1 k0 k1] [--ratio R] [--maxsize M] [--blocking B] [--projection ON|AUTO|OFF] [--no-overwrite] [--outdir D] [--chid C]: S14
+                fdsamr::TwoLevelOptions to;
+                fdsamr::RunOptions ro;
+                ro.quiet = true;
+                for (int i = 3; i < argc; ++i) {
+                    if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) to.steps = std::atoi(argv[++i]);
+                    else if (std::strcmp(argv[i], "--patch") == 0 && i + 4 < argc) { for (int q = 0; q < 4; ++q) to.patch[q] = std::atoi(argv[++i]); }
+                    else if (std::strcmp(argv[i], "--ratio") == 0 && i + 1 < argc) to.ratio = std::atoi(argv[++i]);
+                    else if (std::strcmp(argv[i], "--maxsize") == 0 && i + 1 < argc) to.maxsize = std::atoi(argv[++i]);
+                    else if (std::strcmp(argv[i], "--blocking") == 0 && i + 1 < argc) to.blocking = std::atoi(argv[++i]);
+                    else if (std::strcmp(argv[i], "--projection") == 0 && i + 1 < argc) to.projection = argv[++i];
+                    else if (std::strcmp(argv[i], "--no-overwrite") == 0) to.overwrite = false;
+                    else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) { to.outdir = argv[++i]; ro.outdir = to.outdir; }
+                    else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) { to.chid = argv[++i]; ro.chid = to.chid; }
+                    else if (std::strcmp(argv[i], "--log-every") == 0 && i + 1 < argc) to.log_every = std::atoi(argv[++i]);
+                }
+                fdsamr::TimeLoop loop(l0, dt, ro);
+                const int nfail = fdsamr::two_level_run(loop, l0, dt, to);
+                amrex::Print() << (nfail == 0 ? "TWO-LEVEL RUN PASS" : "TWO-LEVEL RUN FAIL") << "\n";
+                if (nfail != 0) amrex::Abort("two-level run failed");
             }
             if (argc > 2 && std::strcmp(argv[2], "--run") == 0) {
                 // --run [--steps N] [--outdir D] [--chid C] [--quiet] [--exact-zone-sums]: the C++ time loop (S5)
