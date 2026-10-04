@@ -685,6 +685,33 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
         Array<MultiFab const*,3> fine{grad_out[l][0], grad_out[l][1], grad_out[l][2]};
         Array<MultiFab*,3> crse{grad_out[l-1][0], grad_out[l-1][1], grad_out[l-1][2]};
         amrex::average_down_faces(fine, crse, W.ratio[l], 0);
+        // A face on a periodic domain boundary exists twice (index lo and index hi+1). If one copy is under the
+        // fine level and the other is not, the fine average must be carried over to the other copy.
+        for (int d = 0; d < 3; ++d) {
+            if (d == W.hidden || !W.geom[l-1].isPeriodic(d)) { continue; }
+            BoxArray fc = W.ba[l];
+            fc.coarsen(W.ratio[l]);                                       // covered coarse cells
+            MultiFab& g = *grad_out[l-1][d];
+            MultiFab cov(g.boxArray(), g.DistributionMap(), 1, 0);
+            cov.setVal(0.0);
+            for (MFIter mfi(cov); mfi.isValid(); ++mfi) {
+                auto const& c = cov.array(mfi);
+                for (int i = 0; i < static_cast<int>(fc.size()); ++i) {
+                    const Box fb = amrex::surroundingNodes(fc[i], d) & mfi.validbox();
+                    if (fb.ok()) { amrex::LoopOnCpu(fb, [&] (int ii, int jj, int kk) { c(ii,jj,kk) = 1.0; }); }
+                }
+            }
+            MultiFab tv(g.boxArray(), g.DistributionMap(), 1, 0), rv(g.boxArray(), g.DistributionMap(), 1, 0), rc(g.boxArray(), g.DistributionMap(), 1, 0);
+            MultiFab::Copy(tv, g, 0, 0, 1, 0);
+            MultiFab::Multiply(tv, cov, 0, 0, 1, 0);
+            rv.setVal(0.0); rc.setVal(0.0);
+            rv.ParallelAdd(tv, 0, 0, 1, 0, 0, W.geom[l-1].periodicity());
+            rc.ParallelAdd(cov, 0, 0, 1, 0, 0, W.geom[l-1].periodicity());
+            for (MFIter mfi(g); mfi.isValid(); ++mfi) {
+                auto const& o = g.array(mfi); auto const& v = rv.const_array(mfi); auto const& n = rc.const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (n(i,j,k) > 0.0) { o(i,j,k) = v(i,j,k)/n(i,j,k); } });
+            }
+        }
     }
     return R;
 }

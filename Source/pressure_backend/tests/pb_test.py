@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CTest driver for the pressure backend harness. Parses the harness RESULT/CMP/CHECK lines.
 Subcommands: selector, exactsum, fftmlmg, frozen, decomp, repeat, singular, ulmat, ulmatgauge, meankind,
-composite: compconv, compfull, compdecomp, comp3, compgrad, compns2d, compsel, compws (composite two-/three-level
+composite: compconv, compfull, compdecomp, comp3, compgrad, compshape, compmixed, compns2d, compsel, compws (composite two-/three-level
 solves; manufactured solutions, see harness/composite_modes.cpp and frozen/composite-notes.md).
 Exit 0 = pass. ulmat/ulmatgauge/meankind compare against an independent numpy computation that follows FDS
 ULMAT (volume-scaled rows, arithmetic mean removal of F and of X, identity-pin reduced system, rho*volume gauge)."""
@@ -324,6 +324,31 @@ def compgrad():
     print(out)
     out = comp_run(3, n=32, nlev=3, ratio=2, mgs=8, plane2d=A.plane, grad=1, uniform=0, dmkind=2)
 
+def compshape():
+    # Patch shapes: corner patch touching (and, if periodic, wrapping over) the domain faces; two separate patches;
+    # a corner patch with a third level; ratio 2 and 4; odd rank count.
+    for layout, nlev, ratio, np_ in ((1, 2, 2, 3), (1, 2, 4, 2), (2, 2, 2, 3), (2, 2, 4, 2), (1, 3, 2, 3)):
+        out = comp_run(np_, n=32 if ratio == 2 else 16, nlev=nlev, ratio=ratio, mgs=8, layout=layout, grad=1, plane2d=A.plane, dmkind=2)
+        c, u = comp_lines(out); print(lines(out, "COMP")[0]); print(lines(out, "UNIFORM")[0])
+        ok(c["status"] == "Ok" and float(c["true_rel2"]) <= EPS_COMP, f"layout={layout} nlev={nlev} ratio={ratio} np={np_}: Ok, true residual {c['true_rel2']}")
+        ok(float(u["comp_fine_err_l2"]) < float(u["uni_coarse_err_l2"]), f"layout={layout} nlev={nlev} ratio={ratio}: fine-level error below uniform coarse error")
+        for l in lines(out, "GRAD"):
+            if "div_consistency " in l: ok(float(kv(l)["rel2"]) <= EPS_COMP, f"layout={layout} nlev={nlev} ratio={ratio}: gradient divergence consistency {kv(l)['rel2']}")
+
+def compmixed():
+    # Per-direction mix of periodic and Neumann faces (all closed): 2-D plane periodic in x,z with a Neumann one-cell y
+    # (the ns2d_16 pattern with a physical y wall), and 3-D mixes; patch in the middle and at the corner.
+    for plane, b3, layout, ratio, np_ in ((1, "periodic neumann periodic", 0, 2, 2), (1, "neumann periodic neumann", 1, 2, 3),
+                                          (0, "periodic neumann periodic", 0, 2, 2), (0, "neumann periodic neumann", 1, 4, 2),
+                                          (0, "periodic periodic neumann", 2, 2, 3)):
+        kw = dict(n=32 if ratio == 2 else 16, nlev=2, ratio=ratio, mgs=8, layout=layout, grad=1, plane2d=plane, dmkind=2, bcs3=f'"{b3}"')
+        cmd = [A.mpiexec, "--oversubscribe", "--bind-to", "none", "-np", str(np_), A.harness, "mode=comp"] + [f"{k}={v}" for k, v in kw.items() if k != "bcs3"] + ["bcs3=" + b3]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=500); out = p.stdout + p.stderr
+        ok(p.returncode == 0, f"mixed bc [{b3}] plane={plane} layout={layout} ratio={ratio} harness checks")
+        if p.returncode != 0: print(out)
+        c, u = comp_lines(out); print(lines(out, "COMP")[0]); print(lines(out, "UNIFORM")[0])
+        ok(c["status"] == "Ok" and float(c["true_rel2"]) <= EPS_COMP, f"mixed bc [{b3}]: Ok, true residual {c['true_rel2']}")
+
 def compns2d():
     for np_, mgs in ((1, 16), (2, 8), (4, 4)):
         rc, out = run(np_, mode="comp_ns2d", mgs=mgs)
@@ -341,7 +366,7 @@ def compws():
 
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
- "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad,
+ "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
