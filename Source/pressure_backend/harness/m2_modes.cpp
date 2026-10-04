@@ -19,6 +19,8 @@
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <functional>
+#include <memory>
 #include <sstream>
 
 using namespace amrex;
@@ -336,6 +338,184 @@ void run_mixed1 (ParmParse& pp)
     }
 }
 
+// --------------------------------------------------------------------------------------------------------------
+// mode=bcdata: inhomogeneous boundary data folded into the right-hand side (fold_boundary_data).
+//   part=exact: discrete test. rhs := L_full(phi) built with explicit ghost values from data, fold, solve the homogeneous
+//               problem, compare with phi (up to a constant if singular).
+//   part=mms:   manufactured solution u = cos(1.3x+.2) cosh(.7y) sin(.9z+.4) on [0,1]^3 with exact wall data; error vs u.
+// --------------------------------------------------------------------------------------------------------------
+Real bdata_fn (int f, int i, int j, int k)
+{
+    return (Real(0.2) + Real(0.3)*f) * hash_noise(i + 7*f, j + 3*f, k) + Real(0.2) + Real(0.05)*f;
+}
+
+// Slab MultiFab of the face-adjacent layer with another distribution than the problem.
+std::unique_ptr<MultiFab> make_slab (S1 const& s, int f, std::function<Real(int,int,int)> const& fn)
+{
+    const int d = f % 3, side = f / 3;
+    Box layer = s.domain;
+    if (side == 0) { layer.setBig(d, s.domain.smallEnd(d)); } else { layer.setSmall(d, s.domain.bigEnd(d)); }
+    BoxArray ba(layer); ba.maxSize(3);
+    auto const old = DistributionMapping::strategy();
+    DistributionMapping::strategy(DistributionMapping::ROUNDROBIN);
+    DistributionMapping dm(ba);
+    DistributionMapping::strategy(old);
+    auto mf = std::make_unique<MultiFab>(ba, dm, 1, 0);
+    for (MFIter mfi(*mf); mfi.isValid(); ++mfi) {
+        auto const& a = mf->array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = fn(i,j,k); });
+    }
+    return mf;
+}
+
+void run_bcdata (ParmParse& pp)
+{
+    std::string part = "exact"; pp.query("part", part);
+    Vector<int> n{8, 7, 6}; pp.queryarr("n_cell", n);
+    int mgs = 4; pp.query("mgs", mgs);
+    std::string bcs = "ND,DN,NN"; pp.query("bcpairs", bcs);
+    std::string be = "fft"; pp.query("backend", be);
+    S1 s = make_s1(n, bcs, mgs);
+    pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9; o.tol_rel = 1.0e-13; o.max_iter = 100;
+    o.backend = (be == "mlmg") ? pb::BackendKind::MLMG : pb::BackendKind::FFT;
+    const Real h = s.dx;
+    bool singular = true;
+    for (int f = 0; f < 6; ++f) { singular = singular && s.bc[f] != pb::BC::Dirichlet; }
+    const Real pi = Real(3.141592653589793238462643383279502884);
+    (void)pi;
+    if (part == "exact") {
+        // unknown field and data (slabs on odd faces, constants on even faces)
+        MultiFab phi_ex(s.ba, s.dm, 1, 0), rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1);
+        for (MFIter mfi(phi_ex); mfi.isValid(); ++mfi) {
+            auto const& a = phi_ex.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = hash_noise(i,j,k) + Real(0.3)*i - Real(0.2)*j; });
+        }
+        pb::BoundaryData bd;
+        std::vector<std::unique_ptr<MultiFab>> slabs;
+        for (int f = 0; f < 6; ++f) {
+            if (s.bc[f] == pb::BC::Periodic) { continue; }
+            if (f % 2 == 1) { slabs.push_back(make_slab(s, f, [f] (int i, int j, int k) { return bdata_fn(f, i, j, k); })); bd.value[f] = slabs.back().get(); }
+            else { bd.constant[f] = Real(0.4) + Real(0.1)*f; }
+        }
+        // data value at a boundary cell (i,j,k) of face f
+        auto data_at = [&] (int f, int i, int j, int k) { return bd.value[f] ? bdata_fn(f, i, j, k) : bd.constant[f]; };
+        // explicit full operator with ghost values from the data; evaluated from a gathered copy of phi (rank-local lookup via a global array)
+        std::vector<double> G = gather_s(phi_ex, s.domain);
+        G.resize(s.domain.numPts());
+        ParallelDescriptor::Bcast(G.data(), int(s.domain.numPts()), ParallelDescriptor::IOProcessorNumber());
+        const int nx = n[0], ny = n[1];
+        auto at = [&] (int i, int j, int k) { return Real(G[i + nx*(j + ny*k)]); };
+        for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+            auto const& r = rhs.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const int c[3] = {i, j, k};
+                const Real v0 = at(i, j, k);
+                Real sum = 0;
+                for (int d = 0; d < 3; ++d) {
+                    if (d == 1 && n[1] == 1) { continue; }
+                    for (int side = 0; side < 2; ++side) {
+                        int t[3] = {i, j, k}; t[d] += side == 0 ? -1 : 1;
+                        Real nb;
+                        const int f = pb::face_index(d, side);
+                        if (t[d] >= 0 && t[d] < n[d]) { nb = at(t[0], t[1], t[2]); }
+                        else if (s.bc[f] == pb::BC::Periodic) { t[d] = (t[d] + n[d]) % n[d]; nb = at(t[0], t[1], t[2]); }
+                        else if (s.bc[f] == pb::BC::Dirichlet) { nb = Real(2)*data_at(f, i, j, k) - v0; }
+                        else { nb = v0 + (side == 0 ? Real(-1) : Real(1)) * h * data_at(f, i, j, k); }
+                        sum += nb - v0;
+                    }
+                    (void)c;
+                }
+                // each direction contributes (nb_lo + nb_hi - 2 v0)/h^2: both sides were summed above
+                r(i,j,k) = sum / (h*h);
+            });
+        }
+        // fold + negative control without fold
+        MultiFab rhs0(s.ba, s.dm, 1, 0); MultiFab::Copy(rhs0, rhs, 0, 0, 1, 0);
+        pb::PressureProblem p = problem_of(s, rhs, phi);
+        std::string msg;
+        pb::Status fs = pb::fold_boundary_data(p, bd, rhs, &msg);
+        mcheck(fs == pb::Status::Ok, "fold_boundary_data Ok " + msg);
+        phi.setVal(0.0);
+        pb::PressureResult r = pb::solve_pressure(p, o);
+        mcheck(r.status == pb::Status::Ok, "solve status Ok (" + r.message + ")");
+        auto ph = gather_s(phi, s.domain), pe = gather_s(phi_ex, s.domain);
+        double err = 0, mx = 0;
+        if (ParallelDescriptor::IOProcessor()) {
+            double shift = 0;
+            if (singular) { for (std::size_t q = 0; q < ph.size(); ++q) { shift += ph[q] - pe[q]; } shift /= double(ph.size()); }
+            for (std::size_t q = 0; q < ph.size(); ++q) { err = std::max(err, std::abs(ph[q] - shift - pe[q])); mx = std::max(mx, std::abs(pe[q])); }
+        }
+        ParallelDescriptor::ReduceRealMax(err); ParallelDescriptor::ReduceRealMax(mx);
+        Print() << std::setprecision(6) << "BCDATA part=exact bcpairs=" << bcs << " backend=" << be << " singular=" << int(singular) << " max_err_rel=" << err/mx << "\n";
+        mcheck(err <= 1.0e-10 * mx, "folded solve reproduces the field whose data-ghost operator built the rhs (max error " + std::to_string(err/mx) + ")");
+        // negative control: without the fold the solution is wrong
+        MultiFab phi2(s.ba, s.dm, 1, 1); phi2.setVal(0.0);
+        pb::PressureProblem p2 = problem_of(s, rhs0, phi2);
+        pb::solve_pressure(p2, o);
+        auto ph2 = gather_s(phi2, s.domain);
+        double err2 = 0;
+        if (ParallelDescriptor::IOProcessor()) {
+            double shift = 0;
+            if (singular) { for (std::size_t q = 0; q < ph2.size(); ++q) { shift += ph2[q] - pe[q]; } shift /= double(ph2.size()); }
+            for (std::size_t q = 0; q < ph2.size(); ++q) { err2 = std::max(err2, std::abs(ph2[q] - shift - pe[q])); }
+        }
+        ParallelDescriptor::ReduceRealMax(err2);
+        mcheck(err2 > 1.0e-3 * mx, "negative control: without the fold the error is large (" + std::to_string(err2/mx) + ")");
+        // error handling
+        {
+            pb::BoundaryData bp; pb::PressureProblem pq = p;
+            for (int f = 0; f < 6; ++f) { if (s.bc[f] == pb::BC::Periodic) { bp.constant[f] = 1.0; std::string m2; MultiFab rr(s.ba, s.dm, 1, 0); rr.setVal(5.0);
+                    mcheck(pb::fold_boundary_data(pq, bp, rr, &m2) == pb::Status::InvalidInput && rr.max(0) == 5.0 && rr.min(0) == 5.0, "data on a periodic face: InvalidInput, rhs untouched"); break; } }
+        }
+    } else {
+        // manufactured solution
+        auto u = [] (Real x, Real y, Real z) { return std::cos(1.3*x + 0.2)*std::cosh(0.7*y)*std::sin(0.9*z + 0.4); };
+        auto du = [] (int d, Real x, Real y, Real z) {
+            if (d == 0) { return -1.3*std::sin(1.3*x + 0.2)*std::cosh(0.7*y)*std::sin(0.9*z + 0.4); }
+            if (d == 1) { return 0.7*std::cos(1.3*x + 0.2)*std::sinh(0.7*y)*std::sin(0.9*z + 0.4); }
+            return 0.9*std::cos(1.3*x + 0.2)*std::cosh(0.7*y)*std::cos(0.9*z + 0.4);
+        };
+        MultiFab rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1);
+        for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+            auto const& r = rhs.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { r(i,j,k) = Real(-2.01)*u((i+0.5)*h, (j+0.5)*h, (k+0.5)*h); });
+        }
+        pb::BoundaryData bd;
+        std::vector<std::unique_ptr<MultiFab>> slabs;
+        for (int f = 0; f < 6; ++f) {
+            const int d = f % 3, side = f / 3;
+            const bool dir = (s.bc[f] == pb::BC::Dirichlet);
+            auto fn = [=] (int i, int j, int k) {
+                Real x = (i+0.5)*h, y = (j+0.5)*h, z = (k+0.5)*h;
+                const Real w = side == 0 ? Real(0) : Real(n[d])*h;
+                if (d == 0) { x = w; } else if (d == 1) { y = w; } else { z = w; }
+                return dir ? u(x, y, z) : du(d, x, y, z);
+            };
+            slabs.push_back(make_slab(s, f, fn)); bd.value[f] = slabs.back().get();
+        }
+        pb::PressureProblem p = problem_of(s, rhs, phi);
+        std::string msg;
+        mcheck(pb::fold_boundary_data(p, bd, rhs, &msg) == pb::Status::Ok, "fold_boundary_data Ok");
+        phi.setVal(0.0);
+        pb::PressureResult r = pb::solve_pressure(p, o);
+        mcheck(r.status == pb::Status::Ok, "solve status Ok (" + r.message + ")");
+        MultiFab ex(s.ba, s.dm, 1, 0);
+        for (MFIter mfi(ex); mfi.isValid(); ++mfi) {
+            auto const& a = ex.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = u((i+0.5)*h, (j+0.5)*h, (k+0.5)*h); });
+        }
+        auto ph = gather_s(phi, s.domain), pe = gather_s(ex, s.domain);
+        double e2 = 0, shift = 0;
+        if (ParallelDescriptor::IOProcessor()) {
+            if (singular) { for (std::size_t q = 0; q < ph.size(); ++q) { shift += ph[q] - pe[q]; } shift /= double(ph.size()); }
+            for (std::size_t q = 0; q < ph.size(); ++q) { const double e = ph[q] - shift - pe[q]; e2 += e*e; }
+            e2 = std::sqrt(e2 / double(ph.size()));
+        }
+        ParallelDescriptor::ReduceRealMax(e2);
+        Print() << std::setprecision(8) << "BCDATA part=mms n=" << n[0] << " bcpairs=" << bcs << " backend=" << be << " singular=" << int(singular) << " err_l2=" << e2 << "\n";
+    }
+}
+
 } // namespace
 
 int run_m2_mode (std::string const& mode, ParmParse& pp)
@@ -343,6 +523,7 @@ int run_m2_mode (std::string const& mode, ParmParse& pp)
     if (mode == "trigger1") { run_trigger1(pp); }
     else if (mode == "fftcache") { run_fftcache(pp); }
     else if (mode == "mixed1") { run_mixed1(pp); }
+    else if (mode == "bcdata") { run_bcdata(pp); }
     else { return -1; }
     return g_m2fail;
 }

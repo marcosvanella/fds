@@ -434,11 +434,13 @@ def compgauge():
     res = S([kres[l] - pB[l] for l in range(nlev)], W)
     scale = S([np.abs(kres[l] - pB[l]) for l in range(nlev)], W)
     ok(abs(res) <= 1e-13 * scale, f"sum(rho V (KRES - H)) = {res:.2e} (scale {scale:.2e}) is zero over the uncovered cells")
+    kscale = S([np.abs(kres[l]) for l in range(nlev)], W)
+    ok(abs(res) <= 1e-14 * kscale, f"|sum(rho V (H-KRES))| = {abs(res):.2e} <= 1e-14 * sum(rho V |KRES|) = {1e-14*kscale:.2e}")
 
 def compgaugedecomp():
     """Removed mean bitwise and gauge constants to round-off across rank counts, box sizes and distribution mappings."""
     runs = {}
-    for np_, mgs, dmk, layout in ((1, 32, 0, 0), (2, 16, 1, 0), (3, 8, 2, 0), (2, 16, 0, 2), (1, 16, 0, 2), (4, 8, 2, 2)):
+    for np_, mgs, dmk, layout in ((1, 32, 0, 0), (2, 16, 1, 0), (3, 8, 2, 0), (2, 16, 0, 2), (1, 16, 0, 2), (4, 8, 2, 2), (1, 8, 1, 0), (2, 8, 1, 0), (4, 8, 1, 0)):
         rc, out = run(np_, mode="comp_gauge", n=32, nlev=2, ratio=2, mgs=mgs, dmkind=dmk, layout=layout, bc=A.bc, plane2d=A.plane)
         ok(rc == 0, f"np={np_} mgs={mgs} dmkind={dmk} layout={layout}: harness checks")
         if rc != 0: print(out)
@@ -532,10 +534,37 @@ def mixedfaces():
             print(f"{be} np={np_}: worst relative error over 125 combinations {worst:.2e}")
             ok(nbad == 0 and worst <= 1e-10, f"{be} np={np_}: all 125 combinations agree with the dense operator (worst {worst:.2e})")
 
+def bcdata_exact():
+    """fold_boundary_data: discrete check (rhs built with explicit data ghosts; folded homogeneous solve reproduces the field) + negative control."""
+    for bc in ("ND,DN,NN", "NN,NN,NN", "DD,DD,DD", "PP,ND,DN", "NN,DD,PP"):
+        for be in ("fft", "mlmg"):
+            for np_ in (1, 2):
+                rc, out = run(np_, mode="bcdata", part="exact", bcpairs=bc, backend=be, mgs=4)
+                ok(rc == 0, f"bcdata exact bcpairs={bc} {be} np={np_}: harness checks")
+                if rc != 0: print(out)
+                d = kv(lines(out, "BCDATA")[0]); ok(float(d["max_err_rel"]) <= 1e-10, f"{bc} {be} np={np_}: max error {d['max_err_rel']} <= 1e-10")
+
+def bcdata_mms():
+    """Manufactured solution with exact Dirichlet / Neumann wall data folded into the rhs: second order."""
+    for bc in ("DD,DD,DD", "NN,NN,NN", "ND,DN,NN", "DN,ND,DD"):
+        errs = []
+        for n in (16, 32, 64):
+            rc, out = run(2, mode="bcdata", part="mms", bcpairs=bc, backend="fft", n_cell=f"{n} {n} {n}", mgs=32)
+            ok(rc == 0, f"mms {bc} n={n}: harness checks")
+            errs.append(float(kv(lines(out, "BCDATA")[0])["err_l2"]))
+        orders = [math.log2(errs[i] / errs[i+1]) for i in range(2)]
+        print(f"MMS {bc}: errors {errs} orders {orders}")
+        ok(all(o >= 1.9 for o in orders), f"{bc}: second-order convergence {orders[0]:.2f}, {orders[1]:.2f}")
+    # MLMG on the coarser grids gives the same answer as FFT
+    rc, o1 = run(2, mode="bcdata", part="mms", bcpairs="ND,DN,NN", backend="fft", n_cell="32 32 32", mgs=16)
+    rc2, o2 = run(2, mode="bcdata", part="mms", bcpairs="ND,DN,NN", backend="mlmg", n_cell="32 32 32", mgs=16)
+    e1, e2 = float(kv(lines(o1, "BCDATA")[0])["err_l2"]), float(kv(lines(o2, "BCDATA")[0])["err_l2"])
+    ok(rc == 0 and rc2 == 0 and abs(e1 - e2) <= 1e-6 * e1, f"FFT and MLMG give the same error {e1:.6e} {e2:.6e}")
+
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
- "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces}[A.cmd]()
+ "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

@@ -86,3 +86,7 @@ endforeach()
 pb_add_test(pb_comp_faces_plane2d_DDNNDD compconv --faces "DD,DD,DD" --plane 1 --ns "32 64")
 pb_add_test(pb_comp_faces_plane2d_NDDDNN compconv --faces "ND,DD,NN" --plane 1 --ns "32 64")
 pb_add_test(pb_mixed_faces_sweep mixedfaces)
+
+# Inhomogeneous boundary data folded into the right-hand side (M2 item d).
+pb_add_test(pb_bcdata_exact bcdata_exact)
+pb_add_test(pb_bcdata_mms   bcdata_mms)

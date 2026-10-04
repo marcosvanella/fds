@@ -287,6 +287,33 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
 PressureResult face_gradient_composite (PressureProblem const& p,
                                         std::vector<std::array<amrex::MultiFab*,3>>& grad_out);
 
+// ---- Inhomogeneous boundary data: fold into the right-hand side (M2 item d) ------------------------------------------------
+// The solve is for the HOMOGENEOUS boundary problem (zero-gradient / zero-value / periodic). Non-zero boundary data enter by moving
+// the known ghost-cell terms to the right-hand side, once, before solve_pressure.
+//
+// Convention (FDS pres.f90: header at lines 57-58, boundary application at 452-454, ULMAT F_H terms 1620-1679):
+//   Neumann face, data g = dH/dx_d, the derivative along the INCREASING coordinate at both the low and the high face
+//     (so g is the outward derivative at a high face and minus the outward derivative at a low face);
+//   Dirichlet face, data H_b = the value of H at the wall (not at the ghost cell).
+// Ghost values used by the operator L (CommonLayer.H) with data, h = cell width in direction d, phi_1 / phi_n the first / last
+// interior cell of the line:
+//   low Neumann    phi_g = phi_1 - h*g       high Neumann  phi_g = phi_n + h*g       Dirichlet (either side)  phi_g = 2*H_b - phi_1
+// Moving the data terms to the right-hand side (b is the right-hand side of L_hom phi = b, L_hom the homogeneous operator):
+//   low Neumann:   b += g / h          high Neumann:  b -= g / h          Dirichlet (either side):  b -= 2*H_b / h^2
+// applied to the boundary-adjacent layer of cells of the face only (corner and edge cells collect one term per face). No other factor
+// (no cell volume): b is the unit-operator right-hand side of this interface (volume-scaled F = V*b is formed by the caller if needed).
+// Periodic faces take no data. A one-cell y direction drops its term (D-057), so data on its faces are ignored.
+// A Dirichlet face in a one-cell x or z direction is NotBuilt, as in the solve.
+// Data per face: `value[f]` (cell-centred MultiFab, one component, any BoxArray / DistributionMapping; it is read in the boundary-adjacent
+// layer of cells, cell indices as the domain, cells of the layer that it does not cover are read as 0) or, if null, the uniform `constant[f]`.
+struct BoundaryData {
+    std::array<amrex::MultiFab const*,6> value{};     // index face_index(dir, side)
+    std::array<amrex::Real,6> constant{};
+};
+// Adds the fold terms to `rhs` (BoxArray / DistributionMapping of p.ba / p.dm, valid cells). Collective. Single-level problems only.
+// InvalidInput: data on a periodic face, rhs layout different from the problem, bad data MultiFab. rhs untouched on error.
+Status fold_boundary_data (PressureProblem const& p, BoundaryData const& bd, amrex::MultiFab& rhs, std::string* message = nullptr);
+
 const char* to_string (Status s);
 const char* to_string (BC b);
 

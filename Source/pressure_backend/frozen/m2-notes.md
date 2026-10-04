@@ -75,3 +75,32 @@ and by MLPoisson for Neumann or periodic faces. Dirichlet faces of a one-cell y 
 (`apply_operator`, so the true-residual check agrees) and the singular-component test (an all-open 2-D box with a one-cell y is
 non-singular because of its x and z faces; a box with Dirichlet only in y is singular). A Dirichlet face in a one-cell x or z
 direction keeps the term -2 phi/dx^2 and is NotBuilt (single level and composite), with a message. See d057-mapping.md.
+
+## 4. Inhomogeneous boundary data: fold into the right-hand side
+
+`fold_boundary_data(p, BoundaryData, rhs)` (PressureIface.H, implemented in CommonLayer.cpp) adds the known ghost-cell terms
+of non-zero wall data to the right-hand side of the homogeneous problem the backends solve. Call it once on the rhs
+before `solve_pressure`; the solver's mean removal then acts on the folded right-hand side (for a pure-Neumann problem with
+compatible data the folded rhs sums to zero).
+
+Sign convention (FDS pres.f90: header comment lines 57-58, boundary application 452-454, ULMAT F_H terms 1620-1679):
+
+- Neumann data g is dH/dx_d along the increasing coordinate at both the low and the high face.
+- Dirichlet data is H at the wall.
+- Ghost values: low Neumann phi_g = phi_1 - h g; high Neumann phi_g = phi_n + h g; Dirichlet phi_g = 2 H_b - phi_1.
+- Fold (h = cell width of the direction, boundary-adjacent layer of cells only, one term per face, nothing else multiplies it):
+
+| face | rhs change |
+|---|---|
+| low Neumann | `+ g / h` |
+| high Neumann | `- g / h` |
+| Dirichlet, low or high | `- 2 H_b / h^2` |
+
+Data per face is a cell-centred MultiFab (any BoxArray / DistributionMapping, read in the face-adjacent layer; uncovered
+layer cells read as 0) or a uniform constant. Periodic faces take no data (InvalidInput, rhs untouched). A one-cell y
+drops its term, so its data are ignored; a Dirichlet face in a one-cell x or z is NotBuilt. Uniform cell width only.
+
+Tests: `pb_bcdata_exact` builds the rhs with an independent explicit ghost-value operator from slab and constant data (five face
+mixes, FFT and MLMG, 1 and 2 ranks); the folded homogeneous solve reproduces the field to 1e-15 relative, and the same solve without the
+fold is wrong by 0.3-0.5 (negative control). `pb_bcdata_mms` uses u = cos(1.3x+0.2) cosh(0.7y) sin(0.9z+0.4) with exact wall values and
+exact increasing-direction derivatives: second order for DD,DD,DD; NN,NN,NN; ND,DN,NN; DN,ND,DD (error 1.4e-5 at n=64 for DD).

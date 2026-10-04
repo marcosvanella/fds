@@ -256,6 +256,51 @@ void apply_operator (PressureProblem const& p, MultiFab& phi, MultiFab& out)
     }
 }
 
+Status fold_boundary_data (PressureProblem const& p, BoundaryData const& bd, MultiFab& rhs, std::string* message)
+{
+    auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
+    if (!p.levels.empty() || p.nlevels != 1) { return fail(Status::NotBuilt, "fold_boundary_data is built for single-level problems"); }
+    if (rhs.boxArray() != p.ba || !(rhs.DistributionMap() == p.dm)) { return fail(Status::InvalidInput, "rhs BoxArray/DistributionMapping differ from the problem"); }
+    const Box dom = p.geom.Domain();
+    for (int d = 0; d < 3; ++d) {
+        for (int side = 0; side < 2; ++side) {
+            const int f = face_index(d, side);
+            const bool has = (bd.value[f] != nullptr) || (bd.constant[f] != Real(0));
+            if (p.bc[f] == BC::Periodic && has) { return fail(Status::InvalidInput, "boundary data given on a periodic face"); }
+            if (bd.value[f] && bd.value[f]->nComp() < 1) { return fail(Status::InvalidInput, "boundary data MultiFab has no component"); }
+            if (p.bc[f] == BC::Dirichlet && dom.length(d) == 1 && d != 1) { return fail(Status::NotBuilt, "a Dirichlet face in a one-cell x or z direction is not built"); }
+        }
+    }
+    for (int d = 0; d < 3; ++d) {
+        if (d == 1 && dom.length(1) == 1) { continue; }               // TWO_D: the y term does not exist
+        const Real h = p.geom.CellSize(d);
+        for (int side = 0; side < 2; ++side) {
+            const int f = face_index(d, side);
+            if (p.bc[f] == BC::Periodic) { continue; }
+            if (!bd.value[f] && bd.constant[f] == Real(0)) { continue; }
+            Real coef;                                                 // factor applied to the data value
+            if (p.bc[f] == BC::Neumann) { coef = (side == 0 ? Real(1) : Real(-1)) / h; }
+            else { coef = Real(-2) / (h*h); }
+            Box layer = dom;
+            if (side == 0) { layer.setBig(d, dom.smallEnd(d)); } else { layer.setSmall(d, dom.bigEnd(d)); }
+            MultiFab tmp(p.ba, p.dm, 1, 0);
+            tmp.setVal(Real(0));
+            if (bd.value[f]) { tmp.ParallelCopy(*bd.value[f], 0, 0, 1); }
+            for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+                const Box b = mfi.validbox() & layer;
+                if (!b.ok()) { continue; }
+                auto const& r = rhs.array(mfi);
+                auto const& t = tmp.const_array(mfi);
+                const Real cst = bd.value[f] ? Real(0) : bd.constant[f];
+                const bool use_arr = (bd.value[f] != nullptr);
+                amrex::LoopOnCpu(b, [&] (int i, int j, int k) { r(i,j,k) += coef * (use_arr ? t(i,j,k) : cst); });
+            }
+        }
+    }
+    if (message) { message->clear(); }
+    return Status::Ok;
+}
+
 ResidualNorms true_residual (PressureProblem const& p, MultiFab& phi, MultiFab const& rhs)
 {
     MultiFab lphi(p.ba, p.dm, 1, 0);
