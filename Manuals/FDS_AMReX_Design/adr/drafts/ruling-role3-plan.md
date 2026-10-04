@@ -192,3 +192,13 @@ D-075 pressure results and open answers (`docs/pressure/07` sections 11 and 12).
 - (c) Finer `&MESH` lines are not filtered in `read.f90`. The driver gets an input pre-pass (converter) that writes a level-0-only input and builds the `&AMR` hierarchy from the removed meshes. `main.cpp` calls `parse_amr_params` and the hierarchy builder; `assemble_level0` gets only level-0 meshes. Owner: Role 3 with Role 1, after the domain-edge fix. Until then, inputs with finer meshes abort at `FdsAmr.cpp:30` with a message that names the converter.
 - (d) Classification: race_test_1/4 and the four derived 2:1 cases run via `_r4` copies or converter output (originals FDS-only); three inputs convert to refinement levels; `duct_flow_uglmat_refine` waits for FR-040 R3; stretched-grid and embedded inputs are FDS-only. The Legacy Mapper's list is the reference.
 - (e) FM_Burner 5 mm inputs have a coarse/fine face with 2 or more species and are FDS-only in AMR mode until converted. The stale header comment at `LevelRegistry.H:8-11` is for its owner to fix.
+
+## Update 2026-10-04 (o): flip-budget gate, ported list, test lock, libm entry (D-077)
+
+- (a) The flip-budget gate in `solid/09` is ratified: 95% confidence per run and 99% at phase exit; PASS, FAIL and INCONCLUSIVE, with INCONCLUSIVE not signing; the denominator is exposed distinct-input calls; Level A (device equals forced host within 2 ulp) and Level B (`E_class` measured in a host forced-flip survey, signed by the Solid Phase Lead and the V&V Lead); shortfall rule and overrun responses as in D-077 (1).
+- (b) The 1-D wall solve cap is 10**6 sub-steps with the predicate form: at the cap, finite state and `DT_BC` continue as upstream, otherwise status 301. The AMR CPU path carries the same cap and text. The driver aborts with the report.
+- (c) Patch 0010 (NIC>1 guard) validated on both compilers and tests P-3 and N-5 passing on the host build come before the L1485 retirement is merged.
+- (d) The V&V Lead is reviewer of record for `ported` status; the Architect co-signs `ported.toml` with the evidence scope per entry; `ported` counts for the map only until `ci_checks --strict` is green.
+- (e) Shared generator test lock: one full pass per engineer per hour, FIFO under `flock`, 30-minute hold limit; scoped runs need no full lock.
+- (f) `CUNNINGHAM` is added to the libm registry class (2 ulp, not time-step coupled) by the Species and Combustion Lead after a recorded grep check.
+- (g) Ghost `UII`/`UIID`/`QR` are compared interior-only in restart-file checks. The `-gpu=nofma` build and the 8-thread sweep run on the GPU test machine.

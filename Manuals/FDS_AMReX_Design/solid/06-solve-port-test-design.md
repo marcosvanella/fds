@@ -42,7 +42,7 @@ Callees by file: `func.f90`: `GET_N_LAYER_CELLS` 5743-5784, `GET_WALL_NODE_COORD
 
 Three facts about the control flow that shape the tests:
 1. **One abort path.** The only `SHUTDOWN` in 1809-3154 is `ERROR(300)` at 2670 (`NWP_NEW > N_CELLS_MAX`). `PYROLYSIS` has none.
-2. **Two ways to "not converge".** The sub-step loop has no cap (with a NaN temperature `DT_BC_SUB` and `T_BC_SUB` can become NaN, and then the exit test at 2947 is false for ever; the NaN case of section 8 confirms this on the reference before the watchdog is relied on). The Newton loop `O2_LOOP` simply ends after 20 iterations with the last `Y_O2_F` and without writing `B2%Y_O2_ITER` (3119-3150).
+2. **Two ways to "not converge".** The sub-step loop has no cap (with a NaN `DT_BC` the sub-step time becomes NaN and the exit test at 2947 is false for ever; a NaN temperature alone ends after one sub-step with NaN outputs, see `09-flip-budget-gate.md`; the NaN cases of section 8 take their expected outcome from the reference run before the watchdog is relied on). The Newton loop `O2_LOOP` simply ends after 20 iterations with the last `Y_O2_F` and without writing `B2%Y_O2_ITER` (3119-3150).
 3. **Hidden state.** `ICYC`, `WALL_INCREMENT`, `CHECK_FO`, `OXPYRO_MODEL`, `TMPMIN/TMPMAX`, `I_MAX_TEMP`, `NWP_MAX` are module data, not arguments.
 
 ## 3. Testable units in dependency order

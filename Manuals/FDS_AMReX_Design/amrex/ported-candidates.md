@@ -1,33 +1,42 @@
 # Ported-status candidates (D-072 (c)) and the fast-math pin check
 
-Owner: AMReX Integration Lead. Status: v0.1. `tools/ported.toml` is **unchanged: no kernel is set to ported**. This file lists what is ready, what each entry still needs, and the record of the CMake pin check.
+Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `tools/ported.toml` sets to ported, what is blocked, and the CMake pin check.
 
-## 1. Why no entry is set yet
+## 1. State of `tools/ported.toml`
 
-D-072 (c) needs four things per kernel: a device run on record on real fields within the class tolerance; a review by the kernel owner; the V&V ulp gate for a libm kernel; and `tools/ci_checks.sh` (--strict) passing. State of the four:
+**22 kernels are set** (6 `[[ported]]` entries), aligned with the V&V Lead's review (`vv/ported-review.md`). `reviewed_by` says that the V&V Lead reviewed the device runs and the ulp gate; **the Architect's co-signature of the list is pending** and is not claimed. `set_by` is the Integration Lead. `port_kernel_map.py --strict` accepts all entries (self-check PASS, no PM-08 finding; the map shows 22 kernels as "ported").
 
-| Condition | State |
+| Entry | Kernels | Class | Device evidence as reviewed |
+|---|---|---|---|
+| 1 | `vpred_us/vs/ws`, `vcorr_u/v/w`, `div2_pred`, `div2_corr`, `vflux_vort_tau` (9) | bitwise | `csmag_32` only (real fields); `dec2_obst` is host only for these. `vpred_vs`, `vcorr_v`, `div2_corr`, `vflux_vort_tau` have no FDS truth |
+| 2 | `baro_p_rrho`, `baro_fvx/fvy/fvz` (4) | bitwise | all zero (vacuous) on `csmag_32`; device evidence is the four `dec2_obst` boxes; ghost and solid inputs not physical, no FDS truth |
+| 3 | `vflux_fvx/fvy/fvz` | bitwise | real fields and real edge tables; device ran `csmag_32` and `dec2_obst` box 0 only (four boxes is the host result) |
+| 4 | `cfl_max`, `vn_max`, `div_extrema` | bitwise | real fields (`csmag_32`, four `dec2_obst` boxes) with `CFL_VELOCITY_NORM` 0 only for `cfl_max`; `div_extrema` only Cartesian with stored divergence off (`CARTVELDIV` all zero); other branches only by the SYNTHETIC rounds 4 to 7 hash run |
+| 5 | `rho_d_dzd`, `h_rho_d_dzd` | bitwise | device coverage only: ZZ and TMP real, `RHO_D` and `D_Z` synthetic, no FDS truth; host gate PASS |
+| 6 | `cfl_wall_max`, `ulp_gate_passed = true` | libm, 2 ulp | gate `ULP` lines PASS: real 32 walls max 1 ulp (only 19 distinct real values), SYNTHETIC 20,000 walls max 2 ulp; the 2 ulp bound is measured for this toolchain, not a guarantee |
+
+
+**Held out, not in `ported.toml`:**
+- `d_z_max`, `del_rho_d_del_z`: the review accepts them as device coverage (synthetic `RHO_D` and `D_Z`) on the stated condition that the gate's host tier shows a result for both. The latest quick run has no result line for either, so the condition is unmet and they are held out until it is.
+- `rho_d_interp`, `rho_d_maxloc_fix`, `dp_div_heat`: the review asks for (1) bitwise host tests in the gate (they are NO-TEST; the map shows `generated`), and (2) a real-field run: dump `RHO_D` and the `D_Z` table, rerun `WP3_DIFF` on the test machine. Cases needed: for `rho_d_interp` the real table with real `TMP`, including the end-of-table clamp; for `rho_d_maxloc_fix` the branch with more than two species (the maximum run has `NS = 2`) and a tie in `MAXV`; for `dp_div_heat` a non-synthetic `H_RHO_D_DZD*`.
+- WP1 non-wall and wall kernels (266 and 76 arrays): held until the kernels are named with their truth status and the run is repeated with the device outputs kept (the earlier device outputs were removed, so the reviewer could not re-compare them).
+
+**Open conditions of D-072 (c):**
+- `tools/ci_checks.sh --strict` must be green as ruled. It is not: `k2_ci_check` (K2-03) and `kernel_lint` (CL-07) fail on `s5gen_rad_wall_qin_zero` (`W_SURF_INDEX` missing from the device-address list). Until that is fixed the entries stand for the map only.
+- The ruling asks for the kernel owner's review. The V&V Lead's review is the independent review of the device results; the Architect has to accept it in place of the owner's review (or the owners' reviews are added).
+
+## 2. Evidence (kernel-map names; run on the cc 8.9 test-machine GPU unless stated)
+
+| Kernels | Evidence |
 |---|---|
-| Device run on real fields, class tolerance | **Met** for the kernels in section 2 (run, cc 8.9 test-machine GPU; see `stage1-gpu-spike-plan.md` 7.9c, 7.10a, 7.13, 7.13a, 7.13b, 7.10d). |
-| Review by the kernel owner | **Not on record.** The plan review of the stage-1 work approved work packages and read documents only ("nothing run"); it is not a kernel-result review, so it is not entered as `reviewed_by`. The wall-kernel code reviews in `solid/07` and `solid/08` are reviews on reading of the generated text, without a device run. Each entry below needs a named reviewer who has seen the device-run result. |
-| V&V ulp gate (libm kernel `cfl_wall_max`) | **Not met in the gate's own terms.** The gate (`vv-runs/gpu_gate`) judges a libm kernel only by a `ULP` line printed by a device driver. The stage-1 harness result (device within 1 ulp of host on 32 real walls; 2 ulp maximum on a SYNTHETIC sweep of 20,000 walls) is a harness result, not the gate's `ULP` line. `ulp_gate_passed = true` stays unset. |
-| `ci_checks.sh --strict` | **Fails** for a reason outside this work, see section 3: `s5gen_rad_wall_qin_zero` in `test/rad_kernels.golden` (K2-03 and CL-07, array dummy `W_SURF_INDEX` missing from the device-address list). |
+| the 9 kernels of entry 1 | 7.13: device = host serial = host 4 threads on all 54 output files of the `csmag_32` WP3 stages (gate-tool recheck: 0 failing elements); bit-equal to FDS where a value exists (7.9c) |
+| the 4 baroclinic kernels | 7.13: `dec2_obst`, four boxes, device = serial = 4 threads on 8 arrays per box |
+| `vflux_fvx/fvy/fvz` | 7.13b: `csmag_32` 33,792 of 33,792 faces per direction and `dec2_obst` box 0 (272 / 512 / 272), device = serial = 4 threads = FDS; negative control with neutralised edge tables fails identically |
+| `cfl_max`, `vn_max`, `div_extrema` | 7.13a: 155 of 155 outputs; scalars and locations equal in five cases; `div_extrema` checked independently |
+| `rho_d_dzd`, `h_rho_d_dzd` | 7.13a neighbours; `RHO_D` synthetic |
+| `cfl_wall_max` | 7.10d and the gate `ULP` lines (`vv-runs/gpu_gate/device_logs/stage1_cflw`): host serial = 4 threads = FDS-build value on 32 of 32 real walls (hot-obstruction variant of `dec2_obst`, scratch input); device within 1 ulp (4 of 32 differ); SYNTHETIC sweep max 2 ulp |
 
-An entry can be added in one step once a reviewer is on record and `ci_checks.sh` is green.
-
-## 2. Candidates (kernel-map names; evidence is run on the test machine's GPU unless stated)
-
-| Kernels | Evidence | Tolerance class |
-|---|---|---|
-| `vpred_us`, `vpred_vs`, `vpred_ws`, `vcorr_u`, `vcorr_v`, `vcorr_w`, `div2_pred`, `div2_corr`, `baro_p_rrho`, `baro_fvx`, `baro_fvy`, `baro_fvz`, `vflux_vort_tau` | 7.13: device = host serial = host 4 threads on every output array (`csmag_32`, four `dec2_obst` boxes); bit-equal to FDS where an FDS value exists (7.9c) | bitwise |
-| `vflux_fvx`, `vflux_fvy`, `vflux_fvz` | 7.13b: real fields and real edge tables, host and device; bit-equal to FDS on `csmag_32` (33,792 of 33,792 faces each) and `dec2_obst` (272/512/272 faces per box) | bitwise |
-| `cfl_max`, `vn_max`, `div_extrema` | 7.13a: device = serial = 4 threads on 155 of 155 outputs (+0 equals -0 rule, 7.10c); `div_extrema` checked independently | bitwise |
-| `d_z_max`, `rho_d_interp`, `rho_d_maxloc_fix`, `del_rho_d_del_z`, `dp_div_heat` | 7.13a: same runs; `RHO_D` and `D_Z` inputs are SYNTHETIC, no FDS truth | bitwise (map shows `host` or `generated`: the map does not list a device run for these yet, so PM-08 would reject them until the device-run overlay lists the stage-1 run) |
-| `rho_d_dzd`, `h_rho_d_dzd` | 7.13a neighbours | bitwise |
-| WP1 non-wall and wall kernels (`7.9`, `7.10`, `7.10a`): 266 of 266 non-wall and 76 of 76 wall output arrays bit-equal across device, host serial and 4 threads (7 data sets) | 7.9, 7.10a | bitwise |
-| `cfl_wall_max` | 7.10d: host serial = 4 threads = FDS-build value on 32 of 32 real walls (hot-obstruction variant of `dec2_obst`, scratch input); device within 1 ulp (4 of 32 walls differ); SYNTHETIC sweep device-vs-host maximum 2 ulp | libm, 2 ulp |
-
-Not candidates: the six `gsfv_*` kernels (no device run), loops without a kernel or marker, and `wall_rho_d_dzdn` for its `NIC>1` branch (no case reaches it).
+Not set: the six `gsfv_*` kernels (no device run), loops without a kernel or marker, and the held-out kernels above.
 
 ## 3. Fast-math pin (D-068): check on a scratch copy
 

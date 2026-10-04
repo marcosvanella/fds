@@ -34,14 +34,14 @@ L1315,Legacy Mapper,claimed,cell-loop batch (TEST_FILTER)
 L1316,Legacy Mapper,claimed,cell-loop batch (TEST_FILTER)
 L1356,Legacy Mapper,claimed,cell-loop batch (WALE)
 L1321,Legacy Mapper,claimed,cell-loop batch (VARDEN_DYNSMAG)
-L0878,AMR Species & Combustion Lead,claimed,translatable-now cell loop; own tests
-L0865,AMR Species & Combustion Lead,claimed,translatable-now cell loop; own tests
-L0874,AMR Species & Combustion Lead,claimed,translatable-now cell loop; own tests
-L0881,AMR Species & Combustion Lead,claimed,translatable-now cell loop; own tests
-L0402,AMR Species & Combustion Lead,claimed,translatable-now cell loop; own tests
-L0872,AMR Species & Combustion Lead,claimed,translatable-now cell loop; own tests
-L0879,AMR Species & Combustion Lead,claimed,translatable-now cell loop; own tests
-L0608,AMR Species & Combustion Lead,claimed,idempotent B1-alias marker store
+L0878,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
+L0865,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
+L0874,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
+L0881,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
+L0402,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
+L0872,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
+L0879,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
+L0608,AMR Species & Combustion Lead,translated,idempotent B1-alias marker store; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
 L1488,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
 L1489,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
 L1485,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
@@ -49,6 +49,17 @@ L0823,AMR Solid Phase Lead,claimed,host-side event code (REASSIGN_WALL_CELLS); t
 L1486,AMR Solid Phase Lead,claimed,WALL_BC ghost values loop 1; wall-bc-translation-plan.md
 L1487,AMR Solid Phase Lead,claimed,WALL_BC thin-wall loop 0; wall-bc-translation-plan.md
 L1239,AMR Radiation Lead,claimed,"R1 zero of Q_RAD_IN where TMP_GAS_FRONT<=0; needs the B1_PRESENT wall-table flag (radiation 00-r1-signoff); kernel rad_wall_qin_zero is already in the committed radiation sidecar; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT; line numbers re-verified radi.f90:3887-3893"
-L1243,AMR Radiation Lead,claimed,"R1 open-boundary Q_RAD_IN; blocked on the ragged BR_ILW(NRA bands wall) table; per-band temporary starting at +0; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT WITH CHANGE (per-band temporary; flat chain fails bitwise); line numbers re-verified radi.f90:4965-4974"
+L1243,AMR Radiation Lead,translated,"R1 open-boundary Q_RAD_IN; blocked on the ragged BR_ILW(NRA bands wall) table; per-band temporary starting at +0; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT WITH CHANGE (per-band temporary; flat chain fails bitwise); line numbers re-verified radi.f90:4965-4974; translated by kernel wall_open_qin (radi.f90:4961-4970, per-band temporary, SUM order of the verbatim loop checked bitwise) with wall_open_qin_wl; in the s5-four kernel set"
 L1248,AMR Radiation Lead,claimed,"R1 INTERPOLATE_IL wall loop; low priority and host first; blocked on the ragged BR_ILW table; keep the ILW_OLD copy; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT WITH CHANGE, low priority, host acceptable (keep ILW_OLD copy); line numbers re-verified radi.f90:3651-3662"
 L1245,AMR Radiation Lead,not planned (host),"R1 RADF file write; host code; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT as host code; line numbers re-verified radi.f90:5048-5063"
+L1211,AMR Pressure Backend Implementer,claimed,"Poisson RHS PRHS, 3-D non-cylindrical branch for IPS 1/4/7 (pres.f90:250-260, FireX 36975d7). Plan: independent CPU reference in Source/pressure_backend (fds_loops) tested bitwise against the verbatim upstream lines compiled with gfortran; generator kernel entry (closest dp_kdtd) left to the generator owners. IPS 2,3,5,6 (L1212-L1214, transposed store) not covered: the AMR route keeps the natural layout"
+L1207,AMR Pressure Backend Implementer,claimed,"P = RHOP*(HP-KRES) over the full box incl. ghost cells (pres.f90:758-764). Plan as L1211; closest kernel baro_p_rrho (velo.f90:3254-3261). Trap: bounds 0:IBP1 in every direction, RHOP is allocated -1:IBP1+1"
+L1215,AMR Pressure Backend Implementer,not planned (retired),"Retired/replaced (FR-037): pressure_backend writes H (phi, valid cells) directly, so the copy of PRHS into HP after the FFT solve (IPS 1,4,7; pres.f90:394-400) has no counterpart; the driver's valid-cell copy phi to H (TimeLoop.cpp solve_level0) is a plain MultiFab copy and no generator kernel. Same reasoning applies to the transposed copies L1216-L1218 (not claimed here)"
+L1220,AMR Pressure Backend Implementer,claimed,"H boundary fill in x from BXS/BXF with the LBC codes (pres.f90:450-462). Hand-written host code in Source/pressure_backend (front end takes K,J,I nests only), tagged with the loop id and line range; verbatim-Fortran bitwise test"
+L1221,AMR Pressure Backend Implementer,claimed,H boundary fill in y from BYS/BYF with the MBC codes (pres.f90:466-477). Hand-written host code as L1220
+L1222,AMR Pressure Backend Implementer,claimed,H boundary fill in z from BZS/BZF with the NBC codes (pres.f90:481-492). Hand-written host code as L1220
+L1209,AMR Pressure Backend Implementer,claimed,Poisson boundary arrays BXS..BZF from wall data (pres.f90:65-228). Host code against the driver's ghost-exchange data: neighbour spacing and the EVALUATE_RAMP callee are passed in by the caller; NIC>1 branches are not reached in the AMR route (D-072). Consumer: the inhomogeneous boundary-data fold helper (frozen/m2-notes.md)
+L1242,AMR Radiation Lead,claimed,"hand-written, FR-062, D-073: sweep kernels in s5_rad_sweep/s5rad_sweep.toml (drift check check_sweep_drift.py, 30 copy blocks, 17 omitted ranges pinned at bee11f0329); deliberately not a markers sidecar entry, so the generator holds no kernel or golden for it and it does not count in the generated-translated percentage"
+L1470,AMR Solid Phase Lead,claimed,HT3D_TEMPERATURE_EXCHANGE loop 1 (wall.f90:3635-3677); blocked on neighbour-mesh data (T4) and on the HT3D deferral in the fine-level plan
+L1471,AMR Solid Phase Lead,claimed,HT3D_TEMPERATURE_EXCHANGE loop 2 (wall.f90:3681-3717); blocked on neighbour-mesh data (T4) and on the HT3D deferral in the fine-level plan
+L1452,AMR Solid Phase Lead,claimed,ASSIGN_GHOST_VALUE (wall.f90:319-339); blocked on neighbour-mesh data (T4)

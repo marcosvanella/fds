@@ -1,6 +1,6 @@
 # Baseline status: FireX 36975d7, GNU/Open MPI reference build
 
-**Change log.** 2026-10-04: added the section "Intel / Intel MPI baseline (FireX 36975d7, `impi_intel_rel`)" (G0, A-09, Tier 1 and part of A-24 on the Intel Release rebuild; Intel-versus-GNU classification; the step-1 Poisson-error finding; debug-build smoke checks) and updated "Pending / not done". The earlier sections are the GNU/Open MPI record and are unchanged. The previous version is archived at `docs/vv/archive/baseline_status_pre-intel.md`. 2026-10-03: added the section "Reference build verification (Debug and merged-tip Release)". The previous version is archived at `docs/vv/archive/baseline_status_pre-refbin-verify.md`. 2026-10-02: added the section "M2a baselines (rebuilt Release binary)" and a binary note: csmag_32, its FISHPAK_BC periodic variant and the shunn3_4mesh_32 GLMAT runs, all with the rebuilt Release binary (new sha256), plus a rebuild-versus-original check. The previous version is archived at `docs/vv/archive/baseline_status_pre-m2a.md`.
+**Change log.** 2026-10-04: added the section "Intel / Intel MPI baseline (FireX 36975d7, `impi_intel_rel`)" (G0, A-09, Tier 1 and A-24 on the Intel Release rebuild, the remaining four- and eight-rank cases and the `int_1to2` checked-debug run completed on a second machine; Intel-versus-GNU classification; the step-1 Poisson-error finding; debug-build smoke checks; ULMAT baselines recorded by pressure-solver library, PARDISO and HYPRE) and updated "Pending / not done". The earlier sections are the GNU/Open MPI record and are unchanged. The previous version is archived at `docs/vv/archive/baseline_status_pre-intel.md`. 2026-10-03: added the section "Reference build verification (Debug and merged-tip Release)". The previous version is archived at `docs/vv/archive/baseline_status_pre-refbin-verify.md`. 2026-10-02: added the section "M2a baselines (rebuilt Release binary)" and a binary note: csmag_32, its FISHPAK_BC periodic variant and the shunn3_4mesh_32 GLMAT runs, all with the rebuilt Release binary (new sha256), plus a rebuild-versus-original check. The previous version is archived at `docs/vv/archive/baseline_status_pre-m2a.md`.
 
 - **Build:** FDS `FDS-6.11.1-1244-g36975d765f-AMReX` (FireX worktree HEAD 36975d765fcead401e14b094a04f910ac42eab8a), GNU Fortran + Open MPI 5.0.7 (Debian package). The binaries are Release `build/firex-36975d7/ompi_gnu_rel/fds` and Debug (the `_db` build; sha256 below).
 - **HYPRE:** commit 63331f19c7 = **v2.32.0-24-g63331f19c**. The FDS run header prints "Hypre library version: 3.0.0" because CMakeLists hard-codes HYPRE_GIT_VERSION. That label is wrong; every manifest records the real version.
@@ -822,19 +822,20 @@ Tip against 36975d7: `bee11f0329` (built with `USE_AMREX` OFF, so the `WITH_AMRE
 <!-- INTEL-BASELINE-BEGIN -->
 ## Intel / Intel MPI baseline (FireX 36975d7, `impi_intel_rel`)
 
-**Change log.** 2026-10-04: new section. Intel Release capture (G0, A-09, Tier 1, a cheap part of A-24), Intel-versus-GNU comparison, the step-1 Poisson-error finding and the debug-build smoke checks. The previous version of this file is archived at `docs/vv/archive/baseline_status_pre-intel.md`.
+**Change log.** 2026-10-04: new section. Intel Release capture (G0, A-09, Tier 1, a cheap part of A-24), Intel-versus-GNU comparison, the step-1 Poisson-error finding and the debug-build smoke checks. The previous version of this file is archived at `docs/vv/archive/baseline_status_pre-intel.md`. 2026-10-04 (second update): the 13 four-rank Tier 1 cases, the 8-rank `symmetry_test_mpi`, the A-24 single-mesh `dancing_eddies_default` pair and the A-09 `int_1to2` checked-debug run were completed on a second machine (the test machine `pop-os`, same binary); the ULMAT results are recorded by pressure-solver library (PARDISO, HYPRE).
 
 - **Binary.** `vv-runs/refbin/impi_intel_firex-36975d7/impi_intel_rel/fds`, sha256 `cfaa5d06a4adde262121ee39b16386bcc570cd44c6e17f965fbdd8bbdfa4ad70`. ifx/icx 2026.1.1, Intel MPI 2021.18.1, MKL 2026.1.0 (static), HYPRE `63331f19c7` (v2.32.0-24), SUNDIALS 7.5.0, CMake Release with **`-O2`** and OpenMP (see `environment.md` for why not `-O3`). Banner `FDS-6.11.1-1244-g36975d765f-AMReX`. This is a **rebuild**: the earlier Intel binary (`60c98782…ecdfc`) and every earlier Intel result were lost in an earlier environment reset, so this is the first recorded Intel baseline.
 - **Where.** Runs: `vv-runs/baseline/impi_intel_firex-36975d7/` (same layout as the GNU directory: one folder per run with `manifest.json`, inputs, outputs; binaries above 5 MB dropped and listed in each manifest). G0: `vv-runs/g0/impi_intel_firex-36975d7/`. Tier 2 `emb_1to1` and the A-09 checked-debug runs: `vv-runs/a09/impi_intel_firex-36975d7/`. Poisson study: `vv-runs/analysis/impi_intel_firex-36975d7/poisson/`. Debug smoke: `vv-runs/smoke/impi_intel_firex-36975d7/`. Comparison data: `vv-runs/analysis/impi_intel_firex-36975d7/{analysis.json,intel_vs_gnu.json,intel_vs_gnu.txt}`.
-- **Integrity.** `vv-runs/baseline/impi_intel_firex-36975d7/SHA256SUMS` lists 5122 files with relative paths, as the GNU one does (its own sha256 is `4a6072769d534f3458077ef5012faa0dff2eaad38dca58f296ba1cf1a023c946`). The directory is read-only.
+- **Integrity.** `vv-runs/baseline/impi_intel_firex-36975d7/SHA256SUMS` lists 5403 files with relative paths, as the GNU one does (its own sha256 is `ea5e7a78304dcc8f31e0aca5e8852ee4bb3a8dafe0c52ac5cdcec39878dccc06`). It also lists the per-case `SHA256SUMS` files of the test machine runs. The directory is read-only.
 - **Runner.** `vv-runs/tools/vv_run_intel.py` (the GNU `vv_run.py` ported: `mpirun -genv I_MPI_PIN=0 -np N`, the `env-intel.sh` environment) driven by `vv-runs/scripts/intel_capture.py`, which re-uses the GNU spec lists (`g0.py`, `a09_rel.py`, `tier1.py`, `a24.py`, `a09_db.py`) so the case list, variants (as committed, SIG_FIGS=17, GLMAT, alternate ranks, restart chain) and rank counts are the GNU ones. Comparison: `vv-runs/scripts/intel_vs_gnu.py`, `analyze_intel.py` (the GNU `analyze.py` pointed at the Intel directories), `intel_report.py`, `intel_section.py`, `intel_docs.py`.
 - **Deviations from the GNU protocol** (all recorded in each manifest):
   - The machine load stayed between 6 and 39 for the whole capture, so the load gate (load1 < 2) could not be used. Only the RAM gate (MemAvailable ≥ ranks × 0.5 + 1 GB) was kept. Runs were confined with `taskset -c` to 4 cores (G0, Poisson study, smoke, A-09 release, first part of Tier 1) and later to 3 cores (`5-7`), under `nice -n 10` and `timeout -k 60`. Runs were strictly sequential.
   - Timeouts are max(1200 s, 3 × estimate) instead of max(600 s, 3 × estimate), because of the load. A run with a wall time above 600 s is flagged below.
   - `I_MPI_THREAD_YIELD=3` and `I_MPI_SPIN_COUNT=1` were set from the second 4-rank Poisson-study run on, so for everything except G0 and the first three Poisson-study runs (they change how ranks wait, not the numerics). With the Intel MPI defaults a 4-rank run on the shared cores was 20 to 40 times slower than the GNU run (for example `obst_activation_default` took 242 s with the default and 20 to 25 s with the two settings). G0 and the first three Poisson-study runs used the defaults. The 4-rank outputs of a default run and a modified run are bitwise identical to each other (below).
+  - **Second machine.** The runs listed in "Test machine runs" below were made on the test machine `pop-os` (Intel Core i9-13900HX, AVX2 only, no AVX-512; Pop!_OS 24.04; oneAPI 2026.1.1 and Intel MPI 2021.18.1, the same versions as the box), with the identical `impi_intel_rel/fds` (sha256 verified after the copy; the SUNDIALS 7.5.0 shared libraries were copied with it). Each job had its own cores (`taskset`, 16 cores in total, cores 16 to 31), `nice -n 5`, Intel MPI default wait settings, a 4 h timeout, no pruning. The development machine is an AVX-512 Xeon. Floating-point results that depend on the library code path (libimf, MKL) can differ between the two CPUs at round-off level; see "Test machine runs".
   - **Wall times in the table are not performance data.**
   - The Intel Release is `-O2`, the GNU one `-O3`; results across compilers are not bitwise comparable (`README.md` of the refbin directory).
-- **Counts.** 93 run folders are in the Intel baseline directory (plus the Tier 2 `emb_1to1` and checked-debug runs in `a09/`). **Every run exited 0 with "STOP: FDS completed successfully", with no trap, NaN or error line.** Not run, with the reason, at the end of this section.
+- **Counts.** 111 run folders are in the Intel baseline directory (plus the Tier 2 `emb_1to1` and checked-debug runs in `a09/`). **Every run exited 0 with "STOP: FDS completed successfully", with no trap, NaN or error line.** 17 of these folders were run on the test machine (the 13 four-rank cases, `symmetry_test_mpi` and `__sf17` at 8 ranks, and the A-24 `dancing_eddies_default__1mesh` and `__1mesh_sf17`), as was the A-09 `int_1to2` checked-debug run; for them only the small files (inputs, `.out`, CSV, `manifest.json`, stdout/stderr) are on the development machine, the binary outputs (restart, slice, boundary files) stay on the test machine, and each folder has a `SHA256SUMS` with the sha256 of every test machine output file (see "Test machine runs"). Not run, with the reason, at the end of this section.
 
 ### Verification of the delivered reference set
 
@@ -875,7 +876,7 @@ The Release runs use `impi_intel_rel`. The `__debug` runs use the Intel checked-
 | ns2d_16_emb_1to1_refinement__debug | chk-debug | 2 | 171.31 | 0/yes | 0 | 1407/1407 |
 | ns2d_16_emb_1to1_refinement__sf17 | rel | 2 | 21.25 | 0/yes | 0 | 1407/1407 |
 | ns2d_16_emb_1to2_refinement__debug | chk-debug | 2 | 913.62 | 0/yes | 0 | 9006/9006 |
-| ns2d_16_int_1to2_refinement__debug | chk-debug | 1 | 1800.02 | 124/no | 0 | 4552/3700 |
+| ns2d_16_int_1to2_refinement__debug | rel | 1 | 1048.3 | 0/yes | 0 | 4552/4552 |
 | ns2d_16_int_1to2_refinement_uglmat__debug | chk-debug | 1 | 233.32 | 0/yes | 0 | 4439/4439 |
 
 - Pressure iterations (Intel): `int_1to2` mean 35.75, max 46 (GNU 35.75 / 46); `int_1to2_uglmat` 1 per step (same); `emb_1to1` mean 13.39, max 17 (same); `emb_1to2` mean 6.17, max 16 (GNU 6.35 / 16).
@@ -883,7 +884,7 @@ The Release runs use `impi_intel_rel`. The `__debug` runs use the Intel checked-
 - UVEL divergence between the default solver and UGLMAT runs (|Δ| > 1e-6 at 0.752 s, > 1e-3 at 11.38 s, > 0.1 at 15.54 s, > 1 at 16.71 s) agrees with the GNU values to better than 1e-11 s.
 - `emb_1to2` takes 9020 steps on Intel against 8723 on GNU (3 % more). The pressure iteration count per step is the same, but the step-size sequence differs; the run is the marginal 2-mesh interface case, and the RMS error is unchanged. The UGLMAT run has 4442 steps against 4443.
 - UGLMAT repeat determinism (`sf17` against `sf17_rep2`): T0 PASS and T1 PASS (bitwise identical), as on GNU.
-- Release against checked-debug (Intel): `emb_1to1` 1407 steps on both; `emb_1to2` 9020 (Release) against 9006 (debug); `int_1to2_uglmat` 4442 against 4439. None of the debug runs trapped (no SIGFPE, no `-check` message, no NaN). **`int_1to2` debug did not finish:** it was killed by the 1800 s timeout (exit 124) at step 3700 (t = 25.9 s of 30 s), with no trap before that; the Release run has 4552 steps. This run is incomplete and is listed as such; it needs a longer timeout or an idle machine. The step-count differences between Release and debug are of the same kind as Intel against GNU (a different step-size path, not a defect).
+- Release against checked-debug (Intel): `emb_1to1` 1407 steps on both; `emb_1to2` 9020 (Release) against 9006 (debug); `int_1to2_uglmat` 4442 against 4439; `int_1to2` 4552 against 4552. None of the debug runs trapped (no SIGFPE, no `-check` message, no NaN). **`int_1to2` debug:** the first attempt on the development machine was killed by the 1800 s timeout (exit 124) at step 3700 of 4552 with no trap; the box folder was moved to `vv-runs/logs/intel_incomplete/`. The run was repeated on the test machine to completion (1048 s wall, 4552 steps, exit 0, normal stop, no trap) and its result is the folder in `a09/`; it is IDENTICAL to the GNU Debug run in every compared CSV (step count 4552 on both). The step-count differences between Release and debug for `emb_1to2` and `uglmat` are of the same kind as Intel against GNU (a different step-size path, not a defect).
 
 ### Intel against GNU: classification
 
@@ -896,9 +897,13 @@ The committed inputs print 8 significant figures, so IDENTICAL in that column on
 
 | case | ranks | steps GNU/Intel | as committed (8 digits) | SIG_FIGS=17 copy | heat-budget (HRR) file | wall s (Intel) |
 |---|---|---|---|---|---|---|
+| 1_step_2_step_compare | 4 | 892/883 | LARGER 2.9e-01 | LARGER 2.9e-01 | LARGER | 85.03 |
 | csmag_32 | 1 | 28/28 | IDENTICAL | ROUNDOFF | ROUNDOFF | 4.62 |
 | dancing_eddies_1mesh | 1 | 4737/4737 | SMALL 2.1e-08 | ROUNDOFF | ROUNDOFF | 759.03 (>10 min) |
+| dancing_eddies_default | 4 | 4739/4739 | SMALL 2.5e-08 | SMALL 1.3e-10 | ROUNDOFF | 201.27 |
+| dancing_eddies_uglmat_refine | 4 | 4751/4751 | SMALL 2.9e-09 | SMALL 3.5e-10 | ROUNDOFF | 206.81 |
 | divergence_test_2 | 1 | 57/57 | ROUNDOFF | ROUNDOFF | ROUNDOFF | 1.89 |
+| divergence_test_3 | 4 | 5001/5047 | LARGER 1.2e+00 | LARGER 1.2e+00 | LARGER | 319.45 |
 | energy_budget_tmix | 1 | 2000/2000 | LARGER 6.5e-06 | LARGER 6.5e-06 | LARGER | 9.17 |
 | lapse_rate | 4 | 4/4 | LARGER 1.1e-06 | LARGER 1.0e-06 | LARGER | 4.42 |
 | layer_1mesh | 1 | 2570/2575 | LARGER 1.6e-01 | LARGER 1.6e-01 | LARGER | 113.31 |
@@ -917,6 +922,7 @@ The committed inputs print 8 significant figures, so IDENTICAL in that column on
 | obst_activation_default | 4 | 144/144 | LARGER 3.8e-03 | LARGER 3.8e-03 | LARGER | 10.84 |
 | obst_activation_ulmat | 4 | 144/145 | LARGER 9.9e-01 | LARGER 9.9e-01 | LARGER | 5.33 |
 | obst_coarse_fine_interface | 2 | 43/43 | LARGER 1.3e-03 | LARGER 1.3e-03 | LARGER | 3.61 |
+| random_meshes | 4 | 7031/7031 | LARGER 2.0e-02 | LARGER 2.0e-02 | LARGER | 90.54 |
 | restart_test1_continuous | 1 | 727/730 | LARGER 1.6e+02 | LARGER 1.6e+02 | LARGER | 60.02 |
 | restart_test1a | 1 | 344/342 | LARGER 1.7e+02 | LARGER 1.7e+02 | LARGER | 39.37 |
 | restart_test1b | 1 | 729/724 | LARGER 1.7e+02 | LARGER 1.7e+02 | LARGER | 23.89 |
@@ -934,15 +940,17 @@ The committed inputs print 8 significant figures, so IDENTICAL in that column on
 | soborot_superbee_square_wave_128_1mesh | 1 | 447/447 | IDENTICAL | ROUNDOFF | ROUNDOFF | 73.65 |
 | species_conservation_1 | 1 | 546/556 | LARGER 1.5e-03 | LARGER 1.5e-03 | LARGER | 101.06 |
 | species_conservation_2 | 1 | 187/187 | LARGER 1.0e-03 | LARGER 1.0e-03 | LARGER | 8.36 |
+| symmetry_test_mpi | 8 | 1000/1000 | IDENTICAL | ROUNDOFF | IDENTICAL | 4.57 |
 
 Reading of the table:
 - **Round-off level (state files ≤ 1e-10 of the column norm at 17 digits; identical at 8 digits), same step counts:** `ns2d_8/16/32/64` and their `nupt1` variants (largest 1.4e-14), `ns2d_16_emb_1to1_refinement` (7e-12), `divergence_test_2`, `csmag_32` (all four variants, 4e-16), `saad_512_cfl_*` (≤ 9e-14), `shunn3_32/64/128`, `shunn3_4mesh_32/128` (≤ 5e-15), `soborot_superbee_square_wave_128` and its `_1mesh` run (4e-12), `dancing_eddies_1mesh` (8e-11 at 17 digits, 2e-8 at 8 digits; 4737 steps on both), and the GLMAT copies of `shunn3_4mesh_32/128` and `soborot` (same size). The heat-budget file (`_hrr.csv`) of the shunn3, saad and soborot cases is SMALL (1e-8 to 1e-10): the differing column is `Q_ENTH`, a difference of large terms, in a run with no heat release.
 - **LARGER, expected for different compilers (step-size sequence or CFL-driven path differs, FDS criterion still passes):** `obst_activation_default` (time base differs from step 9 on: dt 0.03848 against 0.03855, 0.2 %; 144 steps on both), `obst_coarse_fine_interface` (1e-3), `energy_budget_tmix` (6.5e-6 in Temp, 2000 steps on both), `lapse_rate` (1e-6), `species_conservation_1` and `_2` (1e-3 time base, 546 against 556 steps for `_1`), and the A-09 AMR cases (`emb_1to2`, `int_1to2`, `int_1to2_uglmat`: the known marginal-resolution flows, whose GNU default-against-UGLMAT difference is of the same size).
+- **Test machine cases (see "Test machine runs" for the full list):** `symmetry_test_mpi` (8 ranks) IDENTICAL to GNU in every CSV and `symmetry_test_mpi__sf17` ROUNDOFF (3e-14); `dancing_eddies_default` (4 ranks, 4739 steps on both) and `__sf17`, `__1mesh`, `__1mesh_sf17`, `dancing_eddies_uglmat_refine` and `__sf17` SMALL (1e-10 to 3e-8 of the column norm; the same step counts), `dancing_eddies_default__sf17_glmat` SMALL (5e-9); `random_meshes` and `__sf17` LARGER in `Vdot` (2e-2) with 7031 steps on both; `divergence_test_3` and `__sf17` LARGER (5001 steps GNU against 5047 Intel, the compared columns are noise-level divergence values), `divergence_test_3__sf17_glmat` LARGER (5003 against 5051); `1_step_2_step_compare` and `__sf17` at 4 ranks LARGER, 883 steps on Intel (the same 883 as the 1-rank Intel box run) against 892 on GNU.
 - **LARGER, chaotic fire cases:** `layer_1mesh` (2570 against 2575 steps) `1_step_2_step_compare` at 1 rank (883 against 892 steps), and the restart set (`restart_test1a/1b/1_continuous`, 342 against 344 steps for 1a). The first 60 rows of the pre-clip 1a-against-continuous comparison are bitwise identical on Intel (GNU also 60), then the runs separate at t ≈ 0.42 s on both compilers (0.4225 Intel, 0.4223 GNU). This is the known chaotic behaviour; these runs have no round-off-level reference value and the T2 reading uses the spread (`calib/`).
-- **`obst_activation_ulmat`: Intel passes the FDS criterion, GNU fails it** (below). The two runs differ at the noise level of the divergence (D_min about 1e-12), 144 against 145 steps.
+- **`obst_activation_ulmat` and `__sf17`: the difference is the pressure-solver library, not the compiler.** The `.out` header of GNU says `Solver: ULMAT with HYPRE`, the Intel one `Solver: ULMAT with MKL PARDISO` (the default library depends on what the build found). The divergence noise floor of the two runs differs by two orders of magnitude (D_max 1.9e-12 with HYPRE on GNU, 1.7e-14 with PARDISO on Intel), see "ULMAT baselines by library" below. No other case has a different `Solver:` line.
 - **GLMAT copies of `obst_activation_default/ulmat`:** LARGER in the D_max / D_min columns (they are noise-level divergence values; the step-1 maximum pressure error of the GLMAT runs is 27 on both compilers, 144 steps on both); `lapse_rate` GLMAT 1e-6 like its FFT run.
 - **Rank count (Intel, same pattern as GNU):** `lapse_rate` 4 against 1 rank and `obst_coarse_fine_interface` 2 against 1 rank are T0 FAIL and T1 PASS; `soborot_superbee_square_wave_128` 4 against 1 rank is T0 FAIL and T1 FAIL, as on GNU. `obst_activation_default` at 1 rank and 4 ranks is bitwise identical in every CSV and `.out` (restart files differ only in a few header bytes).
-- **Repeat determinism (Intel):** `obst_activation_default` 1 rank twice and 4 ranks twice (Poisson study): bitwise identical (`cmp_runs.py`: BITWISE). `ns2d_16_int_1to2_refinement_uglmat__sf17` against `_rep2`: T0 and T1 PASS. The 4-rank `dancing_eddies_default` repeat and the `1_step_2_step_compare` 4-against-1-rank comparison are in the skipped list below.
+- **Repeat determinism (Intel):** `obst_activation_default` 1 rank twice and 4 ranks twice (Poisson study): bitwise identical (`cmp_runs.py`: BITWISE). `ns2d_16_int_1to2_refinement_uglmat__sf17` against `_rep2`: T0 and T1 PASS. **The 4-rank `dancing_eddies_default__sf17` against `__sf17_rep2` (test machine): T0 BITWISE** (all CSV, `.out` after the timing strip, and every restart and slice file have the same sha256, as on GNU). `1_step_2_step_compare__sf17` 4 ranks against 1 rank, both on the test machine: T0 FAIL (ROUNDOFF class; devc up to 3.6e-11 of the column norm), the same kind of result as on GNU (T0 FAIL, T1 FAIL for GNU at the chaotic-case reading); the 1-rank box run against the 1-rank test machine run differs by up to 1.9e-10 (the AVX-512 against AVX2 effect, below).
 
 ### FDS acceptance criteria (as-committed runs, Intel against GNU)
 
@@ -960,7 +968,19 @@ Reading of the table:
 | species_conservation_2 (Absolute Error, end) | 0.01 | 0, 0.00378 | 0, 0.00378 | PASS | PASS |
 
 - All judged criteria that GNU passes are also passed on Intel, with errors of the same size.
-- **`obst_activation_ulmat`: Intel D_max error 8.28e-14 against tolerance 1e-13 (PASS); GNU 1.77e-12 (FAIL).** The requirements (§2.2 T2) list this case as one where "the FireX reference build itself misses" the FDS criterion; on the Intel reference build it does not. The single-compiler statement in requirements v0.4.25 therefore holds for GNU only. The step-1 maximum pressure error of this case is also much smaller on Intel (0.22E-12 against 0.46E-11).
+- **`obst_activation_ulmat`: PARDISO passes the FDS criterion, HYPRE fails it, on both compilers.** Intel Release with the default library (MKL PARDISO): D_max error 8.28e-14 against tolerance 1e-13 (PASS); GNU Release (HYPRE): 1.77e-12 (FAIL); Intel Release with `&PRES SOLVER='ULMAT HYPRE'` (folder `obst_activation_ulmat__hypre`): 1.80e-12 (FAIL, as GNU). The requirements (§2.2 T2) list this case as one where "the FireX reference build itself misses" the criterion; that statement holds for the HYPRE library, not for the compiler. Step-1 maximum pressure error: 0.22E-12 PARDISO, 0.38E-11 Intel HYPRE, 0.46E-11 GNU HYPRE.
+
+### ULMAT baselines by library (PARDISO, HYPRE)
+
+Check: the `Solver:` line of the `.out` of every case present in both the GNU and the Intel baseline directories and in `a09/` (116 cases) was compared. The only differences are `obst_activation_ulmat` and `obst_activation_ulmat__sf17` (GNU `ULMAT with HYPRE`, Intel `ULMAT with MKL PARDISO`). All other cases print the same line on both: FFT (97), GLMAT (9), UGLMAT (8). UGLMAT does not use either library for its solve.
+
+| Library | Build | Run | Steps | Step-1 max pressure error | D_max (max |D|) | D_max error vs 1e-13 | Criterion |
+|---|---|---|---|---|---|---|---|
+| HYPRE | GNU Release | `obst_activation_ulmat` | 144 | 0.46E-11 | 1.87e-12 | 1.77e-12 | FAIL |
+| HYPRE | Intel Release | `obst_activation_ulmat__hypre` (`SOLVER='ULMAT HYPRE'`) | 145 | 0.38E-11 | 1.90e-12 | 1.80e-12 | FAIL |
+| MKL PARDISO | Intel Release | `obst_activation_ulmat` (default) | 145 | 0.22E-12 | 1.7e-14 | 8.3e-14 | PASS |
+
+The noise floor follows the library: HYPRE gives 1.9e-12 on both compilers, PARDISO 1.7e-14. The step count (144 against 145) follows the compiler: Intel has 145 steps with either library. A GNU build has no MKL, so there is no GNU PARDISO value. **Baseline rule: ULMAT references are recorded and compared per library (PARDISO, HYPRE); the HYPRE pair (GNU, Intel) is the cross-compiler comparison and the PARDISO run is a separate reference.** The same holds for the SIG_FIGS=17 copy `obst_activation_ulmat__sf17` (Intel PARDISO).
 - Script criteria on Intel: `saad_mms_temporal_error` L2 order ρ = Z = 2.0053 (≥ 1.99 PASS), `soborot_mass_transport` L1 0.00857 for 4-mesh and 1-mesh, difference 0 (PASS), `shunn_mms` order 32 to 128: ρ 1.95, Z 1.69, u 2.00, H 0.92 (same values as GNU; the V&V gate ≥ 1.8 fails for Z and H on both). `ns2d.py` RMS u error: N=8 0.4822, 16 0.1307, 32 0.0319, 64 0.00805 (order 32 to 64: 1.99) as on GNU.
 
 ### Step-1 Poisson error: the "discrepancy" is two different `.out` lines, not a change in the solver
@@ -1003,26 +1023,42 @@ The FDS `.out` prints, at time step 1, a line `Maximum Pressure Error: <value> o
 | obst_coarse_fine_interface | 2 | 17.87, 0/yes, 0 | 6.57, 0/yes, 0 | 43 / 43 / 43 | 0.17E-04 / 0.17E-04 |
 | shunn3_32 | 1 | 18.08, 0/yes, 0 | 5.66, 0/yes, 0 | 80 / 80 / 80 | 0.73E-06 / 0.73E-06 |
 
+### Test machine runs
+
+The runs below were made on the test machine (`pop-os`: Intel Core i9-13900HX, 16 cores used in total, AVX2) with the same `impi_intel_rel/fds` (and `impi_intel_db_chk_mh/fds` for the debug run), up to four jobs at a time, each on its own cores. They are full runs, with a 4 h timeout that no run came close to. The outputs are on the test machine under `<work folder>/vv-intel-baseline/runs/<case>/`; the development machine has the small files, and every folder has a `SHA256SUMS` (all test machine files, including the binary ones kept only there; its `manifest.json` entry is the test machine's original, the development-machine copy has extra fields) and a `LAPTOP_NOTE.txt`. Runner: `vv-intel-baseline/laptop_run.py` (environment `run_env.sh`: oneAPI `setvars.sh`, the bundled SUNDIALS libraries, `OMP_NUM_THREADS=1`, `I_MPI_PIN=0`, `HWLOC_LIBXML=0`).
+
+| run | ranks | test machine wall (s) | GNU wall (s) | steps GNU / Intel | exit, stop, traps | class against GNU (worst column, relative) |
+|---|---|---|---|---|---|---|
+| `1_step_2_step_compare` | 4 | 85 | 51 | 892 / 883 | 0, yes, 0 | LARGER (_devc.csv:F1 2.9e-01); heat file LARGER |
+| `1_step_2_step_compare__sf17` | 4 | 88 | 51 | 892 / 883 | 0, yes, 0 | LARGER (_devc.csv:F1 2.9e-01); heat file LARGER |
+| `random_meshes` | 4 | 91 | 59 | 7031 / 7031 | 0, yes, 0 | LARGER (_devc.csv:Vdot 2.0e-02); heat file LARGER |
+| `random_meshes__sf17` | 4 | 90 | 60 | 7031 / 7031 | 0, yes, 0 | LARGER (_devc.csv:Vdot 2.0e-02); heat file LARGER |
+| `divergence_test_3` | 4 | 319 | 85 | 5001 / 5047 | 0, yes, 0 | LARGER (_devc.csv:div_max 1.2e+00); heat file LARGER |
+| `divergence_test_3__sf17` | 4 | 170 | 80 | 5001 / 5047 | 0, yes, 0 | LARGER (_devc.csv:div_max 1.2e+00); heat file LARGER |
+| `divergence_test_3__sf17_glmat` | 4 | 279 | 135 | 5003 / 5051 | 0, yes, 0 | LARGER (_devc.csv:div_min 7.6e-01); heat file LARGER |
+| `dancing_eddies_default` | 4 | 201 | 85 | 4739 / 4739 | 0, yes, 0 | SMALL (_devc.csv:pres 2.5e-08); heat file ROUNDOFF |
+| `dancing_eddies_default__sf17` | 4 | 204 | 83 | 4739 / 4739 | 0, yes, 0 | SMALL (_devc.csv:error 1.3e-10); heat file ROUNDOFF |
+| `dancing_eddies_default__sf17_rep2` | 4 | 208 | 82 | 4739 / 4739 | 0, yes, 0 | SMALL (_devc.csv:error 1.3e-10); heat file ROUNDOFF |
+| `dancing_eddies_default__sf17_glmat` | 4 | 259 | 118 | 4737 / 4737 | 0, yes, 0 | SMALL (_devc.csv:error 5.3e-09); heat file ROUNDOFF |
+| `dancing_eddies_uglmat_refine` | 4 | 207 | 99 | 4751 / 4751 | 0, yes, 0 | SMALL (_devc.csv:pres 2.9e-09); heat file ROUNDOFF |
+| `dancing_eddies_uglmat_refine__sf17` | 4 | 207 | 98 | 4751 / 4751 | 0, yes, 0 | SMALL (_devc.csv:pres 3.5e-10); heat file ROUNDOFF |
+| `dancing_eddies_default__1mesh` | 1 | 797 | 262 | 4737 / 4737 | 0, yes, 0 | SMALL (_devc.csv:error 2.1e-08); heat file ROUNDOFF |
+| `dancing_eddies_default__1mesh_sf17` | 1 | 799 | 272 | 4737 / 4737 | 0, yes, 0 | SMALL (_devc.csv:error 2.5e-10); heat file ROUNDOFF |
+| `symmetry_test_mpi` | 8 | 5 | 36 | 1000 / 1000 | 0, yes, 0 | IDENTICAL (_devc.csv:None 0.0e+00); heat file IDENTICAL |
+| `symmetry_test_mpi__sf17` | 8 | 6 | 42 | 1000 / 1000 | 0, yes, 0 | ROUNDOFF (_devc.csv:w_2 3.1e-14); heat file ROUNDOFF |
+| `ns2d_16_int_1to2_refinement__debug` | 1 | 1048 | 254 | 4552 / 4552 | 0, yes, 0 | IDENTICAL (_devc.csv:None 0.0e+00); heat file IDENTICAL |
+
+- **Cross-machine check (same binary).** `ns2d_16` (1 rank) on the test machine: `devc.csv` and `hrr.csv` are byte-identical to the box run (295 steps). `obst_activation_default` (4 ranks): 144 steps, step-1 maximum pressure error 0.17E-12 and Poisson error 0.12E-12 as on the development machine, but the `D_max` and `D_min` columns (values at 1e-13, the divergence noise floor) are different numbers: a difference of the same size as the values. The box CPU supports AVX-512, the test machine CPU does not, and the Intel math libraries select code paths by CPU, so the noise-level quantities are not reproducible across the two machines. The physical outputs are unaffected for the non-chaotic cases (see the classification). Files: `vv-runs/analysis/impi_intel_firex-36975d7/laptop_xcheck/`.
+- **Chaotic case across machines.** `1_step_2_step_compare__sf17`: test machine 4 ranks against test machine 1 rank (a third test machine run, `extra_..._np1`, in `laptop_xcheck/`): ROUNDOFF, up to 3.6e-11 of the column norm; test machine 1 rank against box 1 rank: up to 1.9e-10. Step count 883 in all of them. The Intel baseline for this case should therefore be read as a band of about 2e-10, not as bitwise.
+- **Over 10 min.** `dancing_eddies_default__1mesh` and `__1mesh_sf17` (about 800 s each, one rank) and the `int_1to2` debug run (1048 s).
+
 ### Not run, or only partly run
 
-Over 10 min of wall time (kept, because they completed): `dancing_eddies_1mesh` (759 s).
+Over 10 min of wall time (kept, because they completed): `dancing_eddies_default__1mesh_sf17` (799 s), `dancing_eddies_1mesh` (759 s), `dancing_eddies_default__1mesh` (797 s).
 
-Skipped. Reason for the 4-rank runs: the first 4-rank runs of this capture needed 20 to 40 times the GNU wall time on the shared 3 or 4 cores, so any 4-rank case with a GNU wall time above 30 s was projected above 10 min. If a later pass ran any of them, its folder is in the baseline directory and it is not in this list. **Attempted and abandoned:** `1_step_2_step_compare__sf17` (4 ranks) was started once as the cheapest of them; it hit the 1200 s timeout (exit 124, load average about 30) at about step 700 of about 890 and its folder was moved out of the baseline directory (`vv-runs/logs/intel_incomplete/`), so it counts as skipped. The 12 others have a higher GNU wall time and were not started. Nothing was left running.
-- `1_step_2_step_compare` (4 rank(s), GNU wall 51.06s)
-- `1_step_2_step_compare__sf17` (4 rank(s), GNU wall 50.54s)
-- `dancing_eddies_default` (4 rank(s), GNU wall 84.91s)
-- `dancing_eddies_default__sf17` (4 rank(s), GNU wall 82.7s)
-- `dancing_eddies_default__sf17_glmat` (4 rank(s), GNU wall 118.0s)
-- `dancing_eddies_default__sf17_rep2` (4 rank(s), GNU wall 82.22s)
-- `dancing_eddies_uglmat_refine` (4 rank(s), GNU wall 99.27s)
-- `dancing_eddies_uglmat_refine__sf17` (4 rank(s), GNU wall 98.5s)
-- `divergence_test_3` (4 rank(s), GNU wall 84.54s)
-- `divergence_test_3__sf17` (4 rank(s), GNU wall 79.73s)
-- `divergence_test_3__sf17_glmat` (4 rank(s), GNU wall 134.72s)
-- `random_meshes` (4 rank(s), GNU wall 59.18s)
-- `random_meshes__sf17` (4 rank(s), GNU wall 59.91s)
-- A-24: `dancing_eddies_default__1mesh` and `__1mesh_sf17` (single rank, GNU 260 s each, not cheap), and the 8-rank multi-mesh `symmetry_test_mpi` and `symmetry_test_mpi__sf17` (above the 4-core cap). Done: `shunn3_4mesh_32` (4 variants), `symmetry_test_mpi__1mesh` and `__1mesh_sf17`, `layer_1mesh` and `__sf17`.
-- The restart repeat calibration (`calib/`) and the Intel T0/T1 repeat of the 4-rank `dancing_eddies_default` (needs the skipped runs).
+Nothing from the Tier 1, A-24 (multi-mesh, single-mesh) or A-09 lists remains skipped: the 13 four-rank cases that the box could not finish within 10 min (3 or 4 shared cores at a load of about 30), the 8-rank `symmetry_test_mpi` pair, the A-24 `dancing_eddies_default__1mesh` pair and the A-09 `int_1to2` checked-debug run were run to completion on the test machine (below). The first box attempt of `1_step_2_step_compare__sf17` (1200 s timeout) was abandoned and its folder moved to `vv-runs/logs/intel_incomplete/`.
+- A-24 is complete: `shunn3_4mesh_32` (4 variants), `dancing_eddies_default` (multi-mesh in Tier 1 and the `__1mesh` pair), `symmetry_test_mpi` (8 ranks and `__1mesh`), `layer_1mesh` and `__sf17`. The multi-mesh against single-mesh differences are the same as on GNU to four digits (`dancing_eddies_default`: error column 9.4e-01 of the norm, 5 iterations; `symmetry_test_mpi`: `u_2` 1.57e-02), so the A-24 finding does not depend on the compiler.
+- The restart repeat calibration (`calib/`) was not repeated on Intel. The Intel T0/T1 repeat of the 4-rank `dancing_eddies_default` is done (test machine, BITWISE).
 - A-46 and A-47 (the 2-to-1 refinement cases) and the setup-only sweep were not part of this request.
 - The Intel run of the full G0 setup-only sweep (T_END=0 over all 941 inputs) is still pending, as for GNU.
 
@@ -1031,11 +1067,11 @@ Skipped. Reason for the 4-rank runs: the first 4-rank runs of this capture neede
 ## Pending / not done
 
 - G0 setup-only sweep (T_END=0) over all 941 inputs: not run, pending per instruction.
-- Intel oneAPI toolchain baseline: done for the Release rebuild (section "Intel / Intel MPI baseline"), except the 4-rank cases listed there as skipped and the Intel restart-repeat calibration.
+- Intel oneAPI toolchain baseline: done for the Release rebuild (section "Intel / Intel MPI baseline"), except the Intel restart-repeat calibration and the Intel setup-only sweep.
 - A full-domain MMS error for the multi-mesh shunn3 runs is not possible from FDS output, because `_mms.csv` holds mesh 1 only.
 - Suggested follow-ups, not done here:
   - A VV-owned restart-equivalence case with a fixed DT.
-  - Repeating obst_activation_ulmat on another build.
+  - Repeating obst_activation_ulmat on another build: done on the Intel Release build, with MKL PARDISO (default) and with `SOLVER='ULMAT HYPRE'` (section "Intel / Intel MPI baseline", "ULMAT baselines by library").
 
 ## Integrity
 

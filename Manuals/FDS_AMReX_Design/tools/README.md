@@ -208,8 +208,8 @@ it is labelled `device-libm`.
 (bitwise, or at most 2 ulp for a libm kernel); the kernel owner has reviewed it; and `tools/ci_checks.sh` (the four tools with `--strict`) passes.
 The Integration Lead sets it, by adding the kernel to `tools/ported.toml` (`[[ported]]` with `kernels`, `reviewed_by`, `set_by`, and for a libm
 kernel `ulp_gate_passed = true`). A libm kernel can be ported once the V&V Lead's ulp gate exists and passes. A device run alone does not make a
-kernel ported: the `port_state` field says "device run on record" and the `Ported` column in the map says `no`. The file is empty now, so no kernel is
-called ported. The legend of the map gives the same definition. Delete an overlay entry once the gate registry lists the run.
+kernel ported: the `port_state` field says "device run on record" and the `Ported` column in the map says `no`. Only the kernels listed in the file are
+called ported (the V&V Lead is the reviewer of record for device results, the Architect co-signs the list; see `docs/amrex/ported-candidates.md`). The legend of the map gives the same definition. Delete an overlay entry once the gate registry lists the run.
 
 ## Quick start
 
