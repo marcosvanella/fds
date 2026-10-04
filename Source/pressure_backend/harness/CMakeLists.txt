@@ -18,7 +18,9 @@ endforeach()
 set(PB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_library(pressure_backend STATIC
   ${PB_DIR}/CommonLayer.cpp ${PB_DIR}/PressureIface.cpp ${PB_DIR}/FFTBackend.cpp ${PB_DIR}/MLMGBackend.cpp
-  ${PB_DIR}/CompositeSolve.cpp ${PB_DIR}/HypreBackend.cpp)
+  ${PB_DIR}/CompositeSolve.cpp ${PB_DIR}/HypreBackend.cpp ${PB_DIR}/FdsPressureLoops.cpp)
+# host translations of FDS pressure-area loops: bitwise against FDS, so no FMA contraction in that file
+set_source_files_properties(${PB_DIR}/FdsPressureLoops.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
 target_include_directories(pressure_backend PUBLIC ${PB_DIR})
 target_link_libraries(pressure_backend PUBLIC AMReX::amrex)
 
@@ -32,3 +34,4 @@ target_link_libraries(pb_fds_frozen PRIVATE pressure_backend)
 enable_testing()
 add_subdirectory(${PB_DIR}/tests ${CMAKE_CURRENT_BINARY_DIR}/tests)
 include(${PB_DIR}/tests/m4_fds_frozen.cmake)   # pb_fds_frozen_* tests
+include(${PB_DIR}/tests/m5_fds_loops.cmake)   # pb_fds_loops, mutants and pb_fdsloops_* tests (host translations of pres.f90 loops)
