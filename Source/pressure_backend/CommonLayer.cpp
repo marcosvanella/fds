@@ -377,17 +377,22 @@ void evaluate_residual (PressureResult& R, PressureOptions const& o, ResidualSum
     const double bn = std::sqrt(S.b2), an_phi = S.anorm * std::sqrt(S.phi2);
     R.residual_backward = std::sqrt(S.r2_nopin) / (bn + an_phi > 0.0 ? bn + an_phi : 1.0);
     const double u = std::ldexp(1.0, -53);
-    R.residual_floor = S.singular ? kResidualRoundoff * u * an_phi / (bn > 0.0 ? bn : 1.0) : 0.0;
+    // Size-scaled limit (FR-031, docs/pressure/07 sections 14-16): the residual of a floating-point evaluation cannot be below
+    // c u ||A|| ||H||_2 / ||b||_2 (c = kResidualRoundoff = 10), so the limit is max(residual_tol, that floor), for singular and
+    // non-singular components alike. The compared value is the non-pin residual (equal to the full one when no pin was applied).
+    R.residual_floor = kResidualRoundoff * u * an_phi / (bn > 0.0 ? bn : 1.0);
     R.residual_check = S.singular ? R.residual_rel2_nopin : R.residual_rel2;
-    R.residual_limit = o.residual_tol;
+    R.residual_limit = std::max(o.residual_tol, R.residual_floor);
     R.residual_ok = (R.residual_check <= R.residual_limit);
     if (!R.residual_ok) {
         std::ostringstream m2;
         if (S.singular) {
             m2 << "true " << S.what << "residual ||b-L*H||_2/||b||_2 = " << R.residual_check << " (pin cell excluded; raw "
-               << R.residual_rel2 << ", pin row " << R.residual_pin_rel << ") exceeds " << o.residual_tol;
+               << R.residual_rel2 << ", pin row " << R.residual_pin_rel << ") exceeds " << R.residual_limit << " (residual_tol " << o.residual_tol
+               << ", round-off floor " << R.residual_floor << ")";
         } else {
-            m2 << "true " << S.what << "residual ||b-L*H||_2/||b||_2 = " << R.residual_rel2 << " exceeds " << o.residual_tol;
+            m2 << "true " << S.what << "residual ||b-L*H||_2/||b||_2 = " << R.residual_rel2 << " exceeds " << R.residual_limit << " (residual_tol " << o.residual_tol
+               << ", round-off floor " << R.residual_floor << ")";
         }
         R.warnings.push_back(m2.str());
     }

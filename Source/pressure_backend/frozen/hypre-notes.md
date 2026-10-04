@@ -154,16 +154,17 @@ max / max|b|; weight 1 on a single level, the cell volume on a hierarchy, cells 
     residual_relmax_nopin= max|r_nopin| / max|b|
     residual_pin_rel     = sqrt(w_pin) |r_pin| / ||b||_2 ;  residual_pin_abs = |r_pin|        the pin row, separately
     residual_check       = residual_rel2_nopin  (singular component)  or  residual_rel2  (otherwise: unchanged behaviour)
-    warn iff               residual_check > residual_tol                 (residual_tol = 1e-12 by default; not relaxed)
+    residual_limit       = max(residual_tol, residual_floor)             (FR-031, A-67; residual_tol = 1e-12 by default; see "Size-scaled limit")
+    warn iff               residual_check > residual_limit
 
 The pin is reported by the backend (`BackendStatus::pin_applied`, `pin_level`, `pin_cell`), so the cell excluded is exactly the one the matrix
 pinned, including on a hierarchy (lowest-index uncovered cell of the coarsest level that has one). MLMG and FFT apply no pin, so for them
 the checked value is the full residual, as before. The warning text gives the pin-excluded value, the full value, the pin row and the tolerance;
 with `verbose >= 2` a `PRESSURE INFO` line logs the full residual, the non-pin residual (2-norm and max) and the pin row for every solve.
 
-Extra quantities, reported and never warned on: `residual_rel2_mr` (mean-removed), `residual_floor` = 10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with
-||A|| = 4 sum_d 1/dx_d^2 (finest level, directions with more than one cell; round-off size of a floating-point residual, singular components
-only), `residual_backward` = ||r_nopin||_2 / (||b||_2 + ||A|| ||H||_2) (normwise backward error; 1.5e-16 to 4.5e-16 here, one to four times 2^-53).
+`residual_floor` = 10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with ||A|| = 4 sum_d 1/dx_d^2 (finest level, directions with more than one cell;
+round-off size of a floating-point residual) is computed for singular and non-singular components and is the lower bound of `residual_limit`
+(next section). Extra quantities, reported and never warned on: `residual_rel2_mr` (mean-removed), `residual_backward` = ||r_nopin||_2 / (||b||_2 + ||A|| ||H||_2) (normwise backward error; 1.5e-16 to 4.5e-16 here, one to four times 2^-53).
 
 Measured, single level, synthetic right-hand side, default `tol_rel` 1e-12, 2 ranks, boxes of 32 (the raw numbers depend on box layout and rank
 count; the earlier notes had 6e-13, 1.3e-13 and 6.8e-12 on another layout). "Before" is the check that existed (full residual against 1e-12):
@@ -180,9 +181,8 @@ count; the earlier notes had 6e-13, 1.3e-13 and 6.8e-12 on another layout). "Bef
 Does the non-pin residual still grow? Yes, but not like sqrt(N) from the pin: HYPRE 7.8e-14 (48^3), 1.3e-13 (64^3), 3.0e-13 (96^3) Neumann
 and 1.1e-13, 1.5e-13, 3.3e-13 periodic, and MLMG and FFT grow the same way (MLMG periodic 2.8e-13, 4.2e-13, 6.9e-13). That growth is the
 round-off of the residual evaluation itself, which scales with ||A|| ||H||/||b|| = O(N^(2/3)) on the unit cube (the backward error stays constant at
-about 2e-16), and if the trend continues (not measured beyond 96^3) it reaches 1e-12 somewhere above 128^3. The tolerance is not relaxed: at that size the
-check would warn for every backend, including MLMG and FFT; `residual_floor` and
-`residual_backward` are there to tell a round-off warning from a real one.
+about 2e-16), and if the trend continues (not measured beyond 96^3) it reaches 1e-12 somewhere above 128^3. Resolved by the size-scaled limit
+(next section): above that size the limit follows `residual_floor` instead of staying at 1e-12, for every backend.
 
 Negative controls (all must warn, and do): HYPRE at 48^3 with `tol_rel` 1e-3, 1e-6 and 1e-9, and with `max_iter` 4 (NotConverged); a perturbed H (smooth
 cosine mode of relative amplitude 1e-9 and 1e-11, cell noise of relative amplitude 1e-13) re-evaluated through the same code (`mode=rescheck`);
@@ -190,6 +190,39 @@ composite HYPRE and MLMG with `tol_rel` 1e-4 (`mode=hypre_resid`, expect_warn=1)
 unperturbed solves do not warn. Synthetic sums: a residual that is large only at the pin row passes with the pin excluded and warns without
 one; a non-singular component gets the raw check against `residual_tol`. MLMG and FFT results are bitwise unchanged (hashes of H and the raw
 residuals equal to the build before this change on 34x18x32 Neumann, periodic and Dirichlet, 64^3 periodic and the composite cases).
+
+## Size-scaled residual limit (FR-031, A-67)
+
+Implemented in `evaluate_residual` (common layer; single level and composite, every backend):
+
+    residual_floor = 10 * 2^-53 * ||A|| * ||H||_2 / ||b||_2          ||A|| = 4 sum_d 1/dx_d^2 (finest level, directions of more than one cell)
+    residual_limit = max(residual_tol, residual_floor)                residual_tol = 1e-12 by default
+    warn iff residual_check > residual_limit                          residual_check = non-pin residual (full residual when no pin was applied)
+
+What changed against the earlier check: the floor was informational and zero for non-singular components; it is now computed for every component
+and bounds the limit from below. `PressureResult::residual_limit` reports the effective limit; the warning text gives the limit, `residual_tol`
+and the floor. `residual_tol` itself is unchanged (a user value above the floor wins). `||H||_2` and `||b||_2` are the weighted 2-norms already
+used for the residual (cell volumes on a hierarchy), `||H||` the gauge-fixed returned solution.
+
+Measured (harness `mode=solve`, synthetic smooth right-hand side, unit cube, 2 ranks, boxes of 32):
+
+| problem | n | floor | limit | FFT check | MLMG check | HYPRE check (non-pin) |
+|---|---|---|---|---|---|---|
+| Neumann | 48 | 5.4e-13 | 1e-12 | 4.5e-14 | 9.6e-14 | 7.8e-14 |
+| Neumann | 96 | 2.1e-12 | 2.1e-12 | 1.9e-13 | 2.8e-13 | 3.0e-13 |
+| Dirichlet | 48 | 2.4e-13 | 1e-12 | 2.3e-14 | 1.3e-13 | 4.9e-14 |
+| Dirichlet | 96 | 9.4e-13 | 1e-12 | 1.0e-13 | 1.1e-13 | 1.3e-13 |
+
+The floor grows like N^2 (48 to 96: factor 4.0 for Neumann, 4.0 for Dirichlet); the base 1e-12 applies until the floor passes it (about n = 65 on
+this data for Neumann, n = 100 for Dirichlet; about 77 on the Pressure Lead's data in docs/pressure/07 section 15.5). The measured checks are 2 to 40 times below the limit, so no unperturbed solve warns. Negative
+controls still warn: HYPRE and MLMG on 48^3 Dirichlet at `tol_rel` 1e-6 and at `max_iter` 4; the earlier HYPRE negative controls (`tol_rel` 1e-3,
+1e-6, 1e-9, `max_iter` 4) and the perturbed-H controls (relative amplitude 1e-9, 1e-11 smooth; 1e-13 noise) are unchanged. A synthetic check of the formula
+(`mode=rescheck`) covers the floor value, the limit when the floor is above or below `residual_tol`, and singular and non-singular components.
+Composite hierarchies use the finest-level `||A||`; not measured beyond the 16-cell two- and three-level test cases (floor 1.6e-13 on the two-level
+Neumann case, below `residual_tol`).
+
+Tests: `pb_resid_limit` (three backends, Neumann and Dirichlet, n = 48 and 96, floor scaling, negative controls), `pb_resid_check_*` (synthetic
+formula), `pb_hypre_resid_*` (limit = max(residual_tol, floor)).
 
 ## Limitations
 

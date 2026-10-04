@@ -131,3 +131,6 @@ foreach(bc neumann periodic)
   pb_add_test(pb_resid_check_${bc}   rescheck --bc ${bc} --n "48 48 48")
 endforeach()
 pb_add_test(pb_hypre_resid_comp hypresidcomp)
+# (g) size-scaled residual limit (FR-031, A-67): limit = max(residual_tol, 10 u ||A|| ||H||/||b||) for singular and non-singular problems,
+#     every backend, floor scaling with N, negative controls still warn (the synthetic formula check is in rescheck).
+pb_add_test(pb_resid_limit reslimit --ns "48 96")

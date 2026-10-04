@@ -94,10 +94,17 @@ The HYPRE backend is optional at compile time. Everything that names HYPRE is be
 ## Residual check (see frozen/hypre-notes.md, "Residual check")
 
 `PressureResult::residual_rel2` / `residual_relmax` are the full ||b - L H|| / ||b|| (2-norm, max), always reported. For a non-singular
-component, or when the backend applied no pin (MLMG, FFT), that is the checked value against `residual_tol`, unchanged. When HYPRE pinned
+component, or when the backend applied no pin (MLMG, FFT), that is the checked value (`residual_check`). When HYPRE pinned
 an unknown (singular problem) the pin cell is excluded: the residual of a conservative operator with a mean-free right-hand side sums to
 zero, so the pin row holds the sum of all other residuals (up to sqrt(N) times their 2-norm) and is not an independent equation. The warning is on
-`residual_rel2_nopin = ||r_nopin||_2 / ||b||_2` (scaled like MLMG's) against the unrelaxed `residual_tol`; also reported are
-`residual_relmax_nopin`, the pin row (`residual_pin_rel`, `residual_pin_abs`), `residual_check`, `residual_limit` (= `residual_tol`) and the extras
-`residual_rel2_mr` (mean-removed; equals the full value), `residual_floor`, `residual_backward`. `verbose >= 2` logs full and non-pin values.
+`residual_rel2_nopin = ||r_nopin||_2 / ||b||_2` (scaled like MLMG's); also reported are
+`residual_relmax_nopin`, the pin row (`residual_pin_rel`, `residual_pin_abs`), `residual_check`, `residual_limit` and the extras
+`residual_rel2_mr` (mean-removed; equals the full value) and `residual_backward`. `verbose >= 2` logs full and non-pin values.
+
+**Size-scaled limit (FR-031, A-67; docs/pressure/07 sections 14-16).** The checked value is compared with
+`residual_limit = max(residual_tol, residual_floor)`, `residual_floor = 10 * 2^-53 * ||A|| ||H||_2 / ||b||_2`, `||A|| = 4 sum_d 1/dx_d^2`
+(finest level, directions of more than one cell), `||H||_2` and `||b||_2` the weighted 2-norms of the returned solution and of the
+mean-removed right-hand side. The floor is computed for every component, singular or not. `residual_tol` stays 1e-12, so the limit equals
+`residual_tol` while the floor is below it (smooth unit-cube data: about 65 to 100 cells per direction, depending on the problem) and grows like N^2 above that. Warn iff
+`residual_check > residual_limit`; the warning text names the limit, `residual_tol` and the floor. `residual_ok` means `residual_check <= residual_limit`.
 Harness: `mode=rescheck`, `mode=hypre_resid`; ctests `pb_hypre_resid_*`, `pb_resid_check_*`, `pb_hypre_resid_comp`.

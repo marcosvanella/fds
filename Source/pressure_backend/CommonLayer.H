@@ -72,9 +72,10 @@ struct ResidualSums {
     bool pin_excluded = false;
     const char* what = "";                        // wording in the warning ("", "composite ")
 };
-// Fills the residual_* fields of R and appends the warning if the check fails. Non-singular: residual_check = residual_rel2 against
-// residual_tol, exactly as before. Singular: residual_check = residual_rel2_nopin (pin cell excluded when a pin was applied) against
-// the same residual_tol; residual_floor / residual_rel2_mr / residual_backward are informational.
+// Fills the residual_* fields of R and appends the warning if the check fails. residual_check = residual_rel2_nopin for a singular
+// component (the full residual when no pin was applied), residual_rel2 otherwise; it is compared with
+// residual_limit = max(residual_tol, residual_floor), residual_floor = kResidualRoundoff 2^-53 anorm sqrt(phi2)/sqrt(b2) for every
+// component, singular or not (FR-031, A-67). residual_rel2_mr / residual_backward are informational.
 void evaluate_residual (PressureResult& R, PressureOptions const& o, ResidualSums const& S);
 
 // Single-level: the sums for phi (gauge-fixed H) and the mean-removed right-hand side rhs; `pin` is the pinned cell of the solve

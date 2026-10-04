@@ -602,7 +602,29 @@ void run_rescheck (ParmParse& pp)
         check(!c.residual_ok, "synthetic: the same residual without a pin applied warns");
         S.singular = false;
         pb::PressureResult d; pb::evaluate_residual(d, o, S);
-        check(!d.residual_ok && d.residual_floor == 0.0 && d.residual_limit == o.residual_tol && d.residual_check == d.residual_rel2, "synthetic: non-singular: raw residual against residual_tol, no floor");
+        // anorm = ||A||, phi2 = ||H||^2, b2 = ||b||^2 chosen so that the floor is below residual_tol: the limit is residual_tol.
+        check(!d.residual_ok && d.residual_floor > 0.0 && d.residual_floor < o.residual_tol && d.residual_limit == o.residual_tol && d.residual_check == d.residual_rel2,
+              "synthetic: non-singular, small floor: raw residual against residual_tol (the floor is set but below it)");
+    }
+    {   // Synthetic formula: limit = max(residual_tol, 10 * 2^-53 * ||A|| ||H||_2 / ||b||_2), singular and non-singular alike.
+        const double u = std::ldexp(1.0, -53);
+        for (int sing = 0; sing < 2; ++sing) {
+            pb::ResidualSums S; S.singular = (sing == 1); S.sumw = 1.0e6; S.anorm = 1.0; S.phi2 = 4.0; S.b2 = 1.0e-6;   // ||A|| ||H||/||b|| = 2e3
+            const double floor_expect = 10.0 * u * 1.0 * 2.0 / 1.0e-3;                                                      // 2.2e-12
+            const char* w = sing ? "singular" : "non-singular";
+            S.r2 = S.r2_nopin = 1.5e-12*1.5e-12 * S.b2;        // relative residual 1.5e-12: above residual_tol, below the floor
+            pb::PressureResult a; pb::evaluate_residual(a, o, S);
+            check(std::abs(a.residual_floor - floor_expect) <= 1e-14*floor_expect, std::string("synthetic ") + w + ": floor = 10 u ||A|| ||H||/||b||");
+            check(a.residual_limit == floor_expect && a.residual_limit > o.residual_tol, std::string("synthetic ") + w + ": limit = floor when the floor exceeds residual_tol");
+            check(a.residual_ok && a.warnings.empty(), std::string("synthetic ") + w + ": 1.5e-12 passes under the floor-based limit 2.2e-12");
+            S.r2 = S.r2_nopin = 3.0e-12*3.0e-12 * S.b2;        // above the floor: must warn, and the text names the limit
+            pb::PressureResult b; pb::evaluate_residual(b, o, S);
+            check(!b.residual_ok && b.warnings.size() == 1 && b.residual_limit == floor_expect, std::string("synthetic ") + w + ": 3e-12 above the limit warns");
+            o.residual_tol = 5.0e-12;                           // residual_tol above the floor: it wins
+            pb::PressureResult c; pb::evaluate_residual(c, o, S);
+            check(c.residual_ok && c.residual_limit == 5.0e-12, std::string("synthetic ") + w + ": residual_tol above the floor is the limit");
+            o.residual_tol = 1.0e-12;
+        }
     }
 }
 

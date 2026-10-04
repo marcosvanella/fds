@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CTest driver for the pressure backend harness. Parses the harness RESULT/CMP/CHECK lines.
 Subcommands: selector, exactsum, fftmlmg, frozen, decomp, repeat, singular, ulmat, ulmatgauge, meankind,
-residual check: hypresid, rescheck, hypresidcomp;
+residual check: hypresid, rescheck, reslimit, hypresidcomp;
 composite: compconv, compfull, compdecomp, comp3, compgrad, compshape, compmixed, compns2d, compsel, compws (composite two-/three-level
 solves; manufactured solutions, see harness/composite_modes.cpp and frozen/composite-notes.md).
 Exit 0 = pass. ulmat/ulmatgauge/meankind compare against an independent numpy computation that follows FDS
@@ -716,8 +716,9 @@ def hypresid():
         r = kv(lines(out, "RESULT")[0])
         raw, nop, chk, lim = (float(r[k]) for k in ("true_rel2", "rel2_nopin", "check", "limit"))
         ok(r["status"] == "Ok" and r["residual_ok"] == "1" and r["nwarn"] == "0", f"n={ns} {A.bc}: no warning at the default residual_tol 1e-12 (full {raw:.2e}, pin-excluded {nop:.2e})")
-        ok(lim == 1e-12, f"n={ns} {A.bc}: residual_tol is not relaxed (limit {lim:g})")
-        ok(chk == nop and chk <= 1e-12, f"n={ns} {A.bc}: checked value is the pin-excluded residual {nop:.2e} <= 1e-12")
+        fl = float(r["floor"])
+        ok(lim == max(1e-12, fl), f"n={ns} {A.bc}: limit = max(residual_tol 1e-12, floor {fl:.2e}) = {lim:g}")
+        ok(chk == nop and chk <= lim, f"n={ns} {A.bc}: checked value is the pin-excluded residual {nop:.2e} <= limit {lim:.2e}")
         N = int(ns) ** 3
         ok(float(r["pin_rel"]) <= math.sqrt(N) * nop * 1.0001 + 1e-30, f"n={ns} {A.bc}: pin-row residual {float(r['pin_rel']):.2e} <= sqrt(N)*||r_nopin|| (Cauchy-Schwarz on the zero-sum residual)")
         ok(abs(float(r["rel2_mr"]) - raw) <= 1e-3 * raw, f"n={ns} {A.bc}: mean removal of the residual changes nothing (mr {float(r['rel2_mr']):.3e} vs raw {raw:.3e})")
@@ -729,6 +730,36 @@ def hypresid():
     rc, out = run(2, mode="solve", n_cell=n, bc=A.bc, max_grid_size=32, backends="hypre", verbose=1, max_iter=4)
     r = kv(lines(out, "RESULT")[0])
     ok(r["residual_ok"] == "0" and r["status"] == "NotConverged", f"negative control max_iter=4: NotConverged and the residual check warns ({float(r['check']):.2e})")
+
+def reslimit():
+    """Size-scaled residual limit (FR-031, A-67) for every backend, singular (Neumann) and non-singular (Dirichlet) problems:
+    limit = max(1e-12, floor), floor > 0 for both kinds and growing like N^2, unperturbed solves do not warn, loose solves do."""
+    flo = {}
+    for bc in ("neumann", "dirichlet"):
+        for ns in A.ns.split():
+            rc, out = run(2, mode="solve", n_cell=f"{ns} {ns} {ns}", bc=bc, max_grid_size=32, backends="fft mlmg hypre", verbose=1); print(out)
+            ok(rc == 0, f"{bc} n={ns}: harness exit 0")
+            for l in lines(out, "RESULT"):
+                r = kv(l); be = l.split()[1]
+                fl, lim, chk = float(r["floor"]), float(r["limit"]), float(r["check"])
+                ok(r["status"] == "Ok" and r["residual_ok"] == "1" and r["nwarn"] == "0", f"{bc} n={ns} {be}: Ok, no warning (check {chk:.2e}, limit {lim:.2e})")
+                ok(fl > 0.0 and lim == max(1e-12, fl), f"{bc} n={ns} {be}: floor {fl:.2e} > 0 and limit {lim:.3e} = max(1e-12, floor)")
+                ok(chk <= lim, f"{bc} n={ns} {be}: checked value {chk:.2e} <= limit")
+                flo[(bc, be, int(ns))] = fl
+    ns_ = sorted(int(x) for x in A.ns.split())
+    for bc in ("neumann", "dirichlet"):
+        for be in ("fft", "mlmg", "hypre"):
+            if (bc, be, ns_[0]) not in flo or (bc, be, ns_[-1]) not in flo: continue
+            ratio = flo[(bc, be, ns_[-1])] / flo[(bc, be, ns_[0])]; want = (ns_[-1] / ns_[0]) ** 2
+            ok(0.8 * want <= ratio <= 1.25 * want, f"{bc} {be}: floor grows like N^2 from n={ns_[0]} to {ns_[-1]} (ratio {ratio:.2f}, N^2 ratio {want:.2f})")
+    # Negative controls on the non-singular (Dirichlet) problem: the scaled limit does not hide an under-converged solve.
+    for be in ("mlmg", "hypre"):
+        rc, out = run(2, mode="solve", n_cell="48 48 48", bc="dirichlet", max_grid_size=32, backends=be, verbose=1, tol_rel=1e-6)
+        r = kv(lines(out, "RESULT")[0])
+        ok(r["residual_ok"] == "0" and r["nwarn"] == "1" and float(r["check"]) > float(r["limit"]), f"dirichlet {be} tol_rel=1e-6: warns (check {float(r['check']):.2e} > limit {float(r['limit']):.2e})")
+        rc, out = run(2, mode="solve", n_cell="48 48 48", bc="dirichlet", max_grid_size=32, backends=be, verbose=1, max_iter=4)
+        r = kv(lines(out, "RESULT")[0])
+        ok(r["residual_ok"] == "0" and float(r["check"]) > float(r["limit"]), f"dirichlet {be} max_iter=4: residual check warns (status {r['status']}, check {float(r['check']):.2e})")
 
 def rescheck():
     """Residual check on the final H of a solve and on perturbed copies; synthetic sums (harness mode rescheck)."""
@@ -753,7 +784,7 @@ def hypresidcomp():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "hypresidcomp": hypresidcomp}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
