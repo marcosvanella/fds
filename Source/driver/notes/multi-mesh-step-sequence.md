@@ -23,5 +23,9 @@ Findings (plain FDS, USE_AMREX=OFF build of the committed tree, the same input w
   interior mesh corner, not in the driver's dt candidates, mesh set for the minimum or the order of the pressure pass; where exactly in FDS has not been traced.
 - The remaining difference of the driver from the 1-mesh FDS (1.6e-4 in the step-1 T) is present for the 1-mesh variant too, i.e. it is not a multi-mesh effect.
 
-`tests/run_step_sequence_check.sh` compares T and DT of the first 40 steps at 1 and 4 ranks with the baseline `_steps.csv` (2e-3 tolerance, which covers the step-1
-offset) and requires np 1 and np 4 to be identical. It is in the regular list (`run_driver_tests.sh`).
+Ruling: single-mesh FDS is the ground truth and a multi-mesh run must equal it; the driver is unchanged. The multi-mesh FDS first-dt offset above (6.195e-4 against
+6.188e-4 s) is a known reference quirk; the candidate cause (unconfirmed) is interpolated-boundary UVW_SAVE data in the first trial CFL pass.
+
+`tests/run_step_sequence_check.sh` compares the driver (4-mesh input at 1 and 4 ranks, and the 1-mesh input) with the SINGLE-MESH FDS baseline
+`shunn3_4mesh_32__1mesh` only: the three driver runs must be identical, DT within the .csv rounding (6e-3) and T within 5e-4 over the first 40 steps. The multi-mesh FDS
+run is not a reference. It is in the regular list (`run_driver_tests.sh`).

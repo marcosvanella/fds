@@ -31,7 +31,7 @@ for spec in "shunn3_32 1" "shunn3_4mesh_32 4"; do
 done
 if [ -n "${h[0]}" ] && [ "${h[0]}" = "${h[1]}" ]; then echo "PASS side-data hash equal for 1 mesh and 4 meshes: ${h[0]}"; else echo "FAIL side-data hash differs: '${h[0]}' vs '${h[1]}'"; rc=1; fi
 bash "$HERE/run_stage_boundary_fine_check.sh" "$BLD" "$BLD/run/stageboundary" || rc=1
-bash "$HERE/run_step_sequence_check.sh" "$BLD" "$BLD/run/stepseq" || rc=1   # T, DT per step of shunn3_4mesh_32 (2x2 meshes), np 1 and 4, against plain FDS
+bash "$HERE/run_step_sequence_check.sh" "$BLD" "$BLD/run/stepseq" || rc=1   # T, DT per step of shunn3_4mesh_32 (2x2 meshes), np 1 and 4, against single-mesh FDS
 if [ "${DRIVER_DENSITY_CHECK:-0}" = 1 ]; then bash "$HERE/run_two_level_density_check.sh" "$BLD" "$BLD/run/density" || rc=1; fi
 [ $rc = 0 ] && echo "ALL DRIVER TESTS PASS" || echo "DRIVER TESTS FAILED"
 exit $rc
