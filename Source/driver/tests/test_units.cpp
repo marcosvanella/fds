@@ -38,6 +38,7 @@
 #include "ExactSum.H"
 #include "LevelRegistry.H"
 #include "PressureBcMap.H"
+#include "RegistryTransfer.H"
 
 using namespace fdsamr;
 
@@ -805,6 +806,176 @@ long test_pressure_bc_map(int)
     return fdstest::report("pressure_bc_map (S9 thin-direction rules: FDS codes -> FFT boundary strings)");
 }
 
+
+// S11.2: RegistryTransfer (the adapter from the registry fields to Role 3's regrid transfer operators). 16x1x16 periodic 2-D domain with a smooth, exactly divergence-free
+// velocity from a stream function, two species; level 1 = ratio (2,1,2) over coarse cells 4..11 in x and z.
+long test_registry_transfer(int nranks)
+{
+    Layout L0{"ns2d", {16, 1, 16}, {2, 1, 2}, {1, 0, 1}};
+    Level0 l0 = make_level0(L0, nranks);
+    Fields F0(l0, 2);
+    SideData sd0(l0, layout_cell_walls(l0));
+    LevelRegistry reg(l0.dom, 2);
+    reg.adopt_level0(l0, F0, sd0);
+    const double PI = 3.14159265358979323846;
+    const double plo[3] = {-1.0, -1.0, -1.0};
+    const double dx0 = l0.dx[0], dz0 = l0.dx[2];
+    auto psi = [&](int i, int k) { return std::sin(2.0 * PI * (plo[0] + i * dx0) / 8.0) * std::cos(2.0 * PI * (plo[2] + k * dz0) / 2.0); };
+    auto rho_f = [&](double x, double z) { return 1.0 + 0.1 * std::sin(2.0 * PI * x / 8.0) * std::cos(2.0 * PI * z / 2.0); };
+    auto z0_f = [&](double x, double z) { return 0.35 + 0.2 * std::cos(2.0 * PI * x / 8.0) * std::sin(2.0 * PI * z / 2.0); };
+    for (amrex::MFIter mfi(F0["RHO"]); mfi.isValid(); ++mfi) {
+        auto r = F0["RHO"].array(mfi); auto rs = F0["RHOS"].array(mfi); auto t = F0["TMP"].array(mfi); auto z = F0["ZZ"].array(mfi); auto zs = F0["ZZS"].array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            const double x = plo[0] + (i + 0.5) * dx0, zc = plo[2] + (k + 0.5) * dz0;
+            r(i, j, k) = rho_f(x, zc); rs(i, j, k) = r(i, j, k); t(i, j, k) = 300.0 + 10.0 * x;
+            z(i, j, k, 0) = z0_f(x, zc); z(i, j, k, 1) = 1.0 - z0_f(x, zc); zs(i, j, k, 0) = z(i, j, k, 0); zs(i, j, k, 1) = z(i, j, k, 1);
+        });
+    }
+    for (amrex::MFIter mfi(F0["U"]); mfi.isValid(); ++mfi) {
+        auto u = F0["U"].array(mfi); auto us = F0["US"].array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { u(i, j, k) = (psi(i, k + 1) - psi(i, k)) / dz0; us(i, j, k) = u(i, j, k); });
+    }
+    for (amrex::MFIter mfi(F0["W"]); mfi.isValid(); ++mfi) {
+        auto w = F0["W"].array(mfi); auto ws = F0["WS"].array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { w(i, j, k) = -(psi(i + 1, k) - psi(i, k)) / dx0; ws(i, j, k) = w(i, j, k); });
+    }
+    F0["U"].FillBoundary(l0.geom.periodicity()); F0["W"].FillBoundary(l0.geom.periodicity());
+    for (const char* nm : {"RHO", "RHOS", "TMP", "ZZ", "ZZS", "V", "VS"}) F0[nm].FillBoundary(l0.geom.periodicity());
+    // original rho*Z of level 0 for the conservation comparison
+    amrex::MultiFab rz_orig(l0.ba, l0.dm, 2, 0);
+    for (amrex::MFIter mfi(rz_orig); mfi.isValid(); ++mfi) {
+        auto o = rz_orig.array(mfi); auto r = F0["RHO"].const_array(mfi); auto z = F0["ZZ"].const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { for (int n = 0; n < 2; ++n) o(i, j, k, n) = r(i, j, k) * z(i, j, k, n); });
+    }
+    amrex::MultiFab u_orig(F0["U"].boxArray(), l0.dm, 1, 0);
+    amrex::MultiFab::Copy(u_orig, F0["U"], 0, 0, 1, 0);
+
+    const amrex::IntVect rr(2, 1, 2);
+    auto fine_layout = [&](int x0, int x1, int z0, int z1, int nbx) {   // coarse cell range [x0,x1] x [z0,z1], nbx boxes along x
+        fdsrt::LevelLayout fl;
+        fl.level = 1; fl.ref_ratio_from_parent = rr;
+        amrex::Box fdom = amrex::refine(l0.geom.Domain(), rr);
+        amrex::RealBox rb(l0.geom.ProbLo(), l0.geom.ProbHi());
+        amrex::Array<int, 3> per{l0.dom.periodic[0], l0.dom.periodic[1], l0.dom.periodic[2]};
+        fl.geom.define(fdom, rb, 0, per);
+        amrex::BoxList bl;
+        const int nx = 2 * (x1 - x0 + 1);
+        for (int q = 0; q < nbx; ++q) bl.push_back(amrex::Box(amrex::IntVect(2 * x0 + nx * q / nbx, 0, 2 * z0), amrex::IntVect(2 * x0 + nx * (q + 1) / nbx - 1, 0, 2 * z1 + 1)));
+        fl.ba.define(bl); fl.dm.define(fl.ba);
+        return fl;
+    };
+    RegistryTransfer tr(reg, 2);
+    fdsrt::LevelLayout f2 = fine_layout(4, 11, 4, 11, 2);
+    reg.begin_regrid();
+    reg.make_level(f2);
+    tr.fill_new_level(f2);
+    tr.hierarchy_done(false);
+    reg.end_regrid();
+    const Level& lv = reg.level(1);
+    Fields& F1 = reg.fields(1);
+    // (a) mass fractions sum to 1, rho = sum rho*Z, positive; (b) clips none on smooth data
+    double worst_sum = 0.0;
+    for (amrex::MFIter mfi(F1["RHO"]); mfi.isValid(); ++mfi) {
+        auto z = F1["ZZ"].const_array(mfi); auto r = F1["RHO"].const_array(mfi); auto rs = F1["RHOS"].const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            worst_sum = std::max(worst_sum, std::abs(z(i, j, k, 0) + z(i, j, k, 1) - 1.0));
+            CHECK_MSG(r(i, j, k) > 0.0 && rs(i, j, k) == r(i, j, k), "fine rho positive and RHOS = RHO");
+        });
+    }
+    amrex::ParallelAllReduce::Max(worst_sum, amrex::ParallelContext::CommunicatorSub());
+    CHECK_MSG(worst_sum < 1e-14, "fine mass fractions sum to 1 (worst " + std::to_string(worst_sum) + ")");
+    CHECK_MSG(tr.stats().clips == 0 && tr.stats().parents > 0, "no clip on smooth positive data");
+    // (c) conservation: after the average-down the covered coarse rho*Z equals the original
+    double worst_cons = 0.0, scale = 0.0;
+    for (amrex::MFIter mfi(rz_orig); mfi.isValid(); ++mfi) {
+        auto o = rz_orig.const_array(mfi); auto r = F0["RHO"].const_array(mfi); auto z = F0["ZZ"].const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { for (int n = 0; n < 2; ++n) { worst_cons = std::max(worst_cons, std::abs(r(i, j, k) * z(i, j, k, n) - o(i, j, k, n))); scale = std::max(scale, std::abs(o(i, j, k, n))); } });
+    }
+    amrex::ParallelAllReduce::Max(worst_cons, amrex::ParallelContext::CommunicatorSub());
+    CHECK_MSG(worst_cons < 1e-13 * scale, "children of every parent average to the parent rho*Z (worst abs " + std::to_string(worst_cons) + ")");
+    // (d) interface faces carry the coarse value; every fine cell has the divergence of its parent (zero here)
+    double worst_if = 0.0, worst_div = 0.0;
+    {
+        amrex::BoxArray cba = lv.ba; cba.coarsen(rr); cba.surroundingNodes(0);
+        amrex::MultiFab uc(cba, lv.dm, 1, 0);
+        uc.ParallelCopy(u_orig, 0, 0, 1, 0, 0);
+        for (amrex::MFIter mfi(F1["U"]); mfi.isValid(); ++mfi) {
+            auto u = F1["U"].const_array(mfi); auto us = F1["US"].const_array(mfi); auto c = uc.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                if (i % 2 == 0) worst_if = std::max(worst_if, std::abs(u(i, j, k) - c(i / 2, 0, amrex::coarsen(k, 2))));   // fine x-face on the coarse face i/2
+                worst_if = std::max(worst_if, std::abs(us(i, j, k) - u(i, j, k)));
+            });
+        }
+    }
+    for (amrex::MFIter mfi(F1["RHO"]); mfi.isValid(); ++mfi) {
+        auto u = F1["U"].const_array(mfi); auto w = F1["W"].const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            const double d = (u(i + 1, j, k) - u(i, j, k)) / lv.dx[0] + (w(i, j, k + 1) - w(i, j, k)) / lv.dx[2];
+            worst_div = std::max(worst_div, std::abs(d));
+        });
+    }
+    amrex::ParallelAllReduce::Max(worst_if, amrex::ParallelContext::CommunicatorSub());
+    amrex::ParallelAllReduce::Max(worst_div, amrex::ParallelContext::CommunicatorSub());
+    CHECK_MSG(worst_if < 1e-13 + 1e-13 * 1.0, "fine faces on coarse faces carry the coarse value (worst " + std::to_string(worst_if) + ")");
+    CHECK_MSG(worst_div < 1e-10, "fine cells keep the (zero) divergence of the parents (worst " + std::to_string(worst_div) + ")");
+    // (e) remade level: another split and a larger region; the old fine data are copied bitwise over the overlap
+    amrex::MultiFab rho_old(F1["RHO"].boxArray(), F1["RHO"].DistributionMap(), 1, 0);
+    amrex::MultiFab::Copy(rho_old, F1["RHO"], 0, 0, 1, 0);
+    amrex::BoxArray old_ba = lv.ba;
+    const amrex::DistributionMapping old_dm = F1["RHO"].DistributionMap();
+    amrex::MultiFab zz_old(F1["ZZ"].boxArray(), F1["ZZ"].DistributionMap(), 2, 0);
+    amrex::MultiFab::Copy(zz_old, F1["ZZ"], 0, 0, 2, 0);
+    amrex::MultiFab u_old(F1["U"].boxArray(), F1["U"].DistributionMap(), 1, 0);
+    amrex::MultiFab::Copy(u_old, F1["U"], 0, 0, 1, 0);
+    fdsrt::LevelLayout f4 = fine_layout(3, 12, 4, 11, 5);
+    reg.begin_regrid();
+    reg.remake_level(f4);
+    tr.fill_remade_level(f4);
+    reg.end_regrid();
+    CHECK_MSG(tr.stats().copied_old_cells > 0 && tr.stats().n_remade == 1, "remade level copied old fine cells");
+    // compare on the overlap (old valid cells are still present in the new level's valid region)
+    double diff_rho = 0.0, diff_zz = 0.0, diff_u = 0.0; long ncmp = 0;
+    {
+        amrex::MultiFab nrho(old_ba, old_dm, 1, 0), nzz(old_ba, old_dm, 2, 0);
+        amrex::BoxArray uba = old_ba; uba.surroundingNodes(0);
+        amrex::MultiFab nu(uba, old_dm, 1, 0);
+        nrho.ParallelCopy(reg.fields(1)["RHO"], 0, 0, 1, 0, 0); nzz.ParallelCopy(reg.fields(1)["ZZ"], 0, 0, 2, 0, 0); nu.ParallelCopy(reg.fields(1)["U"], 0, 0, 1, 0, 0);
+        for (amrex::MFIter mfi(nrho); mfi.isValid(); ++mfi) {
+            auto a = nrho.const_array(mfi); auto b = rho_old.const_array(mfi); auto c = nzz.const_array(mfi); auto d = zz_old.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                ++ncmp; diff_rho = std::max(diff_rho, std::abs(a(i, j, k) - b(i, j, k)));
+                for (int n = 0; n < 2; ++n) diff_zz = std::max(diff_zz, std::abs(c(i, j, k, n) - d(i, j, k, n)));
+            });
+        }
+        for (amrex::MFIter mfi(nu); mfi.isValid(); ++mfi) {
+            auto a = nu.const_array(mfi); auto b = u_old.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { diff_u = std::max(diff_u, std::abs(a(i, j, k) - b(i, j, k))); });
+        }
+    }
+    amrex::ParallelAllReduce::Max(diff_rho, amrex::ParallelContext::CommunicatorSub());
+    amrex::ParallelAllReduce::Max(diff_zz, amrex::ParallelContext::CommunicatorSub());
+    amrex::ParallelAllReduce::Max(diff_u, amrex::ParallelContext::CommunicatorSub());
+    CHECK_MSG(ncmp > 0 || nranks > 1, "overlap compared");
+    CHECK_MSG(diff_rho == 0.0 && diff_zz == 0.0 && diff_u == 0.0, "old fine RHO, ZZ and U are kept bitwise on the overlap");
+    CHECK_MSG(reg.retired_fields(1) == nullptr, "end_regrid freed the previous level");
+    // (f) initial conditions by direct evaluation on a new level (no interpolation): the cell function is exact at the fine cell centres
+    reg.begin_regrid(); reg.clear_level(1); reg.end_regrid();
+    reg.make_level(f2);
+    tr.initial.cell = [&](double x, double y, double z, double* rho, double* tmp, double* zz) { (void)y; *rho = rho_f(x, z); *tmp = 300.0; zz[0] = z0_f(x, z); zz[1] = 1.0 - zz[0]; };
+    tr.fill_initial_level(f2);
+    double worst_ic = 0.0;
+    for (amrex::MFIter mfi(reg.fields(1)["RHO"]); mfi.isValid(); ++mfi) {
+        auto r = reg.fields(1)["RHO"].const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            const double x = plo[0] + (i + 0.5) * reg.level(1).dx[0], z = plo[2] + (k + 0.5) * reg.level(1).dx[2];
+            worst_ic = std::max(worst_ic, std::abs(r(i, j, k) - rho_f(x, z)));
+        });
+    }
+    amrex::ParallelAllReduce::Max(worst_ic, amrex::ParallelContext::CommunicatorSub());
+    CHECK_MSG(worst_ic == 0.0 && tr.stats().n_initial == 1, "initial level: rho is the direct evaluation at the fine cell centres");
+    return fdstest::report("registry_transfer (S11.2: prolongation of rho*Z and faces from the registry, average-down, remade-level bitwise copy, direct initial fill)");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -833,6 +1004,7 @@ int main(int argc, char** argv)
             fails += test_tile_race(nranks, thread_sweep);
             fails += test_exact_sum(nranks);
             fails += test_levels(nranks);
+            fails += test_registry_transfer(nranks);
             fails += test_pressure_bc_map(nranks);
             if (amrex::ParallelDescriptor::IOProcessor()) std::printf("%s: %ld failing checks\n", fails == 0 ? "ALL PASS" : "SOME FAILED", fails);
         }

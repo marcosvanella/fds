@@ -101,7 +101,11 @@ add_executable(driver_unit_tests
     ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
     ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/LevelRegistry.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/LevelRegistry.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/RegistryTransfer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/CellTransfer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/FaceTransfer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/LevelOps.cpp)
 target_include_directories(driver_unit_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend)
 target_compile_options(driver_unit_tests PRIVATE -Wall -Wextra)
 target_link_libraries(driver_unit_tests PRIVATE AMReX::amrex MPI::MPI_CXX)
