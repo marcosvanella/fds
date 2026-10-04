@@ -24,6 +24,8 @@ add_test(NAME regrid_transport_blob_registry COMMAND test_blob_registry)
 add_test(NAME regrid_transport_blob_registry_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_blob_registry>)
 add_test(NAME regrid_transport_blob_registry_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_blob_registry> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
 set_tests_properties(regrid_transport_blob_registry regrid_transport_blob_registry_np4 regrid_transport_blob_registry_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
+# The post-regrid projection part of these tests runs on a MOCK composite solver (amrex::MLMG): not a Phase 3 gate until Role 2's composite solver replaces it (notes/r4-part2-results.md)
+set_tests_properties(regrid_transport_blob_registry regrid_transport_blob_registry_np4 regrid_transport_blob_registry_ranks PROPERTIES LABELS "projection_mock_not_gate")
 
 # R4 GPU path of the tagging kernels (K2 Fortran OpenMP target): the same kernel source built twice, host default and offload source (RT_OFFLOAD),
 # each against an independent reference, and their outputs compared bitwise. Without an accelerator the offload source runs its target regions on

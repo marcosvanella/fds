@@ -33,6 +33,8 @@
 #include "GhostShare.H"
 #include "Hierarchy.H"
 #include "LevelOps.H"
+#include "MlmgCompositeSolver.H"
+#include "PostRegridProjection.H"
 #include "RegistryTransfer.H"
 #include "RegridAmrCore.H"
 #include "TagOps.H"
@@ -57,6 +59,8 @@ struct Cfg {
     bool overwrite = true;       // interface flux overwrite
     bool linearZ = false;        // negative control: restriction by linear averaging of Z
     double speed = 3.0;
+    bool null_solver = false;    // negative control of the acceptance test: a solver that reports success and returns zero gradients
+    bool project = false;        // D-063 post-regrid composite projection (mock MLMG solver); false: the divergence is only measured
 };
 
 struct Blob { double xc, yc, zc; };
@@ -89,6 +93,46 @@ double vel_comp(const Cfg& c, int dir, double x, double y, double z)
     return u;
 }
 
+// Face value of the prescribed velocity on a grid of cell size dx: the DISCRETE curl of the analytic vector potential sampled on the cell edges (A_y only in 2-D), plus the uniform
+// translation. Divergence-free to round-off on every level (D = 0 exactly), so that on a hierarchy any max|div u - D| comes from the transfer between levels, not from truncation.
+double vector_potential(const Cfg& c, int comp, double x, double y, double z)
+{
+    const double a = 0.15 * c.speed / (2 * PI);
+    if (c.dim == 3) {
+        if (comp == 0) return a * std::sin(2 * PI * y) * std::sin(2 * PI * z);
+        if (comp == 1) return a * std::sin(2 * PI * z) * std::sin(2 * PI * x);
+        return a * std::sin(2 * PI * x) * std::sin(2 * PI * y);
+    }
+    return comp == 1 ? a * std::sin(2 * PI * x) * std::sin(2 * PI * z) : 0.0;
+}
+
+double vel_face(const Cfg& c, int dir, double x, double y, double z, const double* dx)
+{
+    const double U0[3] = {c.speed, c.dim == 3 ? 0.6 * c.speed : 0.0, 0.4 * c.speed};
+    auto d = [&](int comp, int along) {   // d A_comp / d x_along, centred difference over one cell
+        double p[3] = {x, y, z}, m[3] = {x, y, z};
+        p[along] += 0.5 * dx[along]; m[along] -= 0.5 * dx[along];
+        return (vector_potential(c, comp, p[0], p[1], p[2]) - vector_potential(c, comp, m[0], m[1], m[2])) / dx[along];
+    };
+    double u = U0[dir];
+    if (dir == 0) u += d(2, 1) - d(1, 2);
+    if (dir == 1) u += d(0, 2) - d(2, 0);
+    if (dir == 2) u += d(1, 0) - d(0, 1);
+    return u;
+}
+
+// Negative control for the acceptance test: claims success, corrects nothing.
+class NullSolver : public fdsrt::CompositePoissonSolver {
+public:
+    const char* name() const override { return "null solver (control)"; }
+    void rebuild(const std::vector<fdsrt::ProjectionLevel>&) override {}
+    fdsrt::SolveReport solve(const std::vector<const amrex::MultiFab*>&, std::vector<std::array<amrex::MultiFab*, 3>>& grad, double, double, int) override
+    {
+        for (auto& a : grad) for (auto* m : a) m->setVal(0.0);
+        fdsrt::SolveReport r; r.ok = true; return r;
+    }
+};
+
 struct Sim {
     Cfg c;
     Hierarchy h;
@@ -112,6 +156,13 @@ struct Sim {
     int n_changed = 0;
     uint64_t hier_hash = 1469598103934665603ULL;
     std::vector<std::string> log;
+    // post-regrid projection (D-063): statistics over the regrids
+    std::unique_ptr<fdsrt::CompositePoissonSolver> psolver;
+    int proj_n = 0, proj_notaccepted = 0, proj_iter = 0, proj_failed = 0;
+    std::string proj_msg;
+    double proj_before = 0, proj_after = 0, proj_rhs_sum = 0;
+    std::vector<double> proj_change;            // by level: largest velocity change of the projection
+    std::vector<double> prof = std::vector<double>(8, 0.0);   // largest |velocity change| by distance (cells of its level) to the nearest cell with a source: 0,1,..,6, >=7
 };
 
 uint64_t mixh(uint64_t h, uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); return h; }
@@ -144,7 +195,7 @@ void fill_analytic(Sim& S, int l, bool cells, bool faces)
                     const int idx[3] = {i, j, k};
                     double x[3];
                     for (int e = 0; e < 3; ++e) x[e] = plo[e] + (idx[e] + (e == d ? 0.0 : 0.5)) * dx[e];
-                    a(i, j, k) = vel_comp(S.c, d, x[0], x[1], x[2]);
+                    a(i, j, k) = vel_face(S.c, d, x[0], x[1], x[2], dx);
                     as(i, j, k) = a(i, j, k);
                 });
             }
@@ -173,6 +224,8 @@ std::vector<double> composite(Sim& S)   // exact [rho, rho*Z_1..3] over the unco
     for (int n = 0; n < 1 + NS; ++n) out.push_back(fdsamr::exact_sum_hierarchy(mf, n, w, cov));
     return out;
 }
+
+void projection_step(Sim& S);
 
 void build(Sim& S, const Cfg& c)
 {
@@ -229,6 +282,11 @@ void build(Sim& S, const Cfg& c)
     S.core->init_from_tags(*S.reg, 0.0, false, RegridAmrCore::DmFn(), &S.l0.dm);
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(S.core->boxArray(0) == S.l0.ba, "level-0 grids of AmrCore and registry differ");
     for (int l = 0; l <= S.core->finestLevel(); ++l) { S.reg->fields(l)["RHO"].FillBoundary(S.core->Geom(l).periodicity()); S.reg->fields(l)["ZZ"].FillBoundary(S.core->Geom(l).periodicity()); }
+    // the prescribed velocity of every level is the discrete curl on that level's own grid (divergence free to round-off on each level)
+    for (int l = 0; l <= S.core->finestLevel(); ++l) fill_analytic(S, l, false, true);
+    if (c.null_solver) S.psolver = std::make_unique<NullSolver>(); else S.psolver = std::make_unique<fdsrt::MlmgCompositeSolver>();
+    if (c.project && S.core->finestLevel() > 0) projection_step(S);   // the t = 0 hierarchy: the coarse faces under the fine ones took the fine mean
+    S.proj_n = S.proj_notaccepted = S.proj_iter = 0; S.proj_before = S.proj_after = S.proj_rhs_sum = 0; S.proj_change.clear(); std::fill(S.prof.begin(), S.prof.end(), 0.0);
     S.mass0 = composite(S);
 }
 
@@ -347,6 +405,116 @@ amrex::MultiFab divergence(Sim& S, int l)
     return dv;
 }
 
+// ---- D-063 post-regrid projection (mock composite MLMG solver) -------------------------------------------------------------------------------------------------
+std::vector<fdsrt::ProjectionLevel> projection_levels(Sim& S)
+{
+    std::vector<fdsrt::ProjectionLevel> lv;
+    for (int l = 0; l <= S.core->finestLevel(); ++l) {
+        fdsamr::Fields& F = S.reg->fields(l);
+        fdsrt::ProjectionLevel pl;
+        pl.geom = S.core->Geom(l);
+        pl.ref_ratio = l > 0 ? S.core->refRatio(l - 1) : amrex::IntVect(1);
+        pl.vel = {&F["U"], &F["V"], &F["W"]};
+        pl.covered = S.reg->covered_mask(l);
+        lv.push_back(pl);
+    }
+    return lv;
+}
+
+// distance (in cells of the level, along the active directions) to the nearest cell with a source, up to 7; the profile of the velocity change against it
+void add_profile(Sim& S, int l, const amrex::MultiFab& r, double rthr, const std::array<amrex::MultiFab, 3>& dv)
+{
+    const amrex::BoxArray cba = r.boxArray();
+    amrex::iMultiFab dist(cba, r.DistributionMap(), 1, 1);
+    dist.setVal(99);
+    for (amrex::MFIter mfi(dist); mfi.isValid(); ++mfi) {
+        auto d = dist.array(mfi); auto rr = r.const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (std::abs(rr(i, j, k)) > rthr) d(i, j, k) = 0; });
+    }
+    const int ny = S.c.dim == 3 ? 1 : 0;
+    for (int it = 1; it <= 7; ++it) {
+        dist.FillBoundary(S.core->Geom(l).periodicity());
+        for (amrex::MFIter mfi(dist); mfi.isValid(); ++mfi) {
+            auto d = dist.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                if (d(i, j, k) <= it) return;
+                const bool nb = d(i - 1, j, k) == it - 1 || d(i + 1, j, k) == it - 1 || d(i, j, k - 1) == it - 1 || d(i, j, k + 1) == it - 1 ||
+                                (ny && (d(i, j - 1, k) == it - 1 || d(i, j + 1, k) == it - 1));
+                if (nb) d(i, j, k) = it;
+            });
+        }
+    }
+    dist.FillBoundary(S.core->Geom(l).periodicity());
+    for (int dir = 0; dir < 3; ++dir) {
+        if (dir == 1 && !ny) continue;
+        for (amrex::MFIter mfi(dv[dir]); mfi.isValid(); ++mfi) {
+            auto a = dv[dir].const_array(mfi); auto d = dist.const_array(mfi);
+            const amrex::IntVect e = amrex::IntVect::TheDimensionVector(dir);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                const int dm = std::min(d(i, j, k), d(i - e[0], j - e[1], k - e[2]));
+                const int b = std::min(dm, 7);
+                S.prof[b] = std::max(S.prof[b], std::abs(a(i, j, k)));
+            });
+        }
+    }
+}
+
+void projection_step(Sim& S)
+{
+    std::vector<fdsrt::ProjectionLevel> lv = projection_levels(S);
+    const int nl = static_cast<int>(lv.size());
+    const double scale = S.c.speed / total_cells_dx(S.c);
+    fdsrt::ProjectionOptions po;
+    po.enabled = S.c.project;
+    po.tol_rel = 1.0e-11;
+    po.max_iter = 100;
+    po.tol_abs = 1.0e-10 * scale;
+    po.accept_abs = 1.0e-9 * scale;     // the pressure tolerance of this mock run, against the divergence scale u / dx_fine
+    po.accept_rel = 0.0;
+    fdsrt::average_down_velocity(lv);
+    std::vector<std::array<amrex::MultiFab, 3>> before(nl);
+    std::vector<amrex::MultiFab> r(nl);
+    std::vector<double> rmax(nl, 0.0);
+    for (int l = 0; l < nl; ++l) {
+        for (int d = 0; d < 3; ++d) {
+            before[l][d].define(lv[l].vel[d]->boxArray(), lv[l].vel[d]->DistributionMap(), 1, 0);
+            amrex::MultiFab::Copy(before[l][d], *lv[l].vel[d], 0, 0, 1, 0);
+        }
+        r[l] = divergence(S, l);
+        if (lv[l].covered)
+            for (amrex::MFIter mfi(r[l]); mfi.isValid(); ++mfi) {
+                auto a = r[l].array(mfi); auto m = lv[l].covered->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (m(i, j, k)) a(i, j, k) = 0.0; });
+            }
+        rmax[l] = r[l].norminf(0);
+    }
+    const fdsrt::ProjectionReport rep = fdsrt::project_after_regrid(lv, S.psolver.get(), po);
+    ++S.proj_n;
+    if (rep.ran && !rep.solved) { ++S.proj_failed; S.proj_msg = rep.message; }
+    if (!rep.accepted) ++S.proj_notaccepted;
+    S.proj_before = std::max(S.proj_before, rep.div_before);
+    S.proj_after = std::max(S.proj_after, rep.div_after);
+    S.proj_rhs_sum = std::max(S.proj_rhs_sum, rep.rhs_sum_rel);
+    S.proj_iter = std::max(S.proj_iter, rep.iterations);
+    if (S.proj_change.size() < static_cast<size_t>(nl)) S.proj_change.resize(nl, 0.0);
+    if (rep.ran && rep.solved) {
+        const char* st[3] = {"US", "VS", "WS"};
+        const char* vn[3] = {"U", "V", "W"};
+        for (int l = 0; l < nl; ++l) {
+            fdsamr::Fields& F = S.reg->fields(l);
+            std::array<amrex::MultiFab, 3> dv;
+            for (int d = 0; d < 3; ++d) {
+                amrex::MultiFab::Copy(F[st[d]], F[vn[d]], 0, 0, 1, 0);
+                dv[d].define(before[l][d].boxArray(), before[l][d].DistributionMap(), 1, 0);
+                amrex::MultiFab::Copy(dv[d], *lv[l].vel[d], 0, 0, 1, 0);
+                amrex::MultiFab::Subtract(dv[d], before[l][d], 0, 0, 1, 0);
+            }
+            S.proj_change[l] = std::max(S.proj_change[l], rep.max_change_level[l]);
+            if (rmax[l] > 1e-6 * scale) add_profile(S, l, r[l], 1e-3 * rmax[l], dv);
+        }
+    }
+}
+
 // after a regrid: for the cells of level l that have no cell of the OLD level l within one cell (all faces new): divergence against the parent's
 void new_cell_divergence(Sim& S, int l, const amrex::BoxArray& old_ba, double* worst_abs, double* worst_parent, long* ncells)
 {
@@ -406,9 +574,15 @@ void run(Sim& S, bool verbose)
             }
             amrex::ParallelDescriptor::ReduceRealMax(nd_abs); amrex::ParallelDescriptor::ReduceRealMax(nd_par); amrex::ParallelDescriptor::ReduceLongSum(nn);
             S.worst_new_div = std::max(S.worst_new_div, nd_abs); S.worst_parent = std::max(S.worst_parent, nd_par); S.n_new_cells += nn;
+            std::string pj;
+            if (ch && S.core->finestLevel() > 0) {   // D-063: the projection after a regrid that changed the grids (enabled by the case; otherwise only measured)
+                const double b0 = S.proj_before;
+                projection_step(S);
+                pj = " | projection " + std::string(S.c.project ? "on" : "off (measured)") + ": composite max|div u - D| before " + std::to_string(S.proj_before) + " (run max, was " + std::to_string(b0) + "), after " + std::to_string(S.proj_after) + " (run max), solver iterations " + std::to_string(S.proj_iter);
+            }
             if (verbose && amrex::ParallelDescriptor::IOProcessor())
-                std::printf("    regrid %2d t=%.4f finest level %d%s: composite change %.1e, max|div u - D| by level (all cells incl. seams to retained fine data):%s, in all-new cells %.1e (child - parent %.1e, %ld cells), D-059 corner/edge cells (two-face/all shared):%s, clips so far %ld\n", nreg, S.t, S.core->finestLevel(),
-                            ch ? " (grids changed)" : "", rel, dv.c_str(), nd_abs, nd_par, nn, gs.c_str(), S.rt->stats().clips);
+                std::printf("    regrid %2d t=%.4f finest level %d%s: composite change %.1e, max|div u - D| by level (all cells incl. seams to retained fine data):%s, in all-new cells %.1e (child - parent %.1e, %ld cells), D-059 corner/edge cells (two-face/all shared):%s, clips so far %ld%s\n", nreg, S.t, S.core->finestLevel(),
+                            ch ? " (grids changed)" : "", rel, dv.c_str(), nd_abs, nd_par, nn, gs.c_str(), S.rt->stats().clips, pj.c_str());
         }
     }
 }
@@ -472,7 +646,8 @@ double l1_diff(const amrex::MultiFab& a, const amrex::MultiFab& b, const amrex::
     return v[0] / v[1];
 }
 
-struct Outcome { double worst_regrid = 0, total_drift = 0, worst_div = 0, worst_new_div = 0, worst_parent = 0; long n_new = 0; double err_amr = 0, err_coarse = 0; long late = 0, neg = 0, clips = 0; int changed = 0; uint64_t hh = 0, dh = 0; int finest = 0; };
+struct Outcome { double worst_regrid = 0, total_drift = 0, worst_div = 0, worst_new_div = 0, worst_parent = 0; long n_new = 0; double err_amr = 0, err_coarse = 0; long late = 0, neg = 0, clips = 0; int changed = 0; uint64_t hh = 0, dh = 0; int finest = 0;
+    int proj_n = 0, proj_notaccepted = 0, proj_iter = 0, proj_failed = 0; std::string proj_msg; double proj_before = 0, proj_after = 0, proj_rhs_sum = 0; std::vector<double> proj_change, prof; };
 
 Outcome dynamic_run(const Cfg& c, bool verbose, bool compare)
 {
@@ -486,12 +661,13 @@ Outcome dynamic_run(const Cfg& c, bool verbose, bool compare)
     for (int n = 0; n < 1 + NS; ++n) o.total_drift = std::max(o.total_drift, std::abs(end[n] - S.mass0[n]) / std::abs(S.mass0[n]));
     o.worst_regrid = S.worst_regrid; o.worst_div = S.worst_div; o.worst_new_div = S.worst_new_div; o.worst_parent = S.worst_parent; o.n_new = S.n_new_cells; o.late = S.feature_late; o.neg = S.min_neg; o.clips = S.rt->stats().clips; o.changed = S.n_changed;
     o.hh = S.hier_hash; o.dh = data_hash(S); o.finest = S.core->finestLevel();
+    o.proj_failed = S.proj_failed; o.proj_msg = S.proj_msg; o.proj_n = S.proj_n; o.proj_notaccepted = S.proj_notaccepted; o.proj_iter = S.proj_iter; o.proj_before = S.proj_before; o.proj_after = S.proj_after; o.proj_rhs_sum = S.proj_rhs_sum; o.proj_change = S.proj_change; o.prof = S.prof; amrex::ParallelDescriptor::ReduceRealMax(o.prof.data(), static_cast<int>(o.prof.size()));
     long neg = o.neg; amrex::ParallelDescriptor::ReduceLongSum(neg); o.neg = neg;
     if (compare) {
         // uniform-fine and uniform-coarse runs with the same dt and number of steps
         int total_ratio = 1; for (int l = 0; l < c.max_level; ++l) total_ratio *= c.ratio;
-        Cfg cf = c; cf.max_level = 0; cf.n0 = c.n0 * total_ratio; cf.interval = 0; cf.name = c.name + " uniform fine";
-        Cfg cc = c; cc.max_level = 0; cc.interval = 0; cc.name = c.name + " uniform coarse";
+        Cfg cf = c; cf.project = false; cf.max_level = 0; cf.n0 = c.n0 * total_ratio; cf.interval = 0; cf.name = c.name + " uniform fine";
+        Cfg cc = c; cc.project = false; cc.max_level = 0; cc.interval = 0; cc.name = c.name + " uniform coarse";
         Sim F;
         build(F, cf);
         F.dt = S.dt; F.t = 0;
@@ -557,7 +733,7 @@ void corner_check(const Cfg& base, int nsteps)
     CHECK_MSG(v[3] > 0, base.name + ": the check can fail: cells inside the cone do feel the coarse ghost values (" + std::to_string(v[3]) + " differ)");
 }
 
-void check_run(const Cfg& c, bool compare, bool print_hash, uint64_t* hh, uint64_t* dh)
+Outcome check_run(const Cfg& c, bool compare, bool print_hash, uint64_t* hh, uint64_t* dh)
 {
     const Outcome o = dynamic_run(c, true, compare);
     if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -577,23 +753,80 @@ void check_run(const Cfg& c, bool compare, bool print_hash, uint64_t* hh, uint64
     if (compare) CHECK_MSG(o.err_amr < o.err_coarse, c.name + ": the AMR result is closer to the uniform-fine run than the uniform-coarse one");
     if (hh) { *hh = o.hh; *dh = o.dh; }
     (void)print_hash;
+    return o;
+}
+
+// D-063: the same case with the post-regrid composite projection (mock solver). Bound = the pressure tolerance of the mock run, expressed against the divergence scale u/dx_fine.
+// g_assert_projection (command line --report-only turns it off) is the single switch between "numbers reported" and "bound asserted"; the composite conservation checks are always asserted.
+bool g_assert_projection = true;
+
+void check_projection(const Cfg& c0, const Outcome& off, uint64_t* hier_hash)
+{
+    Cfg c = c0; c.project = true; c.name = c0.name + " + projection";
+    const Outcome o = dynamic_run(c, true, true);
+    const double scale = c.speed / total_cells_dx(c);
+    const double bound = 1.0e-9 * scale;
+    if (o.proj_failed == 0 && amrex::ParallelDescriptor::IOProcessor()) {
+        std::printf("  %s [mock solver: NOT a Phase 3 gate until the real composite solver lands]: %d projections, composite max|div u - D| before %.2e, after %.2e (bound %.1e = 1e-9 u/dx), solver iterations <= %d, "
+                    "|sum rhs| / sum|rhs| <= %.1e\n", c.name.c_str(), o.proj_n, o.proj_before, o.proj_after, bound, o.proj_iter, o.proj_rhs_sum);
+        std::printf("    largest velocity change of the projection by level:");
+        for (double v : o.proj_change) std::printf(" %.2e", v);
+        std::printf(" (u = %.1f, u/dx_fine = %.1f)\n", c.speed, scale);
+        std::printf("    velocity change against the distance to the nearest divergence source (cells of the level; max over regrids and levels):");
+        for (int b = 0; b < 8; ++b) std::printf(" d%s%d: %.2e", b == 7 ? ">=" : "=", b, o.prof[b]);
+        std::printf("\n");
+        std::printf("    conservation: composite change per regrid %.1e (without projection %.1e), whole run %.1e (without %.1e); L1 of rho*Z_1 to the uniform-fine run: AMR+projection %.3e (uniform coarse %.3e)\n",
+                    o.worst_regrid, off.worst_regrid, o.total_drift, off.total_drift, o.err_amr, o.err_coarse);
+        std::printf("    control, projection off, same case: max|div u - D| before %.2e, accepted in %d of %d regrids\n", off.proj_before, off.proj_n - off.proj_notaccepted, off.proj_n);
+    }
+    if (o.proj_failed > 0) {   // no projection support for this case in the mock solver: reported, not a gate
+        if (amrex::ParallelDescriptor::IOProcessor())
+            std::printf("  %s: NOT GATE: the mock composite solver did not converge in %d of %d projections (%s); the case has no projection support yet, only its transport conservation is asserted\n",
+                        c.name.c_str(), o.proj_failed, o.proj_n, o.proj_msg.c_str());
+        CHECK_MSG(o.worst_regrid <= 1e-12 && o.total_drift <= 1e-12, c.name + ": composite mass and species conserved (projection not applied)");
+        return;
+    }
+    CHECK_MSG(o.proj_n > 0 && off.proj_n > 0, c.name + ": projections were done");
+    CHECK_MSG(o.worst_regrid <= 1e-12 && o.total_drift <= 1e-12, c.name + ": the projection does not perturb composite mass and species (per regrid " + std::to_string(o.worst_regrid) + ", run " + std::to_string(o.total_drift) + ")");
+    CHECK_MSG(o.neg == 0 && o.clips == 0, c.name + ": no negative rho*Z and no clips with the projection");
+    CHECK_MSG(o.err_amr < o.err_coarse, c.name + ": with the projection the AMR result is still closer to the uniform-fine run than the uniform-coarse one");
+    CHECK_MSG(off.proj_before > bound, c.name + ": control: without the projection the divergence at the seams exceeds the bound (" + std::to_string(off.proj_before) + " > " + std::to_string(bound) + ")");
+    CHECK_MSG(off.proj_notaccepted == off.proj_n, c.name + ": control: the acceptance test fails for every regrid when the projection is off");
+    if (g_assert_projection) {
+        CHECK_MSG(o.proj_notaccepted == 0, c.name + ": D-063 acceptance: max|div u - D| <= bound on all uncovered cells after every projection (not accepted: " + std::to_string(o.proj_notaccepted) + ")");
+        CHECK_MSG(o.proj_after <= bound, c.name + ": D-063 acceptance: max|div u - D| after projection " + std::to_string(o.proj_after) + " <= " + std::to_string(bound));
+    }
+    if (hier_hash) *hier_hash = o.hh;
 }
 
 }  // namespace
 
-int main(int, char** argv)
+int main(int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--report-only") g_assert_projection = false;
     int one = 1;
     amrex::Initialize(one, argv);
     uint64_t hh = 0, dh = 0;
     {
         Cfg a; a.name = "3-D 32^3, 2 levels, ratio 2"; a.dim = 3; a.n0 = 32; a.max_level = 1; a.ratio = 2; a.steps = 36;
-        check_run(a, true, true, &hh, &dh);
+        const Outcome oa = check_run(a, true, true, &hh, &dh);
         if (amrex::ParallelDescriptor::IOProcessor()) std::printf("HASH hier=%016llx data=%016llx\n", (unsigned long long)hh, (unsigned long long)dh);
+        uint64_t ph = 0;
+        check_projection(a, oa, &ph);
+        if (amrex::ParallelDescriptor::IOProcessor()) std::printf("HASH_PROJ hier=%016llx\n", (unsigned long long)ph);
+        {
+            Cfg nc = a; nc.project = true; nc.null_solver = true; nc.name = "control: projection with a solver that corrects nothing";
+            const Outcome on = dynamic_run(nc, false, false);
+            if (amrex::ParallelDescriptor::IOProcessor()) std::printf("  control null solver: max|div u - D| after %.2e, accepted in %d of %d regrids\n", on.proj_after, on.proj_n - on.proj_notaccepted, on.proj_n);
+            CHECK_MSG(on.proj_n > 0 && on.proj_notaccepted == on.proj_n, "control: the acceptance test fails when the solver corrects nothing");
+        }
         Cfg b; b.name = "2-D 48x1x48, 3 levels, ratio 2"; b.dim = 2; b.n0 = 48; b.max_level = 2; b.ratio = 2; b.steps = 36;
-        check_run(b, true, false, nullptr, nullptr);
+        const Outcome ob = check_run(b, true, false, nullptr, nullptr);
+        check_projection(b, ob, nullptr);
         Cfg d; d.name = "2-D 32x1x32, 2 levels, ratio 4"; d.dim = 2; d.n0 = 32; d.max_level = 1; d.ratio = 4; d.steps = 36;
-        check_run(d, true, false, nullptr, nullptr);
+        const Outcome od = check_run(d, true, false, nullptr, nullptr);
+        check_projection(d, od, nullptr);
 
         // corner check
         corner_check(a, 5);

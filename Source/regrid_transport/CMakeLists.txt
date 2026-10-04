@@ -34,7 +34,7 @@ if (TARGET AMReX::amrex AND TARGET MPI::MPI_CXX)
     add_library(fds_rt_driver_objs STATIC ${DRV}/FdsAmr.cpp ${DRV}/Fields.cpp ${DRV}/SideData.cpp ${DRV}/ExactSum.cpp ${DRV}/LevelRegistry.cpp ${DRV}/GhostExchange.cpp)
     target_include_directories(fds_rt_driver_objs PUBLIC ${DRV})
     target_link_libraries(fds_rt_driver_objs PUBLIC AMReX::amrex MPI::MPI_CXX fds_regrid_transport_core)
-    add_library(fds_regrid_transport_amrex STATIC RegridAmrCore.cpp LevelOps.cpp FluxOverrideOps.cpp DriverAdapter.cpp FaceTransfer.cpp TagOps.cpp CellTransfer.cpp rt_tag_kernels.F90)
+    add_library(fds_regrid_transport_amrex STATIC RegridAmrCore.cpp LevelOps.cpp FluxOverrideOps.cpp DriverAdapter.cpp FaceTransfer.cpp TagOps.cpp CellTransfer.cpp PostRegridProjection.cpp rt_tag_kernels.F90)
     set_source_files_properties(rt_tag_kernels.F90 PROPERTIES Fortran_PREPROCESS ON)   # tagging kernels: Fortran, K2 style (ADR-001); the macros of the directives need the preprocessor
     target_include_directories(fds_regrid_transport_amrex PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(fds_regrid_transport_amrex PUBLIC fds_regrid_transport_core fds_rt_driver_objs AMReX::amrex MPI::MPI_CXX)
