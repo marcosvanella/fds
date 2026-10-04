@@ -20,7 +20,7 @@ The family entry cites the pin `36975d765f`. Lines up to 3797 did not move; from
 
 ## 3. Evidence
 
-- L1243: `docs/radiation/03-radiation-translation-notes.md` and `amrex/s4_mass/s5_gen/test/make_rad_tests.py` (case `open_qin_spec`): the verbatim loop (with the real `BOUNDARY_RADIA_TYPE` and `BAND_TYPE` layout) against a hand-written specification kernel that has the per-band temporary; the flat chain (`-DRAD_MUT_FLATSUM`) is a mutant that must fail.
+- L1243: `docs/radiation/03-radiation-translation-notes.md` and `amrex/s4_mass/s5_gen/test/make_rad_tests.py` (case `open_qin_spec`): the verbatim loop (with the real `BOUNDARY_RADIA_TYPE` and `BAND_TYPE` layout) against a hand-written specification kernel that has the per-band temporary; the flat chain (`-DRAD_MUT_FLATSUM`) is a mutant that must fail; run result: the clean build passes (8632 cases, 0 mismatches) and the flat-chain build fails on the open-boundary case (51 mismatches over the whole run, including two-band walls).
 - L1239: generated kernel `rad_wall_qin_zero` (wall table flag `B1_PRESENT`), bitwise against the verbatim loop. The generator accepts it with one extra table component and no other change.
 - L1243 and L1248 are refused today by the generator with "pointer assignment `BR => BOUNDARY_RADIA(WC%BR_INDEX)` ... is not one of the recognised wall aliases"; a rank-1 per-wall table cannot carry `BR_ILW(N,IBND,IW)` either (the wall-array policy takes only tables indexed by `IW`). See the notes, section "Missing generator features".
 

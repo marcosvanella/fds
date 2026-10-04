@@ -19,6 +19,7 @@ explicitly labelled.
 | `03-fr034-fr040r3-answers.md` | Answers to the Chief Architect's draft rulings (`adr/drafts/rulings-FR040R3-FR034.md`): FR-034 leak/HVAC owned-face mask, the composite PBAR profile, per-stage consistency with D-032 mean removal, one leak node across levels; FR-040 R3 E-2 β rule and MLMG C/F interpolation across thin walls. Verifies the draft's citations. |
 | `04-masked-domain-pressure.md` | **DRAFT, incomplete (stopped by the scope change).** R-47 / FR-037 open point: pressure solve on a masked (non-box) level 0 (40 FR-006 cases). Recommends a single-level MLMG "gap mask"; FFT-based routes are rejected; acceptance criteria and the fit with D-021/D-032 (5)/FR-039. |
 | `05-backend-head-to-head.md` | **PARTIAL.** Masked single-level solve, MLMG vs assembled HYPRE PCG+BoomerAMG (A-56): hallways and stairwell (mesh union) measured, masked stairwell, GPU notes and recommendation still open. |
+| `06-meanremoval-masked-stretched.md` | Mean removal and solution gauge: verdict on the backend study, FDS GLMAT single-rank defect and upstream patch 0005 (with its behavior-unchanged check), default-gauge recommendation and draft ADR wording, stretched-grid runs (64³ and 1M, MLMG vs assembled HYPRE, CPU and GPU), masked stairwell with three components, and the D-057 2-D review from the pressure side (confirmed vs unverified). |
 
 ## Key recommendations (short form; details and citations in 01)
 1. The FDS step is algebraically a MAC projection: `Ũ = uⁿ − δtF`, `∇·(δt∇H) = ∇·Ũ − D*` (corrector: β = δt/2, S = Dⁿ⁺¹). Use a

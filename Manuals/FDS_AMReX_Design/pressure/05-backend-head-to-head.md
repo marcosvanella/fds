@@ -441,7 +441,7 @@ Done in the sections above: the 1e-10 hallways comparison, first-solve times, pe
 
 Still open:
 
-- **The stairwell with the mask and all-gap boxes dropped (`ba=drop`).** This is the case A-56 asked for, and it still has not run.
+- **The stairwell with the mask and all-gap boxes dropped (`ba=drop`).** This is the case A-56 asked for. It has now run, as a single open component and as a three-component split, with Mf and H on 1, 4 and 8 CPU ranks and 1 GPU rank: see doc 06, section 8. Repeats and the 1e-12 tolerance are still open.
 - Stairwell repeats 2 and 3, the stairwell at a 1e-12 tolerance, and Mf and H on the stairwell at 1 rank.
 - The HYPRE PCG gap between its recursive and true residuals seen on the stairwell (1.6e-10 for a 1e-10 request). It did not reproduce anywhere else.
 - Iteration counts with an RHS built the way FDS builds it (all hallways runs use the synthetic zero-mean RHS).

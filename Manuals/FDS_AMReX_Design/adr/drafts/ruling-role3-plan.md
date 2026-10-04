@@ -98,3 +98,12 @@ A GPU-enabled AMReX build is needed to use the offload tagging kernels inside th
 - A-57 tooling (K2 CI check, kernel lint, zone-sum order script, `port_kernel_map`) must exist before the first new kernel is accepted. The owner is the Mesh Data Loops Engineer.
 - The plan total is relabelled 55-68 work-days with ESTIMATE labels.
 - The csmag_32 RHOS difference is not a blocker for the work packages, but it blocks FDS-agreement claims at edges and corners.
+
+## Update 2026-10-04 (h): pressure gauge and mean removal (D-067)
+
+D-067 pressure gauge and mean removal (source: `pressure/06-meanremoval-masked-stretched.md` sections 5-6).
+- Default gauge: `sum(rho*V*(KRES-H)) = 0` per pressure zone and per connected component, with the exact (decomposition-independent) sum over uncovered cells (ULMAT/UGLMAT convention). It is always applied, because `p = rho*(H-KRES)` carries the constant into the baroclinic pass-2 RHS. It is also applied to FFT-solved cases, with PRES compared after removing a constant.
+- Default mean removal: the composite volume-weighted mean (D-032). The FDS arithmetic removal is kept as a runtime parity switch (AMR mode is uniform-per-level only, so the stretched-grid advantage matters for parity studies against FDS-only runs). AMReX native `makeSolvable` is not relied on.
+- The FDS single-rank GLMAT gauge defect (the one-rank periodic test 7 leaves a constant of +0.0304 and moves the mass-fraction slice by up to 1.5e-5 in 0.05 s) goes to the owner as an upstream patch file under D-051, not as a local change.
+- The composite `gauge_weight`/offset is an open implementation item for the Pressure Backend role.
+- Intel validation: draft patches 0005-0009, including the 0007 `DT_NEW(*)` amendment (`a72d491fb9`), pass oneAPI validation (0 warnings, OFF bitwise, driver tests, decomposition check with a max(2e-15, 1 ulp) gate, outputs check against a same-compiler reference). GNU Debug validation is pending. The kernelcheck driver-fill csmag DIV1 difference is an open item under bisection.
