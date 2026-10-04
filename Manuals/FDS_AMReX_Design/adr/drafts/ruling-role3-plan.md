@@ -81,3 +81,20 @@ A GPU-enabled AMReX build is needed to use the offload tagging kernels inside th
 4. Role 1 builds the fine-level OBST wall tables in Phase 5; Role 3 triggers the rebuild at regrid.
 5. Area-mean TMP_F against the FR-022 budget is deferred until the WP6 measurement.
 6. Thin-wall faces: records are never deeper than their owner.
+
+## Update 2026-10-04 (g): solid wall/BC translation and GPU spike plan review (D-065, D-066)
+
+**1. Solid wall/BC translation (D-065, plan `amrex/wall-bc-translation-plan.md`).**
+- Q1: the `EWC%NIC>1` branch (INTERPOLATED_BC species flux match, L1485) is retired in the AMR route behind a host abort guard. This is conditional on a grep of the supported AMR input set showing no `NIC>1` case (no INTERPOLATED_BC between meshes of different resolution). Refused inputs are listed as FDS-only. Consistent with D-055.
+- Q2: the back-wall heat transfer coefficient in the thick-wall and thin-wall passes uses a snapshot of the other side in the AMR route. FDS-only mode is untouched. The host AMR route also offers snapshot mode, so the difference is measured as algorithm and not as port. V&V signs the tolerances (`back_wall_test`, `heat_conduction_a`).
+- Q4: running the whole wall pass on the host when `HVAC_SOLVE` is on is acceptable in Phase 4. HVAC cases are correctness gates only, not GPU performance gates. This is a known limitation; its cost is measured, and it is reopened if an HVAC case becomes a performance target.
+- Q6: the neighbour obstruction-mass read returns the value at the start of WALL_BC of that stage (snapshot before the pass, read-only during it), identical on host and device. The difference from FDS order is recorded as for Q2. Burn-away is deferred (FR-042).
+
+**2. GPU spike plan review (D-066, plan `amrex/stage1-gpu-spike-plan.md`).**
+- Wall-seam work packages WP1b, WP9, WP9b, WP11 and WP12 are approved with changes; WP10 is approved.
+- Flux-hook findings are approved with changes. Finding 1: gather straight from `ADV_F*`, no pack kernel.
+- Data-movement infrastructure kernels (pack, gather, scatter, checksum) in the C++ driver layer may be C++ `ParallelFor` (K1) because they contain no physics. All physics kernels stay K2. This clarifies D-049; ADR-001 gets one sentence.
+- The per-box wrapper for the 1-box and 4-box device tests lives in test code only (D-052).
+- A-57 tooling (K2 CI check, kernel lint, zone-sum order script, `port_kernel_map`) must exist before the first new kernel is accepted. The owner is the Mesh Data Loops Engineer.
+- The plan total is relabelled 55-68 work-days with ESTIMATE labels.
+- The csmag_32 RHOS difference is not a blocker for the work packages, but it blocks FDS-agreement claims at edges and corners.

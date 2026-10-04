@@ -1,0 +1,31 @@
+# Radiation Lead sign-off: blocked-loop family R1 (radiation wall loops)
+
+Owner: AMR Radiation Lead. Reference: FireX `radi.f90` at the local merge of upstream `afb5e31a48` (the s5-gen reference commit `bee11f0329`; `radi.f90` is unchanged since). The family entry is `docs/amrex/blocked-loop-families.md` (R1). That file is shared: this note holds the text for its **Sign-off** line, for the Legacy Mapper and the AMR Chief Architect to apply. Nothing was edited there.
+
+## 1. Line numbers after the RTE_SOURCE merge
+
+The family entry cites the pin `36975d765f`. Lines up to 3797 did not move; from 3798 on the merged file is longer. The shift is not constant: +1 for 3798-4217, about +8 inside the angle loop (4218-4456), and **+4 from 4943 to the end of the routine**, so the loops after about 4220 moved by 4 (not 11) to the end of `RADIATION_FVM`.
+
+| Loop | Pin 36975d765f | Merged file |
+|---|---|---|
+| L1239 (zero `Q_RAD_IN` where `TMP_GAS_FRONT<=0`) | 3886-3892 | **3887-3893** |
+| L1243 (open-boundary `Q_RAD_IN`) | 4961-4970 | **4965-4974** |
+| L1245 (RADF file write) | 5044-5059 | **5048-5063** |
+| L1248 (`INTERPOLATE_IL` wall loop) | 3651-3662 | **3651-3662** (unchanged) |
+| L1242 (`BAND_LOOP`, not covered) | 3912-4953 | **3913-4957** |
+
+## 2. Text for the R1 entry
+
+> - **Sign-off (Radiation Lead): accept with change.** Line numbers re-verified on the merged file (L1239 radi.f90:3887-3893, L1243 4965-4974, L1245 5048-5063, L1248 3651-3662); none of the four loops was touched by the `RTE_SOURCE` merge. Per loop: **L1239 accept**: each wall writes only its own `B1%Q_RAD_IN`, `B1_INDEX` slots are unique (func.f90:4226-4246), so there is no race and no aliasing; it needs the `B1_PRESENT` flag (and the gather `SF%TMP_GAS_FRONT` through `SURF_INDEX`) in the wall table; a one-line change to the test (`WC%B1_PRESENT==0`) is bitwise-neutral. **L1243 accept with change** (the one real concern): the source is `B1%Q_RAD_IN = 0; DO IBND: B1%Q_RAD_IN = B1%Q_RAD_IN + SUM(ILW(1:NRA))`, so the grouping is `Q + (sum over angles)` per band, with the angle sum a left-to-right chain starting at +0 in gfortran. "Expand in source order" must therefore be read as a per-band temporary: `T = 0; DO N=1,NRA: T = T + ILW(N); END DO; Q = Q + T`. A flat chain `Q = Q + ILW(N)` over all bands and angles is **not** bitwise equal as soon as there is more than one band (tested: the flat chain fails on wide-magnitude data). The sum must start at +0, not at the first element, so `0 + (-0)` stays +0. It needs the ragged per-wall table `BR_ILW(NRA, NSB, wall)` and must keep the `OPEN_BOUNDARY` and `IW<=N_EXTERNAL_WALL_CELLS` conditions. Bitwise claims are against gfortran; ifx may vectorise `SUM` and change the grouping. **L1248 accept with change, low priority, host is acceptable**: the routine-level automatic `ILW_OLD` (radi.f90:3613) is a copy of the old angle values and must be kept (angle `N` reads `ILW_OLD(IDX(:,I_INTP))` of other angles, so an in-place update would race and also change the result); on the device it needs per-thread scratch of `NRA` values, or better a ping-pong pair of tables with one thread per (wall, band, angle). The `I_INTP` accumulation stays ascending and serial per angle; the product grouping is `(W*ILW_OLD)*RSA`, summed from 0, then divided by `RSA(n)`. `IDX` and `W` stay host-computed (the `NRA` squared loop at 3623-3645). `INTERPOLATE_IL` runs only at the start of a new angle cycle under `ALLOW_RANDOM_RADIATION_ROTATION` (main.f90:560 and :1101), so it is rare and negligible. **BR_INDEX validity:** the wall loop at 3653 has no `NULL_BOUNDARY` check, and none is needed on the device: `INCLUDE_BOUNDARY_RADIA_TYPE` is `.TRUE.` for every `SURFACE` (type.f90:1001, never set false) and every wall gets a unique `BR` slot in `ALLOCATE_STORAGE` (func.f90:4028, `ALLOCATE_BOUNDARY_RADIA_ARRAYS` 4343-4382); the unguarded uses at radi.f90:4266, 4308, 4332 rely on the same fact. The host that builds the table should assert `0 < BR_INDEX <= N_BOUNDARY_RADIA_DIM`. **L1245 accept: host** (file output; not a perfect K,J,I nest). Summation order: L1239 and L1245 are stores; L1243 and L1248 change nothing if written as above. **Not covered by this sign-off:** the dominant radiation loop L1242 (`RADIATION_FVM` band loop, 4.576% modelled share, geometry-deferred, O4).
+
+## 3. Evidence
+
+- L1243: `docs/radiation/03-radiation-translation-notes.md` and `amrex/s4_mass/s5_gen/test/make_rad_tests.py` (case `open_qin_spec`): the verbatim loop (with the real `BOUNDARY_RADIA_TYPE` and `BAND_TYPE` layout) against a hand-written specification kernel that has the per-band temporary; the flat chain (`-DRAD_MUT_FLATSUM`) is a mutant that must fail.
+- L1239: generated kernel `rad_wall_qin_zero` (wall table flag `B1_PRESENT`), bitwise against the verbatim loop. The generator accepts it with one extra table component and no other change.
+- L1243 and L1248 are refused today by the generator with "pointer assignment `BR => BOUNDARY_RADIA(WC%BR_INDEX)` ... is not one of the recognised wall aliases"; a rank-1 per-wall table cannot carry `BR_ILW(N,IBND,IW)` either (the wall-array policy takes only tables indexed by `IW`). See the notes, section "Missing generator features".
+
+## 4. Messages (to be sent by someone who has a messaging tool; the executor that wrote this had none)
+
+To the FDS Legacy Mapper (non-priority): "R1 sign-off from the Radiation Lead is in `docs/radiation/00-r1-signoff.md`, section 2, ready to paste on the R1 Sign-off line. Verdicts: L1239 accept (needs `B1_PRESENT`), L1243 accept with change (per-band temporary for the angle `SUM`; a flat chain breaks bitwise equality), L1248 accept with change and host-first (keep the `ILW_OLD` copy), L1245 host. Line numbers moved by 4 (not 11) after about 4943: L1243 is now 4965-4974, L1245 5048-5063, L1239 3887-3893. L1242 is not covered. The candidate list and the split for the radiation loops are in `docs/radiation/02-radiation-gpu-candidates.md`; the loops I translated are in `docs/radiation/03-radiation-translation-notes.md` (all in my own files; nothing in the shared sidecar was edited)."
+
+To the AMR Chief Architect (non-priority): same text; plus "the sign-off asks for a wall-table flag `B1_PRESENT` and a ragged `BR_ILW` table; both are driver-side tables, no change to the numerics."

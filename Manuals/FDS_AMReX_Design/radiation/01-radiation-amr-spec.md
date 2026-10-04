@@ -3,7 +3,7 @@
 **Status:** Draft outline (not reviewed, not approved). Rev 2026-09-26: owner decision on Q12, S-B default (see §2).
 **Author role:** Radiation Lead
 **Depends on:** requirements.md (FR-005, FR-006, FR-022, FR-040, FR-041, FR-060, FR-061, NFR-030/031, NFR-043/044, NFR-047), ADR-001, ADR-002 (leaning), ADR-003 v0.2.1, risks.md (R-16, R-36), amrex/mapping.md:287
-**Source pin:** FireX `36975d765f` (local branch `AMReX`, this repository (read-only)). Citations get re-pinned per milestone (D-034). *Re-pin note:* the `radi.f90` citations in this file now follow the local branch after the upstream merge of `afb5e31a48` (RTE_SOURCE precompute): lines up to 3797 are unchanged, and lines after 3797 moved by +1 to +8 inside the band loop and by +4 from the end of the band loop onwards (file length 5,323 to 5,327). Other files are cited as before. See `02-radiation-gpu-candidates.md` Part B.
+**Source pin:** FireX `36975d765f` (local branch `AMReX`, this repository (read-only)). Citations get re-pinned per milestone (D-034). *Re-pin note:* the `radi.f90` citations in this file now follow the local branch after the upstream merge of `afb5e31a48` (RTE_SOURCE precompute): lines up to 3797 are unchanged, and lines after 3797 moved by +1 to +8 inside the band loop and by +4 from the end of the band loop onwards (file length 5,323 to 5,327). `main.f90` and `wall.f90` citations were also moved to the local branch at `bee11f0329` (main.f90 is +73 lines from `main.f90:~1000` on, wall.f90 +6); `mesh.f90`, `dump.f90`, `func.f90`, `type.f90`, `read.f90` are unchanged between the two pins. See `02-radiation-gpu-candidates.md` Part B.
 **Legend:** [REC] recommended proposal · [ALT] alternative · [OPEN] undecided · [VERIFY] not yet confirmed in source. Every decision in this document is a proposal.
 
 ## 1. Current solver (FireX)
@@ -22,26 +22,27 @@
 - Each update sweeps only the angle subset N = NRA-AIC+1, stepping down by ANGLE_INCREMENT (:4315-4321). That is about 21 of 104 angles, so a full angular cycle takes 15 steps at defaults.
 - UII is the sum of UIIDIM slots, and those slots have different ages (:4299-4303, :4961-4976).
 - κ comes from GET_KAPPA (:5174-5212). Particles add KAPPA_PART and KFST4_PART in the cell that contains them (:3980-3992).
-- Gray RTE source correction: the partial sums RAD_Q_SUM/KFST4_SUM (:4088-4125) are combined by MPI_ALLREDUCE at main.f90:1760-1761, then damped and clipped at main.f90:1767.
+- Gray RTE source correction: the partial sums RAD_Q_SUM/KFST4_SUM (:4088-4125) are combined by MPI_ALLREDUCE at main.f90:1833-1834, then damped and clipped at main.f90:1840.
 - The 3D sweep is a hyperplane (i+j+k) wavefront with `!$OMP PARALLEL DO` on each plane (:4494-4718). Solid cells use the upwind override from CELL_ILW (:4542-4548).
 - Differencing: STEP is at :4621-4628. The FireX-only DIAMOND and EXPONENTIAL schemes are at :4635-4714 (commit 7d8dcb2707). No Verification input uses them.
+- RTE source (upstream `afb5e31a48`): the angle-independent term `RTE_SOURCE = KFST4_GAS + KFST4_PART + RSA_RAT*(SCAEFF+SCAEFF_G)*UIIOLD` is built once per band (:4220-4222, freed at :4942) and read by the cylindrical, 2D and 3D sweeps (:4465, :4489, :4628, :4672, :4708) instead of being recomputed inline for every angle. Same operation order as the inline form, whole-array on `(0:IBP1,...)` like `KFST4_GAS`, ghost values never read by the sweeps. It is a box-local elementwise kernel computed once per band per box before the sweeps, with no new obstacle for FR-062 (review: `02-radiation-gpu-candidates.md`, Part B).
 - Walls: WALL_LOOP1 sets the incoming boundary intensity (:4327-4372). WALL_LOOP2 stores ILW per wall, per angle, per band and updates INRAD_W (:4747-4775). Q_RAD_IN is set at :4902-4920.
 - QR = κ·UII − KFST4 (:4981-4988). QR enters the divergence at divg.f90:567/579.
 - Memory: intensity is not stored for all angles per cell. IL is one scratch array per angle. Per-angle storage exists only for wall cells (NRA×NSB per wall) and mesh-interface cells (IL_S/IL_R/IL_R_OLD, type.f90:1035-1039).
 
 **How sweeps cross meshes and MPI today**
 - Each mesh sweeps on its own. At an INTERPOLATED boundary, the ghost intensity is the arithmetic mean of the neighbour-mesh IL_R over NIC_MIN..NIC_MAX (:4353-4361).
-  - At 2:1 in 3D, a coarse ghost averages 4 fine cells and a fine ghost copies 1 coarse cell (NIC setup main.f90:2093-2160).
+  - At 2:1 in 3D, a coarse ghost averages 4 fine cells and a fine ghost copies 1 coarse cell (NIC setup main.f90:2166-2233).
 - After each angle, IL_S is packed for all other meshes (:4826-4843). The loop skips NM==NOM, so periodic self-coupling may never be filled [VERIFY].
-- MESH_EXCHANGE code 2 packs only angles with DLN(IOR,N)>0 from the current subset (main.f90:3486-3510). It uses persistent MPI_STARTALL on REQ5 (:3671-3674) and unpacks at :3815-3834. Same-rank meshes copy directly (:3507-3508).
-- With the default RADIATION_ITERATIONS=1, the exchange runs at the end of the step (main.f90:1110-1116). Intensity therefore lags by one angular cycle per mesh crossed. This is block-Jacobi in time and depends on the decomposition. The User Guide documents it (FDS_User_Guide.tex:5894).
-- RADIATION_ITERATIONS>1 repeats the whole solve K times per step, with a MESH_EXCHANGE(2) after each pass (main.f90:1022-1044). Each pass re-sweeps the same angle subset, because RAD_CALL_COUNTER advances only on the last pass (radi.f90:3866). So each extra pass carries intensity across one more mesh interface within the step, and costs a full extra radiation solve. After the first cycle only one exchange runs per pass, whatever ANGLE_INCREMENT is (`IF (ICYC>1) EXIT`, main.f90:1038-1041). Exchange happens only on intensity-update steps (EXCHANGE_RADIATION, radi.f90:3856-3862). INITIAL_RADIATION_ITERATIONS defaults to 3 (read.f90:10224).
-- Creating or removing an OBST sets UPDATE_ALL_ANGLES (main.f90:1795).
+- MESH_EXCHANGE code 2 packs only angles with DLN(IOR,N)>0 from the current subset (main.f90:3559-3583). It uses persistent MPI_STARTALL on REQ5 (:3671-3674) and unpacks at :3815-3834. Same-rank meshes copy directly (:3507-3508).
+- With the default RADIATION_ITERATIONS=1, the exchange runs at the end of the step (main.f90:1183-1189). Intensity therefore lags by one angular cycle per mesh crossed. This is block-Jacobi in time and depends on the decomposition. The User Guide documents it (FDS_User_Guide.tex:5894).
+- RADIATION_ITERATIONS>1 repeats the whole solve K times per step, with a MESH_EXCHANGE(2) after each pass (main.f90:1095-1117). Each pass re-sweeps the same angle subset, because RAD_CALL_COUNTER advances only on the last pass (radi.f90:3866). So each extra pass carries intensity across one more mesh interface within the step, and costs a full extra radiation solve. After the first cycle only one exchange runs per pass, whatever ANGLE_INCREMENT is (`IF (ICYC>1) EXIT`, main.f90:1111-1114). Exchange happens only on intensity-update steps (EXCHANGE_RADIATION, radi.f90:3856-3862). INITIAL_RADIATION_ITERATIONS defaults to 3 (read.f90:10224).
+- Creating or removing an OBST sets UPDATE_ALL_ANGLES (main.f90:1868).
 - Restart writes UIID (dump.f90:3921) and RAD_Q_SUM/KFST4_SUM/RTE_SOURCE_CORRECTION_FACTOR (dump.f90:3950). Wall ILW is packed by PACK_BOUNDARY_RADIA (func.f90:5128-5146).
 
 **Interaction with in-scope features**
 - **Thin OBSTs** (zero thickness, ordinary WALL cells on both sides, per ADR-003) block radiation through the CELL_ILW override (:4362-4365, :4545-4547). Behaviour on box faces and C/F faces is [VERIFY].
-- **HT3D thin walls** are deferred (wall.f90:473-490).
+- **HT3D thin walls** are deferred (wall.f90:479-496).
 - **Level set:** LEVEL_SET_MODE 1-3 turn radiation off. Modes 4 and 5 keep it on (read.f90:1986-2016), and all level-set modes set NO_PRESSURE_ZONES (:1983).
   - Boundary fuel absorbs through the wall Q_RAD_IN.
   - Vegetation particles absorb and emit through KAPPA_PART/KFST4_PART (:3980-3992), so particle deposition must go to the owning level.
@@ -58,7 +59,7 @@
 ## 2. Sweeps on a load-balanced multi-level hierarchy
 
 **Box coupling within one level** (owner decision Q12, 2026-09-26; FR-005(i) exemption for the radiation stage is being recorded by the Spec Lead; FR-005(iv) run-to-run reproducibility still holds):
-- **S-B [DECIDED, default]: FDS-style lagged box-face exchange with RADIATION_ITERATIONS.** Each box sweeps its angle subset independently, using box-face ghost intensities from the previous exchange. A per-box face buffer replaces OMESH IL_S/IL_R. The exchange is an AMReX FillBoundary-style copy of the upwind face intensities per angle, and it follows the FDS cadence (main.f90:1022-1044, 1110-1116): after each pass when K>1, otherwise at the end of the step, and only on intensity-update steps.
+- **S-B [DECIDED, default]: FDS-style lagged box-face exchange with RADIATION_ITERATIONS.** Each box sweeps its angle subset independently, using box-face ghost intensities from the previous exchange. A per-box face buffer replaces OMESH IL_S/IL_R. The exchange is an AMReX FillBoundary-style copy of the upwind face intensities per angle, and it follows the FDS cadence (main.f90:1095-1117, 1110-1116): after each pass when K>1, otherwise at the end of the step, and only on intensity-update steps.
   - The iteration loop keeps FDS semantics. K passes per step move intensity across K box faces within the step, each pass costing a full solve.
   - Reproducibility: the sweep has no atomics and the exchange is fixed, so results are run-to-run identical (FR-005(iv)). With the per-box default below they change only with the box split, which D-039 exempts.
 - **How the lag differs from FDS meshes.** In FDS, intensity loses one exchange per mesh interface crossed, and users choose few, large meshes. AMReX boxes are much smaller (floor 16, D-024; typical max_grid_size 32-64), so a ray crosses several times more interfaces over the same distance. With K=1 information needs about one update cycle per box crossed. A 64-cell path at 16³ boxes crosses about 4 faces, against 0-1 for a typical FDS mesh layout. Regrid and load balancing also move the faces, so the lag pattern shifts over time, and new faces start with no lagged value.

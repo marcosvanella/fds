@@ -1,6 +1,10 @@
-# FDS-AMR Verification & Validation Test Plan (DRAFT v0.4.9)
+# FDS-AMR Verification & Validation Test Plan (DRAFT v0.4.11)
 
 Owner: AMR V&V Lead · Status: **draft for review by the project owner**, 2026-09-25 · Nothing in this plan is approved yet. v0.3 brings the plan in line with `requirements.md` v0.3.1: v0.3, plus the bit-parity scope D-022/D-023 and FR-005, published while this revision was being written. It does not re-argue items the Spec Lead has decided (§9). The v0.2 text, including the full §9 rationale, is kept at `docs/vv/archive/test-plan-v0.2.md`.
+
+**v0.4.11 (2026-10-03)** adds one tooling bullet in §8 for `vv-runs/tools/patch_check.sh`, the standard bitwise behaviour-unchanged check for upstream patches (with `cmp_runs.py`, `pc_run_case.sh`). No other section changed. v0.4.10 is archived at `docs/vv/archive/test-plan_v0.4.10.md`.
+
+**v0.4.10 (2026-10-03)** adds §5.12, the Phase 3 acceptance list for two-level runs (conservation, FR-016 mapped to concrete comparisons, moving-blob regrid tracking) and the D-057 `ns2d_16` check for the Pressure Backend Implementer, with the machine-readable `vv-runs/phase3/phase3_cases.csv` (35 rows) and the inputs, oracle and metrics under `vv-runs/phase3/`. G7 and G8 rows point to it. PROPOSED values are listed in §5.12.6 for the Spec Lead and Architect. No other section changed. v0.4.9 is archived at `docs/vv/archive/test-plan_v0.4.9.md`.
 
 **v0.4.9 (2026-10-02)** (1) adds the GPU bitwise gate for the generated GPU kernels: gate row G15 in §5, new §5.10, tooling entry in §8 and files in §11. (2) applies the FR-005 (iii) test rule (requirements v0.4.31, D-053): new §5.11 gives every decomposition-invariance test (box split, rank count, thread count) its exact fixed-point sum switch setting, and the rows of G11, §5.3, G13, G14, §7 (FR-005, FR-062, FR-070, FR-076, NFR-010/011/012) carry it. MP5 `DIVG` GPU acceptance is tolerance-only until upstream patches 0001 and 0002 land (NFR-043). No other section changes. v0.4.8 is archived at `docs/vv/archive/test-plan_v0.4.8.md`.
 
@@ -174,8 +178,8 @@ Build names for reference: makefile targets `ompi_gnu_linux`, `impi_intel_linux`
 | **G4** Suite non-regression (FR-003) | Phase 2 exit, Phase 10 | All firebot-listed cases with ≤ 8 ranks (870 of 884) | T2. The 14 cases needing 9–64 ranks are exceptions recorded and approved by the project owner |
 | **G5** Build-option equivalence (IR-006) | Phase 2 onward | FR-001 anchors with `USE_AMREX=OFF` | **T0** |
 | **G6** FireX HYPRE options (FR-038) | Phase 2 | The 4 `Pressure_Solver/*_hypre.fds` at 1 and 4 ranks, `FDS_RANKS_PER_GPU` unset and =2 (the variable changes the matrix partition on CPU too: RS masters gather and solve, pres.f90:3411-3440) | **T2** vs baseline at the same setting (v0.3.1: whole runs, multi-mesh inputs, D-022); same HYPRE commit as baseline (§3.5) |
-| **G7** Static two-level (FR-016) | Phase 3 (a–c), Phase 4 (d); **gating only after A-09 shows baseline runs the case (R-34)** | `ns2d_16_int_1to2_refinement` + `VV/…_uglmat` (`SOLVER='UGLMAT HYPRE'`) only (D-015). `ns2d_16_emb_1to2_refinement` is informational and non-gating ((a)-type comparison and FR-014 only). | (a) T0 on first-step fine-side ghosts, **first ghost layer only** (§5.2), vs the A-09b instrumented baseline (component-level only); multi-step and end-state comparisons vs `int_1to2` FDS are T2/T3, never bitwise (D-023); (b) coarse side not matched, FR-020/021 instead; (c) FR-032 normal-velocity mismatch at machine zero (target), `H` error against the exact `ns2d` solution no worse than UGLMAT-HYPRE's, observed order ≥ FDS's measured order − 0.1 and L2 ≤ 1.1× FDS's at each N on the same 2:1 `ns2d` case (u, w, `H`; N = 16/32/64; A-38 norm script, `H` mean removed, t ≈ 1; D-040), with order ≥ 1.8 reported but non-gating. **eps_H does not apply here** (not same-discretisation; replaces the v0.2 "10× solver tol" rule; A-16 closed); (d) T2 vs UGLMAT-HYPRE baseline |
-| **G8** Conservation (FR-020/021/022/024) | Phase 3/4 | `species_conservation_1..4`, `energy_budget_*`, `simple_duct`, mass-balance cases with a refined patch | Requirement numbers (1e-12/step, 1e-10 cumulative; FR-022 with absolute floor) |
+| **G7** Static two-level (FR-016) | Phase 3 (a–c), Phase 4 (d); **gating only after A-09 shows baseline runs the case (R-34)** | `ns2d_16_int_1to2_refinement` + `VV/…_uglmat` (`SOLVER='UGLMAT HYPRE'`) only (D-015). `ns2d_16_emb_1to2_refinement` is informational and non-gating ((a)-type comparison and FR-014 only). | (a) T0 on first-step fine-side ghosts, **first ghost layer only** (§5.2), vs the A-09b instrumented baseline (component-level only); multi-step and end-state comparisons vs `int_1to2` FDS are T2/T3, never bitwise (D-023); (b) coarse side not matched, FR-020/021 instead; (c) FR-032 normal-velocity mismatch at machine zero (target), `H` error against the exact `ns2d` solution no worse than UGLMAT-HYPRE's, observed order ≥ FDS's measured order − 0.1 and L2 ≤ 1.1× FDS's at each N on the same 2:1 `ns2d` case (u, w, `H`; N = 16/32/64; A-38 norm script, `H` mean removed, t ≈ 1; D-040), with order ≥ 1.8 reported but non-gating. **eps_H does not apply here** (not same-discretisation; replaces the v0.2 "10× solver tol" rule; A-16 closed); (d) T2 vs UGLMAT-HYPRE baseline. Phase 3 case list and thresholds: §5.12. |
+| **G8** Conservation (FR-020/021/022/024) | Phase 3/4 | `species_conservation_1..4`, `energy_budget_*`, `simple_duct`, mass-balance cases with a refined patch | Requirement numbers (1e-12/step, 1e-10 cumulative; FR-022 with absolute floor) Phase 3 case list and thresholds: §5.12. |
 | **G9** Accuracy (FR-014, NFR-032) | Phase 4, 10 | `ns2d_{8..64}` + static patch, `ns2d_16_*_refinement`; NFR-032 plume: Heskestad `Qs=1_RI=10` (D-008) on the trimmed 32×32×80 level 0, with the A-19 64×64×160 uniform-fine reference (§6) | FR-014: refined ≤ coarse, refined-region L2 ≤ 2.0× uniform-fine, observed order ≥ FDS's measured order − 0.1 and L2 ≤ 1.1× FDS's at each N on the same 2:1 `ns2d` case (u, w, `H`; N = 16/32/64; A-38 norm script, `H` mean removed, t ≈ 1; D-040), with order ≥ 1.8 reported but non-gating. NFR-032: T3 (Lf within one fine cell 0.057 m, HRR 1%, centreline ΔT and w 10%, discrimination rule) at ≤ 50% of uniform-fine wall time |
 | **G10** Determinism / restart (FR-015, FR-080/081) | Phase 3, 9 | repeat runs, hierarchy dumps; `restart_test1a/b` + continuous copy, `device_restart_*` (+ `device_restart_base_case`), `restart_ulmat_*` | Hierarchy identical. FR-080 uniform mode: T0 proposed, **T1 minimum**. Only if baseline's own restart-vs-continuous difference misses T1 (measured at capture, A-08) does the criterion become "no worse than baseline's own restart-vs-continuous difference". AMR mode: T1 with an identical hierarchy after restart. FR-081: T2 |
 | **G11** Parallel / threads / decomposition (NFR-010/011/012, FR-005) | Phase 2+ | Radiation stage per D-039: box-split dependence exempt, rank count at fixed box layout and run-to-run not exempt. Baseline FDS: {1,2,4,8} ranks ≤ mesh count (D-016), MULT-split copies for wider sweeps (T2 vs original). AMReX code: every anchor at 1, 2, 4 and 8 ranks, two `max_grid_size` values, two thread counts; a pressure-zone case (`zone_break_fast`) for FR-005(ii); FR-005(v) setup-area/volume cases (§5.3); 3 repeats per configuration; `race_test_1/4` (AMR mode: A-35 `_r4` copies; FDS baselines: committed originals; §5.6) | FR-005: reduction-free explicit stages byte-identical across box split/ranks/threads (i); zone integrals and gauge exact, with exact accumulation from the per-cell/per-box sum up, not only at the Allreduce (ii); `H` within eps_H across box split/ranks (iii); bitwise run-to-run at fixed ranks/threads/layout, `OMP_DYNAMIC=false` (iv); setup areas/volumes byte-identical across box split/ranks/threads (v). Whole runs T2 across ranks (uniform), T3 (AMR); NFR-011 watchdog **Switch (FR-005 (iii), §5.11):** every decomposition-invariance comparison runs with the exact fixed-point sum switch ON; the same configurations in default mode are compared within eps_H only |
@@ -409,6 +413,156 @@ Rule (FR-005 (iii)): decomposition-invariance tests (box split, rank count, thre
 
 Rows that do not vary box split, rank count or thread count (G0 to G10, G12, §5.1, §5.2, §5.4 to §5.9) have no switch setting. GPU acceptance: for the MP5 `DIVG` path it is tolerance-only, not bitwise against the baseline, until upstream patches 0001 and 0002 (the fourth `Z_TEMP` element) are committed upstream and merged (NFR-043); the host side of the G15 gate (§5.10) stays bitwise against the verbatim upstream loop text and is not affected.
 
+### 5.12 Phase 3 acceptance: two-level runs and the D-057 `ns2d_16` check (v0.4.10)
+
+Machine-readable twin: `vv-runs/phase3/phase3_cases.csv` (35 rows; columns id, phase, gate, title, purpose, input_source, tier_runtime, observables, comparator, tolerance_class, threshold, threshold_status, dependencies, owner, code_owner, spec_refs, notes). The CSV is generated by `vv-runs/phase3/make_phase3_cases_csv.py`; edit that script, not the CSV. Where this section and the CSV disagree, fix the script and regenerate.
+
+#### 5.12.1 Scope, legend, and what can run when
+
+- **Phase 3 content (roadmap):** regrid, interface transport and the FR-024 interface flux overwrite, with prescribed or simplified velocity; no walls, no OBST, no composite pressure solve. The composite pressure solve and the level-1 `TimeLoop` binding are Phase 4. So the pressure halves of FR-016(c) and (d) and the named `species_conservation_1..4` / `Energy_Budget_*` refined cases are listed as later-phase rows, non-blocking now. Phase 3 stands on the transport, conservation and regrid checks plus the D-057 single-level pressure check.
+- **Gate column:** *blocking* = must pass for the Phase 3 exit; *non-blocking (Phase N gate)* = written now, gates at Phase N.
+- **Threshold status:** **SPEC** = number or rule taken from the requirements (some SPEC numbers are themselves marked "proposed" in the spec: FR-020/021 1e-12 and 1e-10, FR-032 1e-8, the T1 constant). **PROPOSED** = V&V's value, reasoned in the row, and listed in §5.12.6 for the Spec Lead / Architect. No PROPOSED value is final.
+- **Inputs:** `vv-runs/phase3/inputs/` (blob inputs, generated by `make_blob_inputs.py`; derived from `Verification/Scalar_Analytical_Solution/move_slug.fds`), `vv-runs/phase3/d057/` (D-057 inputs, oracle).
+- **Not runnable yet in the AMR code (dependencies column in the CSV):** a prescribed-velocity (`FREEZE_VELOCITY`) mode in AMR mode (`TimeLoop::check_scope` rejects it); static patches from a finer `&MESH` (the driver aborts with the M2a "all meshes must have the same cell size" message); `TAG_*` keywords in `&AMR` (the parser accepts `MAX_LEVEL`, `REF_RATIO`, `REGRID_INTERVAL`, `BLOCKING_FACTOR`, `MAX_GRID_SIZE`, `N_ERROR_BUF`, `N_PROPER`, `GRID_EFF`, `OUTPUT_LEVEL_CAP`, `VELOCITY_TRANSFER`, nothing for tags); the level-1 `TimeLoop` binding; test hooks (flux overwrite off, composite-sum and face-flux dumps, hierarchy dump, RHS/H dump and replay). The input files carry no invented `TAG_*` keywords: working names `TAG_SPEC_ID='SLUG'` and `TAG_SPEC_DIFF` (undivided difference, threshold about 0.05) are noted in a comment in `blob2d_amr.fds`.
+- **Reference runs done now (GNU Release `refbin/gnu_ompi_firex-36975d7/fds`, 1 rank, `nice`, `timeout`):** measured numbers below come from these. Wall times were taken with the machine load at 12 to 19 on 8 cores, so they overstate an idle-machine time.
+
+#### 5.12.2 Conservation (FR-012, FR-020, FR-021, FR-024; D-050, D-061)
+
+Quantities, all summed over **uncovered** cells of all levels with the D-028 exact sum: total mass M_tot = Σ ρV; species mass M_s = Σ ρ Y_s V for each species; energy / enthalpy E_h = Σ ρ h V. The interface check is the FR-024 flux identity: after the overwrite the coarse interface face flux equals the area-sum of the covered fine face fluxes, per stage, advective and diffusive, per species. There is no flux register in the design (D-050); the sum check replaces register bookkeeping. Within the periodic frozen-velocity test boxes the net boundary flux is zero, so the conserved totals must stay constant. Thresholds are the spec numbers (SPEC) except where marked.
+
+| id | Gate | Check | Threshold | Status |
+|---|---|---|---|---|
+| P3-C01 | blocking | M_tot per step and cumulative, static patch (`blob2d_static_mr_amr`) | per step ≤ 1e-12; cumulative ≤ 1e-10 (relative) | SPEC (FR-020) |
+| P3-C02 | blocking | M_s per species, same run | same numbers per species | SPEC (FR-021) |
+| P3-C03 | blocking | E_h, isothermal frozen blob | same numbers | PROPOSED (FR-024 gives "as in FDS", no figure; the isothermal frozen case has no source terms, so the species-mass form applies) |
+| P3-C04 | Phase 4 | energy closure, non-isothermal blob with pressure work | max(1.05·\|closure_base\|, 0.005·max\|Q_TOTAL\|) (FR-022 form) | SPEC form; whether Phase 3 needs any hot-blob number: TBD Spec Lead |
+| P3-C05 | blocking | FR-024 face flux identity, ADV and DIF, both stages | (a) vs in-code ordered sum: bitwise; (b) vs test-side permuted sum: ≤ 1e-14 relative | PROPOSED (2 to 16 terms; a few ulp) |
+| P3-C06 | blocking | composite sums identical across 1/2/4 ranks and two `max_grid_size` (switch ON, §5.11) | bitwise | SPEC (FR-005, D-028) |
+| P3-C07 | blocking | realizability: clip count; max \|ΣY−1\| | 0; ≤ 1e-14 | count SPEC (FR-025); ΣY PROPOSED ("at round-off" in the spec; a few ulp × species count) |
+| P3-C08 | blocking | negative control: overwrite OFF must fail C01/C02 | cumulative species imbalance > 1e-6 (inverted verdict) | PROPOSED (4 orders above the pass limit) |
+| P3-C09 | Phase 5 | `species_conservation_1..4` with a patch (FR-021 named) | ≤ 1e-2 (case Tol); baseline `species_conservation_1` 9.12e-3, margin 9% | SPEC; needs walls, VENT |
+| P3-C10 | Phase 4–5 | `Energy_Budget_*`, `simple_duct`, `mass_balance_*` with patch | FR-022 form | SPEC |
+
+eps_H is not used in this section: it covers a single solve on frozen input with the same discretisation, not conservation sums and not coarse-fine comparisons (§2). The tolerance classes enter as follows: T0 for decomposition independence and the identity (a); the REQ numbers of FR-020/021 for the sums; T2 later for whole-run budgets.
+
+**Evidence that the check can fail (recorded, GNU Release, FDS own multi-mesh interface, `blob2d_static_mr`, 12 coarse 10×1×10 meshes + one 40×1×40 mesh, 678 steps):** Total mass drift 3.8e-14, BACKGROUND species 5.3e-3, SLUG species 5.1e-2 (max over the run). So the Total looks conserved while the species are not, which is why C02 is separate from C01 and why the species numbers are the sensitive observable. Role 3's unit test without the overwrite shows a tracer drift of 4.5e-4 over 128 steps.
+
+#### 5.12.3 FR-016 (`int_1to2`) mapped to concrete comparisons
+
+FR-016 as recorded in `requirements.md` (v0.4.32): the static two-level case is `Adaptive_Mesh_Refinement/ns2d_16_int_1to2_refinement` (13 meshes: one 16×16 fine patch and 12 coarse 4×4 meshes, ratio 2, fully periodic, 2-D); the reference is its derived UGLMAT-HYPRE copy `_uglmat`. (a) first fine-side ghost layer, bitwise, first step, from the A-09b dump (§5.2); (b) the coarse side is **not** matched, conservation (FR-020/021) applies instead; (c) pressure: (i) interface normal-velocity mismatch at machine zero (FR-032, ≤ 1e-8 m/s), (ii) error against the exact solution no worse than UGLMAT, (iii) observed order ≥ FDS order − 0.1; compared at t≈1 and t≈2π only; (d) full-run T2, Phase 4. eps_H does not apply to (c) and (d).
+
+| id | Gate | Comparison | Threshold | Status |
+|---|---|---|---|---|
+| P3-F01 | blocking | (a) first fine-side ghost layer, RHO, ZZ, TMP, RSUM, RHOS, ZZS, MU, KRES, D, DS on `int_1to2` vs A-09b dump, step 1 | bitwise; coarse side report-only | SPEC |
+| P3-F02 | blocking | D-059 shared corner cells: differing set ⊆ declared set | fine side: none; KRES coarse side ≤ 4 of 16 corner-zone cells; RHO, TMP coarse ≤ 3e-15 relative | count SPEC (D-059); 3e-15 PROPOSED as a limit (recorded observation) |
+| P3-F03 | blocking | covers nothing: `ns2d_16_amr_notag` (AMR mode, no tags) vs same code without `&AMR`; vs recorded `ns2d_16__sf17` | bitwise; T2 (e ≤ 1.05·e_base + 0.1·Tol; e_base RMS u 0.1307); 0 level-1 boxes | SPEC (T0, T2) |
+| P3-F04 | blocking | covers everything, transport: `blob2d` fully refined vs AMR-code uniform fine; level 0 vs average_down(level 1); AMR single-level vs FDS `blob2d_f80` | bitwise; ≤ 1e-14 relative; T1 (1e-10·max\|x_base\|) | PROPOSED (T0 vs T1 to be ruled; FREEZE_VELOCITY, no pressure solve) |
+| P3-F05 | Phase 4 | (c)(i) normal-velocity mismatch | target machine zero; limit ≤ 1e-8 m/s | SPEC (FR-032) |
+| P3-F06 | Phase 4 | (c)(ii) L2 error vs exact ≤ 1.1 × UGLMAT | table below | SPEC (rule), recorded numbers |
+| P3-F07 | Phase 4 | (c)(iii) observed order ≥ FDS order − 0.1 | table below | SPEC (rule), recorded numbers |
+| P3-F08 | Phase 4 | (d) full-run T2, `int_1to2` vs UGLMAT baseline | RMS u (0 to 2π) ≤ 1.05 × 0.2981 = 0.3130 | SPEC |
+| P3-F09 | Phase 4 | covers everything, pressure: `ns2d_16` fully refined vs baseline `ns2d_32` | RMS u ≤ 1.05 × 0.0319; H vs single-level fine solve within eps_H(32) = 1e-8 | SPEC |
+
+"Covers nothing" and "covers everything" are therefore split by what the Phase 3 code can do: the empty hierarchy is a real `ns2d_16` run (about 0.85 s unloaded) and gates now; the full-coverage hierarchy gates now on transport only, with the pressure side in Phase 4 (P3-F09).
+
+Recorded numbers for P3-F06 and P3-F07 (A-38, UGLMAT HYPRE, `vv-runs/A-38/norms.csv`; gate bound L2 ≤ 1.1 × these):
+
+| Quantity | Time | L2 at N = 16 / 32 / 64 | Observed order 16→32, 32→64 |
+|---|---|---|---|
+| u | t≈1 | 4.152e-2 / 1.324e-2 / 4.929e-3 | 1.649, 1.426 |
+| w | t≈1 | 3.774e-2 / 1.196e-2 / 3.937e-3 | 1.658, 1.603 |
+| H (mean removed) | t≈1 | 1.107e-1 / 4.557e-2 / 2.108e-2 | 1.281, 1.112 |
+| u | t≈2π | 2.524e-1 / 1.448e-1 / 1.0905e-1 | 0.802, 0.409 |
+| w | t≈2π | 2.537e-1 / 1.316e-1 / 1.0236e-1 | 0.946, 0.363 |
+| H | t≈2π | 5.225e-1 / 2.921e-1 / 2.240e-1 | 0.839, 0.383 |
+
+FFT and UGLMAT agree to ≤ 3.9e-4 relative up to 2π. t = 30 is not usable (the solution is unresolved). Runtimes (recorded): `ns2d_16` 0.85 s, `ns2d_32` 4.0 s, `ns2d_64` 28.8 s; `int_1to2` 90.9 s (default solver), 29.7 s (UGLMAT); A-38 UGLMAT wall at N = 16/32/64: 30.5 / 141.3 / 917.2 s (1 rank).
+
+**Two gaps to close for P3-F01** (from Role 3's ghost check, `src/Source/regrid_transport/notes/fr016-ghost-check.md`): its dumps use steps 2 and 3 (`FDSREF_STEPS=2,3`), while FR-016(a) and §5.2 say the first step; and it does not compare D and DS, which §5.2 lists. The gate counts only a step-1 comparison that includes D and DS, or a documented ruling.
+
+#### 5.12.4 Moving blob (regrid tracking)
+
+**Input.** A tracer slab advected across a periodic box with frozen velocity, derived from `Verification/Scalar_Analytical_Solution/move_slug.fds` (`FREEZE_VELOCITY` plus `&WIND`, SUPERBEE, two slugs: SLUG mass fraction 1 on [0.125, 0.375]² and 0.5 on [0.5, 0.75]²; BACKGROUND elsewhere). The exact solution is the initial field shifted by u·t, so the field returns to the initial state at t = 1 for the 2-D case (u = w = 1). No existing FDS case serves unchanged: `move_slug` itself has the right physics but is a fixed-grid case without an `&AMR` line and without conservation output. Files, all in `vv-runs/phase3/inputs/`:
+
+| File | Use | Reference-binary result (1 rank, loaded box) |
+|---|---|---|
+| `blob2d_c40`, `blob2d_f80` | 2-D coarse / fine single level | c40: 339 steps, 4.8 s stepping; f80: 678 steps, 124 s wall; mass drift ≤ 6.6e-15 / 3.3e-14 |
+| `blob2d_c16`, `blob2d_f64` | ratio-4 pair | 0.8 s; 26.8 s wall; Total and SLUG drift ≤ 8.6e-15 / 1.7e-14 |
+| `blob2d_amr` | 40×1×40 level 0 + `&AMR MAX_LEVEL=1, REF_RATIO=2, REGRID_INTERVAL=4, BLOCKING_FACTOR=4, N_ERROR_BUF=2` | AMR code only (the FDS binary does not read `&AMR`) |
+| `blob2d_static_mr`, `blob2d_static_mr_amr` | FDS multi-mesh layout like `int_1to2` (12 coarse 10×1×10 + one 40×1×40 over [.25,.75]²); AMR variant with `REGRID_INTERVAL=0` | static_mr: 43.9 s wall; the C08 evidence above |
+| `blob3d_c32`, `blob3d_f64`, `blob3d_amr` | 3-D, one slug, velocity (1, 0.5, 0.25) | c32: 19.3 s, drift ≤ 2.1e-15 (Total), 1.6e-14 (SLUG); f64: 483 s wall, drift ≤ 1.4e-14 |
+
+All use `&DUMP SIG_FIGS=17, DT_SLCF=0.25, MASS_FILE=.TRUE., DT_MASS=0.05` and cell-centred SLUG slices. Tools: `run_blob_smoke.sh` (one rank, `nice -n 19`, `timeout`), `blob_metrics.py` (relative L2 and max error against the exact shifted field with box-overlap fractions, peak, mass, circular centroid, `_mass.csv` drift). Smoke runs show the FDS single-level runs conserve the mass file to round-off; relative L2 error against the exact field at t = 0.25 / 0.5 / 0.75 / 1.0 is c40 0.268 / 0.265 / 0.302 / 0.308 and f80 0.186 / 0.206 / 0.219 / 0.223; the 2-D ratio-4 pair c16 0.393 / 0.446 / 0.484 / 0.540, f64 0.210 / 0.239 / 0.222 / 0.248. The centroid error is a constant ~0.11 fine cell for both resolutions (a one-step time-stamp offset, not drift).
+
+**Refinement criterion.** FR-011 / D-058: undivided difference of the SLUG species with `TAG_KEEP` hysteresis, threshold about 0.05 (working value, keyword TBD), buffer `N_ERROR_BUF = 2`. Buffer rule: `N_ERROR_BUF ≥ ceil(R · CFL per axis) + 1`; the blob moves about 0.5 fine cell per regrid interval here, so 2 is safe.
+
+**Expected behavior.** Level 1 appears around the slabs at t = 0, follows the edges as they move, and tags never leave the finest level; the composite mass and species masses are constant to round-off including across each regrid.
+
+| id | Gate | Observable and comparator | Threshold | Status |
+|---|---|---|---|---|
+| P3-B01 | blocking | per-regrid composite mass and per-species change; per-step and cumulative imbalance; clip count; containment count (cells the criterion would tag that are not on the finest level, sampled every step) | ≤ 1e-12; ≤ 1e-12 / ≤ 1e-10; 0; 0 | regrid and sums SPEC (FR-012, FR-020/021); containment 0 PROPOSED |
+| P3-B02 | blocking | discrimination: relative L2 of SLUG slice, \|\|AMR−F\|\| ≤ 0.5·\|\|C−F\|\| at t = .25/.5/.75/1.0 | ≤ 0.084 / 0.089 / 0.089 / 0.090 as computed from the FDS C and F (‖C−F‖/‖F‖ = 0.168 / 0.177 / 0.178 / 0.180, coarse prolonged 2×2); recompute from AMR-code C and F at the gate | PROPOSED application of the T3 rule to the tracer field |
+| P3-B03 | blocking | circular centroid vs the fine run | ≤ 0.1 fine cell | PROPOSED |
+| P3-B04 | blocking | determinism: hierarchy dumps and final fields across repeats and 1/2/4 ranks | identical / bitwise (switch ON) | SPEC (FR-015, FR-005) |
+| P3-B05 | blocking | negative control `REGRID_INTERVAL=0` | containment > 0 and discrimination bound exceeded (inverted verdict) | PROPOSED |
+| P3-B06 | blocking | `RemakeLevel` on an unchanged grid | bitwise copy | SPEC (FR-012) |
+| P3-B07 | blocking | 3-D blob (`blob3d_amr` vs `blob3d_c32`, `blob3d_f64`) | as B01 and B02 | conservation SPEC, discrimination PROPOSED |
+| P3-B08 | blocking | ratio 4 (`blob2d_c16`, `blob2d_f64`) | as B01 and B02 | same |
+| P3-B09 | blocking | D-059 corner effect: (1) cells farther than n+1 cells from the patch outline bitwise equal to the uniform-fine AMR run for the first n steps; (2) corner-zone max difference ≤ edge-zone max difference at the same distance + 4 ulp | as stated | PROPOSED |
+
+Notes on use: the comparisons of B02, B07, B08 are made between runs of the **AMR code** (level 0 only, fully refined, AMR); the FDS runs supply the exact-field errors and the check that the AMR-code uniform runs reproduce FDS single level (T1). A fixed FDS slice plane (3-D) is left by the blob after t = 0.25 (it moves in y and z), so the FDS-slice comparison in 3-D is valid at t = 0.25 only; the 3-D gate uses the AMR driver's volume output and composite sums. The metrics script normalises the 3-D plane error by the t = 0 plane norm for this reason. The FR-016 shared-corner effect (D-059) is covered by P3-F02 and P3-B09. FR-013: the same cases run once on a GNU Debug AMR build with zero assertion failures (P3-X01).
+
+#### 5.12.5 D-057 check: 2-D `ns2d_16` (with Role 2, Pressure Backend Implementer)
+
+**What D-057 decides** (README decision log and `requirements.md`): AMReX `PoissonHybrid` fails on fully singular problems, so all-periodic and all-Neumann cases use `FFT::Poisson`; a direction with a single cell is ignored by the FFT solver. Role 2 checks the mapping of FDS BC types (`FISHPAK_BC`, `&PRES`, surface and vent types) to the FFT and MLMG BCs for 2-D and singular cases, including mean removal; the Pressure Solver Lead reviews it; the V&V Lead supplies the 2-D test `ns2d_16`; Role 1 supplies the driver side.
+
+**Inputs.** `ns2d_16` exists in the baseline set (`case_inventory.csv`, `vv-runs/baseline/gnu_ompi_firex-36975d7/ns2d_16` and `ns2d_16__sf17`): committed `Verification/NS_Analytical_Solution/ns2d_16.fds`, `PERIODIC_TEST=1`, 16×1×16, x and z periodic, y walls, dx = dz = 2π/16, dy = 0.1. The recorded `SIG_FIGS=17` outputs are reused (DEVC UVEL, PRES, VISC; 296 rows). New derived inputs, in `vv-runs/phase3/d057/` with derivation diffs: `ns2d_16_dy10.fds` (y extent × 10) and `ns2d_16_amr_notag.fds` (adds an `&AMR` line, no tags). 1 rank.
+
+| id | Gate | Check | Comparator and threshold | Status |
+|---|---|---|---|---|
+| P3-D01 | blocking | BC mapping, setup only: `fds_amr ns2d_16.fds --pressure-bc` | prints `twod=1 n=16x1x16 codes=1,3,1 x=PP y=NN z=PP`, no ERROR; FFT chosen | SPEC; string verified once with a scratch driver binary (also for `ns2d_16_amr_notag`, `blob2d_amr`, `blob3d_amr`) |
+| P3-D02 | blocking | single solve on frozen input: backend H (FFT and MLMG) vs `poisson_oracle.py`; vs the baseline FDS FFT H from the A-09b/refdump instrumented dump of step 1; FFT vs MLMG | relative L2 ≤ eps_H(16) = max(1e-8, 2.4e-12·256) = 1e-8, mean removed both sides | SPEC (eps_H) |
+| P3-D03 | blocking | mean removal on the singular problem | removed_rel = \|removed mean\|/‖b‖ ≤ 1e-10 per solve; no true-residual warning | PROPOSED (1e-10 is the T1 scale; FR-039 asks for the diagnostic without a number) |
+| P3-D04 | blocking | whole run vs the recorded baseline | T2 on UVEL, PRES, VISC DEVC (e ≤ 1.05·e_base + 0.1·Tol); RMS u error 0 to 2π ≤ 1.05 × 0.1307 = 0.1372; PRES reported only until the gauge question is settled | SPEC (T2) |
+| P3-D05 | blocking | thin-direction invariance: `ns2d_16_dy10` vs `ns2d_16` in the AMR code | T1, ≤ 1e-10·max\|x_base\| per series | SPEC (T1 constant is "proposed" in the spec) |
+
+**Oracle and its validation.** `poisson_oracle.py` is an independent numpy solver for one cell-centred 7-point Poisson solve with periodic / Neumann / Dirichlet per direction (a one-cell direction contributes no term); it removes the mean on singular problems and prints `ORACLE rel_l2=... eps_H=... removed_rel=... verdict=PASS|FAIL`. Checked against Role 2's harness (`pb_harness`, 16×1×16): FFT periodic 4.2e-15, MLMG periodic 7.1e-14, FFT Neumann 7.6e-15, MLMG Neumann 1.3e-12 (the harness itself reports FFT vs MLMG 7.1e-14 and 1.3e-12 against eps_H 1e-8). Negative controls fail as required: wrong dx gives 0.20, BC mismatch gives 0.43.
+
+**Thin-direction evidence (reference binary).** `ns2d_16_dy10` against the recorded baseline: UVEL differs by ≤ 3.1e-15 (max\|UVEL\| = 2.2), PRES by 2.2e-16, VISC by 2.6e-26; so FDS itself is invariant to dy at round-off, not bitwise: hence T1, not T0. FDS cannot run a one-cell x or z (ERROR(426), "Poisson initialization error") or a y-boundary VENT in a 2-D calculation (ERROR(809)); those variants are not FDS inputs. The one-cell, Dirichlet-refusal and y-open mapping cases stay in Role 1's unit test `pressure_bc_map` (21 checks). The 23 inputs with pressure code 0 on non-periodic directions stay refused in AMR mode (Architect ruling), which also bounds what a blob input may contain: the blob inputs use code 0 only on periodic directions.
+
+**Gauge.** The baseline FFT H slice has a non-zero mean (about 1.84 to 1.89 for `ns2d_16`); UGLMAT's gauge is about 0 relative to the exact solution (FFT about +0.46 for `int_1to2`). All H comparisons are made after mean removal. The recorded H slices are float32 node slices (17×17): too coarse for eps_H = 1e-8, so P3-D02 needs the A-09b/refdump dump of `M%H` in float64. The `ns2d_16` DEVC `PRES` series depends on the gauge.
+
+**Questions for Role 2:**
+1. Which gauge does the backend apply: the FDS FFT convention (mean H ≈ 1.88), the exact solution, or zero mean? How should the `PRES` DEVC be compared?
+2. How is a one-cell y handled in the MLMG backend: `setHiddenDirection` with `ref_ratio_vect = 2 1 2`, or plain Neumann?
+3. Will the harness or backend expose an RHS and H dump / replay hook for `ns2d_16` at step 1?
+4. Is `removed_rel` available per solve as a diagnostic?
+5. Which instrumented-baseline H dump is used (the A-09b refdump)? Which step?
+6. When does the composite path exist, and does a one-cell x/z with a Dirichlet face stay refused?
+
+#### 5.12.6 PROPOSED values and decisions needed (TBD for the Spec Lead and Architect)
+
+| Item | Row | Proposed | Reason |
+|---|---|---|---|
+| Energy / enthalpy closure for an isothermal frozen blob | P3-C03 | same form as FR-020 (1e-12 per step, 1e-10 cumulative) | no source terms; FR-024 gives "as in FDS" only |
+| Whether any hot-blob energy number is needed in Phase 3 | P3-C04 | no; defer to the FR-022 form in Phase 4 | pressure work needs the composite solve |
+| Interface flux identity | P3-C05 | bitwise vs in-code sum; ≤ 1e-14 vs permuted sum | 2 to 16 summands |
+| Species sum | P3-C07 | \|ΣY−1\| ≤ 1e-14 | FR-025 says "at round-off" |
+| Negative-control margin | P3-C08 | cumulative imbalance without the overwrite > 1e-6 | power of the check |
+| T0 vs T1 for full coverage and single-level blob comparisons | P3-F04 | T0 inside the AMR code, T1 against FDS | same kernels, no pressure solve |
+| D-059 corner limit | P3-F02, P3-B09 | coarse side 3e-15; corner max ≤ edge max + 4 ulp | recorded observation; D-059 gives none |
+| Containment count and centroid bound | P3-B01, P3-B03 | 0; 0.1 fine cell | spec has no tracking tolerance |
+| Discrimination rule applied to the tracer slice | P3-B02, B07, B08 | ‖AMR−F‖ ≤ 0.5‖C−F‖ | T3 rule is for physical observables |
+| FR-016(a): step 1 vs steps 2 and 3, and D, DS | P3-F01 | step 1 with D, DS | spec text; Role 3's check differs |
+| Mean-removal bound | P3-D03 | removed_rel ≤ 1e-10 | FR-039 diagnostic without number |
+| Gate phase of F05 to F09 | P3-F05 … F09 | Phase 4 | composite solve is Phase 4 |
+
+Spec-vs-plan wording to align: Role 3's plan (`docs/role3-regrid-transport-plan.md`) uses "YAFluxRegister / reflux"; the spec (D-050) uses the interface flux overwrite with no register. This plan follows the spec.
+
+#### 5.12.7 Reference builds used and their status
+
+All runs above used `vv-runs/refbin/gnu_ompi_firex-36975d7/fds` (Release). Verified: `sha256sum -c SHA256SUMS` passes for 36 entries, and a rerun of `ns2d_16` at `SIG_FIGS=17` gives devc and hrr CSVs byte-identical to the recorded baseline (P3-X02). The Debug binary (`fds_debug`) has landed and its checksums pass, but it has not been run by V&V. `refbin/impi_intel_firex-36975d7` has no `fds` binary yet (build in progress). `refbin/gnu_ompi_firex-bee11f0329` is not built. Open gate row P3-X01: a Debug AMR driver build is needed for FR-013 on the Phase 3 cases.
+
 ## 6. Case selection (details and per-run estimates in `case_inventory.md`)
 
 **Tier 1 (39 runs, ≈ 17 min sequential, all measured on the GNU FireX reference; `dancing_eddies_1mesh` moved to Tier 2 per spec R-0).**
@@ -503,6 +657,7 @@ Full assessment: `case_inventory.md` §6. **Excluded, with reasons:** `case_inve
 
 ## 8. Tooling (delivered and planned)
 - **Delivered:**
+  - `vv-runs/tools/patch_check.sh CONTROL_FDS PATCHED_FDS [--debug CTL_DEBUG PATCHED_DEBUG]`: standard bitwise behaviour-unchanged check for upstream patches (G0 pair, `shunn3_4mesh_32`, `csmag_32`, optional extra case; SIG_FIGS=17 copies; timing columns stripped); usage and pass criterion in the script header.
   - `vv-runs/gpu_gate/` (`run_gpu_gate.sh`, `gate.py`, `check_device_logs.py`, README, `results/`): the GPU kernel bitwise gate of §5.10.
   - `parse_fds_inputs.py`: static survey. Follows FDS `CHECKREAD` rules and expands MULT including SKIP ranges.
   - `make_inventory.py` and `render_inventory_md.py`: inventory, cost model, class mapping.
@@ -606,3 +761,4 @@ The items below are this plan's v0.2 answers (R-n) and disagreements (D-n). Thei
 - `vv-runs/smoke/{run_smoke.sh, inputs/, gnu/, intel/}`
 - `vv-runs/inputs/A-19/{Qs1_RI10_fine_64x64x160.fds, Qs1_RI10_coarse_32x32x80.fds, make_A19_inputs.py, verify_A19_probes.py, README.md, setup_check/, superseded/}` (superseded v1 66×66×160 / 33×33×80 files in `superseded/`)
 - Baseline status: `baseline_status.md` (maintained by the capture worker, not by this plan)
+- `vv-runs/phase3/{phase3_cases.csv, make_phase3_cases_csv.py, inputs/ (blob inputs, make_blob_inputs.py), d057/ (ns2d_16_dy10, ns2d_16_amr_notag, poisson_oracle.py, make_d057_inputs.py), run_blob_smoke.sh, blob_metrics.py, runs/}` (§5.12)

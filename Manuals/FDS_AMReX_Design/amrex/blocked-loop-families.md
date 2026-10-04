@@ -214,3 +214,15 @@ Large loops with reductions that sit in the geometry-deferred bucket and wait fo
 2. `BOUNDARY_PROP1(WC%BC_INDEX)` in divg.f90:1581 against `B1_INDEX` elsewhere (P3): checked against the source and with an instrumented run (about 6.7 million evaluations over four small cases, including massless tracers and runtime obstruction creation and removal; the indices never differed). The two indices coincide for every wall at initialisation and on restart, because all walls are allocated before any particle exists, and a runtime wall re-creation keeps the indices it already has. They could differ only if a wall record were first allocated after massless tracers exist (massless particle classes take a `BOUNDARY_COORD` slot and no `BOUNDARY_PROP1` slot). It is a latent index slip, not a known fault. Patch 0004 (`docs/upstream-patches/0004-divg-solid-dp-b1-index.patch`) is proposed; it is behaviour-neutral whenever the indices coincide. Owner decision: commit upstream or leave; the wall table uses `B1_INDEX` either way.
 3. Cell-to-wall list (CSR, ascending wall index) as a new table family shared by S3, SP1, SP2 (highest wall index per target cell), SP3, SP4 (per gas cell and per obstruction) and P3. Accepted by the Pressure, Species & Combustion and Solid Phase leads; needs the table decision and an owner.
 4. Tie rule for argmax/argmin (V1, V2): lexicographic on K,J,I order as proposed, to be confirmed by the V&V lead.
+
+### DP1. What keeps L0365, L0369 and L0381 (`DIVERGENCE_PART_1`) from whole-loop translation *(GPU Generator Engineer, round 8)*
+**Status: cell sub-nests translated and bitwise-tested (kernels `rho_d_dzd`, `d_z_max`, `rho_d_interp`, `h_rho_d_dzd`, `dp_div_heat`, `del_rho_d_del_z`, `dp_species`, and L0366 `rho_d_maxloc_fix`); the remainder is below.**
+| Piece | Lines (divg.f90) | Blocker | Owner of the fix |
+|---|---|---|---|
+| `RHO_D = MAX(0,MU)*RSC_T` and the `RHO_D_TURB` forms | 122, 124, 146, 148 | front end accepts only constant whole-array fills ("array MU is passed whole; element access not seen"); needs a whole-array to elementwise nest rewrite in the region classifier | loop classifier |
+| `IF (CHECK_VN) D_Z_MAX = 0`, `DEL_RHO_D_DEL_Z = 0` | 111, 117 | not markable as written (IF statement / whole 4D array fill) | generator |
+| `TENSOR_DIFFUSIVITY_MODEL` | 187 | 198-line routine called from the middle of the nest; stays on the host | host |
+| `WALL_LOOP_2` (inside L0369) | 318-386 | "array section without explicit lo:hi" in the generic `Emitter.assign` (`B1%RHO_D_F(:)*(ZZP(...,:)-B1%ZZ_F(:))`); also wall species tables, `MAXLOC(B1%ZZ_F(1:NS),1)`, `STORE_SPECIES_FLUX`, `GET_SENSIBLE_ENTHALPY_Z` call | wall tables + shared emitter change |
+| EXIM and `STORE_SPECIES_FLUX` output copies | 265-283 | four-dimensional whole-array slice statements `DIF_FX(:,:,:,N) = ...` | generator (not attempted) |
+| N loop with `SPECIES_ADVECTION_PART_2`, `IF (CC_IBM) CALL` | L0381 remainder | host orchestration | host |
+Limit of the new `rho_d_maxloc_fix` kernel: NaN species fractions are not guaranteed to follow the serial `MAXLOC` rule.

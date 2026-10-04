@@ -1,0 +1,89 @@
+# Kernel-side review of the flux read-out / override hooks (design note `Source/driver/notes/flux-hooks-design.md`, patch 0009, S10.2 code)
+
+Scope: are the hooks compatible with the generated K2 kernels running on the device (data residency, loops, lo/hi, where a device kernel would call the hook, ordering, extra syncs, bitwise)?
+Everything below is a code reading of the tree at the S10.2 state (read-only) plus numbers measured earlier in the stage-1 spike (labelled *run* with the case and size). Nothing in `Source/` was changed.
+File names are relative to `Source/driver/` unless they start with `Source/` (FDS) or `amrex/s4_mass/s5_gen/generated/` (the K2 generator output of the s5-gen tree, 60 kernels).
+Line numbers are those of the current trees; the K2 markers quote upstream FDS line numbers (patch 0009 shifts `divg.f90` lines after 267 by 9).
+
+## Summary
+
+The hook design is sound for the host path and its tests (T1-T3, `tests/run_flux_hook_check.sh`) are the right ones. It is **not usable as written from a device kernel chain**: the hook module is host code over host pointers, two of the three
+code segments around the DIF hook point have no generated kernel, and the override loop exists only as a hand-made copy in the driver's `fds_density_split.f90`. None of this needs a new hook design; it needs the hook split into
+(a) host-side control state (mode flags, list lengths, which box) and (b) three small device operations (read-out pack, list upload, override scatter), plus two generated kernels and one rule for the override loop. Details, ordered by importance:
+
+| # | Finding | Severity | Fix | Effort (work-days, ESTIMATED) |
+|---|---|---|---|---|
+| 1 | Registered arrays and override tables are host memory that Fortran host loops dereference | blocker on device | device read-out pack kernel, device list buffers, pinned/compact D2H of interface faces only | 3 |
+| 2 | The override loop copy has no generated counterpart | blocker for ADV override | reuse `zzs_pred`/`zz_corr` unchanged on a product array and a ones array (bitwise by construction), or a generator variant | 1.5 (reuse) / 3 (variant) |
+| 3 | DIF hook point sits between host-only segments (species-sum fix, `DEL_RHO_D_DEL_Z` divergence); the re-run design (`flux_apply_dif`) double-runs the chain | blocker for DIF on device | two new generated kernels, split the chain at the hook instead of re-running | 4 |
+| 4 | Syncs and transfer volume: whole-box read-out is 52 MB per stage at 128^3 | performance | gather only the interface faces on the device; 2 syncs per kind and stage | 1.5 |
+| 5 | The ADV hook depends on the wall-state seam (restore of `UVW_SAVE` into `UU/VV/WW`, mass.f90:424-436) and on the SOLID mask, and bitwise equality needs the no-FMA flags | dependency + test | order the stage so W2 upload precedes the read-out; repeat T1/T2/T3 device-vs-host | 2 |
+
+## Finding 1 - residency: the hooks only work on host memory
+
+- `fds_flux_hooks.f90:60-73` (`FDS_FLUX_REGISTER`) maps the C data pointer of the registered MultiFab into a Fortran `POINTER` view; `:127-154` (`FDS_HOOK_DIF_FLUX`), `:159-199` (`FDS_HOOK_ADV`) read and write through it with host `DO` loops (`:136-143`, `:171-177`, `:188-194`).
+- `TimeLoop.cpp:496-514` (`stage_flux_arrays`) builds those MultiFabs with `new amrex::MultiFab(nba, dm, ns, 0)`: the default arena. In the CUDA AMReX build the default arena is device memory (managed only with `amrex.the_arena_is_managed=1`). A host loop on it faults; with managed memory it works but pages migrate
+  (the copy rate measured in the spike, *run*: about 12 GB/s each way, test-machine GPU, pinned, 128^3 field sets 4.5 to 33 ms one way).
+- The override tables (`OVR_T`, `:30-34`; set at `:88-114`) are host `ALLOCATABLE`s of ragged length, and `PROD` (`:40`, allocated and zeroed per call at `:182-186`: `(0:IBAR,0:JBAR,0:KBAR,NS,3)` doubles, i.e. three times a scalar field per call) is a host allocation in the time loop.
+- A device kernel cannot call `FDS_HOOK_ADV` or `FDS_HOOK_DIF_FLUX`: they have `SELECT CASE` on host-side derived-type state, `ASSOCIATED` tests on pointers, `ALLOCATABLE` components and a `RETURN` out of the caller (`fds_density_split.f90:103-105`, `:223-225`).
+
+What the device path needs (all small):
+1. The mode (`MODE(0:1)`, `FDS_FLUX_ACTIVE`, `fds_flux_set_mode`) stays host state; the host decides before launching which of three launch sequences runs (plain, read-out only, override). No device code ever tests a mode.
+2. ADV read-out = one pack kernel from the stage product to the registered nodal arrays. The K2 set already contains the product: `s5gen_adv_flux_store` (marker mass.f90:462-472) computes `ADV_FX = FX*UU` (and Y, Z) on the faces 0..IBAR x 0..JBAR x 0..KBAR in one kernel. Its measured cost (*run*, DENS_P chain, test-machine GPU): 0.70 ms at 128^3 and 2.28 ms at 192^3, 5.5 to 6.7 ms at 32^3 (launch floor). It is stateless, so it also gives the **corrector** stage product (the `adv_flux_avg` kernel, marker mass.f90:650-660, is the STORE_SPECIES_FLUX average `0.5*(ADV_F + FX*UU)` and is NOT what the hook needs).
+3. Layout: the K2 arrays are `ADV_F*(0:IBAR+1,0:JBAR+1,0:KBAR+1,1:NS)` (cell-shaped with ghost), the registered ones are nodal with lower bounds `(0,1,1,1)` / `(1,0,1,1)` / `(1,1,0,1)` (`fds_flux_hooks.f90:5-6`, `TimeLoop.cpp:503-511`). The kernel writes a superset of the hook's face range (it also fills the tangential row 0), so it is compatible; a strided device-to-device pack (about the cost of `adv_flux_store`) maps one to the other. Component base: `FX` has `NL:NS` (the hook passes `LBOUND(FX,4)` as `N0`, `:159-161`); `ADV_F*` has `1:NS`.
+4. Override lists live in two device buffers per box (`dir[n]`, `idx[3][n]`, `val[NS][n]`), uploaded in `fds_flux_set_override` (once per stage and kind, the range check at `:99-106` stays on the host). Upload size: `n*(4 ints + NS doubles)`; for a coarse face list around a 64^3 fine patch (6 sides of 32x32 coarse faces = 6144 faces) and NS=1 about 100 KB, i.e. microseconds (latency bound, 10 to 25 us per copy).
+5. The `PROD` array is not needed: the ADV product arrays of item 2 are the product; the override scatter kernel replaces the listed entries in place.
+
+## Finding 2 - the override loop copy has no generated counterpart
+
+- The override path is a second, hand-edited copy of the update loop that reads `PRX/PRY/PRZ` instead of `FX*UU` etc.: `fds_density_split.f90:106-120` (predictor) and `:226-240` (corrector), produced by `tools/gen_density_split.py:60-77` (`hook_block`, a text substitution on the FDS loop). The K2 generator works from marker regions of `Source/mass.f90` (`zzs_pred` mass.f90:442-455, `zz_corr` mass.f90:619-632), not from the driver's split copy, so the device chain has no `*_ovr` variant.
+- Two ways, both bitwise by construction:
+  a. **Reuse, no generator change.** Call the existing `s5gen_zzs_pred` / `s5gen_zz_corr` with `FX := PRODX` (the `adv_flux_store` output after the override scatter) and `UU := ONES` (a device array of 1.0 with the `UU` shape, allocated once per box). `PRODX*1.0*R(I)` equals `PRX(I)*R(I)` exactly (multiplication by 1.0 is exact; the only fusable operation, the subtraction after the product, is the same in both forms with contraction off). Same for Y and Z. Cost: reads one extra array.
+  b. **Generator variant.** A second marker rule that substitutes `FX(...)*UU(...)` by `ADV_FX(...)` in the same two regions (the same substitution as `gen_density_split.py:62-69`). Cleaner kernels, needs the generator extension and its bitwise test.
+- The empty-list path stays the original kernel call (as in the design), so T1 is unchanged. Host check: `OVR_ADV` is a host logical; the branch is a host `if` before the launch (`fds_density_split.f90:101-110`).
+- Note the product order: in `PRODX*R(I) - PRODX(I-1)*R(I-1)` the product `FX*UU` is rounded when stored, in the inline form it is rounded as an intermediate; both are one rounding (no FMA possible between two multiplications), so equal. The FMA question is only the final subtraction (Finding 5).
+
+## Finding 3 - the DIF hook point lies between segments that have no generated kernel
+
+The hook call is `divg.f90:279` (patch 0009), after the species-sum correction and before the heat flux (`:300`). The K2 set covers (marker list of `s5gen_k2.F90`): `rho_d_dzd` (171-182, the face flux), `wall_rho_d_dzdn` (192-232, the wall loop), `h_rho_d_dzd` (298-312, heat flux), `cp_rhg`, `conductivity`, `kdtd`, `dp_kdtd`, `dp_species` (646-655, which *reads* `DEL_RHO_D_DEL_Z` as an input). Missing:
+- the species-sum fix, `divg.f90:246-267`: per face `N=MAXLOC(ZZP(I,J,K,1:NT)+ZZP(I+1,J,K,1:NT),1)` then `RHO_D_DZDX(I,J,K,N) = -(SUM(...)-RHO_D_DZDX(I,J,K,N))`. This is exactly the value the hook reads or overrides ("after the species-sum fix") and it has no kernel. It needs a reduction over the species index inside a collapsed loop (`MAXLOC` with first-maximum tie rule must be reproduced bit for bit: the tie rule decides which species absorbs the error).
+- the divergence loop that forms `DEL_RHO_D_DEL_Z` from the fluxes, `divg.f90:426-430` (the hook's consumer): no kernel; today the chain takes `DEL_RHO_D_DEL_Z` as input.
+- `SET_EXIMDIFFLX_3D` (`:274`, only with `CC_IBM`): out of scope while cut cells are off; the hook position is right after it, so it must stay before the read-out.
+Without those two kernels the device chain would hand the three flux arrays (NS components each) to the host at the hook and back: at 128^3 and NS=1 that is 52 MB per direction, about 4.3 ms each way (12 GB/s, *run*) per stage, against the whole `WP1_DIV1` kernel chain of about 4.6 ms on the device (*run*, 128^3 tiled case, test-machine GPU: the ten calls take 0.30 to 0.64 ms each).
+
+Re-run design (`TimeLoop.cpp:589-596` `flux_apply_dif`, `:1435-1441` `apply_flux_divergence`/`run_divergence_part1`): the coarse level runs DIVERGENCE_PART_1 twice. On the device that is cheap relative to a hand-off, but it requires every kernel in the chain to be re-runnable from identical inputs. `dp_species` accumulates `DP(I,J,K) = DP(I,J,K) + ...` in place (marker divg.f90:646-655) and `dp_kdtd` adds the conduction term, so a re-run is only correct when `DP` is re-initialised at the start of the chain on the device (it is today by host code at the start of DIVERGENCE_PART_1; the harness stages in the spike take `DP` as zero input). The zone sums (`zone_save/zone_restore`, `TimeLoop.cpp:577-581`) are host arrays that the device chain would update with atomics or a reduction; their snapshot would then be a device-to-host copy.
+Recommended instead: **split the chain at the hook** (the design's own "optimisation if needed", note section 3): part A = kernels up to and including the species-sum fix, then the hook (read-out pack, or list upload + scatter), then part B = heat flux, `DEL_RHO_D_DEL_Z`, `dp_*`. No double run, no re-run precondition, and the stage ordering the design already needs (DIF values exist only after the ADV update, `notes/flux-hooks-design.md` section 9) maps directly: level loop A (all levels) -> fine-to-coarse override -> level loop B.
+
+## Finding 4 - syncs, ordering and transfer volume
+
+Sequence per stage and kind on the device: read-out kernel(s) enqueued on the development machine stream -> host needs the values -> one stream sync + D2H -> Role 3 host code -> H2D of the lists -> override scatter -> update kernels. That is at least 2 syncs and 2 copies per kind and stage (4 syncs per step for ADV+DIF at one interface), every one a pipeline drain; plus the W2 upload per stage (below).
+- Volume: the design copies **whole boxes** (`fds_flux_hooks.f90:136-143`, `:171-177`). At 128^3, NS=1 that is 3 x 17.4 MB = 52 MB per kind and stage, 4.3 ms D2H (*run*, pinned, 12 GB/s) against a 0.70 ms pack kernel. What Role 3 needs is only the faces of the coarse-fine interface. Make the read-out a **gather by face list** on the device (the list is the same face set that `set_flux_override` receives; it changes only at regrid): bytes = faces x NS x 8 (49 KB for the 6144-face example), so the cost is the two latencies and the sync, about 30 to 60 us per kind and stage, estimated (ESTIMATED from the 10 to 25 us per-copy latencies seen in the spike; to be measured with the real consumer).
+- Streams: boxes of one level can run on separate streams; the interface values of a coarse box depend on the fine boxes under it, so the sync is per level pair, not global. Two-level run: 4 syncs per step at the interface for ADV+DIF (predictor and corrector), unchanged with more boxes if the gathers are enqueued first and synced once.
+- Ordering with the clip: the density copy is split at `CHECK_MASS_DENSITY` for the gather clip (`fds_density_split.f90` header, `tools/gen_density_split.py:1-30`); the hooks sit in the first half (pre-clip), before it. Nothing in the hook crosses the clip.
+- The read-out call runs the pre-update part of the density routine twice (`TimeLoop.cpp:571-577` `flux_readout_adv` calls `fds_p_dens_pre` with mode 1, then `stage_density` runs it again): `UU=U` copies, the `UVW_SAVE` restore loop and the first-pass `DEL_RHO_D_DEL_Z__0 = DEL_RHO_D_DEL_Z` copy (`fds_density_split.f90:62-95`). All three are idempotent and cheap (three device copies and one wall kernel), but they must be launched twice; keep them in a small "pre-update" kernel group that both sequences call.
+
+## Finding 5 - wall seam, SOLID mask and bitwise conditions
+
+- The ADV hook sees `UU,VV,WW` **after** the interface-wall restore (`fds_density_split.f90:76-93`, `Source/mass.f90:424-439`: `UU(...) = UVW_SAVE(IW)` over `1..N_EXTERNAL_WALL_CELLS` for `INTERPOLATED_BOUNDARY`). On the device this is the generated wall kernel `wall_uvw_interp` (marker mass.f90:424-436, the first of the 11 wall kernels, takes `WLIST/NWL`) and needs the W2 arrays on the device: `UVW_SAVE` (and for other wall kernels `U_GHOST`, `V_GHOST`, `W_GHOST`), uploaded once per stage after `MATCH_VELOCITY` (`notes/wall-seam-design.md`). The read-out must therefore be enqueued after the stage's W2 upload. A fine box has zero walls (`NWL=0`), so for level > 0 the restore kernel is a no-op and the hook values equal `FX*UU` of the raw `UU`.
+- The SOLID mask (`IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE`, `fds_density_split.f90:111`) is the integer mask argument of the K2 kernels (`SOLID(0:IBAR+1,...)`, `if (SOLID(I,J,K)/=0) cycle`). It must be a device copy refreshed whenever `CELL%SOLID` changes (obstruction events, regrid). Run in this spike: the mask loaded from a real obstruction case changes `RHOS` only in the 16 solid cells per box (the kernel skips them, FDS leaves the old value there), fluid cells are unaffected (`real/` results in the plan, section 7.9).
+- Bitwise: the empty-set equality (T1) and the no-op override (T2) hold on the device only if the device build keeps the no-FMA/no-contraction flags used for the K2 kernels (`-gpu=nofma`, `--fmad=false`, `-ffp-contract=off` in the harness `CMakeLists.txt`); with contraction on, the subtraction `PRX*R(I) - PRX(I-1)*R(I-1)` can fuse differently in the plain and the override kernel call. Keep the flags, and re-run T1, T2, T3 and the negative controls with the device chain against the host chain (not only against the unhooked device run).
+- Species count: the hook requires `NSC == N_TOTAL_SCALARS` (`fds_flux_hooks.f90:98`); the K2 `NS` is `N_TOTAL_SCALARS` (the harness uses `NS`, verified on 1 and 2 species). Passive scalars beyond the tracked species are included in both.
+
+## Other observations (not blocking)
+
+- Face ranges are consistent: the hook uses x faces `I=0..IBAR, J=1..JBAR, K=1..KBAR`; the density kernels read faces `I-1` and `I` for cells `1..IBAR` (`zzs_pred` loops `I=1..IBAR` with `FX(I-1)`); `adv_flux_store` writes `0..IBAR` in all dims, a superset. `UU` has its own lower bound `-1` (the `WORK_U` bug the design already notes, `notes/flux-hooks-design.md` section 9): the K2 signature `UU(-1:IBAR+1,0:JBAR+1,0:KBAR+1)` is the same, pass the true lower bounds when wrapping.
+- The `STORE_SPECIES_FLUX = .FALSE.` rule keeps `ADV_F*`/`DIF_F*` out of the FDS arrays; on the device the K2 `ADV_F*` arrays of the pack kernel are driver-owned scratch and do not collide with the FDS ones.
+- No heat override (ruling) means the `h_rho_d_dzd` kernel is unchanged: it reads the already overridden `RHO_D_DZD*`, as in FDS at mesh interfaces (design section 3 last paragraph). With the chain split at the hook this holds automatically.
+- Fine-level boxes: hooks are registered only for boxes the driver steps (design section 9, open); the device wrappers must take a box number the same way (`BOX_OBJ(NM)`, `POINT_TO_BOX`) so that a fine box with `NWL=0` runs the same kernels.
+
+## Tests to add for the device path (all bitwise device vs host, 1 and 4 boxes)
+
+- D-T1 empty override: hooked device chain vs plain device chain vs host chain, `dec1`, `dec4_np4`, `dec2_obst` (non-zero SOLID).
+- D-T2 no-op override (list = read-out values): ADV through the reuse path of Finding 2; DIF with the split chain of Finding 3.
+- D-T3 negative control: scaled override must differ (as `FDSTL_FLUXCHK=3`).
+- D-T4 gather read-out = the same faces of the full-box read-out (host), including the face ranges at box corners.
+- D-T5 timing: read-out pack, gather, list upload, scatter and the two syncs at 64^3 and 128^3, one and two species; compare with the stage kernel times.
+
+## Work-package placement
+
+Folded into the plan (section 4, work-package table, and sections 7.11 and 10 of `stage1-gpu-spike-plan.md`): WP9 (flux hooks on the device: Findings 1, 2, 4), WP9b (species-sum and `DEL_RHO_D_DEL_Z` kernels and the split chain: Finding 3), shared with the wall-seam work package for Finding 5. Effort numbers in the summary table are ESTIMATED (reading only, nothing run for the hooks themselves).
