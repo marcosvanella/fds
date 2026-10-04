@@ -28,6 +28,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--exe", default=None)
     ap.add_argument("--archive", default=None, help="tar of FDS-written case files (check-fds)")
+    ap.add_argument("--exe-arg", action="append", default=None, help="extra argument for the executable (check-fds)")
     ap.add_argument("--expect-fail", action="store_true")
     a = ap.parse_args()
     os.makedirs(a.work, exist_ok=True)
@@ -74,9 +75,22 @@ def main():
         os.makedirs(d)
         with tarfile.open(a.archive) as t:
             t.extractall(d)
-        rc, out = run([a.exe, "dir=" + d])
+        names = sorted(os.listdir(d))
+        n1209 = [n for n in names if n.startswith("L1209_")]
+        print("L1209 files in the archive:", len(n1209))
+        if len(n1209) < 5:
+            print("FAIL: the archive must hold the L1209 files (open-wall branches against real FDS)")
+            return 1
+        rc, out = run([a.exe, "dir=" + d] + (a.exe_arg or []))
         print(out, end="")
-        return 0 if rc == 0 and "SUMMARY" in out and "PASS" in out else 1
+        good = rc == 0 and "SUMMARY" in out and "PASS" in out and "LOOP L1209 " in out and "LOOP L1209              cases   0" not in out
+        if a.expect_fail:
+            if good:
+                print("NEGATIVE CONTROL NOT CAUGHT: the FDS-file comparison passed with the wrong velocity lower bound")
+                return 1
+            print("NEGATIVE CONTROL CAUGHT")
+            return 0
+        return 0 if good else 1
     if a.action == "drift":
         bad = os.path.join(a.work, "pres_drifted.f90")
         with open(a.pres, errors="replace") as f:

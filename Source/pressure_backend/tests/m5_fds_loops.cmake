@@ -46,9 +46,14 @@ add_test(NAME pb_fdsloops_drift
   COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} drift --pres ${PB_LOOPS_PRES} --work ${CMAKE_CURRENT_BINARY_DIR}/fds_loops_drift)
 
 # Against arrays written by a real FDS run (frozen/fds_loops_cases, made with frozen/fds_loops_dump_hook.py on a scratch copy of pres.f90): L1211,
-# L1207 and L1220-L1222 are bitwise equal to what FDS computed. L1209 files are not in the archive (open-boundary walls differ, see
-# frozen/fds-loops-notes.md).
+# L1207, L1209 (including the OPEN-boundary walls) and L1220-L1222 are bitwise equal to what FDS computed. The velocity arrays of FDS start at
+# index -1 in their own direction (init.f90); pb_fdsloops_fds_uu_lb0 reads them with lower bound 0 and must fail (negative control for the
+# former "open walls differ" finding, frozen/fds-loops-notes.md).
 add_test(NAME pb_fdsloops_fds
   COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} check-fds --work ${PB_LOOPS_WORK} --exe $<TARGET_FILE:pb_fds_loops>
           --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases.tar)
 set_tests_properties(pb_fdsloops_fds PROPERTIES TIMEOUT 300)
+add_test(NAME pb_fdsloops_fds_uu_lb0
+  COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} check-fds --expect-fail --exe-arg uu_lb0=1 --work ${PB_LOOPS_WORK}_lb0 --exe $<TARGET_FILE:pb_fds_loops>
+          --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases.tar)
+set_tests_properties(pb_fdsloops_fds_uu_lb0 PROPERTIES TIMEOUT 300)

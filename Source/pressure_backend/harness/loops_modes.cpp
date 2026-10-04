@@ -45,6 +45,7 @@ bool read_case (std::string const& fn, Case& c)
 }
 
 static bool g_debug = false;
+static bool g_uu_lb0 = false;   // negative control: read the FDS velocity arrays with lower bound 0 (they start at -1)
 struct Stat { long cases = 0, bad_cases = 0; long n = 0, nbad = 0; double max_abs = 0, max_rel = 0; };
 
 void compare (Stat& st, std::string const& what, std::vector<double> const& got, std::vector<double> const& ref, bool verbose, std::string const& file)
@@ -106,7 +107,13 @@ void run_l1209 (Case& c, Stat& st, bool vb, std::string const& fn)
     const int ib = ival(c, "IBAR"), jb = ival(c, "JBAR"), kb = ival(c, "KBAR"), nw = ival(c, "NWALL");
     PoissonBcContext x;
     x.ibar = ib; x.jbar = jb; x.kbar = kb;
-    x.hp = f3(c.at("HP"), 0, 0, 0); x.kres = f3(c.at("KRES"), 0, 0, 0); x.uu = f3(c.at("UU"), 0, 0, 0); x.vv = f3(c.at("VV"), 0, 0, 0); x.ww = f3(c.at("WW"), 0, 0, 0);
+    // FDS allocates U/US in x as -1:IBP1, V/VS in y as -1:JBP1 and W/WS in z as -1:KBP1 (init.f90), and the dump hook writes the
+    // arrays as shape-only records, so the dumped velocity arrays start at index -1 in their own direction. The synthetic cases
+    // (ref_loops.f90.in) use 0:IBP1 for all three. Reading the FDS files with lower bound 0 shifts every velocity by one cell (the
+    // cause of the former "open wall differs from FDS" finding).
+    const bool fds_file = c.count("WV_RAMP") != 0 && !g_uu_lb0;   // uu_lb0=1: negative control, the former (wrong) lower bound 0
+    x.hp = f3(c.at("HP"), 0, 0, 0); x.kres = f3(c.at("KRES"), 0, 0, 0);
+    x.uu = f3(c.at("UU"), fds_file ? -1 : 0, 0, 0); x.vv = f3(c.at("VV"), 0, fds_file ? -1 : 0, 0); x.ww = f3(c.at("WW"), 0, 0, fds_file ? -1 : 0);
     x.fvx = f3(c.at("FVX"), 0, 0, 0); x.fvy = f3(c.at("FVY"), 0, 0, 0); x.fvz = f3(c.at("FVZ"), 0, 0, 0);
     x.hx = f1(c.at("HX"), 0); x.hy = f1(c.at("HY"), 0); x.hz = f1(c.at("HZ"), 0);
     x.dx = f1(c.at("DX"), 1); x.dy = f1(c.at("DY"), 1); x.dz = f1(c.at("DZ"), 1);
@@ -189,6 +196,7 @@ int main (int argc, char** argv)
     for (int a = 1; a < argc; ++a) {
         std::string s = argv[a];
         if (s.rfind("dir=", 0) == 0) dir = s.substr(4);
+        else if (s == "uu_lb0=1") g_uu_lb0 = true;
         else if (s.rfind("verbose=", 0) == 0) { vb = s.substr(8) != "0"; g_debug = s.substr(8) == "2"; }
     }
     if (dir.empty()) { std::fprintf(stderr, "usage: pb_fds_loops dir=<case directory> [verbose=1]\n"); return 2; }

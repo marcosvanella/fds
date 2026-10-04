@@ -41,6 +41,7 @@ bitwise and not a tolerance.
 5. In L1209 the VEL_EDDY choice is made by the vent's IOR, not the wall's; V_WIND(K) is indexed by K in all three directions; the TSI
    selection depends on T_IGN within 20 epsilon and on a ramp index of at least 1.
 6. NIC>1 branches of L1209 are not reached in the AMR route (D-072).
+7. FDS velocity arrays start at -1 in their own direction (`U(-1:IBP1,..)`, `V(..,-1:JBP1,..)`, `W(..,..,-1:KBP1)`); a reader of the shape-only dump records must use that lower bound (this was the cause of the former open-wall finding).
 
 ## Check against real FDS output
 
@@ -59,19 +60,34 @@ first differing values). Results over steps 1 to 3, predictor and corrector, bot
 | L1211 | 12 + 4 | bitwise equal, max abs 0, max rel 0 |
 | L1207 | 12 + 4 | bitwise equal |
 | L1220-L1222 | 12 + 4 | bitwise equal |
-| L1209 | 12 + 4 | Neumann, solid-Dirichlet and interpolated walls: no difference. OPEN-boundary walls: **not equal**, see below |
+| L1209 | 12 + 4 | bitwise equal for every wall kind, OPEN-boundary walls included (after the reader fix, see "L1209 on OPEN walls") |
 
-The committed archive `frozen/fds_loops_cases/fds_loops_cases.tar` (18 files, ctest `pb_fdsloops_fds`) holds L1211, L1207 and the H
-boundary fill. L1209 files are not in it.
+The committed archive `frozen/fds_loops_cases/fds_loops_cases.tar` (23 files, ctest `pb_fdsloops_fds`) holds L1211, L1207 and the H
+boundary fill, and five L1209 files: the closed run (step 1, predictor and corrector) and the two-mesh run (step 3, mesh 1 predictor and
+corrector, mesh 2 predictor), chosen because they exercise the OPEN-wall branches (inflow ramp, wind, pressure ramp). The negative control
+`pb_fdsloops_fds_uu_lb0` reads the same files with the former wrong lower bound and must fail (314 elements differ).
 
-### Open issue: L1209 on OPEN walls against a real FDS dump
+### L1209 on OPEN walls: cause found and closed
 
-For walls with `BOUNDARY_TYPE==OPEN_BOUNDARY` the C++ function and the verbatim Fortran loop (synthetic cases, 8 bitwise-equal files, all six
-IORs, wind, ramp) agree, but the arrays dumped from a real FDS run differ. Closed run: 43 of 99 BZF elements, exactly those with
-`WW(I,J,KBAR)>0` (the C++ takes the `KRES` branch as the code says; FDS's value is the `H0` branch value). Two-mesh run (wind, pressure ramp): all
-BXS values on the wind-inflow face and most BZF values differ by 1 to 2 percent (C++ gives `HP(1,J,K)`, because the dumped `UU(0,J,K)` equals
-`U_WIND(K)`; FDS's value is larger). Both are what the loop would produce if `UU` and `WW` at the open-boundary faces had other values while the
-loop ran than in the dump taken at the end of the routine. The same dumps agree bitwise for all other wall kinds, and the ramp argument (TSI)
-agrees bitwise with FDS's own. A print inserted in the scratch copy at the top of the wall loop (and at the end of the open branch) never fired for
-the wall in question, so the cause is not yet understood. Treat the open-wall branch of `pres_poisson_boundary_arrays` as verified against the Fortran
-text only, not against FDS, until this is resolved.
+The former finding "OPEN-wall BXS..BZF are not reproducible from the dumped inputs" was a defect of the comparison, not of `pres_poisson_boundary_arrays`
+and not of the dump point.
+
+1. **Cause.** FDS allocates the velocity arrays with one extra cell in their own direction: `U/US(-1:IBP1,0:JBP1,0:KBP1)`, `V/VS(0:IBP1,-1:JBP1,0:KBP1)`,
+   `W/WS(0:IBP1,0:JBP1,-1:KBP1)` (init.f90). The dump hook writes shape-only records (assumed-shape dummy arguments lose the bounds), and the
+   reader (`harness/loops_modes.cpp`) used lower bound 0 for UU, VV and WW. Every velocity was therefore read one cell too low in its own direction:
+   `WW(I,J,KBAR)` was really `WW(I,J,KBAR-1)`, and `UU(0,J,K)` was `UU(-1,J,K)`. The open-wall branch compares exactly those normal velocities with zero,
+   so it picked the wrong branch wherever the normal velocity changes sign or is zero next to a non-zero one (closed run, predictor at the start-up
+   pass: 43 of 99 BZF values; two-mesh run: 80 of 99 BXS and up to 69 of 143 BZF values). The synthetic cases of `ref_loops.f90.in` use 0:IBP1 for all
+   three arrays, which is why the verbatim-Fortran test never saw it. The wall-based arrays and the other loops (HP, KRES, FV*, BXS..) are 0-based in FDS
+   and were read correctly, which is why only OPEN walls differed.
+2. **How it was found.** Scratch FDS (-O0, gfortran, only `pres.f90` recompiled with the dump hook) with prints at the end of the open branch
+   (`ICYC`, `PREDICTOR`, I, J, WW(I,J,KBAR), KRES(I,J,KBAR), H0, BZF) and one at each call of `PRESSURE_SOLVER_COMPUTE_RHS`. Findings: (a) FDS
+   redirects unit 6 into `<CHID>.out`, so the prints written earlier were not missing, they were in the .out file (the "print never fired" observation was
+   wrong); (b) the routine is called twice at ICYC 1 for both predictor and corrector (the start-up pass at T = 0 and the first step), the second call overwrites the
+   first dump file, which is expected; (c) at the dumped call FDS's own branch choice and its BZF values are consistent with `WW(I,J,KBAR)` as printed
+   inside the loop: there is no overwrite between the loop and the dump, no ramp or `H0` override, and the dump point is right.
+3. **Fix.** The reader uses lower bound -1 for UU/VV/WW in files written by the hook (files that carry `WV_RAMP`); `uu_lb0=1` restores the old
+   reading as a negative control. The function itself is unchanged.
+4. **Result.** L1209 bitwise equal to FDS output for all walls, closed run steps 1 and 2 (4 files, 2552 elements) and two-mesh run steps 1 to 3 (12 files,
+   8616 elements), predictor and corrector, 0 differing elements. The C++ function may replace the FDS loop on open boundaries; the NIC>1 and synthetic-eddy
+   branches remain untested against FDS (the dump hook stops on synthetic eddies).

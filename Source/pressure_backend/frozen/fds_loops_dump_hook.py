@@ -9,6 +9,8 @@ Run time: FDS_LDUMP_STEPS=3,10 (ICYC values) or ALL, single OpenMP thread. Files
   L1209_fds_n<ICYC>_<P|C>_m<NM>.bin   Poisson boundary arrays (pres.f90:65-228): the whole external wall list with every field the loop reads
   HBC_fds_n<ICYC>_<P|C>_m<NM>.bin     H ghost cells (pres.f90:450-492): H before and after, BXS..BZF, LBC MBC NBC, DXI DETA DZETA
   L1207_fds_n<ICYC>_<P|C>_m<NM>.bin   P = RHOP*(HP-KRES) (pres.f90:758-764): RHO H KRES (full box) and WORK7 after
+Array bounds: the records carry shapes only. HP, KRES, FV*, H are 0-based; UU, VV, WW start at -1 in their own direction (x, y, z) as in FDS init.f90, so a reader
+must use lower bounds (-1,0,0), (0,-1,0), (0,0,-1) for them.
 Limits: the 3-D natural layout only (IPS 0/1/4/7, not cylindrical); a vent with synthetic eddies stops the run (the C++ test needs the eddy arrays).
 """
 import sys
