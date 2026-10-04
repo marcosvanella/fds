@@ -1,5 +1,6 @@
 // test_input_converter.cpp: the D-076 input converter (InputConverter.H): classification, level-0-only text, hierarchy, round trip, error cases with negative controls.
 // No AMReX, no FDS. Argument 1: directory of the case files. Exit code 0 = pass.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <sstream>
@@ -197,6 +198,73 @@ int main(int argc, char** argv)
         Report r2;
         ConvertResult c2;
         CHECK(!convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n\n&AMR MAX_LVL=1 /\n&TAIL /\n", c2, r2) && r2.has_error_containing("line 3"));
+    }
+
+    {   // race_test_1_r4 (thread-check input with mesh 3 remeshed to a 4:1 pair): must convert to a true equal-level-0 input. The case file has no &AMR line (AMR mode is never
+        // inferred), so the test adds one. The FDS-side guard (upstream patch 0010, ERROR 9001 on any level-0 NIC > 1 face) is NOT committed or validated yet: its check is
+        // PENDING (see notes/input-converter.md); the converter-side assertion below is the check in force.
+        const std::string full = fdsrt_test::read_file(dir + "/race_test_1_r4_full.fds");
+        const std::string amr_line = "&AMR MAX_LEVEL=1, REF_RATIO=4, BLOCKING_FACTOR=2, MAX_GRID_SIZE=32 /\n";
+        const size_t at = full.find("&TIME");
+        CHECK(!full.empty() && at != std::string::npos);
+        const std::string txt = full.substr(0, at) + amr_line + full.substr(at);
+        Report r;
+        ConvertResult c;
+        const bool ok = convert_input(txt, c, r);
+        if (!ok) show(r);
+        CHECK(ok && r.ok() && c.meshes.size() == 6 && c.removed_meshes.size() == 1 && c.removed_meshes[0] == 2 && c.level0_meshes.size() == 5);
+        CHECK(ok && c.cover_boxes.size() == 1 && c.hierarchy.top == 1);
+        CHECK(ok && c.grouping.n0[0] == 34 && c.grouping.n0[1] == 18 && c.grouping.n0[2] == 32);
+        // re-read the converted text as FDS would: six meshes, all at the level-0 cell size, tiling 34 x 18 x 32 cells, no ratio other than 1 anywhere
+        Report r2;
+        std::vector<GroupSpan> sp = find_group_spans(c.level0_text, r2);
+        std::vector<MeshLine> ml;
+        std::vector<MeshInput> m2;
+        CHECK(parse_meshes(c.level0_text, sp, ml, m2, r2) && m2.size() == 6);
+        long long cells = 0;
+        double worst = 0;
+        for (const MeshInput& mi : m2) {
+            cells += static_cast<long long>(mi.ijk[0]) * mi.ijk[1] * mi.ijk[2];
+            for (int d = 0; d < 3; ++d) worst = std::max(worst, std::fabs(std::fabs(mi.xb[2 * d + 1] - mi.xb[2 * d]) / mi.ijk[d] - 0.05));
+        }
+        CHECK(cells == 34LL * 18 * 32 && worst < 1e-12);
+        CHECK(verify_equal_level0(m2, c.grouping, r2) && r2.ok());
+        // the added cover is the footprint of mesh 3: x,y in [-0.15,0.15], z in [0,0.2], 6 x 6 x 4 level-0 cells
+        const IBox& cb = c.cover_boxes[0];
+        CHECK(cb.hi[0] - cb.lo[0] + 1 == 6 && cb.hi[1] - cb.lo[1] + 1 == 6 && cb.hi[2] - cb.lo[2] + 1 == 4 && m2.size() == 6 &&
+              std::fabs(m2[5].xb[0] + 0.15) < 1e-12 && std::fabs(m2[5].xb[1] - 0.15) < 1e-12 && std::fabs(m2[5].xb[5] - 0.20) < 1e-12);
+        // hierarchy level 0 = the five kept meshes and the cover, the finer mesh is level 1 (24 x 24 x 16 cells at ratio 4)
+        CHECK(c.hierarchy.levels[0].grids.size() == 6 && c.hierarchy.levels[1].grids.size() == 1);
+        // the five 4:1 interfaces of the input: mesh 3 against meshes 1, 2, 4, 5, 6 (each pair touches one face), none left in the converted text
+        int fine_faces = 0;
+        for (int m : {0, 1, 3, 4, 5}) {
+            int touch = 0;
+            for (int d = 0; d < 3; ++d) {
+                const double a0 = std::min(c.meshes[2].xb[2 * d], c.meshes[2].xb[2 * d + 1]), a1 = std::max(c.meshes[2].xb[2 * d], c.meshes[2].xb[2 * d + 1]);
+                const double b0 = std::min(c.meshes[m].xb[2 * d], c.meshes[m].xb[2 * d + 1]), b1 = std::max(c.meshes[m].xb[2 * d], c.meshes[m].xb[2 * d + 1]);
+                if (std::fabs(a1 - b0) < 1e-9 || std::fabs(b1 - a0) < 1e-9) ++touch;
+            }
+            fine_faces += touch == 1;
+        }
+        CHECK(fine_faces == 5);
+        // negative controls: the unconverted meshes are not equal-level-0 (mesh 3 has cell size 0.0125); removing the cover leaves a hole; a duplicated mesh overlaps
+        Report n1;
+        CHECK(!verify_equal_level0(c.meshes, c.grouping, n1) && n1.has_error_containing("mesh 3 has cell size") && n1.has_error_containing("NIC > 1"));
+        Report n2;
+        std::vector<MeshInput> hole(m2.begin(), m2.begin() + 5);
+        CHECK(!verify_equal_level0(hole, c.grouping, n2) && n2.has_error_containing("do not tile"));
+        Report n3;
+        std::vector<MeshInput> dup = m2;
+        dup.push_back(m2[0]);
+        CHECK(!verify_equal_level0(dup, c.grouping, n3) && n3.has_error_containing("overlap"));
+        Report n4;
+        ConvertResult c4;
+        CHECK(!convert_input(full, c4, n4) && n4.has_error_containing("&AMR"));   // without the &AMR line the converter refuses (not inferred)
+        // a blocking factor that does not fit mesh 3 (24 x 24 x 16 cells) is refused, so the input is never converted half way
+        Report n5;
+        ConvertResult c5;
+        CHECK(!convert_input(full.substr(0, at) + "&AMR MAX_LEVEL=1, REF_RATIO=4, BLOCKING_FACTOR=32, MAX_GRID_SIZE=64 /\n" + full.substr(at), c5, n5));
+        std::printf("PENDING: patch 0010 guard check (ERROR 9001 on race_test_1_r4 unconverted): patch not committed or validated; converter-side equal-level-0 assertion in force\n");
     }
 
     std::printf("test_input_converter: %d checks, %d failures\n", g_checks, g_fail);

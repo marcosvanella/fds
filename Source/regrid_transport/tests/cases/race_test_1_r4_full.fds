@@ -1,0 +1,41 @@
+&HEAD CHID='race_test_1_r4' /
+
+&MESH IJK=14,18,32, XB=-0.85,-0.15,-0.45, 0.45, 0.00, 1.60 /
+&MESH IJK=14,18,32, XB= 0.85, 0.15,-0.45, 0.45, 0.00, 1.60 /
+&MESH IJK=24,24,16, XB=-0.15, 0.15,-0.15, 0.15, 0.00, 0.20 /
+&MESH IJK= 6, 6,28, XB=-0.15, 0.15,-0.15, 0.15, 0.20, 1.60 /
+&MESH IJK= 6, 6,32, XB=-0.15, 0.15,-0.45,-0.15, 0.00, 1.60 /
+&MESH IJK= 6, 6,32, XB=-0.15, 0.15, 0.15, 0.45, 0.00, 1.60 /
+
+&TIME T_END=5. /
+
+&REAC FUEL='N-HEXANE'
+      CO_YIELD=0.100
+      SOOT_YIELD=0.010 /
+
+&SURF ID='FIRE'
+      RGB=204,27,0
+      MASS_FLUX(1)=0.0185
+      SPEC_ID(1)='N-HEXANE'
+      RAMP_MF='RAMP MLRPUA' /
+
+&RAMP ID='RAMP MLRPUA', T= 0, F=0.3896 /
+&RAMP ID='RAMP MLRPUA', T=10, F=0.318 /
+
+&OBST XB=-0.100,0.100,-0.150,0.150,0,0.120, COLOR='WHITE' /
+
+&VENT ID='poolfire', SURF_ID='FIRE', XB=-0.040,0.040,-0.040,0.040,0.120,0.120, XYZ=0,0,0.120, RADIUS=0.030 /
+
+&DUMP DT_DEVC=0.1 /
+
+&DEVC ID='TMP', XYZ=0,0,0.144, QUANTITY='TEMPERATURE', TIME_AVERAGED=.FALSE. /
+&DEVC ID='VEL', XYZ=0,0,0.144, QUANTITY='VELOCITY', TIME_AVERAGED=.FALSE. /
+
+&TAIL/
+
+! ---- V&V-derived input (A-35, D-030). NOT a committed FDS input. ----
+! Source: Verification/Thread_Check/race_test_1.fds at FireX 36975d765f (last commit 7c5e7c99cd, 2025-02-25).
+! Changes: CHID race_test_1 to race_test_1_r4; mesh 3 (line 5) IJK 30,30,20 (dx 0.01) to 24,24,16 (dx 0.0125),
+! so all five interfaces of mesh 3 to its dx 0.05 neighbours are 4:1 instead of 5:1 (FR-010 accepts only 2 and 4).
+! Everything else unchanged, line numbers identical to the original. Grid-snapping consequences: README.md in this folder.
+! The original stays the FDS baseline for NFR-011; this copy is the AMR-mode input.

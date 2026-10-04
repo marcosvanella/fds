@@ -71,6 +71,11 @@ struct ConvertResult {
 // An input without finer meshes is converted too (nothing removed but the &AMR groups) so that the driver has one path.
 bool convert_input(const std::string& text, ConvertResult& out, Report& rep);
 
+// Equal-level-0 check (D-076, the converter-side half of what upstream patch 0010 enforces in FDS): every mesh in `meshes` must have the level-0 cell size
+// `g.dx0` in each non-hidden direction (relative 1e-9), its lower corner on the level-0 lattice of the domain, and the meshes must be disjoint and tile the whole
+// level-0 index domain `g.n0`. Then no two meshes can meet with a ratio other than 1 (NIC = 1 on every internal face). Errors name the mesh (1-based).
+bool verify_equal_level0(const std::vector<MeshInput>& meshes, const Grouping& g, Report& rep);
+
 // Text of the level-0-only input: the groups of `spans` copied unchanged, except the &AMR and &AMR_REGION groups and the &MESH lines of level > 0, which become
 // one comment line each (a '!' line; the rest of the removed line is dropped). `level_of_mesh` has one entry per expanded mesh. `extra_mesh_lines` (the cover
 // meshes, one line each, no final newline) is inserted after the last &MESH line. Pure; used by convert_input.

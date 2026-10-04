@@ -370,8 +370,72 @@ bool convert_input(const std::string& text, ConvertResult& out, Report& rep)
         cover << " / ! converter: level-0 cover under finer meshes";
     }
     out.level0_text = emit_level0_text(text, spans, out.mesh_lines, out.level_of_mesh, cover.str(), out.n_removed_lines);
+
+    // the converted text, read back as FDS reads it, must be an equal-level-0 input (no mesh pair with a ratio other than 1)
+    {
+        Report r2;
+        std::vector<GroupSpan> spans2 = find_group_spans(out.level0_text, r2);
+        std::vector<MeshLine> lines2;
+        std::vector<MeshInput> meshes2;
+        if (!r2.ok() || !parse_meshes(out.level0_text, spans2, lines2, meshes2, r2)) {
+            rep.error("converter self-check: the converted input cannot be read back: " + (r2.errors.empty() ? std::string("?") : r2.errors[0]));
+            return false;
+        }
+        if (meshes2.size() != out.level0_meshes.size() + out.cover_boxes.size()) {
+            rep.error("converter self-check: the converted input holds " + std::to_string(meshes2.size()) + " meshes, expected " +
+                      std::to_string(out.level0_meshes.size() + out.cover_boxes.size()));
+            return false;
+        }
+        if (!verify_equal_level0(meshes2, out.grouping, rep)) return false;
+    }
     out.ok = true;
     return true;
+}
+
+bool verify_equal_level0(const std::vector<MeshInput>& meshes, const Grouping& g, Report& rep)
+{
+    const size_t nerr0 = rep.errors.size();
+    std::vector<IBox> boxes(meshes.size());
+    for (size_t m = 0; m < meshes.size(); ++m) {
+        const MeshInput& mi = meshes[m];
+        for (int d = 0; d < 3; ++d) {
+            boxes[m].lo[d] = 0;
+            boxes[m].hi[d] = 0;
+            if (g.hidden[d]) continue;
+            const double lo = std::min(mi.xb[2 * d], mi.xb[2 * d + 1]), hi = std::max(mi.xb[2 * d], mi.xb[2 * d + 1]);
+            const double dx = (hi - lo) / mi.ijk[d];
+            if (std::fabs(dx - g.dx0[d]) > 1e-9 * g.dx0[d]) {
+                rep.error("mesh " + std::to_string(m + 1) + " has cell size " + std::to_string(dx) + " in direction " + "xyz"[d] + ", not the level-0 size " +
+                          std::to_string(g.dx0[d]) + ": the input is not an equal-level-0 input (an interface with NIC > 1)");
+                continue;
+            }
+            const double q = (lo - g.dom_lo[d]) / g.dx0[d];
+            const long k = std::lround(q);
+            if (std::fabs(q - k) > 1e-6) {
+                rep.error("mesh " + std::to_string(m + 1) + " starts off the level-0 lattice in direction " + "xyz"[d] + " (" + std::to_string(q) + " cells from the domain corner)");
+                continue;
+            }
+            boxes[m].lo[d] = static_cast<int>(k);
+            boxes[m].hi[d] = static_cast<int>(k) + mi.ijk[d] - 1;
+        }
+    }
+    if (rep.errors.size() > nerr0) return false;
+    long long cells = 0;
+    for (size_t a = 0; a < boxes.size(); ++a) {
+        long long v = 1;
+        for (int d = 0; d < 3; ++d) v *= boxes[a].hi[d] - boxes[a].lo[d] + 1;
+        cells += v;
+        for (size_t b = a + 1; b < boxes.size(); ++b) {
+            bool overlap = true;
+            for (int d = 0; d < 3; ++d) overlap = overlap && boxes[a].lo[d] <= boxes[b].hi[d] && boxes[b].lo[d] <= boxes[a].hi[d];
+            if (overlap) rep.error("meshes " + std::to_string(a + 1) + " and " + std::to_string(b + 1) + " overlap on the level-0 lattice");
+        }
+    }
+    long long total = 1;
+    for (int d = 0; d < 3; ++d) total *= g.hidden[d] ? 1 : g.n0[d];
+    if (rep.errors.size() == nerr0 && cells != total)
+        rep.error("the meshes hold " + std::to_string(cells) + " level-0 cells, the level-0 domain " + std::to_string(total) + ": they do not tile the domain");
+    return rep.errors.size() == nerr0;
 }
 
 }  // namespace fdsrt
