@@ -9,6 +9,7 @@ Proposed changes to upstream FDS source (FireX or master) that come out of the A
 4. A behavior-unchanged check: the exact command or test and its result (for example the V&V baseline comparison against the reference binary, bitwise or within the stated tolerance), run on the patched upstream file.
 5. A target line: **FireX**, **master**, or **both**. Master is merged into FireX periodically, so write the patch to apply cleanly to both and say which one it was tested against.
 6. Name: `NNNN-short-name.patch` (four-digit sequence), and add a row to the index below in the same change.
+   Patches that come from the Role 3 end-to-end tests are named `UP-NNNN-short-name.patch` (UP = upstream patch) and are referred to as UP-0006, UP-0007; they are not the driver patch series 0005-0009 in `Source/driver/patches/`.
 
 ## Standard behavior-unchanged check (V&V Lead proposal, accepted as the default)
 1. Control build: the reference GNU Release binary `vv-runs/refbin/gnu_ompi_firex-36975d7/fds`. Patched build: the same FireX source plus the patch, same flags, HYPRE and toolchain. Compare patched against control, never against older recorded baselines. A master-targeted patch is also built once on master against a master control.
@@ -30,8 +31,8 @@ The V&V Lead is writing `vv-runs/tools/patch_check.sh` so each patch can cite th
 Role 3 cannot edit `Source/driver/`, so changes it needs there are kept here as patch files (same folder, same rules for the rationale and the check). Apply with `git apply` from the top of the source tree.
 | No. | File | Source file(s) | Summary | State |
 |---|---|---|---|---|
-| 0006 | `0006-r2b-driver-e2e-hook.patch` | `Source/driver/main.cpp`, `Source/driver/CMakeLists.txt` | `--rt-e2e` entry for the Role 3 end-to-end modes (guarded by file existence and a define) | proposed; needed for `regrid_transport/tests/run_e2e_driver.sh` (skips with exit 77 without it) |
-| 0007 | `0007-r2b-fill-om-bounds.patch` | `Source/driver/fds_ghost_bc.f90` | `FDS_G_FILL_OM` bounds guard for a box number outside OMESH (several fine boxes on one rank crashed in `stage_boundary`) | proposed |
+| UP-0006 | `UP-0006-r2b-driver-e2e-hook.patch` | `Source/driver/main.cpp`, `Source/driver/CMakeLists.txt` | `--rt-e2e` entry for the Role 3 end-to-end modes (guarded by file existence and a define) | proposed; needed for `regrid_transport/tests/run_e2e_driver.sh` (skips with exit 77 without it) |
+| UP-0007 | `UP-0007-r2b-fill-om-bounds.patch` | `Source/driver/fds_ghost_bc.f90` | `FDS_G_FILL_OM` bounds guard for a box number outside OMESH (several fine boxes on one rank crashed in `stage_boundary`) | proposed |
 
 ## Blocked-loop family reviews (decision D-051, item 1)
 Each blocked-loop family is signed off by a domain lead before its rewrite becomes a patch. Details, conditions and the corrected family text are in `docs/amrex/blocked-loop-families.md` (each family has a **Sign-off** line).

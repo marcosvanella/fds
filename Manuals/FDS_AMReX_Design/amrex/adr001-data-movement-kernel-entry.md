@@ -23,3 +23,6 @@ Status: accepted as D-066 and placed in ADR-001 as the subsection "Data-movement
 ## Consequences for the driver layer
 - Data-movement kernels written as K1 can be enqueued on the development machine stream and overlap with other boxes; K2 kernels are host-synchronous points. The ordering rule for a mixed sequence is: stream sync before each K2 launch that consumes a stream result; no extra sync after a K2 launch; copy-back (`cudaMemcpy`) after a K2 launch needs none.
 - The checksum copy-back of the wall-state test (8 bytes) is the only per-stage sync it adds, and only in the first-run/CI check mode.
+
+## Design constraint for the W-section (proposed)
+Streams per box means host threads per box for K2. K2 kernels cannot be placed on an AMReX stream, so the per-box concurrency model is one host thread per box (blocking K2 launches overlap across threads), with an explicit stream synchronisation before any K2 launch that consumes a result written on an AMReX stream. The driver layer and the box-to-thread assignment must be designed with this constraint.

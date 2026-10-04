@@ -38,7 +38,7 @@ distribute-parallel-do, gfortran offload, gfortran offload with callee-bind), an
 | K2-01 | a directive is outside the approved subset: only `target teams loop`, `target teams distribute parallel do` and a bare `declare target` are approved; host `parallel do`, `atomic`, `critical`, `simd`, `target data`, `taskwait`, OpenACC, `do concurrent` and CUDA Fortran `attributes` fail |
 | K2-02 | rule 7 (ADR-001 v0.7): a region that calls a routine, or uses a local array, is not `target teams distribute parallel do` (`target teams loop bind(teams,parallel)` is accepted only under nvfortran) |
 | K2-03 | an array dummy used in a region is not in the device-address clause; the clause is `has_device_addr` under nvfortran or `is_device_ptr` under gfortran; an item is not a dummy argument |
-| K2-04 | a clause outside the D-029 list: only `collapse(n)`, `private`, `is_device_ptr`/`has_device_addr`, `map(to: ...)` of small host constants, `thread_limit`, `num_teams`, `bind(teams,parallel)` (nvfortran) |
+| K2-04 | a clause outside the D-029 list: only `collapse(n)`, `private`, `is_device_ptr`/`has_device_addr`, `map(to: ...)` of small host constants, `thread_limit`, `num_teams`, `bind(teams,parallel)` (nvfortran), and (D-068) `reduction(max: x)` / `reduction(min: x)` of a local scalar that is not also `private`. A maximum or minimum is exact and does not depend on the order in which the threads combine their values, so it does not break bitwise reproducibility. `reduction(+)`, `*`, and every other operator stay forbidden: sums go through the zone-sum order (D-053, tool 3) |
 | K2-05 | a kernel body allocates, assigns a pointer, uses `c_f_pointer`, or does I/O or `STOP` |
 | K2-06 | a region calls a routine that is not a `declare target` routine in the same set of files |
 | K2-07 | the kernel header note is missing (see below) |
@@ -57,6 +57,18 @@ other category (`reference`, `test-harness`, `physics-fallback`) is always print
 `status = "proposed"` means nobody has accepted the reason yet: the tool exits 0 and prints it, `--strict` exits 1.
 Exit codes: 0 pass, 1 findings, 2 usage or tool error.
 
+**Prototypes (D-068).** The hand-written S4 files (`s4_mass_k2.F90`, `s4_mass_k2_dc.F90`, `s4d_k2.F90`) and the K1 comparison code (`s4_driver.cpp`,
+`s4_mass_k1.H`, `s4d_k1.H`) are evaluation code. They are listed as `[[prototype]]` entries (file, reason, `expiry`, `allowed_in`, status) and as
+`[[k1]]` entries of category `prototype`. Every finding in such a file is shown with severity PROTOTYPE, in a block of its own below the
+production findings, with its expiry ("replaced by generator output"). PROTOTYPE findings never make a tool fail, `--strict` included, so
+`--strict` answers the question "do the production kernels pass". A prototype is not allowed in production builds: `kernel_lint.py` rule BF-08
+fails when a build file other than the prototype builds in `allowed_in` mentions a prototype source. A `rejected_rules` list marks rules whose
+waiver was refused: the finding is a real violation, stays visible as "prototype-only, waiver REJECTED" and must be fixed before the file is
+used for anything but evaluation. Today that is the rule-7 pair in `s4_mass_k2.F90`: `s4k2_face_values` calls a routine and `s4k2_clip_terms`
+uses a local array, both inside plain `target teams loop`. They were not edited because the file is a measured S4 artefact and the machine
+that runs the tools has no nvfortran or GPU to re-verify a changed directive; they go away when the file is replaced by generator output.
+No `[[waiver]]` entry is open.
+
 ## 2. `kernel_lint.py` - build-flag and clause-list lint
 
     python3 tools/kernel_lint.py [--tree DIR] [--build-only | --clauses-only] [--amrex-build DIR] [--strict] [--json OUT.json] [FILE ...]
@@ -71,7 +83,9 @@ CMake comments, option descriptions and cache docstrings are ignored). The goal 
 | BF-02 | an nvfortran GPU compile (`-mp=gpu`) lacks `nofma` in its `-gpu=` list |
 | BF-03 | a fast-math flag appears: `-fast`, `-Ofast`, `-ffast-math`, `-Mfast`, `--use_fast_math`, `fastmath` in `-gpu=` |
 | BF-04 | a host compile lacks `-ffp-contract=off`, or uses `-ffp-contract=fast` unguarded (behind an option that defaults to OFF it is a NOTE) |
-| BF-05 | `AMReX_CUDA_FASTMATH=OFF` is not written in any scanned build file; with `--amrex-build DIR` (or env `AMREX_CUDA_BUILD`) the `CMakeCache.txt` of an AMReX build is read as well: ON fails, OFF turns the failure into a warning ("holds, but is not recorded in the repo") |
+| BF-05 | D-068: no build file pins the option, i.e. none has `set(AMReX_CUDA_FASTMATH OFF CACHE BOOL "..." FORCE)` (comments do not count; `-DAMReX_CUDA_FASTMATH=OFF` on a script command line is not a pin because a later `-D` or a stale cache can undo it); or an AMReX build inspected with `--amrex-build DIR` (or env `AMREX_CUDA_BUILD`) has the option ON |
+| BF-07 | D-068: no build file makes the configure fail when the option is ON, i.e. none has `if (AMReX_CUDA_FASTMATH)` (or `... STREQUAL "ON"`, or `NOT ... STREQUAL "OFF"`) with `message(FATAL_ERROR ...)` or `SEND_ERROR` in the block |
+| BF-08 | a build file mentions a prototype source file (registry `[[prototype]]`) outside the prototype builds in its `allowed_in` |
 | BF-06 | (warning) `mem:managed` managed memory is used; it is a bring-up aid, not for acceptance runs |
 
 **Clause lists (CL).** For every target region of the K2 files (same file set and compiler profiles as tool 1), the `private` and device-address
@@ -86,7 +100,15 @@ or privatise them):
 | CL-04 | a `private` item is read before its first assignment |
 | CL-05 | a local scalar or array, or a dummy scalar, is written in the region but is not `private`; or an array element with loop-independent subscripts is written by every iteration (a data race). A one-trip nest (`DO K = RED_K, RED_K`) is exempt |
 | CL-06 | (warning) a `private` item is unused, listed twice or undeclared |
+| CL-08 | a `reduction(max\|min: x)` variable is also `private`, or is assigned with anything but `x = MAX(x, ...)` / `x = MIN(x, ...)` (matching the operator) or an update guarded by a condition on `x` itself (D-068) |
 | CL-07 | the device-address list has a duplicate, a non-dummy, a scalar, or lacks an array that the body uses |
+
+The CMake side of D-068 is proposed in `tools/patches/cmake-fastmath-pin.patch`: a module
+`amrex/cmake/AMReXCudaPin.cmake` (fails the configure if the option is ON, then forces it OFF; `amrex_cuda_fastmath_check()` reads the
+`CMakeCache.txt` of the AMReX build given as `-DS5_AMREX_BUILD_DIR=...`, because an installed AMReX does not record the option), an
+initial-cache file `amrex/cmake/amrex-cuda-gpu.cmake` for `cmake -C`, and three one-line hooks in the CMakeLists of `s4_mass`, `s4d` and
+`s5_gen/gpu`. It is for the Integration Lead to review and apply (`git apply tools/patches/cmake-fastmath-pin.patch` from the worktree root); until
+it is applied BF-05 and BF-07 fail on the real tree.
 
 Waivers and exit codes work as for tool 1 (`tools/kernel_registry.toml`, rule names `BF-xx` and `CL-xx`).
 A finding for an uncommitted or other engineers' build script is reported, not edited.
@@ -131,7 +153,7 @@ must all differ. The tests also mutate the Fortran toy (I outermost, walls desce
 
 ## 4. `port_kernel_map.py` - kernel to FDS routine, route and status
 
-    python3 tools/port_kernel_map.py [--tree DIR] [--md OUT.md] [--json OUT.json] [--no-gate] [-v]
+    python3 tools/port_kernel_map.py [--tree DIR] [--md OUT.md] [--json OUT.json] [--no-gate] [--device-runs FILE] [--strict] [-v]
     python3 tools/port_kernel_map.py --md inventory/port_kernel_status.md --json inventory/port_kernel_status.json    # refresh the committed snapshot
 
 Reads the kernel list from `s5_markers.toml` and every `markers/*.toml` sidecar, the golden `markers/golden_signatures.json`, the generated
@@ -139,7 +161,7 @@ Reads the kernel list from `s5_markers.toml` and every `markers/*.toml` sidecar,
 routine and `file:lines` (from the marker), the loop ids `L0001...` that overlap those lines (`inventory/gpu_candidate_loops.csv`), the route
 (K2, or K1 for the registry entries of `kernel_registry.toml`), where the kernel text lives, the host bitwise suites that cover it and
 whether a device run is on record (both from `vv-runs/gpu_gate`, found next to the docs repository or through `GPU_GATE_DIR`; `--no-gate`
-leaves those columns empty), and a one-word status (device, host, generated, sidecar-only, pending, no-text). The Markdown table and the JSON
+leaves those columns empty), and a one-word status (device, device-note, host, generated, sidecar-only, pending, no-text). The Markdown table and the JSON
 have the same rows; the JSON is stable (no clock time) so a refresh shows only real changes. The existing routine-level table
 `inventory/port_kernel_map.csv` is not touched; differences to its `generated_kernels` column are listed in the Markdown for its owner.
 
@@ -151,9 +173,20 @@ Self-check (exit 1 on a failure):
 | PM-02 | a kernel of a committed marker file is neither in the golden nor in a sidecar text golden (in a sidecar golden only it is a NOTE; a golden kernel whose marker file is not committed is a warning) |
 | PM-03 | the same kernel name appears in two marker files with a different file, routine or lines |
 | PM-04 | a golden kernel has no kernel text (neither in `generated/s5gen_k2.F90` nor in a `test/*.golden`) |
-| PM-05 | (warning) a golden kernel is missing from the argument manifest or the header; the gate registry disagrees with the map |
+| PM-05 | (warning) a golden kernel is missing from the argument manifest or the header; the gate registry disagrees with the map. `--strict` makes warnings fail |
+| PM-06 | `device_runs.toml` names a kernel that is not mapped, names one twice, has a state other than `on-record` / `on-record-open-note`, or an open-note entry without a note |
 
 "Device run on record" repeats what `check_device_logs.py` lists for the kernel set; it is a registry note, not a check of log files.
+
+**Device-run overlay (D-068).** `tools/device_runs.toml` adds device runs that have happened but that the gate registry does not list yet
+(the registry belongs to the gate, so it is not edited from here). A kernel in the overlay gets the status `device`; a run with one open
+numerical question (`state = "on-record-open-note"`) gives `device-note`. The 8 target regions with `reduction(max|min)` (the kernels
+`cfl_max`, `cfl_wall_max`, `vn_max`, `div_extrema`) need a device run before they count as ported, so the map has a section of its own
+for them and a `port_state` field in the JSON: "not ported: a reduction region needs a device run", "device run on record", or "device run on
+record, with one open numerical note". The rounds 4 to 7 run on a GPU (default and distribute-parallel-do builds, about 25 scenarios)
+is on record for all 20 kernels; 19 of them show no difference to the host result. `cfl_wall_max` shows a last-bit difference of UVWMAX in
+three scenarios (attributed to the power function of the device math library), a decision on it is pending, so it is labelled "device run on
+record, with one open numerical note" and not ported. Delete an overlay entry once the gate registry lists the run.
 
 ## Quick start
 

@@ -129,3 +129,22 @@ D-069 Intel build flags for bitwise comparison with the driver.
 - The earlier csmag DIV1 difference was a reference-dump reconstruction error (`FDSREF_STEPS` must be 2,3 to match the recorded dump), not a compiler effect.
 - Remaining known: the plain (no-BC) full/face VISC/VFLUX snapshot effect (the dump is not the exact pre-boundary-step state; `+strips` removes it), the same as with gfortran. The decomposition check `p1_div_DDDT` differs by 1 ulp, covered by the `max(2e-15, 1 ulp)` gate.
 - D-063 context: Role 3 driver-level regrid conservation (R2b): advection with interface flux overwrite closes to 2e-14 (off: 4.3e-5); the diffusion corrector residual of 4.4e-7 (scales with dt^2) is open and not acceptable for the Phase 3 gate.
+
+## Update 2026-10-04 (k): libm tolerance and pressure-backend/gate-threshold rulings (D-070, D-071)
+
+D-070 libm tolerance for kernels that call transcendental functions.
+- Kernels whose arithmetic is only `+ - * /` and `sqrt` stay bitwise (with the +0/-0 rule).
+- Kernels that call libm transcendentals (`**` with a non-integer exponent, `exp`, `log`, trigonometric functions) get the category `libm` in the kernel registry, with a per-value tolerance of 2 ulp (measured: 1). First case: `cfl_wall_max` / UVWMAX with `(ABS(Q)/RHO)**(1/3)`; the device result differs from the host by 1 ulp for about 13% of the arguments (3 of 13 scenarios differ in the last bit).
+- No own device power routine: the host libraries (gfortran libm, Intel libm) already differ from each other, so reproducing one host library bit for bit buys nothing.
+- Dt-coupled quantities (UVWMAX feeds dt) use the run-level tolerance already used for cross-compiler runs.
+- The K2 CI check flags every libm call, so none enters unlisted.
+
+D-071 Pressure-backend and gate-threshold rulings.
+- (a) TWO_D contract: a Dirichlet face in a one-cell direction is treated as Neumann and the term is dropped (as FDS TWO_D does).
+- (b) Fold sign convention: low Neumann `rhs += g/h`, high Neumann `rhs -= g/h`, Dirichlet `rhs -= 2*H_b/h^2`. The Pressure Lead confirms it with a nonzero-data test against FDS H.
+- (c) Hierarchy fold helper: wait for a consumer.
+- (d) The 23 inputs with Dirichlet in a one-cell x or z direction stay refused in AMR mode (FDS-only, D-057).
+- (e) Mixed Neumann/Dirichlet on a hierarchy is accepted if the order (about 2) and the true residual are right; where the fine-level excess error sits goes to the Pressure Lead.
+- (f) A-58 provisional thresholds confirmed. P3-F02 corner limits are a gate: fine side none; KRES coarse differing cells only in the declared D-059 set; RHO/TMP coarse <= 3e-15; if exceeded, reopen D-059, do not widen. P3-B09 (2): corner max <= edge max + 4 ulp. P3-B09 (1): the propagation distance is derived from stages times stencil half-width per step instead of n+1. The 0.5 discrimination rule `||AMR-F|| <= 0.5||C-F||` on the tracer slice is a gate for P3-B02 and P3-B07 and report-only for P3-B08 (ratio 4). P3-R02 pressure tolerance: working bound 1e-9*U/dx_fine at solver tolerance 1e-12 (the Pressure Lead confirms the mapping).
+- (g) Fine-box domain-edge defect: a fine box with faces on the physical domain edge (for example a one-cell y direction in 2-D) had unfilled ghost layers, giving a spurious diffusive flux (about -5e-5), which explains the E3b residual 4.4e-7 and the E1 ZZ gap 3.9e-5. Ruling: fine boxes get the same physical-domain boundary treatment as level 0 on every domain-edge face (wall cells or an identical mirror/periodic ghost rule). Phase 3 scope is periodic and Neumann/mirror domain faces; other boundary types abort with a clear message. Role 1 owns it; Role 3 tightens MASS_TOL and E1_ZZ_TOL to round-off afterwards.
+- Cause of the earlier vcorr 1-ulp difference: FVX/FVZ change inside the pressure step between the dump and the corrector, so dump-based comparisons use corrector-time inputs.
