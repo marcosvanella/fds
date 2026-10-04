@@ -30,7 +30,26 @@ control (unpatched) and patched. Comparison with `vv-runs/tools/cmp_runs.py` (bi
 | unpatched control vs the V&V reference binary `refbin/gnu_ompi_firex-36975d7/fds` | 1 | 40 | identical except the two banner lines "Hypre library" (the control build has no HYPRE) |
 | `shunn3_4mesh_32` (4 meshes, MPI), control vs patched, switch on (steps 1,2,3) | 4 | 90 output files + 168 dump files (EXTRA) | the 90 identical |
 | `ns2d_16` (Dirichlet/Neumann faces, y one cell), control vs patched, switch on (steps 1,2,3) | 1 | 22 output files + 42 dump files (EXTRA) | 21 identical; `ns2d_16_1.restart` differs in 12 of 1569876 bytes (values near 1e-310). The same file differs by 9 to 12 bytes between two runs of the unpatched control, and between the control and the patched binary with the switch off (restart is run-to-run unstable in this case), so it is not an effect of the patch |
-Not run: the full Tier 1 set, the `-fcheck=all` build (the routine uses only array sections of the mesh's own bounds; a debug run of one case is still advisable before upstreaming), GLMAT/ULMAT cases, cylindrical and tunnel cases (the routine writes a PRHS that is not the plain FFT layout for those; documented, not exercised).
+Not run: the full Tier 1 set, GLMAT/ULMAT cases, cylindrical and tunnel cases (the routine writes a PRHS that is not the plain FFT layout for those; documented, not exercised).
+
+## Debug-build revision (strict compiler flags)
+The first version of the patch did not build with the stock Debug targets, which use `-Wall -Werror` (gfortran) and `-warn all -diag-error=remark,warn,error` (ifx):
+`PRESSURE_SOLVER_DUMP` declared `CHARACTER(256) :: BASE,FN` and `FN` was never used (gfortran `-Werror=unused-variable`, ifx error 7712). With that removed, an ifx Debug run
+(`-check all`) still printed `forrtl: warning (406)` ("an array temporary was created", one per section) at the `bc.bin` write, because the six boundary arrays
+`BXS(1:JBAR,1:KBAR)` ... `BZF(1:IBAR,1:JBAR)` are non-contiguous sections of larger arrays. The patch now (1) drops `FN`, (2) copies the six sections in the same order
+(`BXS, BXF, BYS, BYF, BZS, BZF`, first index fastest) into one contiguous allocatable buffer and writes that with a single `WRITE`, so `bc.bin` has the same bytes as before,
+(3) names this sign-off file in the routine comment (it named a retired number).
+
+| Check | Result |
+|---|---|
+| master ce1f659cd4 + patch, stock `ompi_gnu_linux_db` target (gfortran 14, `-Wall -Werror -fcheck=all -fbounds-check`) | builds, no warning; the old patch fails at pres.f90:1098 with `Unused variable 'fn'` |
+| master ce1f659cd4 + patch, stock `impi_intel_linux_db` target (ifx, `-check all -warn all -diag-error=remark,warn,error`) | builds, no diagnostic; the old patch fails with error 7712 on `FN` |
+| ifx Debug run of `csmag_32`, dump on (steps 1, 3, 10) | no warning 406 in stderr; the old patch with only `FN` removed prints 406 for each of the six sections at every dumped stage |
+| gfortran Debug run of `csmag_32`, dump on (steps 1, 3, 10) | completes, no runtime check message |
+| FireX 36975d765f + patch (Release), `csmag_32`, switch off, against the unpatched build | BITWISE (38 output files: 31 identical, 7 identical after the timing strip) |
+| same, switch on (steps 1, 3, 10) | the same 38 identical, 42 dump files (EXTRA) |
+| the 42 dump files of the new patch against the 42 of the old patch (same FireX build flags) | byte-identical, `bc.bin` and `zone.bin` included |
+| step 3, stages P and C: `rhs`, `phi`, `rho`, `kres` and `meta.txt` against `Source/pressure_backend/frozen/fds_csmag32_periodic` | byte-identical (the frozen case does not keep `zone.bin` and `bc.bin`) |
 
 ## Enable and format
 Set `FDS_PDUMP_STEPS` to the step counts (ICYC) wanted, e.g. `FDS_PDUMP_STEPS=3` or `1,10`, or `ALL`, before starting FDS. Files are written in the run directory, per mesh `m<NM>`, stage `P`

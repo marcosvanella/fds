@@ -26,14 +26,14 @@ working area and are not in this repository.
 | `tools/kernel_registry.toml` | 12184 (12 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/patches/cmake-fastmath-pin.patch` | 5850 (6 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/patches/ported-gsfv-proposed.toml` | 2945 (3 KiB) |  | not Markdown or CSV | not recorded |
-| `tools/port_kernel_map.py` | 35465 (35 KiB) |  | not Markdown or CSV | not recorded |
+| `tools/port_kernel_map.py` | 37591 (37 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/ported.toml` | 6615 (6 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/helpers.py` | 736 (1 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_ci_checks.py` | 8526 (8 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_k2_ci_check.py` | 19964 (19 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_kernel_lint.py` | 27604 (27 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_libm.py` | 15430 (15 KiB) |  | not Markdown or CSV | not recorded |
-| `tools/tests/test_port_kernel_map.py` | 31984 (31 KiB) |  | not Markdown or CSV | not recorded |
+| `tools/tests/test_port_kernel_map.py` | 34862 (34 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_prototypes.py` | 11561 (11 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_zone_sum_order.py` | 23004 (22 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/zone_sum_order.py` | 37458 (37 KiB) |  | not Markdown or CSV | not recorded |
@@ -47,7 +47,7 @@ working area and are not in this repository.
 | `upstream-patches/UP-0006-r2b-driver-e2e-hook.patch` | 3252 (3 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/UP-0007-r2b-fill-om-bounds.patch` | 1187 (1 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/UP-0008-ctrl-instant-value-default.patch` | 10251 (10 KiB) |  | not Markdown or CSV | not recorded |
-| `upstream-patches/UP-0011-pressure-rhs-dump.patch` | 10816 (11 KiB) |  | not Markdown or CSV | not recorded |
+| `upstream-patches/UP-0011-pressure-rhs-dump.patch` | 11444 (11 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/inputs/0010-neg-control-converter-pass.fds` | 1786 (2 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/inputs/0010-neg-control-race_test_1.fds` | 1148 (1 KiB) |  | not Markdown or CSV | not recorded |
 | `.gitignore` | 76 (0 KiB) |  | hidden file | not recorded |
