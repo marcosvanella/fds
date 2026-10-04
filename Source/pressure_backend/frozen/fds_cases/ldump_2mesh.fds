@@ -1,0 +1,16 @@
+&HEAD CHID='ldump_2mesh', TITLE='Pressure loop dump: two meshes (interpolated faces), open vents with a pressure ramp, wind, fire' /
+&MESH IJK=12,10,8, XB=0.0,1.2,0.0,1.0,0.0,0.8 /
+&MESH IJK=12,10,8, XB=1.2,2.4,0.0,1.0,0.0,0.8 /
+&TIME T_END=0.05 /
+&DUMP SIG_FIGS=17, DT_HRR=1000., DT_DEVC=1000., DT_SLCF=1000. /
+&WIND SPEED=2.0, DIRECTION=270. /
+&REAC FUEL='PROPANE', SOOT_YIELD=0.01 /
+&SURF ID='BURN', HRRPUA=600. /
+&VENT XB=0.4,0.6,0.4,0.6,0.0,0.0, SURF_ID='BURN' /
+&OBST XB=1.6,1.9,0.0,0.3,0.0,0.3 /
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN', DYNAMIC_PRESSURE=3.0, PRESSURE_RAMP='PR' /
+&RAMP ID='PR', T=0.0, F=0.0 /
+&RAMP ID='PR', T=0.04, F=1.0 /
+&TAIL /

@@ -44,6 +44,7 @@ bool read_case (std::string const& fn, Case& c)
     return true;
 }
 
+static bool g_debug = false;
 struct Stat { long cases = 0, bad_cases = 0; long n = 0, nbad = 0; double max_abs = 0, max_rel = 0; };
 
 void compare (Stat& st, std::string const& what, std::vector<double> const& got, std::vector<double> const& ref, bool verbose, std::string const& file)
@@ -56,6 +57,7 @@ void compare (Stat& st, std::string const& what, std::vector<double> const& got,
         st.n++;
         if (a != b) {
             ++nb; st.nbad++;
+            if (g_debug && nb <= 6) std::printf("    [%zu] got %.17g ref %.17g\n", q, got[q], ref[q]);
             const double ad = std::abs(got[q] - ref[q]), m = std::max(std::abs(got[q]), std::abs(ref[q]));
             st.max_abs = std::max(st.max_abs, ad); st.max_rel = std::max(st.max_rel, m > 0 ? ad / m : 0.0);
         }
@@ -117,31 +119,64 @@ void run_l1209 (Case& c, Stat& st, bool vb, std::string const& fn)
     Rec bxs = c.at("BXS_IN"), bxf = c.at("BXF_IN"), bys = c.at("BYS_IN"), byf = c.at("BYF_IN"), bzs = c.at("BZS_IN"), bzf = c.at("BZF_IN");
     x.bxs = f2(bxs); x.bxf = f2(bxf); x.bys = f2(bys); x.byf = f2(byf); x.bzs = f2(bzs); x.bzf = f2(bzf);
 
-    const int nv = static_cast<int>(c.at("V_RAMP").i.size());
-    std::vector<PoissonVent> vents(nv);
-    Rec &ue = c.at("V_UE"), &ve = c.at("V_VE"), &we = c.at("V_WE");
-    for (int v = 0; v < nv; ++v) {
-        PoissonVent& t = vents[v];
-        t.pressure_ramp_index = c.at("V_RAMP").i[v]; t.n_eddy = c.at("V_NEDDY").i[v]; t.ior = c.at("V_IOR").i[v]; t.dynamic_pressure = c.at("V_DYNP").d[v];
-        auto slab = [&](Rec& r, int n0, int n1) { F2 f; f.p = r.d.data() + static_cast<std::size_t>(n0) * n1 * v; f.lo[0] = 1; f.lo[1] = 1; f.n[0] = n0; f.n[1] = n1; return f; };
-        t.u_eddy = slab(ue, ue.dims[0], ue.dims[1]); t.v_eddy = slab(ve, ve.dims[0], ve.dims[1]); t.w_eddy = slab(we, we.dims[0], we.dims[1]);
-    }
-    Rec &mdx = c.at("M_DX"), &mdy = c.at("M_DY"), &mdz = c.at("M_DZ");
+    const bool fds = c.count("WV_RAMP") != 0;   // file written by the FDS dump hook (per-wall vent fields, FDS-evaluated ramp values)
+    std::vector<PoissonVent> vents;
     std::vector<PoissonWall> walls(nw);
+    if (!fds) {
+        const int nv = static_cast<int>(c.at("V_RAMP").i.size());
+        vents.resize(nv);
+        Rec &ue = c.at("V_UE"), &ve = c.at("V_VE"), &we = c.at("V_WE");
+        for (int v = 0; v < nv; ++v) {
+            PoissonVent& t = vents[v];
+            t.pressure_ramp_index = c.at("V_RAMP").i[v]; t.n_eddy = c.at("V_NEDDY").i[v]; t.ior = c.at("V_IOR").i[v]; t.dynamic_pressure = c.at("V_DYNP").d[v];
+            auto slab = [&](Rec& r, int n0, int n1) { F2 f; f.p = r.d.data() + static_cast<std::size_t>(n0) * n1 * v; f.lo[0] = 1; f.lo[1] = 1; f.n[0] = n0; f.n[1] = n1; return f; };
+            t.u_eddy = slab(ue, ue.dims[0], ue.dims[1]); t.v_eddy = slab(ve, ve.dims[0], ve.dims[1]); t.w_eddy = slab(we, we.dims[0], we.dims[1]);
+        }
+    } else {
+        vents.resize(nw);
+        for (int w = 0; w < nw; ++w) {
+            PoissonVent& t = vents[w];
+            t.pressure_ramp_index = c.at("WV_RAMP").i[w]; t.n_eddy = c.at("WV_NEDDY").i[w]; t.ior = c.at("WV_IOR").i[w]; t.dynamic_pressure = c.at("WV_DYNP").d[w];
+        }
+    }
     for (int w = 0; w < nw; ++w) {
         PoissonWall& q = walls[w];
         q.i = c.at("W_I").i[w]; q.j = c.at("W_J").i[w]; q.k = c.at("W_K").i[w]; q.ior = c.at("W_IOR").i[w];
         q.pressure_bc_type = c.at("W_PBC").i[w]; q.boundary_type = c.at("W_BT").i[w];
         q.dundt = c.at("W_DUNDT").d[w]; q.wall_work1 = c.at("WALL_WORK1").d[w];
-        const int nom = c.at("W_NOM").i[w] - 1, a = std::abs(q.ior);
-        const int nd = mdx.dims[0];
-        q.other_d = a == 1 ? mdx.d[(c.at("W_IIO").i[w] - 1) + static_cast<std::size_t>(nd) * nom]
-                  : a == 2 ? mdy.d[(c.at("W_JJO").i[w] - 1) + static_cast<std::size_t>(nd) * nom]
-                           : mdz.d[(c.at("W_KKO").i[w] - 1) + static_cast<std::size_t>(nd) * nom];
+        if (fds) {
+            q.other_d = c.at("W_OTHERD").d[w];
+            q.vent = &vents[w];
+        } else {
+            Rec &mdx = c.at("M_DX"), &mdy = c.at("M_DY"), &mdz = c.at("M_DZ");
+            const int nom = c.at("W_NOM").i[w] - 1, a = std::abs(q.ior);
+            const int nd = mdx.dims[0];
+            q.other_d = a == 1 ? mdx.d[(c.at("W_IIO").i[w] - 1) + static_cast<std::size_t>(nd) * nom]
+                      : a == 2 ? mdy.d[(c.at("W_JJO").i[w] - 1) + static_cast<std::size_t>(nd) * nom]
+                               : mdz.d[(c.at("W_KKO").i[w] - 1) + static_cast<std::size_t>(nd) * nom];
+            q.vent = &vents[c.at("W_VENT").i[w] - 1];
+        }
         q.t_ign = c.at("W_TIGN").d[w]; q.rho_f = c.at("W_RHOF").d[w];
-        q.vent = &vents[c.at("W_VENT").i[w] - 1];
+    }
+    // FDS-derived file: EVALUATE_RAMP is FDS's own; the caller (here) returns the value FDS computed for the same call, in call order,
+    // and checks that the time argument (TSI) the loop forms is bitwise the one FDS formed.
+    std::size_t ncall = 0; long tsi_bad = 0;
+    if (fds) {
+        const std::vector<double>& rf = c.at("RAMPF_SEQ").d; const std::vector<double>& ts = c.at("TSI_SEQ").d;
+        x.evaluate_ramp = [&, rf, ts](double tsi, int) -> double {
+            if (ncall >= rf.size()) { ++tsi_bad; return 0.0; }
+            std::uint64_t a, b; std::memcpy(&a, &tsi, 8); std::memcpy(&b, &ts[ncall], 8);
+            if (a != b) ++tsi_bad;
+            return rf[ncall++];
+        };
     }
     pres_poisson_boundary_arrays(x, walls.data(), nw);
+    if (fds) {
+        if (tsi_bad || static_cast<int>(ncall) != ival(c, "N_RAMP")) {
+            std::printf("  %s: ramp calls %zu (FDS made %d), TSI mismatches %ld\n", fn.c_str(), ncall, ival(c, "N_RAMP"), tsi_bad);
+            st.nbad += tsi_bad ? tsi_bad : 1;
+        }
+    }
     compare(st, "BXS", bxs.d, c.at("BXS_OUT").d, vb, fn); compare(st, "BXF", bxf.d, c.at("BXF_OUT").d, vb, fn);
     compare(st, "BYS", bys.d, c.at("BYS_OUT").d, vb, fn); compare(st, "BYF", byf.d, c.at("BYF_OUT").d, vb, fn);
     compare(st, "BZS", bzs.d, c.at("BZS_OUT").d, vb, fn); compare(st, "BZF", bzf.d, c.at("BZF_OUT").d, vb, fn);
@@ -154,7 +189,7 @@ int main (int argc, char** argv)
     for (int a = 1; a < argc; ++a) {
         std::string s = argv[a];
         if (s.rfind("dir=", 0) == 0) dir = s.substr(4);
-        else if (s.rfind("verbose=", 0) == 0) vb = s.substr(8) != "0";
+        else if (s.rfind("verbose=", 0) == 0) { vb = s.substr(8) != "0"; g_debug = s.substr(8) == "2"; }
     }
     if (dir.empty()) { std::fprintf(stderr, "usage: pb_fds_loops dir=<case directory> [verbose=1]\n"); return 2; }
     std::vector<std::string> files;

@@ -5,6 +5,8 @@
              (-O2 -ffp-contract=off, no fast-math), run it; it writes the case files into <work>/cases.
   check    : run pb_fds_loops (or a mutant build of it) on the case files; exit 0 iff every element is bitwise equal.
              --expect-fail inverts the result (mutation check: the test must notice the mutant).
+  check-fds: unpack the archive of case files written by the real FDS (frozen/fds_loops_cases, made with
+             frozen/fds_loops_dump_hook.py) and run pb_fds_loops on them: the C++ functions against FDS's own arrays.
   drift    : the generator step on a copy of pres.f90 with one inserted line must REFUSE (the pinned line ranges moved).
 """
 import argparse, os, shutil, subprocess, sys
@@ -19,12 +21,13 @@ def run(cmd, **kw):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["make-ref", "check", "drift"])
+    ap.add_argument("action", choices=["make-ref", "check", "check-fds", "drift"])
     ap.add_argument("--pres", default=os.path.join(HERE, "..", "..", "pres.f90"))
     ap.add_argument("--git-repo", default=None)
     ap.add_argument("--fortran", default=os.environ.get("FC", "gfortran"))
     ap.add_argument("--work", required=True)
     ap.add_argument("--exe", default=None)
+    ap.add_argument("--archive", default=None, help="tar of FDS-written case files (check-fds)")
     ap.add_argument("--expect-fail", action="store_true")
     a = ap.parse_args()
     os.makedirs(a.work, exist_ok=True)
@@ -62,6 +65,18 @@ def main():
             print("MUTANT CAUGHT")
             return 0
         return 0 if ok else 1
+    if a.action == "check-fds":
+        import tarfile
+        if not a.exe or not a.archive:
+            sys.exit("--exe and --archive required")
+        d = os.path.join(a.work, "fds_cases")
+        shutil.rmtree(d, ignore_errors=True)
+        os.makedirs(d)
+        with tarfile.open(a.archive) as t:
+            t.extractall(d)
+        rc, out = run([a.exe, "dir=" + d])
+        print(out, end="")
+        return 0 if rc == 0 and "SUMMARY" in out and "PASS" in out else 1
     if a.action == "drift":
         bad = os.path.join(a.work, "pres_drifted.f90")
         with open(a.pres, errors="replace") as f:

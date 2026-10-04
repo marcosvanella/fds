@@ -1,0 +1,14 @@
+&HEAD CHID='ldump_closed', TITLE='Pressure loop dump: one mesh, solid walls with prescribed inflow velocity (Neumann with dU/dt), open top, fire' /
+&MESH IJK=10,8,10, XB=0.0,1.0,0.0,0.8,0.0,1.0 /
+&TIME T_END=0.2 /
+&DUMP SIG_FIGS=17, DT_HRR=1000., DT_DEVC=1000., DT_SLCF=1000. /
+&REAC FUEL='PROPANE', SOOT_YIELD=0.01 /
+&SURF ID='BURN', HRRPUA=800. /
+&SURF ID='BLOW', VEL=-0.5, RAMP_V='BR' /
+&RAMP ID='BR', T=0.0, F=0.0 /
+&RAMP ID='BR', T=0.05, F=1.0 /
+&VENT XB=0.3,0.5,0.3,0.5,0.0,0.0, SURF_ID='BURN' /
+&OBST XB=0.0,0.3,0.0,0.2,0.0,0.4 /
+&VENT XB=0.0,0.0,0.3,0.6,0.2,0.5, SURF_ID='BLOW' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+&TAIL /
