@@ -207,6 +207,13 @@ void run_solve (ParmParse& pp)
     std::string ref_file; pp.query("ref_file", ref_file);
     pb::PressureOptions o;
     pp.query("tol_rel", o.tol_rel);
+    {   // HYPRE settings: krylov=auto|pcg|gmres|bicgstab coarsen= relax= sweeps= strong= interp= agg=
+        std::string k;
+        if (pp.query("krylov", k)) { o.hypre.krylov = k == "pcg" ? pb::HypreKrylov::PCG : k == "gmres" ? pb::HypreKrylov::GMRES : k == "bicgstab" ? pb::HypreKrylov::BiCGSTAB : pb::HypreKrylov::Auto; }
+        pp.query("coarsen", o.hypre.coarsen_type); pp.query("relax", o.hypre.relax_type); pp.query("sweeps", o.hypre.num_sweeps);
+        pp.query("strong", o.hypre.strong_threshold); pp.query("interp", o.hypre.interp_type); pp.query("agg", o.hypre.agg_levels);
+        pp.query("max_iter", o.max_iter);
+    }
     int rm = 1; pp.query("remove_mean", rm); o.remove_mean = (rm != 0);
     pp.query("verbose", o.verbose);
     double inject = 0.0; pp.query("rhs_offset", inject);   // adds a constant to the RHS before the solve
@@ -249,12 +256,15 @@ void run_solve (ParmParse& pp)
         phi->setVal(0.0);
         p.phi = phi.get();
         o.backend = parse_backend(name);
+        const double t_solve0 = amrex::second();
         pb::PressureResult r = pb::solve_pressure(p, o);
+        const double t_solve = amrex::second() - t_solve0;
         Print() << std::setprecision(6) << "RESULT " << name << " status=" << pb::to_string(r.status)
                 << " backend=" << r.backend << " iters=" << r.backend_status.iterations
                 << " own_res=" << r.backend_status.own_residual
                 << " true_rel2=" << r.residual_rel2 << " true_relmax=" << r.residual_relmax
-                << " residual_ok=" << (r.residual_ok ? 1 : 0) << " nwarn=" << r.warnings.size();
+                << " residual_ok=" << (r.residual_ok ? 1 : 0) << " nwarn=" << r.warnings.size() << " seconds=" << t_solve;
+        if (r.backend == "HYPRE") { Print() << " hypre_setup=" << r.backend_status.hypre_setup_seconds << " hypre_solve=" << r.backend_status.hypre_solve_seconds << " hypre_method=" << r.backend_status.hypre_method; }
         for (auto const& c : r.components) {
             Print() << " comp" << c.id << "_singular=" << (c.singular ? 1 : 0)
                     << " comp" << c.id << "_pin=" << c.pin[0] << "," << c.pin[1] << "," << c.pin[2]
