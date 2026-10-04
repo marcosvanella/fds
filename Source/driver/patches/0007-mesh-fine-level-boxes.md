@@ -5,7 +5,7 @@ first (the Architect is arranging it); this patch grows 0005 and has the same va
 carry fine boxes on the alias route (`fds_shim_bind`); option A (a longer `MESHES`) is not an alternative without asking. 0005 itself is not edited: 0007 applies on top of it (the file
 index line `172704f` of the tree with 0005 applied is the base).
 
-Apply after 0005 (and 0003/0004/0006, independent). Touches only `Source/mesh.f90`, every added or changed line inside `#ifdef WITH_AMREX`; with the macro undefined the
+Apply after 0005 (and 0003/0004/0006, independent). Touches `Source/mesh.f90` and, for the one declaration fix below, `Source/velo.f90`; every added or changed line is inside `#ifdef WITH_AMREX` (the velo.f90 change keeps the original line in the `#else` branch); with the macro undefined the
 preprocessed source is the unchanged FDS source (`USE_AMREX=OFF` bitwise check: below).
 
 ## What it does
@@ -21,6 +21,13 @@ preprocessed source is the unchanged FDS source (`USE_AMREX=OFF` bitwise check: 
   number, `ERROR STOP 1`): a routine that has not been made fine-ready cannot silently read `MESHES(NM)`.
 - `POINT_TO_BOX(NM)`: for `NM <= SIZE(MESHES)` as in 0005; for a larger number it finds the level whose range contains `NM`, calls `POINT_TO_MESH_OBJECT(FINE_LEVEL(L)%BOX(IB))` and then re-points
   the listed arrays at `FINE_LEVEL(L)%VIEW(IB)` exactly as 0005 does at `BOX_VIEW(NM)`; a number that belongs to no level stops the run with the same message.
+
+## Follow-up (bounds-check fix, Intel Build Chief finding 1): `DT_NEW` assumed-size dummies in `velo.f90`
+`VELOCITY_PREDICTOR` and `CHECK_STABILITY` declared the dummy `REAL(EB) :: DT_NEW(NMESHES)` and index it with `NM`. A fine box has `NM > NMESHES` (here), and the draft shadow check calls
+`VELOCITY_PREDICTOR(T,DT,DT_NEW_SH,NMF)` with `NMF=NMESHES+1`, so a `-fcheck=bounds` / `ifx -check bounds` build stopped with `forrtl: severe (408)`. The patch now declares, under `WITH_AMREX`,
+`REAL(EB) :: DT_NEW(*)` in both routines (the original line is kept in the `#else` branch, so an `USE_AMREX=OFF` build preprocesses to the unchanged source). Behaviour-neutral: both routines only
+reference `DT_NEW(NM)` (no whole-array use), and the actual arguments are unchanged. The driver's `DT_NEW_K`/`DT_NEW_SH` vectors are sized by the caller. The hunk is appended to this patch (0007 still
+applies after 0005/0006 and before 0008, whose `velo.f90` hunk is the header block at line 1 and applies with an offset); HEAD carries it in commit "0007: DT_NEW assumed-size dummies (bounds-check fix)".
 
 ## Kernel wrappers and direct `MESHES(NM)` reads (driver side, in this commit)
 `fds_k_*` wrappers (`fds_kernels.f90`, 16 entries with a mesh number) call `FDS_HOOK_FINE_GUARD(name, NM, NMESHES)` first: a fine number aborts with the message unless

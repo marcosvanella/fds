@@ -1594,7 +1594,11 @@ REAL(EB) :: T_NOW,XHAT,ZHAT
 INTEGER  :: I,J,K
 INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(IN) :: T,DT
+#ifdef WITH_AMREX
+REAL(EB) :: DT_NEW(*)   ! patch 0007: assumed size; a fine-level box has NM>NMESHES (D-056 option B), DT_NEW(NM) must not be bounds-checked against NMESHES
+#else
 REAL(EB) :: DT_NEW(NMESHES)
+#endif
 
 IF (SOLID_PHASE_ONLY) RETURN
 IF (PERIODIC_TEST==4) THEN
@@ -3060,7 +3064,11 @@ USE MATH_FUNCTIONS, ONLY: EVALUATE_RAMP
 INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(IN) :: DT,T
 REAL(EB) :: UODX,VODY,WODZ,UVW,UVWMAX,R_DX2,MU_MAX,MUTRM,PART_CFL,MU_TMP, UVWMAX_TMP, DT_CLIP, T_NOW
+#ifdef WITH_AMREX
+REAL(EB) :: DT_NEW(*)   ! patch 0007: assumed size; a fine-level box has NM>NMESHES (D-056 option B), DT_NEW(NM) must not be bounds-checked against NMESHES
+#else
 REAL(EB) :: DT_NEW(NMESHES)
+#endif
 INTEGER  :: I,J,K,IW,IIG,JJG,KKG, ICFL_TMP, JCFL_TMP, KCFL_TMP
 REAL(EB), PARAMETER :: DT_EPS = 1.E-10_EB
 TYPE(WALL_TYPE), POINTER :: WC
