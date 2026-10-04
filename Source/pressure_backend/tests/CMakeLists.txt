@@ -134,3 +134,8 @@ pb_add_test(pb_hypre_resid_comp hypresidcomp)
 # (g) size-scaled residual limit (FR-031, A-67): limit = max(residual_tol, 10 u ||A|| ||H||/||b||) for singular and non-singular problems,
 #     every backend, floor scaling with N, negative controls still warn (the synthetic formula check is in rescheck).
 pb_add_test(pb_resid_limit reslimit --ns "48 96")
+
+# (h) masked single-level MLMG branch (A-68, frozen/masked-notes.md): random solid cells, a solid slab (two components), Known cells, Dirichlet
+#     faces, periodic wrap; labels/ncells/singular/removed_mean/solution/gauge against an independent dense numpy reference on 1/2/3 ranks;
+#     negative control warns; FFT with a mask is NotBuilt.
+pb_add_test(pb_masked masked)

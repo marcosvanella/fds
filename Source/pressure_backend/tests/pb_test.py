@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CTest driver for the pressure backend harness. Parses the harness RESULT/CMP/CHECK lines.
 Subcommands: selector, exactsum, fftmlmg, frozen, decomp, repeat, singular, ulmat, ulmatgauge, meankind,
-residual check: hypresid, rescheck, reslimit, hypresidcomp;
+residual check: hypresid, rescheck, reslimit, hypresidcomp; masked (A-68: masked single-level MLMG vs a dense numpy reference);
 composite: compconv, compfull, compdecomp, comp3, compgrad, compshape, compmixed, compns2d, compsel, compws (composite two-/three-level
 solves; manufactured solutions, see harness/composite_modes.cpp and frozen/composite-notes.md).
 Exit 0 = pass. ulmat/ulmatgauge/meankind compare against an independent numpy computation that follows FDS
@@ -780,11 +780,145 @@ def hypresidcomp():
         ok(rc == 0, f"hypre_resid {bc} nlev={nlev} ratio={ratio} {extra}: negative control tol_rel=1e-4 warns (both backends)")
 
 
+def masked_dense(n, bcp, cls, kn, rhs):
+    """Independent dense reference of the masked problem (frozen/masked-notes.md): own flood fill over gas-gas faces (periodic wrap),
+    L phi = rhs on gas cells with L = sum_gas-nbr (phi_nb - phi)/h^2 + sum_known 2 (g - phi)/h^2 - 2 phi/h^2 per Dirichlet domain face,
+    solid faces carry no flux. Singular components (no Dirichlet face, no Known cell): rhs mean removed, lstsq, constant dropped.
+    Returns labels (min x-fastest index, -1 on non-gas), per-component info, and phi (gas cells; constants fixed to zero mean in singular ones)."""
+    nx, ny, nz = n; h = 1.0/max(n)
+    ix = lambda i, j, k: i + nx*(j + ny*k)
+    N = nx*ny*nz
+    gas = np.zeros(N, bool); lab = -np.ones(N, int)
+    nbrs = {}
+    for k in range(nz):
+        for j in range(ny):
+            for i in range(nx):
+                r = ix(i, j, k)
+                gas[r] = cls[i, j, k] == 0
+    dirich = {}; known = {}
+    for k in range(nz):
+        for j in range(ny):
+            for i in range(nx):
+                r = ix(i, j, k)
+                if not gas[r]: continue
+                c = [i, j, k]; gl = []; nd = 0; kl = []
+                for d in range(3):
+                    for side in (0, 1):
+                        t = c[:]; t[d] += -1 if side == 0 else 1
+                        b = bcp[d][side]
+                        if 0 <= t[d] < n[d]: pass
+                        elif b == "P": t[d] %= n[d]
+                        else:
+                            if b == "D": nd += 1
+                            continue
+                        q = ix(*t)
+                        if cls[t[0], t[1], t[2]] == 0: gl.append(q)
+                        elif cls[t[0], t[1], t[2]] == 2: kl.append((q, kn[t[0], t[1], t[2]]))
+                nbrs[r] = gl; dirich[r] = nd; known[r] = kl
+    comp = {}
+    for r in range(N):
+        if not gas[r] or lab[r] >= 0: continue
+        stack = [r]; lab[r] = r; members = [r]
+        while stack:
+            u = stack.pop()
+            for v in nbrs[u]:
+                if lab[v] < 0: lab[v] = r; stack.append(v); members.append(v)
+        comp[r] = sorted(members)
+    # labels are the minimum index of the component (first seen in x-fastest order)
+    phi = np.zeros(N); info = []
+    rf = rhs.transpose(2, 1, 0).ravel()
+    for cid, (key, mem) in enumerate(sorted(comp.items())):
+        m = {c: a for a, c in enumerate(mem)}; nm = len(mem)
+        M = np.zeros((nm, nm)); g = np.zeros(nm)
+        sing = True
+        for c in mem:
+            a = m[c]
+            for q in nbrs[c]: M[a, a] -= 1/h**2; M[a, m[q]] += 1/h**2
+            M[a, a] -= 2*dirich[c]/h**2
+            if dirich[c] > 0: sing = False
+            for q, gv in known[c]: M[a, a] -= 2/h**2; g[a] += 2*gv/h**2; sing = False
+        b = rf[mem] - g
+        if sing:
+            mean = b.mean(); b = b - mean
+            x = np.linalg.lstsq(M, b, rcond=None)[0]; x -= x.mean()
+        else:
+            mean = 0.0; x = np.linalg.solve(M, b)
+        phi[mem] = x
+        info.append(dict(label=key, n=nm, singular=sing, mean=mean, members=mem))
+    return lab, info, phi
+
+def masked():
+    n = [12, 10, 8]; ok_all = True
+    cases = [  # tag, bcpairs, slab, solid_frac, known_frac, seed, gauge_rho
+        ("sealed2", "NN,NN,NN", 3, 0.0, 0.0, 1, 0),
+        ("dirslab", "NN,NN,ND", 3, 0.10, 0.0, 2, 0),
+        ("known", "NN,NN,ND", 3, 0.10, 0.3, 3, 0),
+        ("periodic", "PP,PP,ND", 3, 0.15, 0.1, 4, 1),
+        ("rand", "NN,PP,NN", -1, 0.15, 0.0, 5, 1),
+        ("dirx", "DN,NN,NN", 3, 0.10, 0.0, 6, 0),
+    ]
+    for tag, bcs, slab, sf, kf, seed, gr in cases:
+        bcp = [(t[0], t[1]) for t in bcs.split(",")]
+        res = {}
+        for np_, mgs in ((1, 8), (2, 6), (3, 4)):
+            pre = f"{A.work}/mk_{tag}_{np_}"
+            rc, out = run(np_, mode="masked", n_cell=" ".join(map(str, n)), bcpairs=bcs, slab=slab, solid_frac=sf, known_frac=kf, seed=seed,
+                          gauge_rho=gr, mgs=mgs, out=pre)
+            m = lines(out, "MASKED"); comps = lines(out, "MASKEDCOMP")
+            ok(rc == 0 and len(m) >= 1 and "status=Ok" in m[0], f"masked {tag} np={np_}: harness status Ok and exact checks (solid 0, known g) pass [{m[0] if m else out[-300:]}]")
+            kvm = kv(m[0]); ok(kvm["residual_ok"] == "1" and kvm["nwarn"] == "0", f"masked {tag} np={np_}: no residual warning (true_rel2={kvm['true_rel2']}, limit={kvm['limit']}, iters={kvm['iters']})")
+            res[np_] = (pre, [kv(c) for c in comps])
+        pre, comps = res[1]
+        cls = read_field(pre + "_class.bin", " ".join(map(str, n))).astype(int)
+        kn = read_field(pre + "_known.bin", " ".join(map(str, n)))
+        rhs = read_field(pre + "_rhs.bin", " ".join(map(str, n)))
+        phi = read_field(pre + "_phi.bin", " ".join(map(str, n)))
+        label = read_field(pre + "_label.bin", " ".join(map(str, n))).astype(int)
+        rho = read_field(pre + "_rho.bin", " ".join(map(str, n)))
+        kres = read_field(pre + "_kres.bin", " ".join(map(str, n)))
+        lab, info, pref = masked_dense(n, bcp, cls, kn, rhs)
+        ids = {i['label']: a for a, i in enumerate(info)}
+        labx = np.vectorize(lambda v: ids.get(v, -1))(lab).reshape(n[2], n[1], n[0]).transpose(2, 1, 0)   # component id = rank of the minimum x-fastest index
+        ok(np.array_equal(labx, label), f"masked {tag}: component labels equal the independent flood fill ({len(info)} components)")
+        ok(len(comps) == len(info), f"masked {tag}: component count {len(comps)} == {len(info)}")
+        for c, i in zip(comps, info):
+            ok(int(c["ncells"]) == i["n"] and int(c["singular"]) == int(i["singular"]), f"masked {tag} comp {c['id']}: ncells={c['ncells']} singular={c['singular']} match reference ({i['n']}, {i['singular']})")
+            if i["singular"]: ok(abs(float(c["removed_mean"]) - i["mean"]) <= 1e-13*max(1, abs(i["mean"])), f"masked {tag} comp {c['id']}: removed_mean {c['removed_mean']} == mean(b) {i['mean']:.17g}")
+        pf = phi.transpose(2, 1, 0).ravel()
+        rf = rho.transpose(2, 1, 0).ravel(); kf_ = kres.transpose(2, 1, 0).ravel()
+        worst = 0.0
+        for i in info:
+            mem = i["members"]; x = pf[mem]; ref = pref[mem]
+            if i["singular"]:
+                x = x - x.mean(); err = np.linalg.norm(x - ref)/max(np.linalg.norm(ref), 1e-300)
+            else:
+                err = np.linalg.norm(x - ref)/max(np.linalg.norm(ref), 1e-300)
+            worst = max(worst, err)
+        ok(worst < 1e-9, f"masked {tag}: solution equals the dense per-component reference (worst relative L2 error {worst:.2e}, singular components after removing the constant)")
+        # gauge of the singular components
+        for i in info:
+            if not i["singular"]: continue
+            mem = i["members"]
+            if gr: val = abs(np.sum(rf[mem]*(pf[mem] - kf_[mem])))/np.sum(rf[mem]*np.abs(kf_[mem]))
+            else: val = abs(np.mean(pf[mem]))
+            ok(val < 1e-12, f"masked {tag} label {i['label']}: gauge ({'rho-weighted H-KRES' if gr else 'volume-weighted H'}) = {val:.2e}")
+        # decomposition independence of the product result
+        for np_ in (2, 3):
+            ph2 = read_field(res[np_][0] + "_phi.bin", " ".join(map(str, n)))
+            lb2 = read_field(res[np_][0] + "_label.bin", " ".join(map(str, n))).astype(int)
+            d = np.max(np.abs(ph2 - phi)); ok(np.array_equal(lb2, label) and d < 1e-9, f"masked {tag}: np={np_} labels identical, max |phi - phi(np=1)| = {d:.2e}")
+    # negative controls: loose tolerance warns; masked FFT is NotBuilt
+    rc, out = run(1, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,ND", slab=3, solid_frac=0.1, seed=2, mgs=8, tol_rel=1e-3, max_iter=3)
+    m = lines(out, "MASKED"); ok(rc == 0 and m and kv(m[0])["nwarn"] != "0", f"masked negative control (tol_rel 1e-3, max_iter 3) warns [{m[0] if m else ''}]")
+    rc, out = run(1, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,ND", slab=3, solid_frac=0.1, seed=2, mgs=8, backend="fft")
+    m = lines(out, "MASKED"); ok(m and "status=NotBuilt" in m[0], f"masked + FFT is NotBuilt [{m[0] if m else out[-200:]}]")
+
+
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "masked": masked}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
