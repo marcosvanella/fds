@@ -28,10 +28,18 @@ PressureWorkspace::PressureWorkspace () = default;
 PressureWorkspace::~PressureWorkspace () = default;
 PressureWorkspace::PressureWorkspace (PressureWorkspace&&) noexcept = default;
 PressureWorkspace& PressureWorkspace::operator= (PressureWorkspace&&) noexcept = default;
+#ifdef PB_WITH_HYPRE
 bool PressureWorkspace::built () const { return m_impl && (m_impl->nlev > 0 || m_impl->fft || m_impl->hypre); }
+#else
+bool PressureWorkspace::built () const { return m_impl && (m_impl->nlev > 0 || m_impl->fft); }
+#endif
 int PressureWorkspace::num_levels () const { return m_impl ? m_impl->nlev : 0; }
 bool PressureWorkspace::fft_plan_built () const { return m_impl && m_impl->fft; }
+#ifdef PB_WITH_HYPRE
 bool PressureWorkspace::hypre_built () const { return m_impl && (m_impl->hypre || m_impl->hsys); }
+#else
+bool PressureWorkspace::hypre_built () const { return false; }
+#endif
 void PressureWorkspace::discard () { m_impl.reset(); }
 PressureWorkspace::Impl& PressureWorkspace::ensure_impl ()
 {
@@ -163,7 +171,11 @@ bool impl_matches (PressureWorkspace::Impl const& W, PressureProblem const& p)
 
 bool PressureWorkspace::matches (PressureProblem const& p) const
 {
+#ifdef PB_WITH_HYPRE
     if (p.levels.empty()) { return m_impl && ((m_impl->fft && m_impl->fft->plan_matches(p)) || (m_impl->hypre && m_impl->hypre->plan_matches(p))); }
+#else
+    if (p.levels.empty()) { return m_impl && m_impl->fft && m_impl->fft->plan_matches(p); }
+#endif
     return m_impl && m_impl->nlev > 0 && impl_matches(*m_impl, p);
 }
 
@@ -574,7 +586,9 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         bs.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
         R.backend_status = bs;
         if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *phix[l], *phi[l]); } }
-    } else {
+    }
+#ifdef PB_WITH_HYPRE
+    else {
         // HYPRE: assembled matrix on the original layout (a one-cell direction simply has no term), cached in the workspace.
         std::vector<HypreLayoutLevel> hl;
         for (int l = 0; l < nlev; ++l) { HypreLayoutLevel L; L.ba = W.ba[l]; L.dm = W.dm[l]; L.geom = W.geom[l]; L.ratio = W.ratio[l]; hl.push_back(L); }
@@ -593,6 +607,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         bs.hypre_setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
         R.backend_status = bs;
     }
+#endif
 
     // Gauge (D-067): sum(V*rho*(phi - KRES)) / sum(V*rho) over the uncovered cells of the hierarchy (exact sums, one
     // fixed-point scale per sum) is removed from phi on all levels; with rho = 1 and KRES = 0 this is the plain exact

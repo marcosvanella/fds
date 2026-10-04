@@ -48,6 +48,34 @@ cmake --build /workspace/pb-build -j6
 ```
 Single run: `mpirun -np 4 pb_harness n_cell="64 64 64" bc=neumann max_grid_size=32 backends="fft mlmg"`.
 
+## FDS pressure-area loops (see frozen/fds-loops-notes.md)
+
+`FdsPressureLoops.H/.cpp` (CPU host code, namespace `fdsloops`): FDS `pres.f90` loops L1211 (PRHS divergence, IPS 1/4/7), L1207
+(`P = RHOP*(HP-KRES)` over the full box), L1220-L1222 (H boundary fill) and L1209 (Poisson boundary arrays), same operation order as the Fortran.
+Harness `pb_fds_loops`; ctests `pb_fdsloops_*` (bitwise against the verbatim upstream loops, 18 mutants, drift check, real-FDS dump archive).
+
+## Build options (PB_WITH_HYPRE)
+
+The HYPRE backend is optional at compile time. Everything that names HYPRE is behind the compile definition `PB_WITH_HYPRE`:
+`HypreBackend.H` and `HypreBackend.cpp` (both empty without it), `make_hypre_backend` (`PressureBackend.H`), the `hypre` / `hsys` members of
+`PbWorkspaceImpl.H`, and the HYPRE branches of `PressureIface.cpp` and `CompositeSolve.cpp`. `PressureIface.H` (`BackendKind::HYPRE`,
+`HypreOptions`, the `hypre_*` result fields, `PressureWorkspace::hypre_built()`) is unchanged and needs no HYPRE header.
+
+- **Without `PB_WITH_HYPRE`** (the driver build): no HYPRE type or symbol is referenced, so a link against AMReX alone (no HYPRE) needs no stub.
+  `BackendKind::HYPRE` is rejected by the selector, for a single level and for a composite request, before anything else is looked at:
+  `Status::NotBuilt` with `message == pb::kHypreNotBuilt` (`"built without HYPRE"`); `PressureWorkspace::hypre_built()` is always false.
+  Compiling `HypreBackend.cpp` without the definition is harmless (empty object), so a source list may keep it.
+- **With `PB_WITH_HYPRE`**: add `HypreBackend.cpp` to the sources, link an AMReX built with HYPRE, and define it for **every**
+  `pressure_backend` translation unit (the layout of `PressureWorkspace::Impl` depends on it; mixing the two settings in one program is an
+  ODR violation).
+- **Harness** (`harness/CMakeLists.txt`): option `PB_WITH_HYPRE`, default ON when the installed AMReX has HYPRE (`AMReX_HYPRE_FOUND`); the
+  library target `pressure_backend` carries the definition publicly. The harness tests the HYPRE backend, so configuring it with the option
+  OFF is an error. The build without the definition is covered by `pb_nohypre_obj` (the driver's pressure_backend source list plus
+  `HypreBackend.cpp`, compiled without the definition) and two ctests: `pb_nohypre_symbols` (no HYPRE symbol in any of those objects, by `nm`)
+  and `pb_nohypre_check` (HYPRE request is `NotBuilt` / `kHypreNotBuilt` single level, composite and with a workspace; FFT and MLMG still solve).
+- **Driver** (`Source/driver/CMakeLists.txt`, owned by Role 1): drop `HypreStub.cpp` and the `if (EXISTS .../HypreBackend.cpp)` block. Do not
+  define `PB_WITH_HYPRE` unless `HypreBackend.cpp` is also in the sources and the AMReX is built with HYPRE.
+
 ## M2 additions (see frozen/m2-notes.md)
 
 - `PressureOptions::trigger` / `full_checks_on` (FR-039): full checks versus the cheap path.

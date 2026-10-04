@@ -2,6 +2,10 @@
 // the numbers. The matrix is built cell by cell from the layout (BoxArrays, DistributionMappings, geometries, ratios, boundary types)
 // with a formula-based global numbering, so no communication is needed to assemble it.
 #include "HypreBackend.H"
+
+// The whole file is compiled only with PB_WITH_HYPRE (README.md, "Build options"); without it the object is empty and no HYPRE symbol is
+// referenced anywhere in the pressure backend.
+#ifdef PB_WITH_HYPRE
 #include "PressureBackend.H"
 
 #include <AMReX_ParallelDescriptor.H>
@@ -675,3 +679,5 @@ private:
 std::unique_ptr<PressureBackend> make_hypre_backend () { return std::make_unique<HypreBackend>(); }
 
 } // namespace pb
+
+#endif // PB_WITH_HYPRE

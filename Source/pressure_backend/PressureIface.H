@@ -55,6 +55,8 @@ namespace pb {
 
 enum class BC { Neumann, Periodic, Dirichlet };   // Dirichlet: homogeneous in M1 (values folded into the RHS)
 enum class BackendKind { Auto, FFT, MLMG, HYPRE };   // Auto never selects HYPRE
+// Message of Status::NotBuilt when BackendKind::HYPRE is requested in a build without PB_WITH_HYPRE (README.md, "Build options").
+inline constexpr const char* kHypreNotBuilt = "built without HYPRE";
 enum class Status { Ok, NotBuilt, InvalidInput, NotConverged };
 
 // Which zero mode of the right-hand side is removed from a singular component (see the header comment and

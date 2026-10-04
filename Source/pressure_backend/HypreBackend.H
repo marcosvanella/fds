@@ -23,6 +23,9 @@
 #ifndef PB_HYPRE_BACKEND_H_
 #define PB_HYPRE_BACKEND_H_
 
+// Everything below exists only when PB_WITH_HYPRE is defined (see README.md, "Build options"); without it this header is empty.
+#ifdef PB_WITH_HYPRE
+
 #include "PressureIface.H"
 
 #include <memory>
@@ -72,4 +75,5 @@ private:
 };
 
 } // namespace pb
+#endif // PB_WITH_HYPRE
 #endif

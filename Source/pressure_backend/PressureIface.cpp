@@ -16,6 +16,18 @@ namespace pb {
 
 using namespace amrex;
 
+// HYPRE references are compiled only with PB_WITH_HYPRE (README.md, "Build options"). Without it the selector rejects BackendKind::HYPRE
+// (Status::NotBuilt, kHypreNotBuilt) before anything else, so no HYPRE type or symbol is named below.
+#ifdef PB_WITH_HYPRE
+#define PB_FFT_OR_HYPRE_SLOT(W, kind) (((kind) == BackendKind::FFT) ? (W).fft : (W).hypre)
+#define PB_MAKE_HYPRE() make_hypre_backend()
+#define PB_HYPRE_CACHED(ws) ((ws)->hypre_built())
+#else
+#define PB_FFT_OR_HYPRE_SLOT(W, kind) ((W).fft)
+#define PB_MAKE_HYPRE() std::unique_ptr<PressureBackend>()
+#define PB_HYPRE_CACHED(ws) false
+#endif
+
 namespace {
 bool has_nonzero (iMultiFab const* m)
 {
@@ -67,6 +79,9 @@ std::string validate (PressureProblem const& p, bool structural = true)
 Selection select_backend (PressureProblem const& p, BackendKind requested)
 {
     Selection s;
+#ifndef PB_WITH_HYPRE
+    if (requested == BackendKind::HYPRE) { s.message = kHypreNotBuilt; return s; }
+#endif
     if (!p.levels.empty()) { return select_composite(p, requested); }
     if (p.nlevels != 1) {
         s.message = "composite (multi-level) pressure solve is not built"; return s;
@@ -136,7 +151,7 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // A workspace built for another layout is a regrid (its stale part is rebuilt by this solve).
     if (ws) {
         if (!p.levels.empty()) { if (ws->num_levels() > 0 && !ws->matches(p)) { ws->mark_regrid(); } }
-        else if (((sel.kind == BackendKind::FFT && ws->fft_plan_built()) || (sel.kind == BackendKind::HYPRE && ws->hypre_built())) && !ws->matches(p)) { ws->mark_regrid(); }
+        else if (((sel.kind == BackendKind::FFT && ws->fft_plan_built()) || (sel.kind == BackendKind::HYPRE && PB_HYPRE_CACHED(ws))) && !ws->matches(p)) { ws->mark_regrid(); }
     }
     // FR-039 trigger points: the options say what kind of solve this is, the workspace adds first solve / first after regrid.
     const unsigned trig = o.trigger | (ws ? ws->auto_triggers() : 0u);
@@ -157,7 +172,7 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     const bool cached_kind = (sel.kind == BackendKind::FFT || sel.kind == BackendKind::HYPRE);
     bool plan_ok = false, had_slot = false;
     if (ws && cached_kind && ws->impl()) {
-        auto& slot = (sel.kind == BackendKind::FFT) ? ws->impl()->fft : ws->impl()->hypre;
+        auto& slot = PB_FFT_OR_HYPRE_SLOT(*ws->impl(), sel.kind);
         had_slot = (slot != nullptr);
         plan_ok = slot && slot->plan_matches(p);
     }
@@ -168,12 +183,12 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     PressureBackend* be = nullptr;
     if (ws && cached_kind) {
         PressureWorkspace::Impl& W = ws->ensure_impl();
-        auto& slot = (sel.kind == BackendKind::FFT) ? W.fft : W.hypre;
-        if (!slot) { slot = (sel.kind == BackendKind::FFT) ? make_fft_backend() : make_hypre_backend(); }
+        auto& slot = PB_FFT_OR_HYPRE_SLOT(W, sel.kind);
+        if (!slot) { slot = (sel.kind == BackendKind::FFT) ? make_fft_backend() : PB_MAKE_HYPRE(); }
         be = slot.get();
         R.workspace_rebuilt = (sel.kind == BackendKind::FFT) ? (!plan_ok && ws->fft_plan_builds() > 0) : (!plan_ok && had_slot);
     } else {
-        local = (sel.kind == BackendKind::FFT) ? make_fft_backend() : (sel.kind == BackendKind::HYPRE) ? make_hypre_backend() : make_mlmg_backend();
+        local = (sel.kind == BackendKind::FFT) ? make_fft_backend() : (sel.kind == BackendKind::HYPRE) ? PB_MAKE_HYPRE() : make_mlmg_backend();
         be = local.get();
     }
     R.backend = be->name();

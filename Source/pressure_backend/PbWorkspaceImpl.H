@@ -5,7 +5,9 @@
 
 #include "PressureIface.H"
 #include "PressureBackend.H"
+#ifdef PB_WITH_HYPRE
 #include "HypreBackend.H"
+#endif
 
 #include <AMReX_MLMG.H>
 #include <AMReX_MLPoisson.H>
@@ -40,8 +42,10 @@ struct PressureWorkspace::Impl {
     std::unique_ptr<PressureBackend> fft;
     // HYPRE backend set-up (matrix + BoomerAMG hierarchy), built on the first HYPRE solve of this layout and dropped with the Impl
     // (rebuild() / discard()). Single level: the backend object (it owns the HypreSystem); composite: the system itself.
+#ifdef PB_WITH_HYPRE
     std::unique_ptr<PressureBackend> hypre;
     std::unique_ptr<HypreSystem> hsys;
+#endif
 };
 
 } // namespace pb
