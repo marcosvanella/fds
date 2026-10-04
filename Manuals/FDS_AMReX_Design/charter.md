@@ -1,6 +1,6 @@
 # FDS-AMR project charter
 
-Owner: Spec & Program Lead · Status: draft v0.4.39 (2026-10-04; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
+Owner: Spec & Program Lead · Status: draft v0.4.40 (2026-10-04; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037)
 
 ## 1. Problem statement
 

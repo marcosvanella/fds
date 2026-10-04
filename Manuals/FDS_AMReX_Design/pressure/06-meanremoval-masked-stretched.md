@@ -8,7 +8,7 @@ Timings: CPU runs on an owner-provided NVIDIA test machine (pinned P-cores, 1 th
 
 1. **Study verdict (backend study, commit `6f414db72f`): confirmed**, with one nuance (section 2). FDS removes the arithmetic mean of the volume-scaled RHS `F = V·b`; on stretched cells that is *not* the volume-weighted mean of `b`; both give a compatible system, they pick different compatible RHS when the input is not compatible, and they agree to round-off when it is.
 2. **A real FDS defect was found and patched**: `GLMAT_SOLVER` does not remove the mean of `F_H` (or of `X_H` in the periodic-test-7 fallback) on one MPI rank. Patch `docs/upstream-patches/UP-0005-glmat-singlerank-mean-removal.patch` (section 4).
-3. **Gauge recommendation** for the Architect: section 5.
+3. **Gauge recommendation** for the design owner: section 5.
 4. **ADR wording** (draft): section 6.
 5. **Stretched and masked runs**: sections 7 and 8. **D-057 review**: section 9.
 
@@ -52,7 +52,7 @@ If the imbalance is spread per unit volume (a net dilatation error, an inconsist
 
 **Defect (read, confirmed by runs):** on one rank `MEAN_FH` and `MEAN_XH` are 0 in the whole-domain branch (section 2 table). With 2 or more ranks the `ALLREDUCE` fills element 2 and the mean is removed.
 
-**Patch:** `docs/upstream-patches/UP-0005-glmat-singlerank-mean-removal.patch`, two added lines (`SUM_FH(2) = SUM_FH(1)`, `SUM_XH(2) = SUM_XH(1)`), target both lines. `git apply --check` passes on FireX `36975d765f` and master `ce1f659cd4` (offsets -63 and -107). Index row added in `docs/upstream-patches/README.md`. The X-mean fix the Chief asked for (pres.f90 ≈3553-3555) is in the same patch.
+**Patch:** `docs/upstream-patches/UP-0005-glmat-singlerank-mean-removal.patch`, two added lines (`SUM_FH(2) = SUM_FH(1)`, `SUM_XH(2) = SUM_XH(1)`), target both lines. `git apply --check` passes on FireX `36975d765f` and master `ce1f659cd4` (offsets -63 and -107). Index row added in `docs/upstream-patches/README.md`. The X-mean fix requested (pres.f90 ≈3553-3555) is in the same patch.
 
 **Behavior-unchanged check (what was run; full text in the patch file):**
 
@@ -66,14 +66,14 @@ If the imbalance is spread per unit volume (a net dilatation error, an inconsist
 
 Not run: master build and run (only `git apply --check`), a `-fcheck=all` build, GLMAT with cut cells or several zones on one rank.
 
-## 5. Gauge recommendation (for the Architect)
+## 5. Gauge recommendation (for the design owner)
 
 1. **Default gauge: `Σ ρ·V·(KRES − H) = 0` per pressure zone and per connected component**, computed with the exact (decomposition-independent) sum over uncovered cells. This is the UGLMAT/ULMAT convention (`SHIFT`, pres.f90 1830-1878).
 2. **Always apply it, even when the solve is "exact up to a constant"**: `p = ρ·(H − KRES)` carries the constant into the baroclinic pass-2 `PRHS` (variable ρ makes `∇(ρc) = c∇ρ ≠ 0`), so the gauge is not cosmetic.
 3. **Evidence that the constant matters:** in a one-rank periodic-test-7 run the only non-rounding difference between unpatched and patched GLMAT is the H constant (+0.0304 versus 0), and it changed the mass-fraction slice by up to 1.5e-5 in 0.05 s (section 4). The same case on 2 ranks already had zero mean, so FDS currently gives rank-count-dependent gauges.
 4. **Mean removal default: the composite volume-weighted mean of `b`** (`F − cV`, D-032). It equals FDS's arithmetic removal on uniform cells, agrees with it to round-off on any compatible RHS (dense check 3e-17 to 3e-16), and corrects a per-volume imbalance (offset 0.3 at 64³, R=8: error 9.85e-4 versus 3.42e-2 with the arithmetic removal; at 1M cells 4.02e-4 versus 3.40e-2).
 5. **FDS-parity option:** arithmetic removal of the scaled `F` (runtime switch). Do not rely on native `makeSolvable` (count-weighted, skipped when a pin is present).
-6. **Open for the Architect:** FFT-solved FDS cases have an arbitrary zero-mode constant (baseline `ns2d_16` H mean ≈ 1.88). Whether the AMR path should reproduce that or apply item 1 also to FFT cases is a decision; item 1 is recommended, and PRES comparisons to the FFT baseline are then made after removing a constant (as the test plan already does).
+6. **Open for the design owner:** FFT-solved FDS cases have an arbitrary zero-mode constant (baseline `ns2d_16` H mean ≈ 1.88). Whether the AMR path should reproduce that or apply item 1 also to FFT cases is a decision; item 1 is recommended, and PRES comparisons to the FFT baseline are then made after removing a constant (as the test plan already does).
 
 ## 6. Draft ADR wording
 
@@ -152,7 +152,7 @@ D-057 (`docs/README.md` line 103, `requirements.md` line 183): all-periodic and 
 | MLMG hidden-direction route (`setHiddenDirection(1)`, `ref_ratio_vect = 2 1 2`) | the feature exists (`AMReX_MLLinOp.H:89,951,1177-1179,1219`) but `m_amr_ref_ratio` is a single int per level (`rr[0]` when no hidden dimension, `:1223`), so an anisotropic ratio **requires** the hidden direction; and its kernels are implemented in `MLPoisson`/`MLALaplacian` only, not in `MLABecLaplacian` (one reference, ratio handling at `AMReX_MLABecLaplacian.H:718`), so the unit-spacing stretched/masked operator cannot use it. The backend therefore does not use it: it solves an extruded periodic copy (4 isotropic cells × product of ratios in the thin direction, ratio in that direction must be 1) after finding hidden-direction slow (73 to 200 iterations against 9) or divergent with more than one level (reported in `frozen/composite-notes.md`, not reproduced by me). Extruded `ns2d_16` composite equals a real 4-cell-y 3-D problem to 8.6e-17 (reproduced) | feature gap **confirmed (read)**; slow/divergent behaviour **reported, not reproduced**; extruded route **confirmed (run)** at 4× cells in y |
 | Single-level hidden direction, periodic x,z (my `hid_test`, 64×1×64, 2 ranks) | solution equals the plain solve to 1.2e-15 (relative 1e-13); 8 iterations against 3 | **measured** (periodic only) |
 | Single-level hidden direction with Neumann x,z | in my test it returned a zero solution after one iteration (residual reported 0), but the same test's *plain* Neumann solve also disagrees with the periodic-y solve by 75× while the backend harness's plain Neumann MLMG matches FFT to 1e-12, so my test setup is suspect | **unverified; do not rely on it** |
-| Rest of D-057: BC-type mapping | the driver mapping table and its 21-check unit test are in the driver note; one-cell x/z with a Dirichlet face is refused; mixed open/closed face sets are refused by the selector (31 verification inputs); 23 code-0 inputs stay refused (Architect ruling) | read only (driver work); not re-run here |
+| Rest of D-057: BC-type mapping | the driver mapping table and its 21-check unit test are in the driver note; one-cell x/z with a Dirichlet face is refused; mixed open/closed face sets are refused by the selector (31 verification inputs); 23 code-0 inputs stay refused (design ruling) | read only (driver work); not re-run here |
 
 Pressure-side conclusion: the single-cell-y handling works for FFT (Neumann/periodic y), MLMG single level, assembled HYPRE (Neumann y) and mean removal; the multilevel case works through extrusion, **not** through the hidden direction; the zone sums are right at the backend level and unverified at the driver level.
 
@@ -163,6 +163,6 @@ Pressure-side conclusion: the single-cell-y handling works for FFT (Neumann/peri
 - The cause of the Mf slowdown at R=64 is established in doc 07 §8 (AMReX hands HYPRE the row-scaled, nonsymmetric matrix; PCG then diverges at the first bottom solve); remedies and the recommended setting are there.
 - The synthetic RHS means iteration counts on real FDS flow fields are still not measured (as in doc 05).
 - Hidden-direction + Neumann behaviour not resolved (section 9). Periodic one-cell y in the assembled matrix not run. Driver zone sums in a refined 2-D case not run. Patch UP-0005 not built against master, no debug build.
-- Decision for the Architect: gauge for FFT-solved cases (section 5, item 6).
+- Decision for the design owner: gauge for FFT-solved cases (section 5, item 6).
 
 Reproduce: `scratch/pressure-signoff/meanremoval/` (dense check, `patchwork/` binaries, cases, `ref_check.py`), `scratch/pressure-signoff/pressure_1M/` (`src/h2h_str.cpp`, `src/h2h.cpp` with `cutk`/`COMPCHECK`, `src/hid_test.cpp`, `pr06_*.sh`, `results_pr06/`).

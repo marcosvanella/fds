@@ -1,21 +1,25 @@
 # 07. A-56 backend comparison plan (MLMG vs assembled HYPRE vs FFT) and first results
 
-**Status: plan complete (sections 1 to 6); first accuracy set measured (7.1 to 7.3, 7.6); R=64 cause established (section 8); stairwell repeats done (7.5); first-set timing repeats partly done, the H rows for the hallway, sealed and stretched-Dirichlet cases and one GPU row are PENDING because the test machine was not quiet (7.4); fold sign check (section 11) and mixed N/D excess (section 12) done; P3-R02 measured on the composite MLMG (section 13). Not committed.**
+**Status: plan complete (sections 1 to 6); first accuracy set measured (7.1 to 7.3, 7.6); first-set timing rows complete with the corrected driver (7.4; two strD8 CPU rows unstable after 5 repeats); R=64 cause established (section 8); stairwell repeats done (7.5); fold sign check (section 11) and mixed N/D excess (section 12) done; P3-R02 measured on the composite MLMG, family 1 (section 13) and family 2 with a moved patch (section 16); product HYPRE against MLMG and FFT, single level and composite measured, masked not built (section 14); residual_tol size scaling measured with a recommendation (section 15). Not committed.**
 Measured = run. Read = source only. Unverified = neither.
-Software: sections 1 to 10 (except where stated) use the common-layer tip of the pressure backend (tree this repository, commit `1f3f4de4c4`; latest `Source/pressure_backend` commit `29c2f9aa4a`, which contains the D-067 defaults from `a4a1073952`), read only and built unchanged. Sections 11 and 12 use the later tip `626c5f4b7f` (adds mixed open/closed faces, `fold_boundary_data`, the D-057 mapping check), built unchanged in a scratch directory. AMReX 26.09 and HYPRE v2.32.0-24 for that tip; the assembled-HYPRE and stretched/masked harnesses (docs 05, 06) use AMReX 99ddfda and the same HYPRE.
+Software: sections 1 to 10 (except where stated) use the common-layer tip of the pressure backend (the read-only source tree, commit `1f3f4de4c4`; latest `Source/pressure_backend` commit `29c2f9aa4a`, which contains the D-067 defaults from `a4a1073952`), read only and built unchanged. Sections 11 and 12 use the later tip `626c5f4b7f` (adds mixed open/closed faces, `fold_boundary_data`, the D-057 mapping check), built unchanged in a scratch directory. AMReX 26.09 and HYPRE v2.32.0-24 for that tip; the assembled-HYPRE and stretched/masked harnesses (docs 05, 06) use AMReX 99ddfda and the same HYPRE.
 Machines: CPU timing and all GPU runs on an owner-provided NVIDIA test machine (pinned performance cores, 1 thread per rank, one GPU, managed arena). CPU accuracy checks of the tip ran on the shared build box.
 
 ## 1. Answers in short
 
 1. **Plan:** A-56 is checked per zone by one number, `eps_H = max(1e-8, 2.4e-12·N²)` (requirements §2.1a), on a single frozen solve on the same discretisation, after removing the volume-weighted mean per zone, relative L2 (section 2). Cases, sizes, rank counts and pass/fail rules are in sections 3 to 6.
-2. **What is measurable today:** the product backend (common layer + MLMG + FFT) can be compared MLMG-vs-FFT on the uniform box only. Assembled HYPRE is not in the product backend; it exists only in the study harnesses. Masked, stretched and mixed-face cases are `NotBuilt` in the product backend (section 9), so those rows use the harnesses and are labelled as such.
+2. **What is measurable today:** the product backend (common layer + MLMG + FFT + assembled HYPRE) can be compared FFT/MLMG/HYPRE on the uniform box and HYPRE against MLMG on composite hierarchies, including mixed face types (section 14). Masked cells, covered cells on the single-level API, stretched cells and cylindrical geometry are `NotBuilt` for every product backend (section 9, 14.3), so masked hallways, the stairwell and the stretched cases use the study harnesses and are labelled as such.
 3. **First set, accuracy (all pass):** MLMG vs FFT on the product tip, 32³ to 128³, Neumann, periodic and Dirichlet, 1 and 2 ranks: worst 7.0e-14 against eps_H 1e-8 to 3.9e-8 (section 7.1). D-067 mode checks: 65 of 65 checks pass (section 7.2). Harness cases (uniform 100³ Dirichlet, hallways open, hallways sealed, stairwell with three zones, stretched 64³ at R=1, 8, 64): every backend pair on CPU and GPU agrees with the assembled-HYPRE reference to at most 5.0e-11, six orders below eps_H (section 7.3).
 4. **R=64 slowness (task 2): cause established.** AMReX's HYPRE interface hands HYPRE the row-scaled matrix `D⁻¹A` (unit diagonal), which is not symmetric when the diagonal varies. On a stretched grid the diagonal varies (7.3× at R=64), and the FDS option set uses PCG, which needs a symmetric matrix. The first bottom solve then diverges until its 200-iteration cap; later solves recover. It is not an anisotropy/coarsening problem: BoomerAMG on the same unscaled matrix needs 27 iterations. Recommended setting: `hypre.hypre_solver=BiCGSTAB` with the bottom tolerance 1e-11 (about 8× faster at 64³, and the only converging setting at 1M and R=64 on CPU), until AMReX can pass the unscaled or symmetrically scaled matrix (section 8).
 5. **Stairwell repeats (task 3):** section 7.5. 3 repeats per row, 36 runs, none rejected; H is 2.6× faster than Mf on CPU and 6.2× on GPU (8 CPU ranks: Mf 2.70 s, H 1.04 s; GPU: Mf 1.19 s, H 0.193 s); BiCGSTAB (Mb) does not help on this uniform-spacing case.
 6. **Fold sign check (task 4):** the three signs of `fold_boundary_data` (low-side Neumann `+g/h`, high-side Neumann `-g/h`, Dirichlet `-2 H_b/h²`) are **right**: derived from `pres.f90` (section 11.1) and confirmed by a nonzero-data run against a dense matrix built the FDS way (24 of 24 cases, worst 4.4e-14; each sign flip gives differences of 0.31 to 3.6 relative to max |H|) and by a manufactured-solution convergence test (section 11.2 and 11.3). No FDS run with nonzero wall data and an H dump exists in the V&V area (section 11.4).
 7. **Mixed N/D error excess (task 5):** not the solver tolerance and not the wall stencil. It is a smooth, domain-wide discretisation effect: the coarse truncation error outside the refined patch is no longer partly cancelled by the patch's own truncation error, and the C/F interface adds a smaller second-order remainder (section 12).
 8. **P3-R02 pressure tolerance (section 13):** on the composite MLMG (two levels, D-067 defaults) the measured `max|div u - D - c|` after projection is **2.8e-12 at eps_rel 1e-12 and 6.9e-9 at 1e-9** for n = 32 (U/dx_fine = 64), i.e. 4.4e-14 and 1.1e-10 times U/dx_fine, against the working bound 1e-9·U/dx_fine (met with margins of 22,000 and 9); every projected case satisfies the derived bound `10·eps_rel·B + 20·eps_mach·U/dx_fine` (tightest margin 11 at 1e-12), and the unprojected control fails it. The working bound is broken only at eps_rel 1e-6.
-9. **Not measurable yet:** items in section 9 (HYPRE inside the product backend, composite masked/stretched/mixed-face cases, GPU build of the product tip, FDS H references).
+9. **Timing, first set (section 7.4):** re-measured with the corrected driver, 2 repeats (5 for the unstable rows), quiet-machine protocol, no run rejected. H is faster than Mf on the GPU in every case (1.8 to 6.2×: sealed hallways 6.2×, stretched Dirichlet 4.3×) and on the CPU for sealed hallways (3.4×), stretched Neumann (3.3×) and Dirichlet (1.5×); slower on the CPU for the uniform and open-hallways cases (0.6×). The `sealD` GPU Mb value (7.5 s, 2 V-cycles) is **confirmed** by two more repeats (0.1% spread), so the row is real. The `strD8` CPU Mb and H rows are unstable (spread 363% and 27% over 5 repeats; medians 0.96 s and 0.39 s, orientation only).
+10. **Product HYPRE (section 14):** against FFT on the uniform box (15 cases, 32³ to 160³, Neumann, periodic, Dirichlet) the worst relative L2 difference is 2.0e-12 (MLMG against FFT 1.5e-13), 3e4 or more below eps_H. Against MLMG on 46 composite solves (two and three levels, ratio 2 and 4, Neumann, periodic, Dirichlet, four mixed-face sets, corner and two-patch layouts, up to 19.1 million unknowns) the worst difference is 7.1e-12, 12,500 or more below eps_H; MLMG hit its 200-cycle cap in the five three-level ratio-4 cases (true residual still 6e-14 to 2.5e-13), HYPRE converged in all 46 (23 to 43 GMRES iterations). Masked cases are `NotBuilt` for every product backend, so no masked comparison exists at product level.
+11. **`residual_tol` (section 15):** the relative residual of a backend at its round-off floor grows like N² for smooth data (FFT 1.5e-14 at 32³ to 3.9e-13 at 160³; HYPRE Neumann 9.8e-14 to 1.5e-12, crossing 1e-12 between 128³ and 160³), because `||A||·||H||/||b||` grows like N²; the normwise backward error does not grow (FFT 1.1 u, HYPRE 4e-16 to 6e-16). The solution error stays at most 5.2e-4 of eps_H in all 96 solves, also where the residual is above 1e-12. Recommendation: keep 1e-12 as base and use `max(1e-12, c·2^-53·||A||·||H||_2/||b||_2)` with the measured constant at the floor at most 5.6 (HYPRE Neumann; at most 1.4 otherwise), so c = 10 (the value already coded in the informational `residual_floor`). Three MLMG overshoots (1.2e-12 to 1.3e-12, 3 of 24 default solves) are V-cycle granularity, not size, and vanish at `tol_rel` 5e-13.
+12. **P3-R02 family 2 (section 16):** noisy velocity (seam 14 to 111 before reprojection), three levels, patch moved by n/8 level-0 cells, nonuniform D with nonzero mean: at eps_rel 1e-12 the error is 1.0e-13 to 1.6e-13 times U/dx_fine in the main cases (2.1e-14 to 3.9e-13 over all variations), margins 13 to 102 against the derived bound and 2,500 to 47,000 against the working bound 1e-9·U/dx_fine; at 1e-9 margins 10 to 160 (derived) and 5.7 to 72 (working, tightest 5.7 for a patch moved by 0.19 of the domain); at 1e-6 the working bound fails (0.01 to 0.09) while the derived bound holds.
+13. **Not measurable yet:** items in section 9 (masked and stretched cases in the product backend, GPU build of the product tip, FDS H references).
 
 ## 2. Requirement and metric
 
@@ -31,7 +35,7 @@ Machines: CPU timing and all GPU runs on an owner-provided NVIDIA test machine (
 |---|---|---|---|
 | FFT (`FFT::Poisson`) | yes | full uniform box, homogeneous Dirichlet/Neumann/periodic per face pair (plus lifted boundary data) | reference for the uniform box; 1-cell direction with Dirichlet is wrong (doc 06 §9) |
 | MLMG, HYPRE bottom (`Mf`: FDS BoomerAMG options) | yes (uniform, composite) | box and masked (overset mask), stretched only through the harness operator | one MG level on pinned singular components |
-| Assembled HYPRE (`H`: PCG + BoomerAMG as FDS sets it) | **no** (harness only) | any gas-cell set, stretched, masked, mixed faces | the FDS-equivalent reference |
+| Assembled HYPRE (`H`: PCG + BoomerAMG as FDS sets it) | **yes, explicit request only** (single level PCG, composite GMRES(30)); masked, stretched, covered cells on the single-level API are `NotBuilt` there, so those rows stay on the harness | product: uniform box and composite hierarchies with mixed faces; harness: any gas-cell set, stretched, masked | the FDS-equivalent reference (harness); section 14 (product) |
 | MLMG, HYPRE bottom with BiCGSTAB (`Mb`, new, section 8) | harness only | as Mf | recommended bottom for stretched cells |
 
 ## 4. Cases
@@ -44,16 +48,16 @@ Machines: CPU timing and all GPU runs on an owner-provided NVIDIA test machine (
 | H2 | hallways sealed, same mesh | 1.15M | 1 sealed, pinned | walls | Mf, Mb, H | 1, 8, GPU | measured |
 | S1 | stairwell union (192×176×552 padded, `ba=drop`, two z-planes cut) | 1.63M | 3 (1 open, 2 sealed) | walls + vent | Mf, Mb, H | 1, 4, 8, GPU | measured (7.3, 7.5) |
 | R1 | stretched z (geometric, last/first = R), pure Neumann (pinned) and Dirichlet | 64³ and 100³ | 1 | as stated | Mf, Mb, H; FFT only at R=1 | 4 (64³), 8 and GPU (100³) | measured |
-| C1 | composite (2 and 3 levels), masked-composite | 32³ to 64³ | per level | Neumann, periodic, Dirichlet | MLMG (tip) vs uniform-fine FFT reference | 1, 2 | tip self-checks pass (7.2); comparison with H not measurable |
-| C2 | mixed open/closed faces in the product backend | | | | | | not built (9) |
+| C1 | composite (2 and 3 levels, ratio 2 and 4), masked-composite | 32³ to 96³ coarse | per level | Neumann, periodic, Dirichlet | product HYPRE vs MLMG (FFT not legal on composite); masked composite not built | 4 | measured (14.2); masked not built (14.3); tip self-checks pass (7.2) |
+| C2 | mixed open/closed faces in the product backend | 32³, 64³ coarse | per level | `ND,DN,NN`, `DD,NN,NN`, `NN,DD,DN`, `PP,NN,DN` | product HYPRE vs MLMG | 4 | built at the later tip; measured (14.2, section 12) |
 
 ## 5. Metrics and pass/fail criteria
 
-1. **Accuracy (hard criterion):** every pair of backends, per zone, `rel_L2 ≤ eps_H` (section 2). Also each solution's own true relative residual ≤ 1e-10 (the solve tolerance used for all backends) and ≥ 1e-14 reported for transparency.
+1. **Accuracy (hard criterion):** every pair of backends, per zone, `rel_L2 ≤ eps_H` (section 2). Also each solution's own true relative residual ≤ 1e-10 (the solve tolerance used for all backends) and ≥ 1e-14 reported for transparency. The product's own residual warning (`residual_tol`) is judged with the size-aware limit of section 15.5, `max(1e-12, 10·2^-53·||A||·||H||_2/||b||_2)`, on the pin-excluded residual; it is a warning criterion, never a replacement of the eps_H solution criterion.
 2. **Rank and decomposition independence:** the same case on 1 and N ranks and two `max_grid_size` values agrees within eps_H (requirements FR iii); CPU and GPU runs of the same backend agree within eps_H.
 3. **Gauge:** with D-067 defaults the removed mean, the pinned value and the zone gauge `Σρ·V·(KRES−H)=0` are checked by the tip's `meankind` and `comp_gauge` modes. The parity switch (`ScaledArithmetic`) must reproduce FDS's arithmetic mean removal (negative control in the same mode).
 4. **Time (report, with regression triggers; not an A-56 pass/fail):** re-solve median over at least 10 timed solves per run, at least 3 runs per row for rows quoted as medians (2 for the wide first-set rows, marked), spread = (max − min)/median. A row with spread above 10% is rerun. Also first-solve time, setup time, iterations (MLMG V-cycles, bottom iterations where known) and peak memory. Trigger for investigation: Mf or Mb more than 3× slower than H on the same case, or any non-converged run.
-5. **CI subset (A-56 "runs in CI"):** `pb_harness solve` at 32³ and 64³ (Neumann, periodic, Dirichlet, 1 and 2 ranks, both mean kinds) plus the `comp_gauge`, `meankind`, `exactsum` and `selector` modes: 22 solves and 65 checks, a few minutes on the shared machine. The harness cases (H1, H2, S1, R1) are too slow and need a GPU/large-memory runner, so they are nightly or manual, until HYPRE is in the product backend.
+5. **CI subset (A-56 "runs in CI"):** `pb_harness solve` at 32³ and 64³ (Neumann, periodic, Dirichlet, 1 and 2 ranks, both mean kinds) plus the `comp_gauge`, `meankind`, `exactsum` and `selector` modes: 22 solves and 65 checks, a few minutes on the shared machine. The harness cases (H1, H2, S1, R1) are too slow and need a GPU/large-memory runner, so they are nightly or manual (masked and stretched cases cannot go through the product API at all). The product HYPRE backend can now join the subset: the uniform solves of section 14.1 (`backends="fft mlmg hypre"`) at 32³ and 64³ and the composite `hypre_cmp` cases at 32³ coarse (two and three levels, ratio 2, Neumann, periodic, Dirichlet and the mixed-face sets) each take under 1 s on 4 ranks, with the eps_H criterion of section 2.
 
 ## 6. Protocol (timing rows)
 
@@ -110,42 +114,61 @@ Reference: assembled HYPRE (H), one CPU rank, one solve, tolerance 1e-10. Entrie
 - **Every entry passes eps_H by at least four orders** (largest 5.0e-11 against 2.5e-7). The size of the differences is the iterative stopping error (Mf and Mb stop at max-norm 1e-10) rather than a discretisation difference; H on 8 ranks or on the GPU differs from H on one rank by 5e-12 or less.
 - **Stairwell, per zone** (one OPEN zone 545,550 cells, two sealed zones 204,593 and 884,511 unknowns): Mf vs H 8.4e-12, 5.8e-13, 1.2e-11 on one rank; Mb 1.2e-11, 7.8e-13, 1.7e-11; GPU Mf 9.3e-12, 8.5e-13, 1.2e-11.
 - **Reuse of earlier data:** the stairwell one-rank Mf vs H agreement was first reported in doc 06 §8 (same order of magnitude); doc 05 reported only residuals and the manufactured-solution error (identical for all backends to four digits, max 8.22e-5), so this table is the first backend-vs-backend metric on hallways. The doc 06 64³ stretched error table (Mf and H identical error to the printed digits) remains valid.
-- Raw dumps and the table generator: `scratch/pressure-signoff/a56/test machine/logs/a56/acc_table.txt`, `a56_cmp.py`.
+- Raw dumps and the table generator: `acc_table.txt` in the scratch results directory of the test machine logs, `a56_cmp.py`.
 
-### 7.4 Solve time, first set (re-measured with the quiet-machine protocol): PARTLY PENDING
+### 7.4 Solve time, first set (re-measured with the quiet-machine protocol)
 
-Cases: uniform Dirichlet 100³ (`mms`), hallways open (`hallD`) and sealed (`sealD`), stretched 1M at R = 8 Neumann (`strN8`) and Dirichlet (`strD8`). Backends Mf, H and, for `sealD` and `strN8`, Mb. 8 CPU ranks (pinned performance cores) and 1 GPU; 2 repeats, interleaved, each a fresh process, quiet-machine gate and rejection rules as in 7.5. No run was rejected for temperature or clock (package at most 96 °C, never 30 s at or above 95 °C; held clocks 3.3 to 4.4 GHz on 8 ranks, GPU SM 2430 MHz).
+Cases: uniform Dirichlet 100³ (`mms`), hallways open (`hallD`) and sealed (`sealD`), stretched 1M at R = 8 Neumann (`strN8`) and Dirichlet (`strD8`). Backends Mf, H and Mb (Mb: Mf with a BiCGSTAB solver). 8 CPU ranks (pinned performance cores) and 1 GPU; each repeat is a fresh process, interleaved by row, and the quiet-machine gate and rejection rules are as in 7.5 (at most 1.5 busy CPUs from other processes, all performance cores at least 85% idle, package below 70 °C before each run; a run is rejected for 30 s at or above 95 °C, a collapsed core clock or a GPU clock below 2000 MHz). No run was rejected or skipped for load in the second pass (package at most 96 °C, never 30 s at or above 95 °C; held clocks 3.4 to 3.6 GHz on 8 ranks in the second pass, GPU SM 2430 MHz).
 
-**What happened.** The Mf rows are complete (2 repeats each). In the repeat driver, a shell variable used for the case name was overwritten by the package-temperature variable of the quiet-machine check, so the output files of most H and Mb runs were named after a temperature and overwritten by later runs with the same name. Only runs whose name occurs once in the log can be trusted; the rows below use only those and show how many of the repeats are valid. A corrected driver (`a56_time_rep2.sh` in the scratch results directory, reruns only the affected H and Mb rows) was started and stopped before its first run: the test machine was not quiet (another process group, about 15 busy CPUs, for the whole 15 minutes I watched; the quiet gate needs at most 1.5). The affected rows therefore remain **PENDING** (marked in the table); the numbers in the table are measured and valid, but with fewer repeats than planned where stated.
+**History of the rows.** The first pass had a driver fault: a shell variable holding the case name was overwritten by the package-temperature variable of the quiet-machine check, so most H and Mb output files were named after a temperature and overwritten. The second pass uses a corrected driver (case name in its own variable, one output file per run, tag `<device>_<case>_<backend>_r<repeat>`), 2 repeats of every affected H and Mb row, plus the `mms` H, `sealD` GPU Mb and `strN8` GPU rows for confirmation. The Mf rows and the `sealD` CPU Mb and `strN8` CPU rows come from the first pass, whose files for those rows were unique and valid. Two rows (strD8 on 8 CPU ranks, H and Mb) are marked unstable after 5 repeats each (below); every other row has its repeats.
 
-| Device | Case | Backend | Valid repeats | Re-solve per repeat (s) | Median (s) | Spread | Iterations | Pkg max (C) | Clock (MHz) |
+| Device | Case | Backend | Repeats | Re-solve per repeat (s) | Median (s) | Spread | Iterations | Pkg max (C) | Clock (MHz) |
 |---|---|---|---|---|---|---|---|---|---|
-| 8 CPU ranks | mms | Mf | 2 of 2 (rep 1,2) | 0.2415, 0.2373 | 0.2394 | 1.7% | 23 | 93 | 4343 |
-| 8 CPU ranks | mms | H | 1 of 2 (rep 1) | 0.3924 | 0.3924 | - | 21 | 90 | 3545 |
-| 1 GPU | mms | Mf | 2 of 2 (rep 1,2) | 0.1678, 0.1678 | 0.1678 | 0.0% | 23 | 92 | 2430 |
-| 1 GPU | mms | H | 1 of 2 (rep 1) | 0.09428 | 0.09428 | - | 21 | 94 | 2430 |
-| 8 CPU ranks | hallD | Mf | 2 of 2 (rep 1,2) | 0.3744, 0.3721 | 0.3733 | 0.6% | 15 | 94 | 4382 |
-| 8 CPU ranks | hallD | H | 0 of 2 | PENDING | | | | | |
-| 1 GPU | hallD | Mf | 2 of 2 (rep 1,2) | 0.2413, 0.2411 | 0.2412 | 0.1% | 15 | 95 | 2430 |
-| 1 GPU | hallD | H | 1 of 2 (rep 2) | 0.1194 | 0.1194 | - | 23 | 88 | 2430 |
-| 8 CPU ranks | sealD | Mf | 2 of 2 (rep 1,2) | 2.295, 2.274 | 2.284 | 0.9% | 4 | 94 | 3588 |
-| 8 CPU ranks | sealD | H | 0 of 2 | PENDING | | | | | |
-| 8 CPU ranks | sealD | Mb | 2 of 2 (rep 1,2) | 1.917, 1.913 | 1.915 | 0.2% | 1 | 96 | 3589 |
-| 1 GPU | sealD | Mf | 2 of 2 (rep 1,2) | 0.8349, 0.835 | 0.835 | 0.0% | 4 | 92 | 2430 |
-| 1 GPU | sealD | H | 0 of 2 | PENDING | | | | | |
-| 1 GPU | sealD | Mb | 1 of 2 (rep 2) | 7.502 | 7.502 | - | 2 | 93 | 2430 |
-| 8 CPU ranks | strN8 | Mf | 2 of 2 (rep 1,2) | 1.479, 1.479 | 1.479 | 0.0% | 4 | 93 | 3552 |
-| 8 CPU ranks | strN8 | H | 2 of 2 (rep 1,2) | 0.4484, 0.4481 | 0.4482 | 0.1% | 24 | 93 | 3575 |
-| 8 CPU ranks | strN8 | Mb | 2 of 2 (rep 1,2) | 0.9216, 0.9237 | 0.9227 | 0.2% | 1 | 92 | 3544 |
-| 1 GPU | strN8 | Mf | 2 of 2 (rep 1,2) | 0.3615, 0.3615 | 0.3615 | 0.0% | 3 | 90 | 2430 |
-| 1 GPU | strN8 | H | 1 of 2 (rep 1) | 0.1104 | 0.1104 | - | 24 | 89 | 2430 |
-| 1 GPU | strN8 | Mb | 1 of 2 (rep 2) | 0.2167 | 0.2167 | - | 1 | 90 | 2430 |
-| 8 CPU ranks | strD8 | Mf | 2 of 2 (rep 1,2) | 0.5938, 0.5992 | 0.5965 | 0.9% | 54 | 93 | 3331 |
-| 8 CPU ranks | strD8 | H | 0 of 2 | PENDING | | | | | |
-| 1 GPU | strD8 | Mf | 2 of 2 (rep 1,2) | 0.3979, 0.3974 | 0.3977 | 0.1% | 54 | 89 | 2430 |
-| 1 GPU | strD8 | H | 0 of 2 | PENDING | | | | | |
+| 8 CPU ranks | mms | Mf | 2 | 0.2415, 0.2373 | 0.2394 | 1.7% | 23 | 93 | 4343 |
+| 8 CPU ranks | mms | H | 2 | 0.3691, 0.4239 | 0.3965 | 13.8% | 21 | 92 | 3600 |
+| 1 GPU | mms | Mf | 2 | 0.1678, 0.1678 | 0.1678 | 0.0% | 23 | 92 | 2430 |
+| 1 GPU | mms | H | 2 | 0.09429, 0.09426 | 0.09427 | 0.0% | 21 | 86 | 2430 |
+| 8 CPU ranks | hallD | Mf | 2 | 0.3744, 0.3721 | 0.3733 | 0.6% | 15 | 94 | 4382 |
+| 8 CPU ranks | hallD | H | 2 | 0.6511, 0.6301 | 0.6406 | 3.3% | 26 | 95 | 3589 |
+| 8 CPU ranks | hallD | Mb | 2 | 0.4934, 0.4967 | 0.4950 | 0.7% | 15 | 93 | 3478 |
+| 1 GPU | hallD | Mf | 2 | 0.2413, 0.2411 | 0.2412 | 0.1% | 15 | 95 | 2430 |
+| 1 GPU | hallD | H | 2 | 0.1194, 0.1193 | 0.1193 | 0.0% | 23 | 89 | 2430 |
+| 1 GPU | hallD | Mb | 2 | 0.3012, 0.3013 | 0.3013 | 0.0% | 15 | 93 | 2430 |
+| 8 CPU ranks | sealD | Mf | 2 | 2.295, 2.274 | 2.284 | 0.9% | 4 | 94 | 3588 |
+| 8 CPU ranks | sealD | H | 2 | 0.6729, 0.6630 | 0.6679 | 1.5% | 27 | 96 | 3594 |
+| 8 CPU ranks | sealD | Mb | 2 | 1.917, 1.913 | 1.915 | 0.2% | 1 | 96 | 3589 |
+| 1 GPU | sealD | Mf | 2 | 0.8349, 0.8350 | 0.8350 | 0.0% | 4 | 92 | 2430 |
+| 1 GPU | sealD | H | 2 | 0.1346, 0.1346 | 0.1346 | 0.0% | 26 | 90 | 2430 |
+| 1 GPU | sealD | Mb | 2 (+1 earlier) | 7.501, 7.509 (earlier 7.502) | 7.505 | 0.1% | 2 | 95 | 2430 |
+| 8 CPU ranks | strN8 | Mf | 2 | 1.479, 1.479 | 1.479 | 0.0% | 4 | 93 | 3552 |
+| 8 CPU ranks | strN8 | H | 2 | 0.4484, 0.4481 | 0.4482 | 0.1% | 24 | 93 | 3575 |
+| 8 CPU ranks | strN8 | Mb | 2 | 0.9216, 0.9237 | 0.9227 | 0.2% | 1 | 92 | 3544 |
+| 1 GPU | strN8 | Mf | 2 | 0.3615, 0.3615 | 0.3615 | 0.0% | 3 | 90 | 2430 |
+| 1 GPU | strN8 | H | 2 | 0.1103, 0.1104 | 0.1104 | 0.1% | 24 | 86 | 2430 |
+| 1 GPU | strN8 | Mb | 2 | 0.2166, 0.2167 | 0.2166 | 0.0% | 1 | 86 | 2430 |
+| 8 CPU ranks | strD8 | Mf | 2 | 0.5938, 0.5992 | 0.5965 | 0.9% | 54 | 93 | 3331 |
+| 8 CPU ranks | strD8 | H | 5 | 0.3761, 0.3966, 0.3876, 0.4811, 0.3880 | 0.3880 | 27% (**above 10%**) | 21 | 93 | 3595 |
+| 8 CPU ranks | strD8 | Mb | 5, **unstable** | 0.9434, 4.147, 0.6660, 0.9594, 1.441 | 0.9594 | 363% | 54 | 94 | 3389 to 4274 |
+| 1 GPU | strD8 | Mf | 2 | 0.3979, 0.3974 | 0.3977 | 0.1% | 54 | 89 | 2430 |
+| 1 GPU | strD8 | H | 2 | 0.09209, 0.09211 | 0.09210 | 0.0% | 20 | 85 | 2430 |
+| 1 GPU | strD8 | Mb | 2 | 0.6541, 0.6554 | 0.6547 | 0.2% | 54 | 91 | 2430 |
 
-Reading (valid rows only): Mf repeats agree within 0.0 to 1.7% on CPU and GPU. On the uniform and stretched 1M cases H is faster than Mf: strN8 CPU 0.448 s against 1.479 s (3.3×), strN8 GPU 0.110 s against 0.362 s (3.3×), mms GPU 0.094 s against 0.168 s (1.8×); on mms CPU H is slower than Mf (0.392 s against 0.239 s). Mb helps where Mf does not converge fast: strN8 CPU 0.923 s against 1.479 s (1.6×, one V-cycle against four) and GPU 0.217 s against 0.362 s (1.7×); on `sealD` CPU 1.915 s against 2.284 s (1.2×). The `sealD` GPU Mb value (7.5 s, one valid repeat, 2 V-cycles) disagrees with the CPU row and with the GPU `strN8` Mb row and is **not confirmed**: it needs its repeat before use. Until the PENDING rows are filled, the doc 05 tables and doc 06 §7 stand for those rows; the single-run R=64 results at 1M are in section 8.
+Reading (re-solve medians, speed-up = Mf time / other time; values below 1 mean slower than Mf):
+
+| Case | CPU H | CPU Mb | GPU H | GPU Mb |
+|---|---|---|---|---|
+| mms | 0.60 | not run | 1.78 | not run |
+| hallD | 0.58 | 0.75 | 2.02 | 0.80 |
+| sealD | 3.42 | 1.19 | 6.20 | 0.11 |
+| strN8 | 3.30 | 1.60 | 3.27 | 1.67 |
+| strD8 | 1.54 | 0.62 (unstable) | 4.32 | 0.61 |
+
+- H is faster than Mf on the GPU in every case (1.8 to 6.2×) and on the CPU where Mf is slow (sealed hallways 3.4×, stretched Neumann 3.3×, stretched Dirichlet 1.5×); it is slower on the CPU for the uniform and the open hallways case (0.60 and 0.58 of Mf's speed), where Mf needs 15 to 23 V-cycles of cheap smoothing.
+- The 13.8% spread of the `mms` H CPU row (two repeats, 0.369 and 0.424 s) is the largest among the valid rows; its median is a coarse number. The earlier single value 0.392 s lies between the two.
+- The `sealD` GPU Mb row is **confirmed**, not a driver artefact: three runs (7.501, 7.509, earlier 7.502 s) agree within 0.1%, 2 V-cycles, so each V-cycle costs about 3.7 s against about 0.1 to 0.2 s per V-cycle on the other GPU rows. The cause was not investigated (the sealed case is singular and the GPU BiCGSTAB path with the sealed-component handling is the obvious suspect, but that was not tested); the row is a real property of that configuration, and Mb should not be recommended on the GPU for sealed domains.
+- Mb on the GPU is slower than Mf for open hallways (0.80) and Dirichlet stretched (0.61), faster for stretched Neumann (1.67); on the CPU it is faster only for sealed hallways (1.19) and stretched Neumann (1.60).
+- The `strD8` CPU rows (H and Mb) are **unstable and unresolved**, not missing. After the first two repeats of Mb disagreed (0.943 and 4.147 s) three more repeats of Mb and of H were run in a later quiet window (gate passed before each run, no run rejected; `time_rep4.log`): Mb re-solve medians 0.666, 0.959 and 1.441 s, H 0.388, 0.481 and 0.388 s. The first solve of Mb is stable (0.650 to 0.668 s in all five runs) while its re-solve time drifts upward within and between runs (p90 of the timed re-solves up to 5.6 s in the second run, 2.9 s in the fifth), with the same 54 iterations and held clocks. The medians (Mb 0.96 s, H 0.39 s) are given for orientation only; the spread (363% and 27%) exceeds the 10% rerun limit of section 5 and the cause of the drift on the CPU Dirichlet stretched case was not found (the GPU rows of the same case have 0.0 to 0.2% spread).
+- Doc 05 tables and doc 06 §7 are superseded by this table for the rows above; the single-run R = 64 results at 1M are in section 8.
 
 ### 7.5 Masked stairwell repeats (task 3) (measured, quiet-machine protocol)
 
@@ -257,23 +280,29 @@ Not established: why the first solve diverges rather than merely stalls (the pre
 
 | Item | State |
 |---|---|
-| MLMG vs FFT, uniform box, product backend | measurable now (7.1, CI subset in section 5) |
-| MLMG vs assembled HYPRE | harness only: HYPRE is not a backend in the product tip |
-| Masked domains (hallways, stairwell) in the product backend | `NotBuilt` (covered cells, variable coefficient `a`). At the tested commit mixed open/closed faces were also `NotBuilt`; at the later tip they are built (read from the commit log; used in section 11 and 12) |
-| Stretched cells in the product backend | `NotBuilt` (selector refuses non-uniform widths, also for explicit MLMG) |
-| Composite branch against H | not possible: no composite H assembly exists; the tip's own composite checks (7.2) and the uniform-fine FFT reference are the available evidence |
+| MLMG vs FFT, uniform box, product backend | measurable now (7.1, CI subset in section 5; 15 cases to 160³ in 14.1) |
+| Product HYPRE vs FFT / MLMG, uniform box | measured (14.1): worst difference to FFT 2.0e-12 |
+| Product HYPRE vs MLMG, composite 2 and 3 levels, ratio 2 and 4, mixed faces, corner and two-patch layouts | measured (14.2): 46 solves, worst 7.1e-12; FFT is not legal on a composite hierarchy, MLMG is the reference |
+| Assembled HYPRE on masked hallways and stairwell, and on stretched cells | harness only (7.3 to 7.5, 8): the product backends return `NotBuilt` for masked cells, covered cells on the single-level API, non-uniform cell widths and variable coefficients (14.3) |
+| Masked or stretched composite cases | not possible (`NotBuilt`); the missing piece is the masked branch in the common layer, not a HYPRE feature |
+| Mixed open/closed faces in the product backend | built at the later tip (read from the commit log); measured with HYPRE and MLMG (14.2, sections 11 and 12) |
+| Composite branch against H | not possible: no composite H assembly exists; the tip's own composite checks (7.2), the uniform-fine reference (14.2, `full=1`) and HYPRE against MLMG are the available evidence |
 | GPU runs of the product tip | not measured: the tip was built for CPU on the shared machine only; GPU rows use the harnesses (same HYPRE, AMReX 99ddfda with CUDA) |
 | FDS H as the reference | not available to me as an executed run: see section 11.4 for what exists in the V&V area; the assembled-HYPRE harness reproduces FDS's matrix and options but is not FDS output |
-| Full-size CI | not before HYPRE is in the product backend (section 5) |
+| Residual criterion | measured (15); the recommended size-aware limit is not yet in the code |
+| Full-size CI | the product HYPRE can join the CI subset (section 5); the harness cases (hallways, stairwell, stretched 1M) stay nightly or manual |
 
 ## 10. Failures, caveats and open items
 
-- One diagnostic batch hung on a non-converging PCG variant (22 s per run times 12 V-cycles); I stopped it and repeated those variants with an iteration cap of 12. The test machine connection dropped twice during waits; no data were lost.
+- One diagnostic batch hung on a non-converging PCG variant (22 s per run times 12 V-cycles); I stopped it and repeated those variants with an iteration cap of 12. The test-machine connection dropped twice during waits; no data were lost.
 - Section 8 experiments are single runs on a shared machine (not the quiet-machine protocol); only the factor differences of 2× or more are significant. The 1M R=64 numbers are single runs.
 - The GPU rows of the R=64 batch ran with the host package at 77 to 92 °C (GPU plateau) and low host clocks; GPU solves are device-bound, but treat them as indicative.
 - The local AMReX build used for the unscaled experiment is a copy of the tree at 99ddfda with one compile flag; it is not committed anywhere.
-- Scratch cleanup: the large regenerable files (rebuilt FDS binaries, objects, restart and run dumps of the mean-removal study; raw field dumps of the D-067 mode checks; the transferred R=64 archive) were deleted once their results were in docs 06 and 07; scripts, logs and result text are kept.
-- Open: runtime option or symmetric scaling in the AMReX HYPRE interface and its upstream test; a product-side guard that selects the Krylov method by the diagonal spread; HYPRE inside the product backend (needed for A-56 in CI); H dump from a real FDS case for the final A-56 sign-off.
+- Scratch cleanup: the large regenerable files (rebuilt FDS binaries, objects, restart and run dumps of the mean-removal study; raw field dumps of the D-067 mode checks and of the HYPRE composite runs; build trees of the study drivers; the transferred R=64 archive) were deleted once their results were in docs 06 and 07; scripts, logs and result text are kept.
+- Timing rows, second pass (7.4): the first pass had the driver fault described there; in the second pass the quiet gate was passed before every run and none was rejected. The accuracy matrices of sections 14 to 16 were also gated (at most 1.5 busy CPUs from others) with a 20-minute waiting budget; part of the HYPRE matrix was skipped for load in the first pass (19 rows) and rerun in a second pass without skips (`hy_retry.log`), so all rows of section 14 are present. The two `strD8` CPU rows remain unstable after 5 repeats (cause not found).
+- Section 14 timings are single runs, 4 ranks, indicative only; section 14.2 iteration counts and differences are exact. MLMG reports `NotConverged` in five three-level ratio-4 cases with a true residual below 3e-13; I did not investigate why its own residual stagnates there.
+- Section 15: one right-hand-side family per spectrum type, uniform single-level only; the composite and masked residual floors are not measured. Section 16: single rank, hand-written face interpolation for the regrid, synthetic velocity.
+- Open: runtime option or symmetric scaling in the AMReX HYPRE interface and its upstream test; a product-side guard that selects the Krylov method by the diagonal spread; the masked branch of the common layer (needed for any masked backend comparison at product level); the size-aware residual limit in `evaluate_residual` (section 15.6); the cause of the `sealD` GPU Mb cost per V-cycle (7.4) and of the `strD8` CPU drift; H dump from a real FDS case for the final A-56 sign-off.
 
 ## 11. Fold sign check (task 4): `fold_boundary_data` against FDS's own H
 
@@ -419,4 +448,273 @@ Findings:
 4. **Negative control:** with no projection (phi = 0, the solver correcting nothing) the observable is B itself (9.4 to 9.7, i.e. 0.07 to 0.15 times U/dx_fine) and fails the bound by about 10 orders at eps_rel 1e-12; the test is sensitive.
 5. **Mean removal:** the constant c in the closed case is -0.29995 (n = 32), the volume mean of b, equal to the backend's reported `removed_mean` to all printed digits; subtracting it is what makes the observable small. With open faces c = 0 as expected.
 
-Limits: the field `u*` is smooth and synthetic and the hierarchy is static (a centred patch), not a regrid seam of a real run; the observable is therefore the pure solver-plus-composite-gradient part, which is what the bound is derived for. The real regrid test (P3-R02 on a run with a seam) still needs the driver. The bound's factor of 10 and the U/dx_fine floor were not stressed (eps_mach term 0.3% of the bound at 1e-12); a case with B much smaller than U/dx_fine would test the floor.
+Limits: the field `u*` is smooth and synthetic and the hierarchy is static (a centred patch), not a regrid seam of a real run; the observable is therefore the pure solver-plus-composite-gradient part, which is what the bound is derived for. A regrid-seam test with a moved patch, noisy velocity and three levels is in section 16 (a hand-written regrid, not the code's own; a seam from a real run is still open). The bound's factor of 10 and the U/dx_fine floor were not stressed (eps_mach term 0.3% of the bound at 1e-12); a case with B much smaller than U/dx_fine would test the floor.
+
+## 14. Product HYPRE backend against MLMG and FFT: single level, composite, masked (measured)
+
+Scope. The assembled HYPRE backend is now part of the product backend (explicit request `BackendKind::HYPRE`; `Auto` never selects it). Per its notes it solves single-level problems with PCG and composite problems with GMRES(30) on the same operator as MLMG, with mixed face types, inhomogeneous face data through the fold, and the pin handling for singular problems. Tip `99c55244e1`, CPU, 4 ranks, on the owner-provided NVIDIA test machine (gate: at most 1.5 busy CPUs from other processes before each run). Harness modes `solve` (backends `fft mlmg hypre`), `hypre_cmp` (HYPRE against MLMG on the same composite problem, with the true residual evaluated by MLMG's operator) and `comp` (composite against a uniform solve); case matrix and raw output in the scratch results directory (`hy_matrix.log`, `hy_retry.log`, `hy_table.md`). The criterion is the relative L2 difference after mean removal against `eps_H = max(1e-8, 2.4e-12·N²)` with N the cells per direction of the finest level.
+
+### 14.1 Single level, uniform box: FFT, MLMG and HYPRE (measured)
+
+N = 32, 64, 96, 128, 160, Neumann, periodic, Dirichlet (15 cases, three backends each, `max_grid_size` 32 to 80, 4 ranks):
+
+| Comparison | Cases | Worst relative L2 difference | Worst relative max difference | eps_H at the worst case | Result |
+|---|---|---|---|---|---|
+| MLMG against FFT | 15 | 1.5e-13 (160³ Neumann) | 1.3e-13 | 6.1e-8 | all pass, margin at least 4e5 |
+| HYPRE against FFT | 15 | 2.0e-12 (160³ periodic) | 2.8e-10 | 6.1e-8 | all pass, margin at least 3e4 |
+
+HYPRE iterations (PCG) 21 to 36 against MLMG 10 to 13 V-cycles. The HYPRE true residual (relative 2-norm, pin row included) is 3e-14 to 1.8e-13 up to 64³, 7.7e-12 (Neumann) and 7.4e-11 (periodic) at 96³, and 4.5e-11 (Neumann) and 4.3e-10 (periodic) at 160³; the pin-aware check of section 15 judges the non-pin value. The largest difference to FFT (2.0e-12, 160³ periodic) belongs to a singular, pinned case; Neumann is at most 1.3e-12, Dirichlet at most 4.6e-13.
+
+### 14.2 Composite two- and three-level hierarchies: HYPRE against MLMG (measured)
+
+FFT is not legal on a composite hierarchy (it needs one box with uniform spacing), so MLMG is the reference; the product HYPRE backend was run on the same `PressureProblem` (same hierarchy, same right-hand side). 46 solves:
+
+| Group | Solves | Levels | Finest N | HYPRE GMRES iterations | MLMG V-cycles | Worst relative L2 difference | Worst relative max difference | Worst HYPRE true residual |
+|---|---|---|---|---|---|---|---|---|
+| Neumann, ratio 2 | 5 | 2, 3 | 64 to 256 | 24 to 41 | 10 to 11 | 7.1e-12 | 4.6e-10 | 2.0e-10 |
+| Neumann, ratio 4 | 4 | 2, 3 | 128 to 1024 | 27 to 43 | 11 to 200 | 6.8e-13 | 1.0e-11 | 4.4e-12 |
+| Periodic, ratio 2 | 4 | 2, 3 | 64 to 256 | 23 to 29 | 9 | 2.0e-13 | 2.1e-13 | 1.3e-13 |
+| Periodic, ratio 4 | 4 | 2, 3 | 128 to 1024 | 27 to 39 | 10 to 200 | 2.2e-12 | 2.9e-12 | 2.2e-12 |
+| Dirichlet, ratio 2 | 5 | 2, 3 | 64 to 256 | 23 to 31 | 10 to 12 | 9.5e-14 | 9.1e-14 | 1.6e-13 |
+| Dirichlet, ratio 4 | 4 | 2, 3 | 128 to 1024 | 27 to 41 | 10 to 200 | 6.3e-13 | 7.4e-13 | 2.0e-12 |
+| Mixed faces (`ND,DN,NN`, `DD,NN,NN`, `NN,DD,DN`, `PP,NN,DN`), ratio 2 | 16 | 2, 3 | 64 to 256 | 23 to 28 | 9 to 12 | 3.9e-13 | 1.8e-13 | 2.2e-13 |
+| Corner patch and two-patch layouts, Neumann, ratio 2 | 4 | 2 | 64 to 128 | 23 to 35 | 10 to 17 | 5.3e-14 | 1.1e-12 | 4.2e-13 |
+
+- **Agreement:** 46 of 46 differences are between 9.9e-15 and 7.1e-12, at least 12,500 times below eps_H (smallest margin: the 96³ coarse, 192³ fine Neumann case, 7.1e-12 against 8.8e-8; the finest-N 1024 cases have eps_H 2.5e-6 against at most 2.2e-12). HYPRE converged and passed its own true-residual check (relative 2-norm by MLMG's operator, at most 2.0e-10 with the pin row; its non-pin value is lower) in all 46, and every HYPRE composite solve was bitwise repeatable (fresh workspace and reused set-up) with the set-up reuse flag set.
+- **MLMG did not converge in 5 of the 46** (`NotConverged` after the 200-V-cycle cap): all three-level, ratio-4 cases (n = 32 Neumann and Dirichlet, n = 64 Neumann, periodic, Dirichlet). Its true residual in those cases is 6e-14 to 2.5e-13 and the HYPRE solution agrees to 3.5e-13 to 2.2e-12, so the MLMG solution is right; the status is its own residual measure stagnating. HYPRE converged in 31 to 43 GMRES iterations in the same cases. (The five harness `CHECK FAIL` lines of the run are exactly these MLMG status lines, nothing else failed.)
+- **Cost (CPU, 4 ranks, single runs, indicative; first solve with set-up / solve reusing the set-up):** where MLMG converges, HYPRE takes 1.4 to 3.8 times as many iterations and a median 7.8 times the time of MLMG for the first solve (3.1 to 14.5 times; 14.5 at 192³ Neumann, 3.3 s against 0.23 s). Where MLMG hits its cap HYPRE is faster: 32³ three-level ratio 4 (2.4 million unknowns) MLMG 13.4 s against HYPRE 4.5 s first, 2.1 s reused; 64³ three-level ratio 4 (19.1 million unknowns) MLMG 88 to 115 s against HYPRE 52 to 56 s first, 24 to 29 s reused. Per the HYPRE notes, GMRES and the assembled matrix are not meant to beat MLMG on a well-behaved hierarchy.
+- **Fine level over the whole domain (`full=1`), two levels ratio 2:** the composite solution on the fine level against a uniform single-level solve of the same backend at the fine resolution (n = 32 and 64, Neumann and Dirichlet, both backends): 7e-16 to 2.5e-14 relative L2 (HYPRE 7.6e-15, 8.2e-15, 1.4e-15, 2.5e-14; MLMG 7.3e-16 to 6.3e-15). For HYPRE this is a composite-against-single-level check inside the same backend; the single-level HYPRE against FFT is 14.1. Without `full` the difference between composite and uniform fine solution is the discretisation difference (1.8e-4 to 7.5e-4 relative), identical for both backends to six digits, which shows that HYPRE and MLMG solve the same composite problem.
+
+### 14.3 Masked cases: not legal for the product backend, so not compared there
+
+The selector checks of the harness (`mode=selector`, all pass) show that an explicit product HYPRE request returns `NotBuilt` for masked cells (`cell_class != 0`: "masked cells ... are not built (masked branch)"), covered cells on the single-level API, cylindrical geometry, non-uniform cell widths (stretched meshes) and variable coefficients; the `Auto` request (which would pick FFT or MLMG) returns `NotBuilt` for masked and covered cells as well. The HYPRE notes list anisotropic refinement ratios and ratios other than 2 and 4 as `NotBuilt` too (read, not run here). Masked hallways and the stairwell therefore cannot be run through the product API with any backend, and the product HYPRE backend cannot take the stretched 1M cases. The masked and stretched comparisons of sections 7.3 to 7.5 remain on the study harnesses (assembled HYPRE and AMReX MLMG on the FDS-style operator); they are labelled as such there. What is missing for a product-level masked comparison is the masked branch in the common layer, not the HYPRE backend.
+
+### 14.4 Not run
+
+GPU (the product tip has no GPU build here); composite with masks or stretching (NotBuilt); ratios other than 2 and 4 (NotBuilt); more than 4 ranks on composite cases; composite n = 96 Dirichlet and larger HYPRE composite runs than the 19.1 million unknown case; FFT as a reference for composite problems (not legal).
+
+## 15. Does `residual_tol` need a size-scaled form? (measured)
+
+Question: the pin-aware residual check of the HYPRE backend reports that the non-pin residual of every backend grows slowly with N and that the fixed `residual_tol = 1e-12` would be crossed above about 128³. Measure the residual against N for the three backends, find out what it is relative to, compare it with the real solution error, and recommend a form with a measured constant.
+
+### 15.1 Method
+
+Product tip `99c55244e1` (contains the pin-aware check), built on the owner-provided NVIDIA test machine, 4 CPU ranks, unit cube, N cells per direction N = 32, 48, 64, 96, 128, 160 (160³ = 4.1 million cells), backends FFT, MLMG and HYPRE, all-Neumann (singular, with the common-layer mean removal and, for HYPRE, the identity pin) and all-Dirichlet. Driver `a56_resid.cpp` (scratch directory): pick a known solution H*, set `b = L H*` with the same 7-point operator and ghost rules as the backends, solve with the product API at `tol_rel` 1e-12 (the default), and read back the product's own residual quantities plus the error against H*.
+- H* "smooth": two low-wavenumber modes plus a constant (so `||b||_2` per cell is 31 to 36 for every N, `max|b|` 129 to 435); H* "noisy": the same plus grid-scale noise of amplitude 0.3 (`||b||_2` per cell 560 to 14,000, growing like N²).
+- Reported per solve: `rel2 = ||r||_2/||b||_2` (the quantity `residual_tol` is compared with), the same with the pin cell excluded (`rel2_nopin`, the quantity actually checked for singular problems), `relmax_nopin = max|r|/max|b|`, the normwise backward error `||r||_2/(||b||_2 + ||A||·||H||_2)`, the solution error `||H - H*||_2/||H*||_2` (mean removed for the closed box) and `eps_H = max(1e-8, 2.4e-12·N²)`.
+- 96 solves: 72 at `tol_rel` 1e-12 (FFT, MLMG, HYPRE, smooth and noisy, Neumann and Dirichlet) and 24 at `tol_rel` 1e-15 for smooth data (MLMG and HYPRE iterate to their own floor), plus three MLMG reruns at 5e-13 and 2e-13 and two negative controls (`tol_rel` 1e-8, 1e-10). Raw outputs: `resid_matrix.log`, `resid_table.md`, `resid_const.md`, `resid_mlmg_tol.log`, `resid_negctl.log` in the scratch results directory. Gate: at most 1.5 busy CPUs from other processes before each run; none was skipped.
+
+### 15.2 Residual against N
+
+Neumann, smooth right-hand side, `tol_rel` 1e-12: relative residual `||r||2/||b||2` (bold: above 1e-12)
+
+| N | FFT | MLMG | HYPRE (non-pin) | HYPRE (full, pin row included) |
+|---|---|---|---|---|
+| 32 | 1.5e-14 | 4.2e-13 | 9.8e-14 | 1.1e-13 |
+| 48 | 3.4e-14 | 3.8e-13 | 1.5e-13 | 1e-11 |
+| 64 | 6.6e-14 | **1.2e-12** | 2.4e-13 | 3e-13 |
+| 96 | 1.4e-13 | 1.1e-13 | 5.3e-13 | 1.4e-10 |
+| 128 | 2.5e-13 | 2.6e-13 | 9.6e-13 | 1e-12 |
+| 160 | 3.9e-13 | 2.5e-13 | **1.5e-12** | 7.3e-10 |
+
+Dirichlet, smooth right-hand side, `tol_rel` 1e-12
+
+| N | FFT | MLMG | HYPRE (non-pin) |
+|---|---|---|---|
+| 32 | 1.2e-15 | 3.3e-13 | 8.2e-14 |
+| 48 | 1.5e-15 | **1.2e-12** | 8.7e-14 |
+| 64 | 1.9e-15 | 1.9e-13 | 5.6e-14 |
+| 96 | 2.4e-15 | 4.4e-13 | 8.1e-14 |
+| 128 | 2.9e-15 | 7.2e-13 | 5e-14 |
+| 160 | 3.3e-15 | 9.7e-13 | 4.4e-14 |
+
+Neumann, noisy right-hand side (grid-scale noise, 0.3), `tol_rel` 1e-12
+
+| N | FFT | MLMG | HYPRE (non-pin) |
+|---|---|---|---|
+| 32 | 9.4e-16 | 2.9e-13 | 3.5e-14 |
+| 48 | 9.5e-16 | 1.3e-13 | 5.5e-14 |
+| 64 | 1e-15 | 1.9e-13 | 6.2e-14 |
+| 96 | 1.1e-15 | 1.1e-13 | 5.8e-14 |
+| 128 | 1.2e-15 | 1.4e-13 | 5.2e-14 |
+| 160 | 1.1e-15 | 9.1e-14 | 7.7e-14 |
+
+Dirichlet, noisy right-hand side, `tol_rel` 1e-12
+
+| N | FFT | MLMG | HYPRE (non-pin) |
+|---|---|---|---|
+| 32 | 9.2e-16 | 2.3e-13 | 7.1e-14 |
+| 48 | 1e-15 | 7.3e-13 | 7e-14 |
+| 64 | 1.2e-15 | **1.3e-12** | 4.1e-14 |
+| 96 | 1.2e-15 | 2.1e-13 | 5.5e-14 |
+| 128 | 1.3e-15 | 3e-13 | 3.1e-14 |
+| 160 | 1.4e-15 | 3.7e-13 | 9.3e-14 |
+
+Neumann, smooth, `tol_rel` 1e-15 (solver iterates to its own floor; MLMG stops at its 200-cycle cap)
+
+| N | MLMG | HYPRE (non-pin) |
+|---|---|---|
+| 32 | 2.9e-15 | 6e-14 |
+| 48 | 6.2e-15 | 1.4e-13 |
+| 64 | 9.8e-15 | 2.4e-13 |
+| 96 | 2e-14 | 5.4e-13 |
+| 128 | 3.5e-14 | 9.7e-13 |
+| 160 | 5.2e-14 | **1.5e-12** |
+
+Dirichlet, smooth, `tol_rel` 1e-15
+
+| N | MLMG | HYPRE (non-pin) |
+|---|---|---|
+| 32 | 1.5e-15 | 1.5e-15 |
+| 48 | 6.5e-16 | 1.9e-15 |
+| 64 | 1.3e-15 | 2.2e-15 |
+| 96 | 5.8e-16 | 3e-15 |
+| 128 | 8e-16 | 3.4e-15 |
+| 160 | 1e-15 | 4e-15 |
+
+
+Fitted exponents, `d ln rel2_nopin / d ln N` (6 sizes): FFT Neumann smooth 2.02 and noisy 0.13; HYPRE Neumann smooth 1.75 (2.01 at `tol_rel` 1e-15) and noisy 0.33; HYPRE Dirichlet -0.4 to 0.6 (flat); MLMG: no trend (-0.6 to 0.4 at 1e-12; 1.77 for Neumann at 1e-15, where the solver reaches the floor and the 200-cycle cap).
+
+What the numbers say:
+1. **The growth is real but belongs to smooth data.** For a smooth right-hand side the relative residual of a backend that reaches round-off (FFT directly; HYPRE, which stops at 4e-16 backward error) grows like N²: FFT Neumann 1.5e-14 at 32 to 3.9e-13 at 160, HYPRE Neumann 9.8e-14 to **1.5e-12**. HYPRE crosses 1e-12 between 128³ (9.6e-13) and 160³ (1.5e-12), in agreement with the backend developer's estimate; FFT would cross at about 260³. For noisy data and for Dirichlet data the relative residual does not grow (FFT 1e-15 to 3e-15, HYPRE 3e-14 to 9e-14).
+2. **The reason is the scale, not the solver.** `||b||_2` is N-independent for smooth data while the matrix norm `||A|| = 12 N²` grows, so `||A||·||H||_2/||b||_2` and with it the round-off size of the residual `~ u·||A||·||H||/||b||` (u = 2⁻⁵³) grows like N². The normwise backward error `||r||/(||b|| + ||A||·||H||)` does not grow with N for any backend (log-log slope over N: FFT 0.09 to 0.14, HYPRE -0.9 to 0.34, MLMG -2.5 to -0.1; FFT 0.9e-16 to 1.3e-16, i.e. 1.1 u; HYPRE Neumann smooth 4.0e-16 to 6.2e-16, flat). So a relative-to-`||b||` threshold fixed in N is reached by the data, not by a loss of accuracy.
+3. **MLMG does not follow the round-off floor at the default tolerance; it follows its stopping rule.** Its residual sits between 9e-14 and 1.3e-12 with no trend in N, and **3 of its 24 default-tolerance solves exceed 1e-12** (N = 48 Dirichlet smooth 1.18e-12, N = 64 Neumann smooth 1.22e-12, N = 64 Dirichlet noisy 1.32e-12). All three are one V-cycle short of the next step: at `tol_rel` 5e-13 each takes one more cycle (11, 12, 11 instead of 10, 11, 10) and gives 8.9e-14, 1.0e-13 and 1.1e-13, no warning (`resid_mlmg_tol.log`); 2e-13 gives the same cycles. This is a granularity effect of a max-norm stopping rule against a 2-norm check (a factor of up to 1.3 overshoot), unrelated to N.
+4. **The pin row is large and already excluded.** The full HYPRE Neumann residual (pin row included) is 1.1e-13, 1.0e-11, 3.0e-13, 1.4e-10, 1.0e-12, 7.3e-10 at N = 32, 48, 64, 96, 128, 160 (largest absolute max-norm entry 5.4e-5 at 160³, always the pin row), irregular in N, against the non-pin 9.8e-14 to 1.5e-12 smooth. The fixed 1e-12 against the full residual would warn at 48, 96, 128 (1.03e-12) and 160; the pin-aware check (already in the tip) removes that.
+
+### 15.3 What the residual should be relative to: the constant
+
+Three candidate scalings, each fitted as a constant over the six sizes (`resid_const.md`): `c_A = rel2_nopin / (u·||A||_2·||H||_2/||b||_2)` (round-off of a floating-point residual, relative to `||b||_2`), `c_N = rel2_nopin / (u·N²)` (size only), `c_S = relmax_nopin / (eps_mach·sqrt(N_cells))` (max-norm, relative to `max|b|`, the form `c·eps_mach·sqrt(N_cells)·|b|_inf`). Range over N, per series; "floor" = a run limited by round-off (FFT, HYPRE, MLMG at `tol_rel` 1e-15); "stop" = limited by the solver tolerance:
+
+| Series | Type | c_A | c_N | c_S |
+|---|---|---|---|---|
+| FFT, Neumann, smooth | floor | 0.87 to 1.0 | 0.13 to 0.14 | 0.52 to 0.73 |
+| FFT, Neumann, noisy | floor | 0.95 to 1.2 | 0.0004 to 0.008 | 0.006 to 0.047 |
+| FFT, Dirichlet, smooth / noisy | floor | 1.0 to 1.2 | 0.0005 to 0.011 | 0.001 to 0.013 |
+| HYPRE, Neumann, smooth (`tol_rel` 1e-12 and 1e-15) | floor | **3.4 to 5.6** | 0.52 to 0.86 | 1.9 to 3.8 |
+| HYPRE, Dirichlet, smooth (`tol_rel` 1e-15) | floor | 1.3 to 1.4 | 0.001 to 0.013 | 0.003 to 0.024 |
+| MLMG, Neumann, smooth (`tol_rel` 1e-15) | floor | 0.14 to 0.17 | 0.018 to 0.026 | 0.18 to 0.31 |
+| MLMG, Dirichlet, smooth (`tol_rel` 1e-15) | floor | 0.27 to 1.3 | 0.0004 to 0.013 | 0.001 to 0.017 |
+| MLMG, all, `tol_rel` 1e-12 | stop | 0.66 to 1,300 | 0.03 to 4.6 | 0.4 to 9.2 |
+| HYPRE, noisy or Dirichlet, `tol_rel` 1e-12 | stop | 16 to 85 | 0.02 to 0.72 | 0.1 to 1.7 |
+
+- `c_A` is the scaling that is flat in N (within 1.7 times in every floor series except MLMG Dirichlet, 0.27 to 1.3) and nearly flat across right-hand sides and boundary conditions: **at the round-off floor c_A is at most 1.4 for FFT, MLMG and HYPRE-Dirichlet and at most 5.6 for HYPRE-Neumann**. `c_N` varies by a factor of 2,000 between smooth and noisy data (it is only right for smooth data), `c_S` by a factor of 3,000.
+- For runs limited by the solver tolerance the residual is whatever the stopping rule leaves (HYPRE noisy or Dirichlet at `tol_rel` 1e-12: 3e-14 to 9e-14, i.e. `c_A` 16 to 85, far below 1e-12); those are not floor-limited and never approach the check, except for the MLMG granularity cases in item 3.
+
+### 15.4 Solution error against the residual
+
+Neumann smooth: solution error `||H - H*||2/||H*||2` (mean removed)
+
+| N | FFT | MLMG | HYPRE |
+|---|---|---|---|
+| 32 | 2.3e-15 | 1.7e-13 | 1.6e-14 |
+| 48 | 6.1e-15 | 5.2e-14 | 9.9e-13 |
+| 64 | 8.8e-15 | 2.3e-13 | 1.3e-14 |
+| 96 | 1.6e-14 | 6e-15 | 5.2e-12 |
+| 128 | 3.6e-14 | 2.3e-14 | 1.2e-14 |
+| 160 | 8.5e-14 | 6e-15 | 1.4e-11 |
+
+Dirichlet smooth: solution error
+
+| N | FFT | MLMG | HYPRE |
+|---|---|---|---|
+| 32 | 4e-15 | 6.5e-13 | 3.6e-14 |
+| 48 | 6.2e-15 | 2.5e-12 | 6.2e-14 |
+| 64 | 6.4e-15 | 4.3e-13 | 5.9e-14 |
+| 96 | 3.4e-14 | 1.1e-12 | 1.5e-13 |
+| 128 | 4.5e-14 | 1.9e-12 | 1.3e-13 |
+| 160 | 9e-14 | 2.5e-12 | 2.4e-13 |
+
+Neumann noisy: solution error
+
+| N | FFT | MLMG | HYPRE |
+|---|---|---|---|
+| 32 | 2.2e-15 | 2e-12 | 7.9e-14 |
+| 48 | 5.7e-15 | 6.6e-13 | 1.2e-12 |
+| 64 | 8.8e-15 | 2.3e-12 | 4.6e-13 |
+| 96 | 1.5e-14 | 9.1e-13 | 5.4e-12 |
+| 128 | 3.5e-14 | 3e-12 | 6.5e-13 |
+| 160 | 8.3e-14 | 9.1e-13 | 1.6e-11 |
+
+Dirichlet noisy: solution error
+
+| N | FFT | MLMG | HYPRE |
+|---|---|---|---|
+| 32 | 3.8e-15 | 6.5e-13 | 4.6e-14 |
+| 48 | 6.1e-15 | 2.4e-12 | 7.6e-14 |
+| 64 | 6.3e-15 | 5.2e-12 | 8.1e-14 |
+| 96 | 3.3e-14 | 1.1e-12 | 2.1e-13 |
+| 128 | 4.4e-14 | 1.8e-12 | 1.8e-13 |
+| 160 | 8.9e-14 | 2.5e-12 | 5e-13 |
+
+- In all 96 solves the error is at most **5.2e-4 of eps_H** (smallest margin 1,930 times: MLMG Dirichlet noisy at N = 64, error 5.2e-12 against eps_H 1e-8). The error is not tied to the residual size: HYPRE Neumann has an error of 1.4e-11 at 160³ with residual 1.5e-12 (ratio 9), FFT has error 8.5e-14 with residual 3.9e-13 (ratio 0.2); over all runs error / residual is 0.004 to 200, which is conditioning and norm scatter, not growth with N.
+- The residual **does** cross 1e-12 in 5 of the 96 solves (the three MLMG cases above and HYPRE Neumann 160³ at both tolerances, 1.52e-12 and 1.53e-12), and in all five the solution is far inside eps_H: errors 2.5e-12, 2.3e-13, 5.2e-12 and 1.4e-11 (twice) against eps_H of 1e-8 to 6.1e-8. A residual of 1.5e-12 relative to `||b||` therefore does not mean a solution error near eps_H.
+- Negative controls (the check must still warn on a really under-converged solve), N = 96 Neumann smooth: MLMG at `tol_rel` 1e-8 gives 2.7e-9 and at 1e-10 gives 1.6e-11; HYPRE at 1e-8 gives 8.9e-10 and at 1e-10 gives 9.1e-12 (non-pin); errors 1.5e-10 and 9.4e-13 (MLMG), 5.5e-11 and 5.5e-12 (HYPRE). All four are 6 to 1,900 times the scaled limit of 1.4e-12 at that size (section 15.5) and still warn with it. The solution errors are 1.5e-10 or lower, still inside eps_H (2.2e-8), which shows that `residual_tol` is a much stricter requirement than A-56 needs.
+
+### 15.5 Recommendation
+
+Keep `residual_tol = 1e-12` as the base and make the limit size-aware through the quantity the common layer already computes:
+
+    residual_limit = max( residual_tol , c · 2^-53 · ||A|| · ||H||_2 / ||b||_2 ),   c = 10,   ||A|| = 4 · sum_d (1/dx_d^2)
+
+with `||H||_2` and `||b||_2` the weighted 2-norms of the returned solution and of the (mean-removed) right-hand side, and the same pin-excluded `rel2_nopin` as the compared quantity. This is today's informational `residual_floor` (it is already coded with `kResidualRoundoff = 10`), promoted from "reported for singular problems only" to "applied as a lower bound of the limit for every component, singular or not".
+- **Constant:** measured `c_A` at the floor is at most 5.6 (HYPRE Neumann; at most 1.4 for every other backend and boundary condition), so c = 10 leaves a factor 1.8 above the largest measured value and 7 above the typical one. The measured flatness over N = 32 to 160 (within 1.7 times for FFT, HYPRE and MLMG-Neumann) is what justifies a constant that does not depend on N.
+- **What it does in numbers:** for the smooth data used here `||A||·||H||/||b|| = 157·(N/32)²`, so the limit is max(1e-12, 1.7e-16·N²): 1.7e-13 at 32, 1.4e-12 at 96 (the base 1e-12 applies up to about N = 77), 2.5e-12 at 128 and 3.7e-12 at 160 (the measured values of the floor; 1.7e-16·N² is a slightly high fit). With it none of the 96 solves exceeds the limit except the three MLMG granularity cases of item 3 (the two HYPRE 160³ cases pass: 1.52e-12 against 3.7e-12). It is not a size-only formula; if a closed form in N alone is wanted for documents, `2·2^-53·N²` (N = cells per direction of the finest level; `N_cells^(2/3)` for non-cubic) bounds the floor-limited residual of all backends on smooth data (largest `c_N` 0.86), but it overstates the limit for noisy data by up to 1,000 times and should not be used as the code's check.
+- **Not recommended:** the max-norm form `c·eps_mach·sqrt(N_cells)·|b|_inf` has no usable constant (0.001 to 3.8 at the floor depending on the data; 9.2 for MLMG at its stopping point), and a plain relative-to-`||b||_2` threshold fixed in N is the present behaviour that reaches 1e-12 at 160³.
+- **MLMG granularity:** independently of the size scaling, either run MLMG with `tol_rel` 5e-13 (one more V-cycle in the three affected cases, none lost elsewhere in this set; not measured across all cases) or accept the base 1.5e-12 (1.14 times the largest overshoot seen, 1.32e-12 in 24 default-tolerance solves). The first removes the spurious warnings at their source and is the better choice if the solve time allows.
+
+### 15.6 What changes in the pass/fail rules
+
+1. **A-56 solution criterion unchanged:** `eps_H = max(1e-8, 2.4e-12·N²)` on the relative L2 difference. All 96 solves above pass it by at least 1,930 times, including those whose residual exceeds 1e-12, so the residual criterion must not be turned into a solution failure.
+2. **Residual criterion (section 5 and the residual rows of every case table):** replace "no residual warning at `residual_tol` = 1e-12" by "`residual_rel2_nopin <= residual_limit`" with the limit of 15.5; a case with `residual_rel2_nopin` between 1e-12 and `residual_limit` is a pass, a case above it is a warning that must be explained. The negative controls (loose `tol_rel`) must still produce the warning; they do (15.4).
+3. **Reporting:** every case table adds `residual_floor` and `residual_backward` next to the residual (they are in `PressureResult` already). A backward error that grows with N for FFT or HYPRE would be a real loss of accuracy independent of the data scale; none occurred in this set (log-log slopes at most 0.34; HYPRE Neumann smooth 4.0e-16 to 6.2e-16, HYPRE Dirichlet 1.7e-15 to 8.5e-15, MLMG 7e-17 to 1.3e-13 and tolerance-limited).
+4. **Code change (not made here, for the backend owner):** `evaluate_residual` in the common layer compares `residual_check` with `o.residual_tol`; the proposed rule compares with `max(o.residual_tol, residual_floor)` and computes the floor for non-singular components as well (today it is 0 there). `PressureResult::residual_limit` should then report the effective limit.
+
+### 15.7 Limits
+
+One right-hand-side family per spectrum type (two modes plus a constant; the same plus noise), unit cube, uniform grid, single level, 4 ranks; no composite or masked case. HYPRE was run with its default setup; the identity pin sits at a fixed cell. The conclusion for composite problems (where `||A||` is taken at the finest level) is not measured. The floor constant was measured on six sizes up to 160³; it is flat there, but extrapolation beyond 160³ is not tested. The Neumann series at `tol_rel` 1e-15 for MLMG stops at the 200-cycle cap (status `NotConverged`) and is used only as a floor measurement, not as a recommended setting.
+
+## 16. P3-R02, second case family: noisy velocity, three levels, patch moved between projections (measured)
+
+Question: does the bound of section 13 (`max|div u - D - c| <= 10·eps_rel·B + 20·eps_mach·U/dx_fine`, working bound 1e-9·U/dx_fine at eps_rel = 1e-12) still hold when the velocity is not smooth, the hierarchy has three levels, the refined patches move between projections so that a regrid seam is exercised, the cell source D is nonuniform with a nonzero mean, and the constant c is nonzero?
+
+Setup (product tip `99c55244e1`, D-067 defaults, one rank, one box per level; driver `a56_regrid.cpp` in the scratch directory; raw results and the table generator in the scratch results directory, `rg_matrix.log`, `rg_table.md`):
+- **Hierarchy A.** Level 1 is the middle half of the unit cube (in level-0 cells), level 2 is the middle half of level 1; refinement ratio 2 (also ratio 4 and two levels in the variations). Face velocity on every level = smooth field (zero normal component at closed walls) plus **grid-scale noise**: a hash-based value in [-0.5, 0.5] times `noise·U` on every face (noise 0.3 in the main runs, 1.0 and 0 in variations; the noise is not put on closed-wall faces). The noise gives `max|div u - D|` of 102 on A for n = 32, three levels, i.e. 0.8 times U/dx_fine. D = `U·(dmean + 0.5 sin(3πx) cos(2πy) sin(πz) + 0.2 cos(5πx) sin(4πz))` evaluated analytically on each level (nonuniform; mean dmean·U plus the oscillating part), dmean = 0.3 in the main runs. Project on A (`solve_pressure` + `face_gradient_composite`, `u = u* - grad H`), then average the fine faces down to the coarse faces.
+- **Regrid to hierarchy B.** Level 1 patch shifted by `shift` level-0 cells in every direction (n/8 in the main runs, i.e. a quarter of the patch width; variations 0, 1 and 6 at n = 32), deeper levels follow as the middle half of the shifted level. Faces that exist in A are copied; faces of cells that are new on a fine level are interpolated trilinearly from the coarser level of B (face-normal linear in the normal direction, bilinear in the tangential ones); coarse faces under fine cells are the average of the fine faces. D is re-evaluated analytically on B.
+- **Reprojection on B** with the same solve, then the observable `max|div u - D - c|` over the uncovered cells of B. c is the volume mean of `b = div u - D` for the closed box (the removed constant); c = 0 when any face is Dirichlet. B in the bound is `max|b|` on B before the reprojection. "Seam before reprojection" is `max|div u - D - c|` on B right after the regrid and before reprojecting; it doubles as the negative control (no projection).
+- eps_rel = 1e-12, 1e-9 and 1e-6; U/dx_fine is 128 for n = 32 with three levels of ratio 2 (finest dx = 1/128) and for two levels of ratio 4, 256 for n = 64, 384 for n = 96, 512 for n = 32 with three levels of ratio 4.
+
+Results (error divided by U/dx_fine, then margins = bound / measured error, for the derived bound and for the working bound 1e-9·U/dx_fine; a margin below 1 is a failure):
+
+| n | levels | ratio | faces | shift | noise | D mean | U | seam before reprojection | B | c | err/(U/dx) at 1e-12 | margin derived / working | err/(U/dx) at 1e-9 | margin derived / working | err/(U/dx) at 1e-6 | margin derived / working |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 32 | 3 | 2 | `NN,NN,NN` | 4 | 0.3 | 0.3 | 1 | 25 | 25 | -0.3 | 1.3e-13 | 16 / 8e+03 | 4.6e-11 | 43 / 22 | 2.3e-08 | 83 / 0.043 |
+| 32 | 3 | 2 | `DD,DD,DD` | 4 | 0.3 | 0.3 | 1 | 25 | 25 | 0 | 1.1e-13 | 18 / 9.1e+03 | 4.4e-11 | 44 / 23 | 2.3e-08 | 84 / 0.044 |
+| 32 | 3 | 2 | `ND,DN,NN` | 4 | 0.3 | 0.3 | 1 | 25 | 25 | 0 | 1.1e-13 | 17 / 9e+03 | 4.4e-11 | 43 / 23 | 2.3e-08 | 82 / 0.043 |
+| 64 | 3 | 2 | `NN,NN,NN` | 8 | 0.3 | 0.3 | 1 | 59 | 59 | -0.3 | 9.8e-14 | 24 / 1e+04 | 4.8e-11 | 48 / 21 | 2.7e-08 | 85 / 0.037 |
+| 64 | 3 | 2 | `DD,DD,DD` | 8 | 0.3 | 0.3 | 1 | 59 | 59 | 0 | 1e-13 | 23 / 9.9e+03 | 4.8e-11 | 48 / 21 | 2.7e-08 | 84 / 0.036 |
+| 64 | 3 | 2 | `ND,DN,NN` | 8 | 0.3 | 0.3 | 1 | 59 | 59 | 0 | 1e-13 | 23 / 9.9e+03 | 4.8e-11 | 48 / 21 | 2.7e-08 | 84 / 0.036 |
+| 32 | 3 | 2 | `NN,NN,NN` | 4 | 0 | 0.3 | 1 | 0.05 | 0.35 | -0.3 | 3.3e-16 | 96 / 3e+06 | 2.7e-13 | 1e+02 / 3.7e+03 | 5e-11 | 5.4e+02 / 20 |
+| 32 | 3 | 2 | `NN,NN,NN` | 4 | 1 | 0.3 | 1 | 82 | 82 | -0.3 | 3.9e-13 | 16 / 2.5e+03 | 1.5e-10 | 42 / 6.6 | 7.8e-08 | 82 / 0.013 |
+| 32 | 3 | 2 | `NN,NN,NN` | 4 | 0.3 | 0 | 1 | 25 | 25 | 1e-05 | 1.3e-13 | 15 / 8e+03 | 4.6e-11 | 42 / 22 | 2.3e-08 | 82 / 0.043 |
+| 32 | 3 | 2 | `NN,NN,NN` | 4 | 0.3 | 1 | 1 | 25 | 26 | -1 | 1.2e-13 | 16 / 8.1e+03 | 4.6e-11 | 44 / 22 | 2.3e-08 | 85 / 0.043 |
+| 32 | 3 | 2 | `NN,NN,NN` | 4 | 0.3 | 0.3 | 100 | 2.5e+03 | 2.5e+03 | -30 | 1.3e-13 | 16 / 8e+03 | 4.6e-11 | 43 / 22 | 2.3e-08 | 83 / 0.043 |
+| 32 | 3 | 2 | `NN,NN,NN` | 0 | 0.3 | 0.3 | 1 | 3.6e-11 | 0.3 | -0.3 | 1.9e-15 | 15 / 5.4e+05 | 1.1e-16 | 2.1e+05 / 8.8e+06 | 2.2e-14 | 1.1e+06 / 4.6e+04 |
+| 32 | 3 | 2 | `NN,NN,NN` | 1 | 0.3 | 0.3 | 1 | 25 | 25 | -0.3 | 1.5e-13 | 13 / 6.7e+03 | 4.4e-11 | 45 / 23 | 2.4e-08 | 80 / 0.041 |
+| 32 | 3 | 2 | `NN,NN,NN` | 6 | 0.3 | 0.3 | 1 | 23 | 23 | -0.3 | 2.1e-14 | 85 / 4.7e+04 | 1.8e-10 | 10 / 5.7 | 8.5e-08 | 21 / 0.012 |
+| 32 | 2 | 2 | `NN,NN,NN` | 4 | 0.3 | 0.3 | 1 | 14 | 14 | -0.3 | 2.2e-14 | 1e+02 / 4.6e+04 | 5.4e-11 | 41 / 19 | 2.6e-08 | 84 / 0.039 |
+| 32 | 2 | 4 | `NN,NN,NN` | 4 | 0.3 | 0.3 | 1 | 29 | 29 | -0.3 | 6.4e-14 | 36 / 1.6e+04 | 1.4e-11 | 1.6e+02 / 72 | 9.9e-08 | 23 / 0.01 |
+| 32 | 3 | 4 | `NN,NN,NN` | 4 | 0.3 | 0.3 | 1 | 1.1e+02 | 1.1e+02 | -0.3 | 7.4e-14 | 29 / 1.3e+04 | 2.8e-11 | 77 / 36 | 1.2e-08 | 1.9e+02 / 0.086 |
+| 32 | 2 | 2 | `DD,DD,DD` | 4 | 0.3 | 0.3 | 1 | 14 | 14 | 0 | 4.6e-14 | 47 / 2.2e+04 | 2.8e-11 | 76 / 36 | 2e-08 | 1e+02 / 0.049 |
+| 96 | 3 | 2 | `NN,NN,NN` | 12 | 0.3 | 0.3 | 1 | 85 | 85 | -0.3 | 1.6e-13 | 14 / 6.4e+03 | 6.3e-11 | 35 / 16 | 3.2e-08 | 69 / 0.031 |
+
+Findings:
+1. **At eps_rel = 1e-12 every case passes both bounds.** The error is 1.0e-13 to 1.6e-13 times U/dx_fine in the main cases (2.1e-14 to 3.9e-13 over all moved-patch variations; 3.9e-13 is the noise = 1.0 case), which is 2,500 to 47,000 times below the working bound, and the margin to the derived bound is 13 to 102 for the moved-patch runs (tightest 13 for shift 1, 14 for n = 96, 15 to 16 for the main closed-box cases). The tightest margins match family 1 (11 to 53).
+2. **At eps_rel = 1e-9 every case passes the derived bound (margins 10 to 160) and the working bound (margins 5.7 to 72; the two smallest are 5.7 for shift 6 and 6.6 for noise = 1.0).** The working bound is thus not violated at 1e-9 here but is tighter than in family 1; the most stressed case (shift 6, a patch moved by 0.19 of the domain) has an error of 1.8e-10 times U/dx_fine, which is 0.97 of `eps_rel·B`.
+3. **At eps_rel = 1e-6 the working bound fails in every case with a real seam** (margins 0.01 to 0.09; the noise-free case, with a seam of only 0.05, still passes at 20) while the derived bound still holds (margins 21 to 540), as in family 1: the working bound is valid for solver tolerances of about 1e-9 and tighter.
+4. **The seam does not break the bound.** The seam before reprojection is 14 to 111 (U = 1; 0.1 to 0.9 times U/dx_fine) in every moved-patch case, about 1e11 times the derived bound at 1e-12 (negative control), and the projection removes it down to the level of the solver tolerance. The error is not concentrated at the coarse-fine interface: the maximum over the interface cells (within one cell of a coarse-fine boundary) and the maximum over all other cells differ by less than a factor of 2.4 in every moved-patch case (interior maximum / interface maximum 0.59 to 2.3; for the closed box the interface cells are the larger by up to 1.1 times at 1e-12, for sets with Dirichlet faces the interior is larger). The static patch (shift 0) starts with a seam of only 3.6e-11 because the fields are already a projected field, and gives 1.9e-15 times U/dx_fine at 1e-12; it is not a seam test.
+5. **Nonzero mean c.** c = -0.3 (D mean 0.3 U), -1.0 (D mean U) and -30 (U = 100) in the closed box, 1.0e-5 (D mean 0, the oscillating part only); the error does not depend on c (1.2e-13 to 1.3e-13 times U/dx_fine for c = -1, -0.3, 0 at 1e-12) and scales with U (U = 100: error 100 times larger, same ratio to U/dx_fine). With open faces (`DD,DD,DD`, `ND,DN,NN`) c = 0 and the results match the closed box within 15%.
+6. **Floor term.** The noise = 0 case has B = 0.35 and a seam of only 0.05, so the machine-precision term of the bound (20·eps_mach·U/dx_fine = 5.6e-13) is 14% of the bound at 1e-12 (4.1e-12); the measured error is 4.2e-14, margin 96. The floor term exceeds the first term only when B < 2·(eps_mach/eps_rel)·U/dx_fine, i.e. B below 0.056 for U/dx_fine = 128 at 1e-12; no case here is below that, so the floor term was not stressed.
+7. **Levels and ratios.** Two levels, ratio 2: 2.2e-14 times U/dx_fine at 1e-12 (margin 102); two levels, ratio 4: 6.4e-14 (36); three levels, ratio 4: 7.4e-14 (29); no degradation with ratio or with depth (three levels, ratio 4: margin 29; three levels, ratio 2: 16). Errors grow only with the tolerance times B.
+8. **Size.** n = 32, 64 and 96 with three levels, ratio 2, closed box, noise 0.3: error 1.3e-13, 9.8e-14, 1.6e-13 times U/dx_fine, margins 16, 24, 14 to the derived bound, 6,400 to 10,000 to the working bound: no trend with size in this range.
+
+Limits: single rank only; the regrid is a hand-written interpolation of the face velocity (trilinear from the coarser level), not the AMR code's own interpolator, and the velocity is a synthetic smooth-plus-noise field, not a flow. The bound is a statement about the projection, so the pressure-solve error is what is tested; whether a real regrid in the code produces seams larger than the 0.9 U/dx_fine of this family is not covered. The noise amplitude (up to 1.0) and the patch shift (up to 0.19 of the domain) were pushed until the margin shrank (5.7 at 1e-9) but not until the derived bound failed.

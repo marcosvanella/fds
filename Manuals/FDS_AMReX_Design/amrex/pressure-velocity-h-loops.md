@@ -56,33 +56,33 @@ The `Read` column: `R` the loop text was read for this list, `I` inventory entry
 Share of the whole list: the pressure and H loops are small in the model (the largest solver-side loop, L1209, is 0.008 %; the matrix and Poisson internals carry the weight and are not in scope). Prioritise by dependency (steps 2 to 4 unlock several loops each), not by share.
 
 <!-- GENERATED-BEGIN:pvh -->
-Counts over sections A to C (77 loops): blocked 13, claimed 5, needs-feature 23, test-only 6, translatable-now 5, translated 25.
+Counts over sections A to C (77 loops): blocked 12, claimed 12, needs-feature 20, test-only 6, translatable-now 2, translated 25.
 
 ### A. pres.f90, translation-eligible, non-geometry
 
 | Loop | file:lines | Routine | What | Share % | Class | Feature or blocker | Closest kernel | Owner | Read |
 |---|---|---|---|---|---|---|---|---|---|
-| L1209 | pres.f90:65-228 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson boundary arrays BXS..BZF from wall data (Neumann, Dirichlet, interpolated, open) | 0.008 | blocked | MESHES(NOM)%DX(EWC%IIO_MIN), VENTS%PRESSURE_RAMP_INDEX, EVALUATE_RAMP, synthetic-eddy arrays | wall_us_pred (wall gather); no neighbour-mesh model yet | open — available | R |
+| L1209 | pres.f90:65-228 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson boundary arrays BXS..BZF from wall data (Neumann, Dirichlet, interpolated, open) | 0.008 | claimed | MESHES(NOM)%DX(EWC%IIO_MIN), VENTS%PRESSURE_RAMP_INDEX, EVALUATE_RAMP, synthetic-eddy arrays | wall_us_pred (wall gather); no neighbour-mesh model yet | AMR Pressure Backend Implementer | R |
 | L1210 | pres.f90:238-245 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS, cylindrical K,I nest | 0.000 | needs-feature | front end takes K,J,I nests only (same as L1392/L1393) | vflux_fvx (flux differences) | open — available | R |
-| L1211 | pres.f90:250-260 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS (3-D, IPS 1/4/7) | 0.002 | translatable-now | front end accepts; no bitwise test committed | dp_kdtd (divg.f90:561-570, same flux-difference form) | open — available | R |
+| L1211 | pres.f90:250-260 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS (3-D, IPS 1/4/7) | 0.002 | claimed | front end accepts; no bitwise test committed | dp_kdtd (divg.f90:561-570, same flux-difference form) | AMR Pressure Backend Implementer | R |
 | L1212 | pres.f90:267-277 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 2: PRHS(J,I,K)) | 0.002 | needs-feature | layout contract: output subscript is not I+/-c | dp_kdtd with a permuted store | open — available | R |
 | L1213 | pres.f90:282-292 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 3,6: PRHS(K,J,I)) | 0.002 | needs-feature | layout contract | dp_kdtd with a permuted store | open — available | R |
 | L1214 | pres.f90:297-307 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 5: PRHS(I,K,J)) | 0.002 | needs-feature | layout contract | dp_kdtd with a permuted store | open — available | R |
-| L1215 | pres.f90:394-400 | PRESSURE_SOLVER_FFT | copy PRHS to HP after the FFT solve (IPS 1,4,7) | 0.000 | translatable-now | front end accepts; whether the loop survives depends on the solver driver (FR-037) | vcorr_u (plain cell copy form) | open — available | R |
+| L1215 | pres.f90:394-400 | PRESSURE_SOLVER_FFT | copy PRHS to HP after the FFT solve (IPS 1,4,7) | 0.000 | claimed | front end accepts; whether the loop survives depends on the solver driver (FR-037) | vcorr_u (plain cell copy form) | AMR Pressure Backend Implementer | R |
 | L1216 | pres.f90:404-410 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 2: PRHS(J,I,K)) | 0.000 | needs-feature | layout contract | as L1215 | open — available | R |
 | L1217 | pres.f90:414-420 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 3,6) | 0.000 | needs-feature | layout contract | as L1215 | open — available | R |
 | L1218 | pres.f90:424-430 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 5) | 0.000 | needs-feature | layout contract | as L1215 | open — available | R |
 | L1219 | pres.f90:438-440 | PRESSURE_SOLVER_FFT | tunnel preconditioner: add H_BAR to HP (loop over I, section assignment) | 0.000 | needs-feature | inside !$OMP MASTER; only with TUNNEL_PRECONDITIONER | none | open — available | R |
-| L1220 | pres.f90:450-462 | PRESSURE_SOLVER_FFT | H boundary fill in x (LBC/MBC/NBC code tests) | 0.000 | needs-feature | front end takes K,J,I nests only | wall_hs_bt (boundary store) | open — available | R |
-| L1221 | pres.f90:466-477 | PRESSURE_SOLVER_FFT | H boundary fill in y | 0.000 | needs-feature | front end takes K,J,I nests only | as L1220 | open — available | R |
-| L1222 | pres.f90:481-492 | PRESSURE_SOLVER_FFT | H boundary fill in z | 0.000 | needs-feature | front end takes K,J,I nests only | as L1220 | open — available | R |
+| L1220 | pres.f90:450-462 | PRESSURE_SOLVER_FFT | H boundary fill in x (LBC/MBC/NBC code tests) | 0.000 | claimed | front end takes K,J,I nests only | wall_hs_bt (boundary store) | AMR Pressure Backend Implementer | R |
+| L1221 | pres.f90:466-477 | PRESSURE_SOLVER_FFT | H boundary fill in y | 0.000 | claimed | front end takes K,J,I nests only | as L1220 | AMR Pressure Backend Implementer | R |
+| L1222 | pres.f90:481-492 | PRESSURE_SOLVER_FFT | H boundary fill in z | 0.000 | claimed | front end takes K,J,I nests only | as L1220 | AMR Pressure Backend Implementer | R |
 | L1223 | pres.f90:531-537 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1224 | pres.f90:544-567 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.007 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1225 | pres.f90:576-582 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1226 | pres.f90:583-589 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1227 | pres.f90:591-596 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1206 | pres.f90:729-742 | PRESSURE_SOLVER_CHECK_RESIDUALS | CHECK_POISSON residual (diagnostic) | 0.001 | needs-feature | layout = exact: WORK8(1:IBAR,..) has no ALLOCATE line; diagnostic only | dp_kdtd | open — available | R |
-| L1207 | pres.f90:758-764 | PRESSURE_SOLVER_CHECK_RESIDUALS | P = RHOP*(HP-KRES) over the full box | 0.000 | translatable-now | front end accepts; no bitwise test committed | baro_p_rrho (velo.f90:3254-3261, same formula) | open — available | R |
+| L1207 | pres.f90:758-764 | PRESSURE_SOLVER_CHECK_RESIDUALS | P = RHOP*(HP-KRES) over the full box | 0.000 | claimed | front end accepts; no bitwise test committed | baro_p_rrho (velo.f90:3254-3261, same formula) | AMR Pressure Backend Implementer | R |
 | L1208 | pres.f90:768-787 | PRESSURE_SOLVER_CHECK_RESIDUALS | inseparable Poisson residual (ITERATE_BAROCLINIC_TERM) | 0.001 | needs-feature | layout = exact: WORK8 view; MAXVAL/MAXLOC after the loop stay on the host | baro_fvx, cfl_max (reduction) | open — available | R |
 | L1190 | pres.f90:1686-1694 | ULMAT_SOLVE_ZONE | (inventory only: cell/face loop; wall gather; derived-type designator table; ) | 0.001 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1192 | pres.f90:1713-1720 | ULMAT_SOLVE_ZONE | (inventory only: cell/face loop; wall gather; zone table) | 0.001 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
