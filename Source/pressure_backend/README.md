@@ -33,9 +33,9 @@ rebuild it. `face_gradient_composite` returns face-centred dphi/dn per level wit
 average of the fine gradients. Only MLMG does composite; unsupported requests are `NotBuilt` (see the header and
 `frozen/composite-notes.md`).
 
-Selector: FFT only on one level with no masked or covered cells; any per-face mix of Neumann, Dirichlet and periodic
+Selector: FFT only on one level with no masked or covered cells; a masked single level (`cell_class` Gas/Solid/Known, `known_value`) goes to MLMG (`Auto` or explicit), FFT/HYPRE/composite with a mask are `NotBuilt`, see frozen/masked-notes.md; any per-face mix of Neumann, Dirichlet and periodic
 faces (each direction: PP, NN, DD, ND, DN), see frozen/m2-notes.md. MLMG on request for the same problems. A Dirichlet face in a one-cell x or z
-direction, masked, variable-coefficient, non-uniform cell widths, cylindrical, and multi-level requests through the single-level fields return `Status::NotBuilt` with a message; `phi` is left untouched.
+direction, variable-coefficient, non-uniform cell widths, cylindrical, and multi-level requests through the single-level fields return `Status::NotBuilt` with a message; `phi` is left untouched.
 
 Build and test (AMReX with MPI, OMP, FFT, LSOLVERS; the install config also needs a Fortran compiler in CMake):
 ```
