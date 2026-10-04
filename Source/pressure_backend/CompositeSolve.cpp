@@ -1,6 +1,7 @@
 // Composite (multi-level) pressure solve: amrex::MLMG over MLPoisson on the whole hierarchy (milestone M2, first
 // version). The common layer (mean removal, gauge, true residual, diagnostics) runs from outside on the
 // uncovered cells of all levels with one fixed-point scale (ExactSum.H). See frozen/composite-notes.md.
+#include "CommonLayer.H"
 #include "Composite.H"
 #include "ExactSum.H"
 #include "PbWorkspaceImpl.H"
@@ -644,18 +645,48 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         Vector<MultiFab*> pres = ptrs(ext ? resx : res);
         mlmg.compResidual(pres, pphi, pb_);
         if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *resx[l], *res[l]); } }
-        LevelMFs rq = squares_of(W, res), bq = squares_of(W, b);
-        const double r2 = exact_sum_multi(terms_of(W, rq, true), 1).sum[0];
-        const double b2 = exact_sum_multi(terms_of(W, bq, true), 1).sum[0];
-        const double rm = max_abs_uncovered(W, res), bm = max_abs_uncovered(W, b);
-        R.residual_checked = true;
-        R.residual_rel2 = (b2 > 0.0) ? std::sqrt(r2 / b2) : std::sqrt(r2);
-        R.residual_relmax = (bm > 0.0) ? rm / bm : rm;
-        R.residual_ok = (R.residual_rel2 <= o.residual_tol);
-        if (!R.residual_ok) {
-            std::ostringstream m;
-            m << "true composite residual ||b-L*H||_2/||b||_2 = " << R.residual_rel2 << " exceeds " << o.residual_tol;
-            R.warnings.push_back(m.str());
+        ResidualSums S;
+        S.singular = ci.singular; S.what = "composite ";
+        {
+            LevelMFs rq = squares_of(W, res), bq = squares_of(W, b), pq = squares_of(W, phi);
+            S.r2 = exact_sum_multi(terms_of(W, rq, true), 1).sum[0];
+            S.b2 = exact_sum_multi(terms_of(W, bq, true), 1).sum[0];
+            S.phi2 = exact_sum_multi(terms_of(W, pq, true), 1).sum[0];
+            S.sumr = exact_sum_multi(terms_of(W, res, true), 1).sum[0];
+            S.sumw = total_volume(W);
+            S.rmax = max_abs_uncovered(W, res); S.bmax = max_abs_uncovered(W, b);
+        }
+        S.r2_nopin = S.r2; S.rmax_nopin = S.rmax;
+        if (bs.pin_applied) {
+            // The pin row is an identity row, not an equation of the operator: take its residual out (it is the sum of the
+            // other rows' residuals, see PressureResult::residual_check). The pin cell is an uncovered cell of level pin_level.
+            const int pl = bs.pin_level;
+            double rp = 0.0;
+            for (MFIter mfi(*res[pl]); mfi.isValid(); ++mfi) {
+                if (mfi.validbox().contains(bs.pin_cell)) {
+                    auto const& a = res[pl]->array(mfi);
+                    rp += double(a(bs.pin_cell[0], bs.pin_cell[1], bs.pin_cell[2]));
+                    a(bs.pin_cell[0], bs.pin_cell[1], bs.pin_cell[2]) = Real(0);
+                }
+            }
+            ParallelDescriptor::ReduceRealSum(rp);
+            S.pin2 = double(W.vol[pl]) * rp * rp; S.pin_abs = std::abs(rp);
+            LevelMFs rq2 = squares_of(W, res);
+            S.r2_nopin = exact_sum_multi(terms_of(W, rq2, true), 1).sum[0];
+            S.rmax_nopin = max_abs_uncovered(W, res);
+            S.pin_excluded = true;
+        }
+        {
+            const auto dxf = W.geom[nlev-1].CellSizeArray();
+            const Box dom = W.geom[nlev-1].Domain();
+            double an = 0.0;
+            for (int d = 0; d < 3; ++d) { if (dom.length(d) > 1) { an += 4.0/(double(dxf[d])*double(dxf[d])); } }
+            S.anorm = an;
+        }
+        evaluate_residual(R, o, S);
+        if (o.verbose >= 2 && bs.pin_applied) {
+            Print() << "PRESSURE INFO: composite residual full " << R.residual_rel2 << " (max " << R.residual_relmax << "), pin cell excluded " << R.residual_rel2_nopin
+                    << " (max " << R.residual_relmax_nopin << "), pin row " << R.residual_pin_rel << "\n";
         }
     }
     if (full && ci.singular && ci.removed_rel > o.removed_mean_warn) {

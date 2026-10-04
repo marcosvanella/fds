@@ -196,14 +196,14 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // Gauge, then the true residual of the problem the backend was given (mean-removed b).
     apply_gauge(work, cm, p.uncovered, vol, nullptr, p.gauge_weight, p.gauge_offset);
     if (o.check_residual && full) {
-        ResidualNorms rn = true_residual(p, work, b);
-        R.residual_checked = true;
-        R.residual_rel2 = rn.rel2; R.residual_relmax = rn.relmax;
-        R.residual_ok = (rn.rel2 <= o.residual_tol);
-        if (!R.residual_ok) {
-            std::ostringstream m;
-            m << "true residual ||b-L*H||_2/||b||_2 = " << rn.rel2 << " exceeds " << o.residual_tol;
-            R.warnings.push_back(m.str());
+        const bool sing = !cm.comps.empty() && cm.comps[0].singular;
+        const IntVect pin = R.backend_status.pin_cell;
+        ResidualSums S = residual_sums(p, work, b, sing, R.backend_status.pin_applied ? &pin : nullptr);
+        S.what = "";
+        evaluate_residual(R, o, S);
+        if (o.verbose >= 2 && R.backend_status.pin_applied) {
+            Print() << "PRESSURE INFO: residual full " << R.residual_rel2 << " (max " << R.residual_relmax << "), pin cell excluded " << R.residual_rel2_nopin
+                    << " (max " << R.residual_relmax_nopin << "), pin row " << R.residual_pin_rel << "\n";
         }
     }
     if (full) {

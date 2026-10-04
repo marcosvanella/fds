@@ -169,11 +169,17 @@ enum SolveTrigger : unsigned { SolveRoutine = 0u, SolveFirst = 1u, SolveFirstAft
 //  num_sweeps:     sweeps per level.                        strong_threshold: BoomerAMG strength threshold, < 0 = HYPRE default.
 //  interp_type:    interpolation, < 0 = HYPRE default.      agg_levels: aggressive coarsening levels.
 // Tolerance: the Krylov solver is run to 0.1*tol_rel (its recurrence residual is slightly optimistic); `converged` is judged against
-// tol_rel. Singular problems are pinned by an identity row (FDS ULMAT), which concentrates the round-off of all other residuals in
-// the pin row, so the independent true residual of a large singular problem (about 1e6 unknowns) can exceed 1e-12 although the
-// solution is accurate to 1e-13 (frozen/hypre-notes.md, section "Limitations"). Typical counts at tol_rel 1e-12: 20-27 PCG
+// tol_rel. Singular problems are pinned by an identity row (FDS ULMAT), which concentrates the residual of all other rows in
+// the pin row (the residual of a conservative operator with a mean-free right-hand side sums to zero), so the raw relative
+// residual of a large singular problem (about 1e6 unknowns) exceeds 1e-12 although the solution is accurate to 1e-13. The check
+// therefore warns on the residual with the pin cell excluded, against the unrelaxed residual_tol and scaled like MLMG's
+// (PressureResult::residual_check, frozen/hypre-notes.md, section "Residual check"); the full residual and the pin row are reported. Typical counts at tol_rel 1e-12: 20-27 PCG
 // iterations single level, 18-28 GMRES iterations composite (MLMG: 9-12); a tuned set (coarsen 10, relax 6, strong 0.5, agg 1)
 // needs 19-22 and is about 2x faster.
+// Round-off factor of the informational residual_floor: about the number of floating-point operations that enter one row of
+// b - L H (7-point stencil with the boundary ghost, 9 flops), times the unit round-off 2^-53.
+inline constexpr double kResidualRoundoff = 10.0;
+
 enum class HypreKrylov { Auto, PCG, GMRES, BiCGSTAB };
 struct HypreOptions {
     HypreKrylov krylov = HypreKrylov::Auto;
@@ -199,7 +205,7 @@ struct PressureOptions {
     bool use_initial_guess = false;               // false: start from zero
     bool remove_mean = true;                      // test hook: false disables mean removal (singular solves then warn)
     bool check_residual = true;                   // true composite residual b - L phi of the mean-removed problem
-    double residual_tol = 1.0e-12;                // warn above this relative 2-norm
+    double residual_tol = 1.0e-12;                // warn when the checked residual (pin cell excluded if a pin was applied) exceeds this relative 2-norm
     double removed_mean_warn = 1.0e-10;           // warn when removed mean (rel. to rms b) exceeds this
     // Trigger points (FR-039). Default: every solve is a Debug solve, i.e. full checks always (the behaviour before this option).
     // A driver sets SolveRoutine for ordinary solves (FDS solves up to 10 times per step) and passes SolveFirst /
@@ -229,6 +235,11 @@ struct BackendStatus {
     long long hypre_rows = 0, hypre_nnz = 0;
     double hypre_setup_seconds = 0.0, hypre_solve_seconds = 0.0;
     std::string hypre_method;
+    // The solve pinned one unknown by an identity row (HYPRE on a singular problem): level and cell. Used by the common layer's
+    // residual check (the pin row is not an independent equation, see PressureResult::residual_check).
+    bool pin_applied = false;
+    int pin_level = 0;
+    amrex::IntVect pin_cell{0};
 };
 
 struct PressureResult {
@@ -240,7 +251,31 @@ struct PressureResult {
     bool residual_checked = false;
     double residual_rel2 = 0.0;                   // ||b - L H||_2 / ||b||_2 (mean-removed b); composite: volume-weighted over uncovered cells
     double residual_relmax = 0.0;                 // max|b - L H| / max|b|; composite: over uncovered cells
-    bool residual_ok = true;
+    bool residual_ok = true;                      // residual_check <= residual_limit
+    // Pin-aware residual check (definition: README "Residual check", frozen/hypre-notes.md). r = b - L H on the uncovered cells; the
+    // norms below are scaled exactly like residual_rel2 / residual_relmax (weighted 2-norm / ||b||_2, max / max|b|; weights are the cell
+    // volumes on a hierarchy). residual_rel2 and residual_relmax stay the FULL residual (pin row included) and are always reported.
+    //   residual_rel2_nopin    ||r with the pin cell zeroed||_2 / ||b||_2       (= residual_rel2 when no pin was applied)
+    //   residual_relmax_nopin  max over the non-pin cells of |r| / max|b|        (= residual_relmax when no pin was applied)
+    //   residual_pin_rel       |r_pin| (weighted like the norm) / ||b||_2: the residual of the identity pin row, reported separately
+    //   residual_pin_abs       |r_pin| unweighted, absolute
+    //   residual_check         the value warned on: residual_rel2_nopin for a singular component, residual_rel2 otherwise
+    //   residual_limit         residual_tol (not relaxed)
+    // Extra, informational (never used for the warning):
+    //   residual_rel2_mr       ||r - mean(r)||_2 / ||b||_2, exact weighted mean of r (equals the raw value for singular components
+    //                          with a mean-free b: the mean of r is round-off; equals residual_rel2 when not singular)
+    //   residual_floor         10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with ||A|| = 4 sum_d 1/dx_d^2 (finest level, directions of more than
+    //                          one cell): the round-off size of a floating-point residual; singular components only (0 otherwise)
+    //   residual_backward      ||r_nopin||_2 / (||b||_2 + ||A|| ||H||_2): normwise backward error
+    double residual_rel2_nopin = 0.0;
+    double residual_relmax_nopin = 0.0;
+    double residual_pin_rel = 0.0;
+    double residual_pin_abs = 0.0;
+    double residual_check = 0.0;
+    double residual_limit = 0.0;
+    double residual_rel2_mr = 0.0;
+    double residual_floor = 0.0;
+    double residual_backward = 0.0;
     std::vector<std::string> warnings;
     unsigned triggers = 0;                        // effective trigger flags of this solve (options OR workspace-detected)
     bool full_checks = true;                      // the full checks ran (false: cheap path; residual_checked is then false, removed_rel is 0)

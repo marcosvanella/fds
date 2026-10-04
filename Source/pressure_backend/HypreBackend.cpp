@@ -546,6 +546,7 @@ BackendStatus HypreSystem::solve (std::vector<MultiFab*> const& phi, std::vector
     BackendStatus s;
     s.hypre_rows = I.nglobal; s.hypre_nnz = nonzeros();
     s.hypre_method = method();
+    s.pin_applied = I.has_pin; s.pin_level = I.has_pin ? I.pin_lev : 0; s.pin_cell = I.pin_iv;
     std::vector<double> fscale(I.nlev);
     for (int l = 0; l < I.nlev; ++l) { fscale[l] = -I.vol[l]; }
     put_vector(I, I.bvec, b, fscale, true, true);

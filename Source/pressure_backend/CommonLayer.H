@@ -61,5 +61,26 @@ void apply_operator (PressureProblem const& p, amrex::MultiFab& phi, amrex::Mult
 struct ResidualNorms { double rel2 = 0.0; double relmax = 0.0; };
 ResidualNorms true_residual (PressureProblem const& p, amrex::MultiFab& phi, amrex::MultiFab const& rhs);
 
+// ---- Scaled, pin-aware residual check (see PressureResult::residual_check and frozen/hypre-notes.md) -----------------------
+// The sums behind it, all with the same cell weights w (1 on a single level, the cell volume on a hierarchy) over the uncovered cells:
+//   r2 = sum w r^2, r2_nopin = same with the pin cell's r set to 0, pin2 = w_pin r_pin^2, sumr = sum w r, sumw = sum w,
+//   b2 = sum w b^2, phi2 = sum w H^2, anorm = bound of the operator norm (4 sum_d 1/dx_d^2 over directions with more than one cell,
+//   finest level), rmax = max |r| over all cells, rmax_nopin = same without the pin cell, bmax = max |b|, pin_abs = |r_pin|.
+struct ResidualSums {
+    double r2 = 0, r2_nopin = 0, pin2 = 0, sumr = 0, sumw = 0, b2 = 0, phi2 = 0, anorm = 0, rmax = 0, rmax_nopin = 0, bmax = 0, pin_abs = 0;
+    bool singular = false;
+    bool pin_excluded = false;
+    const char* what = "";                        // wording in the warning ("", "composite ")
+};
+// Fills the residual_* fields of R and appends the warning if the check fails. Non-singular: residual_check = residual_rel2 against
+// residual_tol, exactly as before. Singular: residual_check = residual_rel2_nopin (pin cell excluded when a pin was applied) against
+// the same residual_tol; residual_floor / residual_rel2_mr / residual_backward are informational.
+void evaluate_residual (PressureResult& R, PressureOptions const& o, ResidualSums const& S);
+
+// Single-level: the sums for phi (gauge-fixed H) and the mean-removed right-hand side rhs; `pin` is the pinned cell of the solve
+// or nullptr. Collective. phi needs one ghost layer (overwritten).
+ResidualSums residual_sums (PressureProblem const& p, amrex::MultiFab& phi, amrex::MultiFab const& rhs, bool singular,
+                            amrex::IntVect const* pin);
+
 } // namespace pb
 #endif

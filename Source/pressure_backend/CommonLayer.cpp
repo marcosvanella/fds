@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 
 namespace pb {
 
@@ -311,6 +312,85 @@ ResidualNorms true_residual (PressureProblem const& p, MultiFab& phi, MultiFab c
     n.rel2 = (b2 > 0.0) ? lphi.norm2(0) / b2 : lphi.norm2(0);
     n.relmax = (bm > 0.0) ? lphi.norm0(0) / bm : lphi.norm0(0);
     return n;
+}
+
+// One residual cell: sum over ranks of the value at iv (the cell belongs to exactly one box); optionally zeroes it.
+static double take_cell (MultiFab& mf, IntVect const& iv, bool zero)
+{
+    double v = 0.0;
+    for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        if (mfi.validbox().contains(iv)) {
+            auto const& a = mf.array(mfi);
+            v += double(a(iv[0], iv[1], iv[2]));
+            if (zero) { a(iv[0], iv[1], iv[2]) = Real(0); }
+        }
+    }
+    ParallelDescriptor::ReduceRealSum(v);
+    return v;
+}
+
+ResidualSums residual_sums (PressureProblem const& p, MultiFab& phi, MultiFab const& rhs, bool singular, IntVect const* pin)
+{
+    ResidualSums S;
+    S.singular = singular;
+    MultiFab r(p.ba, p.dm, 1, 0);
+    apply_operator(p, phi, r);
+    MultiFab::Xpay(r, Real(-1.0), rhs, 0, 0, 1, 0);          // r = rhs - L phi
+    const double rn = r.norm2(0);
+    S.r2 = rn*rn;
+    S.rmax = r.norm0(0);
+    S.sumr = exact_sum(r, 0, 1.0, 1, nullptr, nullptr).sum[0];
+    S.sumw = double(p.ba.numPts());
+    if (pin) {
+        const double rp = take_cell(r, *pin, true);
+        S.pin2 = rp*rp; S.pin_abs = std::abs(rp);
+        const double rn2 = r.norm2(0);
+        S.r2_nopin = rn2*rn2;
+        S.rmax_nopin = r.norm0(0);
+        S.pin_excluded = true;
+    } else {
+        S.r2_nopin = S.r2; S.rmax_nopin = S.rmax;
+    }
+    const double bn = rhs.norm2(0), pn = phi.norm2(0);
+    S.b2 = bn*bn; S.phi2 = pn*pn; S.bmax = rhs.norm0(0);
+    const auto dx = p.geom.CellSizeArray();
+    const Box dom = p.geom.Domain();
+    double a = 0.0;
+    for (int d = 0; d < 3; ++d) { if (dom.length(d) > 1) { a += 4.0/(double(dx[d])*double(dx[d])); } }
+    S.anorm = a;
+    return S;
+}
+
+void evaluate_residual (PressureResult& R, PressureOptions const& o, ResidualSums const& S)
+{
+    auto rel = [&] (double sq) { return (S.b2 > 0.0) ? std::sqrt(sq / S.b2) : std::sqrt(sq); };
+    R.residual_checked = true;
+    R.residual_rel2 = rel(S.r2);
+    R.residual_relmax = (S.bmax > 0.0) ? S.rmax / S.bmax : S.rmax;
+    // Mean-removed: sum(w (r - m)^2) = sum(w r^2) - m^2 sum(w) with m the weighted mean (exact sum).
+    const double m = (S.sumw > 0.0) ? S.sumr / S.sumw : 0.0;
+    R.residual_rel2_mr = S.singular ? rel(std::max(0.0, S.r2 - m*m*S.sumw)) : R.residual_rel2;
+    R.residual_rel2_nopin = rel(S.r2_nopin);
+    R.residual_relmax_nopin = (S.bmax > 0.0) ? S.rmax_nopin / S.bmax : S.rmax_nopin;
+    R.residual_pin_abs = S.pin_abs;
+    R.residual_pin_rel = rel(S.pin2);
+    const double bn = std::sqrt(S.b2), an_phi = S.anorm * std::sqrt(S.phi2);
+    R.residual_backward = std::sqrt(S.r2_nopin) / (bn + an_phi > 0.0 ? bn + an_phi : 1.0);
+    const double u = std::ldexp(1.0, -53);
+    R.residual_floor = S.singular ? kResidualRoundoff * u * an_phi / (bn > 0.0 ? bn : 1.0) : 0.0;
+    R.residual_check = S.singular ? R.residual_rel2_nopin : R.residual_rel2;
+    R.residual_limit = o.residual_tol;
+    R.residual_ok = (R.residual_check <= R.residual_limit);
+    if (!R.residual_ok) {
+        std::ostringstream m2;
+        if (S.singular) {
+            m2 << "true " << S.what << "residual ||b-L*H||_2/||b||_2 = " << R.residual_check << " (pin cell excluded; raw "
+               << R.residual_rel2 << ", pin row " << R.residual_pin_rel << ") exceeds " << o.residual_tol;
+        } else {
+            m2 << "true " << S.what << "residual ||b-L*H||_2/||b||_2 = " << R.residual_rel2 << " exceeds " << o.residual_tol;
+        }
+        R.warnings.push_back(m2.str());
+    }
 }
 
 } // namespace pb

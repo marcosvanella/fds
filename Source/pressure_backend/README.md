@@ -61,4 +61,15 @@ Single run: `mpirun -np 4 pb_harness n_cell="64 64 64" bc=neumann max_grid_size=
 - `PressureOptions::backend = BackendKind::HYPRE` (never chosen by Auto; the backend option lives on `PressureOptions`, not on `PressureProblem`), settings in `PressureOptions::hypre` (`HypreOptions`: Krylov, BoomerAMG parameters), tolerance and iteration cap are `tol_rel` / `max_iter`.
 - Same discrete operator as MLMG (7-point, second order, MLMG's C/F ghost and reflux), assembled from host buffers; single level and composite (ratios 2 and 4, n levels, one-cell y). Mean removal and gauge are the common layer's. Same `NotBuilt` rules as MLMG.
 - The set-up (matrix and AMG hierarchy) is cached in `PressureWorkspace` and dropped by `rebuild`; `PressureWorkspace::hypre_built()`.
-- Harness: `backends="fft mlmg hypre"` (single level), `mode=hypre_cmp` (composite HYPRE vs MLMG), `mode=hypre_op` (operator oracle against MLMG), `mode=hypcache`, `backend=hypre` on `comp`, `comp_ns2d`, `comp_sel`, `comp_ws`, `mixed1`, `bcdata`; `mode=err_map` (error by distance to C/F and domain faces). ctests `pb_hypre_*` (21).
+- Harness: `backends="fft mlmg hypre"` (single level), `mode=hypre_cmp` (composite HYPRE vs MLMG), `mode=hypre_op` (operator oracle against MLMG), `mode=hypcache`, `backend=hypre` on `comp`, `comp_ns2d`, `comp_sel`, `comp_ws`, `mixed1`, `bcdata`; `mode=err_map` (error by distance to C/F and domain faces). ctests `pb_hypre_*` (21, plus the residual-check tests below).
+
+## Residual check (see frozen/hypre-notes.md, "Residual check")
+
+`PressureResult::residual_rel2` / `residual_relmax` are the full ||b - L H|| / ||b|| (2-norm, max), always reported. For a non-singular
+component, or when the backend applied no pin (MLMG, FFT), that is the checked value against `residual_tol`, unchanged. When HYPRE pinned
+an unknown (singular problem) the pin cell is excluded: the residual of a conservative operator with a mean-free right-hand side sums to
+zero, so the pin row holds the sum of all other residuals (up to sqrt(N) times their 2-norm) and is not an independent equation. The warning is on
+`residual_rel2_nopin = ||r_nopin||_2 / ||b||_2` (scaled like MLMG's) against the unrelaxed `residual_tol`; also reported are
+`residual_relmax_nopin`, the pin row (`residual_pin_rel`, `residual_pin_abs`), `residual_check`, `residual_limit` (= `residual_tol`) and the extras
+`residual_rel2_mr` (mean-removed; equals the full value), `residual_floor`, `residual_backward`. `verbose >= 2` logs full and non-pin values.
+Harness: `mode=rescheck`, `mode=hypre_resid`; ctests `pb_hypre_resid_*`, `pb_resid_check_*`, `pb_hypre_resid_comp`.

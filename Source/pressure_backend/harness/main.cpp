@@ -263,7 +263,10 @@ void run_solve (ParmParse& pp)
                 << " backend=" << r.backend << " iters=" << r.backend_status.iterations
                 << " own_res=" << r.backend_status.own_residual
                 << " true_rel2=" << r.residual_rel2 << " true_relmax=" << r.residual_relmax
-                << " residual_ok=" << (r.residual_ok ? 1 : 0) << " nwarn=" << r.warnings.size() << " seconds=" << t_solve;
+                << " residual_ok=" << (r.residual_ok ? 1 : 0) << " nwarn=" << r.warnings.size() << " seconds=" << t_solve
+                << " rel2_mr=" << r.residual_rel2_mr << " rel2_nopin=" << r.residual_rel2_nopin << " pin_rel=" << r.residual_pin_rel
+                << " relmax_nopin=" << r.residual_relmax_nopin << " pin_abs=" << r.residual_pin_abs << " floor=" << r.residual_floor << " backward=" << r.residual_backward << " check=" << r.residual_check
+                << " limit=" << r.residual_limit;
         if (r.backend == "HYPRE") { Print() << " hypre_setup=" << r.backend_status.hypre_setup_seconds << " hypre_solve=" << r.backend_status.hypre_solve_seconds << " hypre_method=" << r.backend_status.hypre_method; }
         for (auto const& c : r.components) {
             Print() << " comp" << c.id << "_singular=" << (c.singular ? 1 : 0)
@@ -529,6 +532,80 @@ void run_meankind (ParmParse& pp)
     }
 }
 
+
+// mode=rescheck: pin-aware residual check (frozen/hypre-notes.md, "Residual check"). Solves the synthetic singular problem
+// with `backend` (default hypre), then re-evaluates the check on perturbed copies of H (negative controls) and on synthetic sums.
+// Prints RESCHECK lines and CHECK PASS/FAIL.
+void run_rescheck (ParmParse& pp)
+{
+    Setup s = make_setup(pp);
+    std::string backend = "hypre"; pp.query("backend", backend);
+    pb::PressureOptions o; o.verbose = 0; pp.query("tol_rel", o.tol_rel);
+    MultiFab rhs(s.ba, s.dm, 1, 0);
+    fill_rhs(s, rhs); make_compatible(s, rhs);
+    pb::PressureProblem p;
+    p.ba = s.ba; p.dm = s.dm; p.geom = s.geom; p.bc = s.bc; p.rhs = &rhs;
+    MultiFab phi(s.ba, s.dm, 1, 1); phi.setVal(0.0); p.phi = &phi;
+    o.backend = parse_backend(backend);
+    pb::PressureResult r = pb::solve_pressure(p, o);
+    check(r.status == pb::Status::Ok, "solve status Ok");
+    check(r.residual_checked && r.residual_ok && r.warnings.empty(), "unperturbed solve: residual_ok, no warning");
+    Print() << std::setprecision(6) << "RESCHECK base backend=" << r.backend << " raw=" << r.residual_rel2 << " mr=" << r.residual_rel2_mr
+            << " nopin=" << r.residual_rel2_nopin << " pin_rel=" << r.residual_pin_rel << " relmax_nopin=" << r.residual_relmax_nopin << " pin_abs=" << r.residual_pin_abs << " floor=" << r.residual_floor
+            << " backward=" << r.residual_backward << " check=" << r.residual_check << " limit=" << r.residual_limit << "\n";
+    // The b the backend saw (mean removed) and the pin of the solve.
+    const Real vol = s.dx*s.dx*s.dx;
+    MultiFab b(s.ba, s.dm, 1, 0); MultiFab::Copy(b, rhs, 0, 0, 1, 0);
+    pb::ComponentMap cm = pb::label_components(p);
+    pb::remove_mean(b, cm, nullptr, vol, nullptr, p.mean_kind, true);
+    const bool sing = cm.comps[0].singular;
+    const IntVect pin = r.backend_status.pin_applied ? r.backend_status.pin_cell : cm.comps[0].pin;
+    const bool applied = r.backend_status.pin_applied;
+    const double pmax = phi.norm0(0);
+    struct Pert { const char* name; int kind; double amp; bool expect_ok; };
+    const Pert perts[] = {
+        {"smooth_mode_1e-9", 0, 1e-9, false}, {"smooth_mode_1e-11", 0, 1e-11, false}, {"noise_1e-13", 1, 1e-13, false},
+        {"noise_1e-16", 1, 1e-16, true}, {"none", 2, 0.0, true} };
+    for (auto const& pt : perts) {
+        MultiFab ph(s.ba, s.dm, 1, 1); ph.setVal(0.0);
+        MultiFab::Copy(ph, phi, 0, 0, 1, 0);
+        for (MFIter mfi(ph); mfi.isValid(); ++mfi) {
+            auto const& a = ph.array(mfi);
+            const Real dx = s.dx; const double nm = double(s.nmax);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                double d = 0.0;
+                if (pt.kind == 0) { d = std::cos(M_PI*(i+0.5)/nm)*std::cos(M_PI*(j+0.5)/nm); }
+                else if (pt.kind == 1) {
+                    std::uint64_t h = 1469598103934665603ULL;
+                    for (int q : {i, j, k}) { h ^= std::uint64_t(q + 1); h *= 1099511628211ULL; h ^= h >> 29; }
+                    d = (double(h % 2000001ULL) - 1000000.0) / 1000000.0;
+                }
+                a(i,j,k) += Real(pt.amp * pmax * d);
+                (void)dx;
+            });
+        }
+        pb::PressureResult pr;
+        pb::ResidualSums S = pb::residual_sums(p, ph, b, sing, applied ? &pin : nullptr);
+        pb::evaluate_residual(pr, o, S);
+        Print() << std::setprecision(6) << "RESCHECK " << pt.name << " raw=" << pr.residual_rel2 << " nopin=" << pr.residual_rel2_nopin
+                << " floor=" << pr.residual_floor << " check=" << pr.residual_check << " limit=" << pr.residual_limit
+                << " ok=" << (pr.residual_ok ? 1 : 0) << " nwarn=" << pr.warnings.size() << "\n";
+        check(pr.residual_ok == pt.expect_ok && (pr.warnings.empty() == pt.expect_ok), std::string("perturbation ") + pt.name + (pt.expect_ok ? " passes" : " warns"));
+    }
+    {   // Synthetic sums: a pin row that holds a large defect is excluded only when the pin was applied.
+        pb::ResidualSums S; S.singular = true; S.b2 = 1.0; S.phi2 = 1.0; S.anorm = 1.0; S.sumw = 1.0e6;
+        S.r2_nopin = 1e-26; S.pin2 = 1e-18; S.r2 = S.r2_nopin + S.pin2; S.pin_excluded = true;
+        pb::PressureResult a; pb::evaluate_residual(a, o, S);
+        check(a.residual_ok && a.residual_rel2 > o.residual_tol, "synthetic: large pin-row defect, small other rows: ok, raw value above tolerance");
+        S.r2_nopin = S.r2; S.pin_excluded = false;
+        pb::PressureResult c; pb::evaluate_residual(c, o, S);
+        check(!c.residual_ok, "synthetic: the same residual without a pin applied warns");
+        S.singular = false;
+        pb::PressureResult d; pb::evaluate_residual(d, o, S);
+        check(!d.residual_ok && d.residual_floor == 0.0 && d.residual_limit == o.residual_tol && d.residual_check == d.residual_rel2, "synthetic: non-singular: raw residual against residual_tol, no floor");
+    }
+}
+
 } // namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp);   // composite_modes.cpp
@@ -546,6 +623,7 @@ int main (int argc, char* argv[])
         else if (mode == "selector") { run_selector(); }
         else if (mode == "exactsum") { run_exactsum(pp); }
         else if (mode == "meankind") { run_meankind(pp); }
+        else if (mode == "rescheck") { run_rescheck(pp); }
         else {
             int cf = run_m2_mode(mode, pp);
             if (cf < 0) { cf = run_composite_mode(mode, pp); }

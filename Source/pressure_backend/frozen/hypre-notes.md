@@ -128,14 +128,74 @@ HYPRE is about 5-10 times slower than MLMG on one core for the same accuracy (ML
 than BoomerAMG with the PMIS coarsening that FDS uses), and about 50 times slower than FFT where FFT applies. The set-up is roughly half of
 a first solve and is amortised by the workspace. Where the box has many cores the picture may differ; this is not measured.
 
+## Residual check (singular problems)
+
+What the pin row holds. With the identity pin the Krylov solver controls the residual of every row except the pin row. The operator is
+conservative (the volume-weighted column sums of L are zero) and the right-hand side has its mean removed, so the true residual
+r = b - L H sums to zero (up to round-off) over the component: r_pin = -(sum of the other residuals). Consequences, all measured:
+
+- The pin row is not an independent equation. It is the sum of the others, so by Cauchy-Schwarz |r_pin| <= sqrt(N) ||r_nopin||_2. This is the
+  sqrt(N) growth of the raw residual: every other row at 1e-13 relative leaves up to sqrt(N) times that in the one pin row (96^3:
+  sqrt(N) = 940). The measured pin row stays below the bound in every case (ratio 3e-4 to 0.24; `pb_hypre_resid_*` asserts it).
+- Removing the mean of r does nothing. The mean of r is already zero by the same identity, and the pin defect is a spike at one cell, not a
+  constant: the mean-removed residual equals the raw one to 4 digits in every case (table). It is reported (`residual_rel2_mr`) as an extra
+  quantity only. Excluding the pin cell is the remedy.
+- The solution error caused by a spike of size r_pin at one cell is about G(0) h^2 r_pin with G(0) = 0.2527 (3-D lattice Green's function):
+  about 4e-13 times max|b| at 96^3 with the largest pin residual seen (1.5e-8 max|b|), consistent with the 1e-13 agreement with FFT/MLMG.
+
+Definition (decision of the Pressure Lead and Architect: pin cell excluded, `residual_tol` not relaxed, pin row reported separately, full
+residual kept). With r = b - L H on the uncovered cells (H the gauge-fixed solution returned to the caller, b the mean-removed right-hand
+side), r_nopin = r with the cell of the identity pin set to 0, and the same scaling as the MLMG residual (rel2 = weighted 2-norm / ||b||_2, relmax =
+max / max|b|; weight 1 on a single level, the cell volume on a hierarchy, cells counted once, finest level wins):
+
+    residual_rel2        = ||r||_2 / ||b||_2                  full residual, pin row included (unchanged, always reported)
+    residual_relmax      = max|r| / max|b|                    full (unchanged)
+    residual_rel2_nopin  = ||r_nopin||_2 / ||b||_2            = residual_rel2 when no pin was applied (MLMG, FFT)
+    residual_relmax_nopin= max|r_nopin| / max|b|
+    residual_pin_rel     = sqrt(w_pin) |r_pin| / ||b||_2 ;  residual_pin_abs = |r_pin|        the pin row, separately
+    residual_check       = residual_rel2_nopin  (singular component)  or  residual_rel2  (otherwise: unchanged behaviour)
+    warn iff               residual_check > residual_tol                 (residual_tol = 1e-12 by default; not relaxed)
+
+The pin is reported by the backend (`BackendStatus::pin_applied`, `pin_level`, `pin_cell`), so the cell excluded is exactly the one the matrix
+pinned, including on a hierarchy (lowest-index uncovered cell of the coarsest level that has one). MLMG and FFT apply no pin, so for them
+the checked value is the full residual, as before. The warning text gives the pin-excluded value, the full value, the pin row and the tolerance;
+with `verbose >= 2` a `PRESSURE INFO` line logs the full residual, the non-pin residual (2-norm and max) and the pin row for every solve.
+
+Extra quantities, reported and never warned on: `residual_rel2_mr` (mean-removed), `residual_floor` = 10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with
+||A|| = 4 sum_d 1/dx_d^2 (finest level, directions with more than one cell; round-off size of a floating-point residual, singular components
+only), `residual_backward` = ||r_nopin||_2 / (||b||_2 + ||A|| ||H||_2) (normwise backward error; 1.5e-16 to 4.5e-16 here, one to four times 2^-53).
+
+Measured, single level, synthetic right-hand side, default `tol_rel` 1e-12, 2 ranks, boxes of 32 (the raw numbers depend on box layout and rank
+count; the earlier notes had 6e-13, 1.3e-13 and 6.8e-12 on another layout). "Before" is the check that existed (full residual against 1e-12):
+
+| problem | before: full residual | mean-removed | pin row alone | after: non-pin residual (2-norm) | non-pin max | warns before / after | MLMG full (= non-pin) | FFT full |
+|---|---|---|---|---|---|---|---|---|
+| 48^3 Neumann | 6.5e-13 | 6.5e-13 | 6.5e-13 | 7.8e-14 | 1.6e-13 | no / no | 9.6e-14 | 4.5e-14 |
+| 48^3 periodic | 6.0e-12 | 6.0e-12 | 6.0e-12 | 1.1e-13 | 1.7e-13 | yes / no | 2.8e-13 | 3.3e-14 |
+| 64^3 Neumann | 1.3e-13 | 1.3e-13 | 2.3e-14 | 1.3e-13 | 2.9e-13 | no / no | 3.0e-13 | 8.4e-14 |
+| 64^3 periodic | 1.7e-13 | 1.7e-13 | 7.8e-14 | 1.5e-13 | 2.8e-13 | no / no | 4.2e-13 | 5.5e-14 |
+| 96^3 Neumann | 7.3e-12 | 7.3e-12 | 7.3e-12 | 3.0e-13 | 7.3e-13 | yes / no | 2.8e-13 | 1.9e-13 |
+| 96^3 periodic | 7.3e-11 | 7.3e-11 | 7.3e-11 | 3.3e-13 | 7.4e-13 | yes / no | 6.9e-13 | 1.4e-13 |
+
+Does the non-pin residual still grow? Yes, but not like sqrt(N) from the pin: HYPRE 7.8e-14 (48^3), 1.3e-13 (64^3), 3.0e-13 (96^3) Neumann
+and 1.1e-13, 1.5e-13, 3.3e-13 periodic, and MLMG and FFT grow the same way (MLMG periodic 2.8e-13, 4.2e-13, 6.9e-13). That growth is the
+round-off of the residual evaluation itself, which scales with ||A|| ||H||/||b|| = O(N^(2/3)) on the unit cube (the backward error stays constant at
+about 2e-16), and if the trend continues (not measured beyond 96^3) it reaches 1e-12 somewhere above 128^3. The tolerance is not relaxed: at that size the
+check would warn for every backend, including MLMG and FFT; `residual_floor` and
+`residual_backward` are there to tell a round-off warning from a real one.
+
+Negative controls (all must warn, and do): HYPRE at 48^3 with `tol_rel` 1e-3, 1e-6 and 1e-9, and with `max_iter` 4 (NotConverged); a perturbed H (smooth
+cosine mode of relative amplitude 1e-9 and 1e-11, cell noise of relative amplitude 1e-13) re-evaluated through the same code (`mode=rescheck`);
+composite HYPRE and MLMG with `tol_rel` 1e-4 (`mode=hypre_resid`, expect_warn=1). Round-off-level noise (relative amplitude 1e-16) and the
+unperturbed solves do not warn. Synthetic sums: a residual that is large only at the pin row passes with the pin excluded and warns without
+one; a non-singular component gets the raw check against `residual_tol`. MLMG and FFT results are bitwise unchanged (hashes of H and the raw
+residuals equal to the build before this change on 34x18x32 Neumann, periodic and Dirichlet, 64^3 periodic and the composite cases).
+
 ## Limitations
 
-1. Residual floor on large singular problems. The identity pin concentrates the round-off residual of all other rows in the pin row, so the
-   independent true residual of a singular problem grows like sqrt(N) times round-off and does not fall with tighter tolerance: 6e-13 at
-   48^3 Neumann for tol_rel 1e-12, 1e-13, 1e-14 and 1e-15 alike (the largest entry is the pin cell), 1.3e-13 at 64^3 and 6.8e-12 at 96^3. The
-   solution is correct (rel 1e-13 against FFT/MLMG after the gauge); with the default `residual_tol = 1e-12` the common layer warns at about
-   10^6 unknowns. Raising `residual_tol` or comparing the residual away from the pin is the remedy; removing the leftover mean once more
-   and restarting the Krylov solver were tried and change nothing. Non-singular problems (any Dirichlet face) are not affected.
+1. Residual floor on large singular problems: resolved by the pin-aware residual check (section "Residual check" below). The raw
+   residual of a singular problem still grows like sqrt(N) times round-off and is still reported (`residual_rel2`), but it is no longer what
+   the common layer warns on. Non-singular problems (any Dirichlet face) are not affected and keep the raw check.
 2. The composite matrix is not symmetric; GMRES is the default there, PCG works on the cases tested but is not guaranteed.
 3. `face_gradient_composite` is MLMG-based whatever backend produced H.
 4. The backend option is on `PressureOptions`, not `PressureProblem`.

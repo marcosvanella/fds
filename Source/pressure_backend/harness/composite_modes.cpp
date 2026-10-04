@@ -1461,6 +1461,34 @@ void run_hypre_cmp (ParmParse& pp)
     }
 }
 
+// Scaled, pin-aware residual check on a hierarchy (frozen/hypre-notes.md, "Residual check"): HYPRE and MLMG with the DEFAULT residual_tol
+// (1e-12). expect_warn=0: neither warns; expect_warn=1 (negative control, loose tol_rel): both warn.
+void run_hypre_resid (ParmParse& pp)
+{
+    std::string bcs;
+    Cfg c = cfg_from_pp(pp, bcs);
+    int dmkind = 0; pp.query("dmkind", dmkind);
+    double tol_rel = 1e-12; pp.query("tol_rel", tol_rel);
+    int expect_warn = 0; pp.query("expect_warn", expect_warn);
+    Hier h = build_hier(c, dmkind);
+    pb::PressureProblem p = make_problem(c, h);
+    for (int be = 0; be < 2; ++be) {
+        pb::PressureOptions o; o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.verbose = 0;   // residual_tol: default
+        o.backend = be == 0 ? pb::BackendKind::HYPRE : pb::BackendKind::MLMG;
+        if (be == 0) { apply_backend_opts(pp, o); o.backend = pb::BackendKind::HYPRE; }
+        for (auto& m : h.phi) { m->setVal(0.0); }
+        pb::PressureResult r = pb::solve_pressure(p, o);
+        Print() << std::setprecision(6) << "HYPRESID " << (be == 0 ? "hypre" : "mlmg") << " bc=" << bcs << " nlev=" << c.nlev << " ratio=" << c.ratio
+                << " tol_rel=" << tol_rel << " status=" << pb::to_string(r.status) << " raw=" << r.residual_rel2 << " mr=" << r.residual_rel2_mr
+                << " nopin=" << r.residual_rel2_nopin << " pin_rel=" << r.residual_pin_rel << " floor=" << r.residual_floor
+                << " check=" << r.residual_check << " limit=" << r.residual_limit << " ok=" << int(r.residual_ok) << " nwarn=" << r.warnings.size()
+                << " singular=" << int(!r.components.empty() && r.components[0].singular) << " pin_applied=" << int(r.backend_status.pin_applied) << "\n";
+        ccheck(r.status == pb::Status::Ok || expect_warn, std::string(be == 0 ? "HYPRE" : "MLMG") + " composite solve status Ok");
+        ccheck(r.residual_checked && (r.residual_ok == (expect_warn == 0)) && ((r.warnings.empty()) == (expect_warn == 0)),
+               std::string(be == 0 ? "HYPRE" : "MLMG") + (expect_warn ? " loose solve warns (negative control)" : " default residual_tol: no warning"));
+    }
+}
+
 // Where the error of a hierarchy sits: per level, uncovered cells classed by the nearest of {C/F interface, closed domain face (N),
 // open domain face (D), interior} and the distance in cells (0 = adjacent, 3 = three or more). Composite error against the
 // manufactured solution, the uniform finest-grid error on the same cells, and their difference (frozen/mixed-nd-hierarchy-note.md).
@@ -1569,6 +1597,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_trigger") { run_comp_trigger(); }
     else if (mode == "hypre_op") { run_hypre_op(pp); }
     else if (mode == "hypre_cmp") { run_hypre_cmp(pp); }
+    else if (mode == "hypre_resid") { run_hypre_resid(pp); }
     else if (mode == "err_map") { run_err_map(pp); }
     else { return -1; }
     return g_cfail;

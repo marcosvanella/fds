@@ -123,3 +123,11 @@ foreach(bc "NN,NN,NN" "PP,PP,PP")
   string(REPLACE "," "" bcn ${bc})
   pb_add_test(pb_hypre_cache_${bcn} hypcache --bc ${bc} --n "32 32 32")
 endforeach()
+
+# (f) pin-aware true-residual check of singular problems (frozen/hypre-notes.md, "Residual check"): no spurious warning at 48^3..96^3,
+#     negative controls still warn, MLMG/FFT checked by the same code.
+foreach(bc neumann periodic)
+  pb_add_test(pb_hypre_resid_${bc}   hypresid --bc ${bc} --ns "48 64 96")
+  pb_add_test(pb_resid_check_${bc}   rescheck --bc ${bc} --n "48 48 48")
+endforeach()
+pb_add_test(pb_hypre_resid_comp hypresidcomp)

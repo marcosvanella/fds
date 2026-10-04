@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CTest driver for the pressure backend harness. Parses the harness RESULT/CMP/CHECK lines.
 Subcommands: selector, exactsum, fftmlmg, frozen, decomp, repeat, singular, ulmat, ulmatgauge, meankind,
+residual check: hypresid, rescheck, hypresidcomp;
 composite: compconv, compfull, compdecomp, comp3, compgrad, compshape, compmixed, compns2d, compsel, compws (composite two-/three-level
 solves; manufactured solutions, see harness/composite_modes.cpp and frozen/composite-notes.md).
 Exit 0 = pass. ulmat/ulmatgauge/meankind compare against an independent numpy computation that follows FDS
@@ -704,11 +705,55 @@ def pressure_bc_map():
     code = "\n".join(l.split("//")[0] for l in src.splitlines())
     ok("FFT::Poisson<MultiFab>" in code and "PoissonHybrid" not in code, "FFTBackend uses FFT::Poisson only (PoissonHybrid is never selected)")
 
+# ---- pin-aware residual check (frozen/hypre-notes.md, "Residual check") ------------------------------
+def hypresid():
+    """HYPRE on large singular single-level problems: the default residual_tol no longer warns although the raw residual
+    exceeds it; the loose solves (negative controls) still warn; the pin row holds at most sqrt(N) times the other rows."""
+    for ns in A.ns.split():
+        n = f"{ns} {ns} {ns}"
+        rc, out = run(2, mode="solve", n_cell=n, bc=A.bc, max_grid_size=32, backends="hypre", verbose=1); print(out)
+        ok(rc == 0, f"n={ns} {A.bc}: harness exit 0")
+        r = kv(lines(out, "RESULT")[0])
+        raw, nop, chk, lim = (float(r[k]) for k in ("true_rel2", "rel2_nopin", "check", "limit"))
+        ok(r["status"] == "Ok" and r["residual_ok"] == "1" and r["nwarn"] == "0", f"n={ns} {A.bc}: no warning at the default residual_tol 1e-12 (full {raw:.2e}, pin-excluded {nop:.2e})")
+        ok(lim == 1e-12, f"n={ns} {A.bc}: residual_tol is not relaxed (limit {lim:g})")
+        ok(chk == nop and chk <= 1e-12, f"n={ns} {A.bc}: checked value is the pin-excluded residual {nop:.2e} <= 1e-12")
+        N = int(ns) ** 3
+        ok(float(r["pin_rel"]) <= math.sqrt(N) * nop * 1.0001 + 1e-30, f"n={ns} {A.bc}: pin-row residual {float(r['pin_rel']):.2e} <= sqrt(N)*||r_nopin|| (Cauchy-Schwarz on the zero-sum residual)")
+        ok(abs(float(r["rel2_mr"]) - raw) <= 1e-3 * raw, f"n={ns} {A.bc}: mean removal of the residual changes nothing (mr {float(r['rel2_mr']):.3e} vs raw {raw:.3e})")
+    n = "48 48 48"
+    for tol in (1e-3, 1e-6, 1e-9):
+        rc, out = run(2, mode="solve", n_cell=n, bc=A.bc, max_grid_size=32, backends="hypre", verbose=1, tol_rel=tol)
+        r = kv(lines(out, "RESULT")[0])
+        ok(r["residual_ok"] == "0" and r["nwarn"] == "1", f"negative control tol_rel={tol:g}: warns (checked {float(r['check']):.2e} > limit {float(r['limit']):.2e})")
+    rc, out = run(2, mode="solve", n_cell=n, bc=A.bc, max_grid_size=32, backends="hypre", verbose=1, max_iter=4)
+    r = kv(lines(out, "RESULT")[0])
+    ok(r["residual_ok"] == "0" and r["status"] == "NotConverged", f"negative control max_iter=4: NotConverged and the residual check warns ({float(r['check']):.2e})")
+
+def rescheck():
+    """Residual check on the final H of a solve and on perturbed copies; synthetic sums (harness mode rescheck)."""
+    for be, nn in (("hypre", A.n), ("mlmg", "32 32 32"), ("fft", "32 32 32")):
+        rc, out = run(2, mode="rescheck", n_cell=nn, bc=A.bc, max_grid_size=16, backend=be); print(out)
+        ok(rc == 0, f"rescheck {be} {A.bc} n=[{nn}]: all harness checks pass")
+        base = kv(lines(out, "RESCHECK")[0])
+        if be != "hypre":
+            ok(base["pin_rel"] == "0" and base["nopin"] == base["raw"], f"{be}: no pin applied, pin-excluded residual equals the raw one")
+
+def hypresidcomp():
+    """Composite: default residual_tol, HYPRE and MLMG do not warn; loose solves warn."""
+    for bc, nlev, ratio, extra in (("neumann", 2, 2, {}), ("neumann", 3, 2, {}), ("periodic", 2, 4, {}), ("periodic", 3, 2, {}), ("neumann", 2, 2, {"plane2d": 1})):
+        kw = dict(mode="hypre_resid", n=16, nlev=nlev, ratio=ratio, mgs=8, bc=bc, **extra)
+        rc, out = run(2, **kw); print(out)
+        ok(rc == 0, f"hypre_resid {bc} nlev={nlev} ratio={ratio} {extra}: no warning at the default residual_tol (both backends)")
+        rc, out = run(2, tol_rel=1e-4, expect_warn=1, **kw)
+        ok(rc == 0, f"hypre_resid {bc} nlev={nlev} ratio={ratio} {extra}: negative control tol_rel=1e-4 warns (both backends)")
+
+
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "hypresidcomp": hypresidcomp}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
