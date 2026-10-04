@@ -18,7 +18,7 @@ endforeach()
 set(PB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_library(pressure_backend STATIC
   ${PB_DIR}/CommonLayer.cpp ${PB_DIR}/PressureIface.cpp ${PB_DIR}/FFTBackend.cpp ${PB_DIR}/MLMGBackend.cpp
-  ${PB_DIR}/CompositeSolve.cpp)
+  ${PB_DIR}/CompositeSolve.cpp ${PB_DIR}/HypreBackend.cpp)
 target_include_directories(pressure_backend PUBLIC ${PB_DIR})
 target_link_libraries(pressure_backend PUBLIC AMReX::amrex)
 

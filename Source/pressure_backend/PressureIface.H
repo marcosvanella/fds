@@ -9,8 +9,13 @@
 // Two APIs share one entry point:
 //  - single level (milestone M1): the fields ba/dm/geom/rhs/phi of PressureProblem, FFT or MLMG backend;
 //  - composite (milestone M2, first version): `PressureProblem::levels` non-empty. Then the list is authoritative
-//    and the single-level ba/dm/geom/rhs/phi/nlevels are ignored. Only the MLMG backend does composite
-//    (amrex::MLMG over MLPoisson on the whole hierarchy). See frozen/composite-notes.md.
+//    and the single-level ba/dm/geom/rhs/phi/nlevels are ignored. The MLMG backend (amrex::MLMG over MLPoisson on the
+//    whole hierarchy) and the HYPRE backend do composite. See frozen/composite-notes.md.
+//
+// Backends: FFT (single uniform level), MLMG (default for composite; single level on request), HYPRE (assembled matrix, PCG or
+// GMRES/BiCGSTAB with BoomerAMG, ADR-002 backend (H); on request only through `PressureOptions::backend =
+// BackendKind::HYPRE`, never selected by Auto). HYPRE assembles the same discrete operator as MLMG (including the
+// coarse/fine interface treatment) into an IJ matrix, see HypreBackend.H and frozen/hypre-notes.md.
 //
 // Not built (returned as Status::NotBuilt, never a silent fallback): masked cells (obstructed/solid, known-value
 // or pinned cells), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
@@ -49,7 +54,7 @@
 namespace pb {
 
 enum class BC { Neumann, Periodic, Dirichlet };   // Dirichlet: homogeneous in M1 (values folded into the RHS)
-enum class BackendKind { Auto, FFT, MLMG };
+enum class BackendKind { Auto, FFT, MLMG, HYPRE };   // Auto never selects HYPRE
 enum class Status { Ok, NotBuilt, InvalidInput, NotConverged };
 
 // Which zero mode of the right-hand side is removed from a singular component (see the header comment and
@@ -155,8 +160,34 @@ struct PressureProblem {
 //                bitwise the same as on the full path; removed_mean and gauge_shift are still reported.
 enum SolveTrigger : unsigned { SolveRoutine = 0u, SolveFirst = 1u, SolveFirstAfterRegrid = 2u, SolveDebug = 4u };
 
+// HYPRE backend settings (ADR-002 backend (H)); defaults follow FDS (pres.f90 3020-3035, imkl.f90 237-263) except where noted.
+// The tolerance and iteration cap are PressureOptions::tol_rel and max_iter.
+//  krylov:         PCG (symmetric positive definite matrices: every single-level problem) or GMRES / BiCGSTAB for the composite
+//                  matrix, which is not symmetric (the C/F interpolation is one-sided); Auto = PCG on one level, GMRES on a
+//                  hierarchy.
+//  coarsen_type:   BoomerAMG coarsening (FDS 8 = PMIS).     relax_type: smoother (FDS 18 = L1-Jacobi, symmetric).
+//  num_sweeps:     sweeps per level.                        strong_threshold: BoomerAMG strength threshold, < 0 = HYPRE default.
+//  interp_type:    interpolation, < 0 = HYPRE default.      agg_levels: aggressive coarsening levels.
+enum class HypreKrylov { Auto, PCG, GMRES, BiCGSTAB };
+struct HypreOptions {
+    HypreKrylov krylov = HypreKrylov::Auto;
+    int coarsen_type = 8;
+    int relax_type = 18;
+    int num_sweeps = 1;
+    double strong_threshold = -1.0;
+    int interp_type = -1;
+    int agg_levels = 0;
+    int gmres_kdim = 30;
+    bool operator== (HypreOptions const& o) const
+    {
+        return krylov == o.krylov && coarsen_type == o.coarsen_type && relax_type == o.relax_type && num_sweeps == o.num_sweeps &&
+               strong_threshold == o.strong_threshold && interp_type == o.interp_type && agg_levels == o.agg_levels && gmres_kdim == o.gmres_kdim;
+    }
+};
+
 struct PressureOptions {
-    BackendKind backend = BackendKind::Auto;      // Auto = selector rule; FFT/MLMG = request, still rule-checked
+    BackendKind backend = BackendKind::Auto;      // Auto = selector rule; FFT/MLMG/HYPRE = request, still rule-checked
+    HypreOptions hypre;                           // used when backend == HYPRE
     double tol_rel = 1.0e-12;                     // backend relative tolerance
     int max_iter = 200;                           // backend iteration cap
     bool use_initial_guess = false;               // false: start from zero
@@ -186,13 +217,18 @@ struct BackendStatus {
     bool converged = false;
     int iterations = 0;                           // 0 for direct backends
     double own_residual = -1.0;                   // backend-reported relative residual (-1: none)
-    bool plan_reused = false;                     // FFT: the plan cached in the PressureWorkspace was used (not built for this solve)
+    bool plan_reused = false;                     // FFT/HYPRE: the set-up cached in the PressureWorkspace was used (not built for this solve)
+    // HYPRE only (0 otherwise): matrix size, set-up time (assembly + BoomerAMG setup; 0 when the cached set-up was reused),
+    // solver time of this solve, Krylov method actually used ("PCG", "GMRES", "BiCGSTAB").
+    long long hypre_rows = 0, hypre_nnz = 0;
+    double hypre_setup_seconds = 0.0, hypre_solve_seconds = 0.0;
+    std::string hypre_method;
 };
 
 struct PressureResult {
     Status status = Status::Ok;
     std::string message;                          // reason for any non-Ok status
-    std::string backend;                          // "FFT", "MLMG" (empty if not built)
+    std::string backend;                          // "FFT", "MLMG", "HYPRE" (empty if not built)
     BackendStatus backend_status;
     std::vector<ComponentInfo> components;
     bool residual_checked = false;
@@ -254,6 +290,7 @@ public:
     int fft_plan_builds () const { return m_fft_builds; }
     int fft_plan_reuses () const { return m_fft_reuses; }
     bool fft_plan_built () const;
+    bool hypre_built () const;                    // a HYPRE set-up (matrix + BoomerAMG) is cached for the single-level path
 
     // Internal (used by solve_pressure).
     void note_solve_done () { ++m_nsolves; m_regrid = false; }

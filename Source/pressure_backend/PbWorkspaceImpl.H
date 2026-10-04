@@ -5,6 +5,7 @@
 
 #include "PressureIface.H"
 #include "PressureBackend.H"
+#include "HypreBackend.H"
 
 #include <AMReX_MLMG.H>
 #include <AMReX_MLPoisson.H>
@@ -37,6 +38,10 @@ struct PressureWorkspace::Impl {
     std::unique_ptr<MLMG> mlmg;                       // refers to *mlp: declared after it, destroyed first
     // Single level: the FFT backend object, which owns the cached FFT::Poisson plan (null until needed).
     std::unique_ptr<PressureBackend> fft;
+    // HYPRE backend set-up (matrix + BoomerAMG hierarchy), built on the first HYPRE solve of this layout and dropped with the Impl
+    // (rebuild() / discard()). Single level: the backend object (it owns the HypreSystem); composite: the system itself.
+    std::unique_ptr<PressureBackend> hypre;
+    std::unique_ptr<HypreSystem> hsys;
 };
 
 } // namespace pb

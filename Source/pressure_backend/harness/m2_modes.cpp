@@ -32,7 +32,7 @@ int g_m2fail = 0;
 void mcheck (bool ok, std::string const& what)
 {
     Print() << "CHECK " << (ok ? "PASS " : "FAIL ") << what << "\n";
-    if (!ok) { ++g_m2fail; }
+    if (!ok) { ++g_m2fail; if (!ParallelDescriptor::IOProcessor()) { amrex::AllPrint() << "CHECK FAIL (rank " << ParallelDescriptor::MyProc() << ") " << what << "\n"; } }
 }
 
 // "NN,DD,ND" -> six face types (x lo, x hi, y lo, ...: stored as face_index(dir, side)). Letters: N Neumann, D Dirichlet, P periodic.
@@ -208,6 +208,75 @@ void run_trigger1 (ParmParse& pp)
     }
 }
 
+
+// --------------------------------------------------------------------------------------------------------------
+// mode=hypcache: HYPRE set-up (matrix + BoomerAMG) cached in the PressureWorkspace on the single-level path
+// --------------------------------------------------------------------------------------------------------------
+void run_hypcache (ParmParse& pp)
+{
+    Vector<int> n{32, 32, 32}; pp.queryarr("n_cell", n);
+    int mgs = 16; pp.query("mgs", mgs);
+    int nsolve = 5; pp.query("nsolve", nsolve);
+    std::string bcs = "NN,NN,NN"; pp.query("bcpairs", bcs);
+    S1 s = make_s1(n, bcs, mgs);
+    MultiFab rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1);
+    fill_smooth(s, rhs, 0.0);
+    pb::PressureProblem p = problem_of(s, rhs, phi);
+    pb::PressureOptions o; o.backend = pb::BackendKind::HYPRE; o.verbose = 0; o.trigger = pb::SolveRoutine;
+    std::vector<double> fresh, wsv;
+    double t_fresh = 0.0, t_first = 0.0, t_reuse = 0.0;
+    int iters = 0; bool all_reused = true;
+    for (int it = 0; it < nsolve; ++it) {      // no workspace: set-up built and dropped every solve
+        phi.setVal(0.0); const double t0 = amrex::second();
+        pb::PressureResult r = pb::solve_pressure(p, o, nullptr);
+        t_fresh += amrex::second() - t0;
+        mcheck(r.status == pb::Status::Ok && r.backend == "HYPRE", "fresh solve status Ok on HYPRE");
+        iters = r.backend_status.iterations;
+        fresh = gather_s(phi, s.domain);
+    }
+    pb::PressureWorkspace ws;
+    mcheck(!ws.hypre_built(), "empty workspace holds no HYPRE set-up");
+    for (int it = 0; it < nsolve; ++it) {
+        phi.setVal(0.0); const double t0 = amrex::second();
+        pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+        const double dt = amrex::second() - t0;
+        mcheck(r.status == pb::Status::Ok, "workspace solve status Ok");
+        if (it == 0) { t_first = dt; mcheck(!r.backend_status.plan_reused && ws.hypre_built(), "first solve builds the set-up"); }
+        else { t_reuse += dt; if (!r.backend_status.plan_reused) { all_reused = false; } }
+        wsv = gather_s(phi, s.domain);
+        mcheck(wsv == fresh, "workspace solution is bitwise identical to the fresh-set-up solution");
+    }
+    mcheck(all_reused, "every later solve reused the cached HYPRE set-up");
+    mcheck(ws.matches(p) && ws.hypre_built(), "workspace matches the layout and holds a HYPRE set-up");
+    mcheck(ws.rebuild(p) == pb::Status::Ok && !ws.hypre_built(), "rebuild() invalidates the cached HYPRE set-up");
+    {
+        phi.setVal(0.0);
+        pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+        mcheck(r.status == pb::Status::Ok && !r.backend_status.plan_reused && ws.hypre_built(), "the next solve after rebuild() builds a new set-up");
+        mcheck(gather_s(phi, s.domain) == fresh, "solution after rebuild is bitwise identical");
+    }
+    {   // another box layout: the key differs, set-up rebuilt for the new layout (no pointers into the old MultiFabs)
+        S1 s2 = make_s1(n, bcs, std::max(8, mgs/2));
+        MultiFab r2(s2.ba, s2.dm, 1, 0), p2(s2.ba, s2.dm, 1, 1); fill_smooth(s2, r2, 0.0); p2.setVal(0.0);
+        pb::PressureProblem q = problem_of(s2, r2, p2);
+        mcheck(!ws.matches(q), "workspace key differs for another box layout");
+        pb::PressureResult r = pb::solve_pressure(q, o, &ws);
+        mcheck(r.status == pb::Status::Ok && !r.backend_status.plan_reused && r.workspace_rebuilt, "a solve on another layout rebuilds the set-up and flags it");
+        std::vector<double> v2 = gather_s(p2, s2.domain);
+        double dn = 0.0, nn = 0.0;
+        for (std::size_t q2 = 0; q2 < v2.size() && q2 < fresh.size(); ++q2) { dn += (v2[q2]-fresh[q2])*(v2[q2]-fresh[q2]); nn += fresh[q2]*fresh[q2]; }
+        ParallelDescriptor::ReduceRealSum(dn); ParallelDescriptor::ReduceRealSum(nn);    // gathered on the I/O rank only
+        mcheck(std::sqrt(dn/nn) <= 1e-8, "result on the other box layout agrees within eps_H (rel L2 " + std::to_string(std::sqrt(dn/nn)) + ")");
+    }
+    {   // options are part of the key
+        pb::PressureOptions o2 = o; o2.hypre.relax_type = 6;
+        pb::PressureResult r = pb::solve_pressure(p, o2, &ws);
+        mcheck(r.status == pb::Status::Ok && !r.backend_status.plan_reused, "other HYPRE options rebuild the set-up");
+    }
+    Print() << std::setprecision(6) << "HYPCACHE n=" << n[0] << "x" << n[1] << "x" << n[2] << " nranks=" << ParallelDescriptor::NProcs() << " mgs=" << mgs << " iters=" << iters
+            << " per_solve_fresh_ms=" << 1e3*t_fresh/nsolve << " first_ms=" << 1e3*t_first << " per_solve_reuse_ms=" << 1e3*t_reuse/std::max(1, nsolve-1) << "\n";
+}
+
 // --------------------------------------------------------------------------------------------------------------
 // mode=fftcache: repeated FFT solves on one layout with and without the workspace
 // --------------------------------------------------------------------------------------------------------------
@@ -310,7 +379,7 @@ void mixed_one (Vector<int> const& n, std::string const& bcs, int mgs, std::stri
     phi.setVal(0.0);
     pb::PressureProblem p = problem_of(s, rhs, phi);
     pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9;   // the rhs is deliberately incompatible
-    o.backend = (be == "fft") ? pb::BackendKind::FFT : (be == "mlmg") ? pb::BackendKind::MLMG : pb::BackendKind::Auto;
+    o.backend = (be == "fft") ? pb::BackendKind::FFT : (be == "mlmg") ? pb::BackendKind::MLMG : (be == "hypre") ? pb::BackendKind::HYPRE : pb::BackendKind::Auto;
     o.tol_rel = 1.0e-13; o.max_iter = 100;
     pb::PressureResult r = pb::solve_pressure(p, o);
     Print() << std::setprecision(6) << "MIXED bcpairs=" << bcs << " status=" << pb::to_string(r.status) << " backend=" << (r.backend.empty() ? std::string("none") : r.backend)
@@ -378,7 +447,7 @@ void run_bcdata (ParmParse& pp)
     std::string be = "fft"; pp.query("backend", be);
     S1 s = make_s1(n, bcs, mgs);
     pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9; o.tol_rel = 1.0e-13; o.max_iter = 100;
-    o.backend = (be == "mlmg") ? pb::BackendKind::MLMG : pb::BackendKind::FFT;
+    o.backend = (be == "mlmg") ? pb::BackendKind::MLMG : (be == "hypre") ? pb::BackendKind::HYPRE : pb::BackendKind::FFT;
     const Real h = s.dx;
     bool singular = true;
     for (int f = 0; f < 6; ++f) { singular = singular && s.bc[f] != pb::BC::Dirichlet; }
@@ -630,6 +699,7 @@ int run_m2_mode (std::string const& mode, ParmParse& pp)
 {
     if (mode == "trigger1") { run_trigger1(pp); }
     else if (mode == "fftcache") { run_fftcache(pp); }
+    else if (mode == "hypcache") { run_hypcache(pp); }
     else if (mode == "mixed1") { run_mixed1(pp); }
     else if (mode == "bcdata") { run_bcdata(pp); }
     else if (mode == "fftraw") { run_fftraw(pp); }

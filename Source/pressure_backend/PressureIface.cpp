@@ -136,7 +136,7 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // A workspace built for another layout is a regrid (its stale part is rebuilt by this solve).
     if (ws) {
         if (!p.levels.empty()) { if (ws->num_levels() > 0 && !ws->matches(p)) { ws->mark_regrid(); } }
-        else if (sel.kind == BackendKind::FFT && ws->fft_plan_built() && !ws->matches(p)) { ws->mark_regrid(); }
+        else if (((sel.kind == BackendKind::FFT && ws->fft_plan_built()) || (sel.kind == BackendKind::HYPRE && ws->hypre_built())) && !ws->matches(p)) { ws->mark_regrid(); }
     }
     // FR-039 trigger points: the options say what kind of solve this is, the workspace adds first solve / first after regrid.
     const unsigned trig = o.trigger | (ws ? ws->auto_triggers() : 0u);
@@ -153,20 +153,27 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
         } else if (ws) { ws->note_solve_done(); }
         return R;
     }
-    // Single level. With a workspace the FFT plan is cached; the layout was validated when the plan was built.
-    const bool plan_ok = (ws && sel.kind == BackendKind::FFT && ws->matches(p));
+    // Single level. With a workspace the FFT plan / HYPRE set-up is cached; the layout was validated when it was built.
+    const bool cached_kind = (sel.kind == BackendKind::FFT || sel.kind == BackendKind::HYPRE);
+    bool plan_ok = false, had_slot = false;
+    if (ws && cached_kind && ws->impl()) {
+        auto& slot = (sel.kind == BackendKind::FFT) ? ws->impl()->fft : ws->impl()->hypre;
+        had_slot = (slot != nullptr);
+        plan_ok = slot && slot->plan_matches(p);
+    }
     std::string bad = validate(p, full || !plan_ok);
     if (!bad.empty()) { return fail(Status::InvalidInput, bad); }
 
     std::unique_ptr<PressureBackend> local;
     PressureBackend* be = nullptr;
-    if (sel.kind == BackendKind::FFT && ws) {
+    if (ws && cached_kind) {
         PressureWorkspace::Impl& W = ws->ensure_impl();
-        if (!W.fft) { W.fft = make_fft_backend(); }
-        be = W.fft.get();
-        R.workspace_rebuilt = (!plan_ok && ws->fft_plan_builds() > 0);
+        auto& slot = (sel.kind == BackendKind::FFT) ? W.fft : W.hypre;
+        if (!slot) { slot = (sel.kind == BackendKind::FFT) ? make_fft_backend() : make_hypre_backend(); }
+        be = slot.get();
+        R.workspace_rebuilt = (sel.kind == BackendKind::FFT) ? (!plan_ok && ws->fft_plan_builds() > 0) : (!plan_ok && had_slot);
     } else {
-        local = (sel.kind == BackendKind::FFT) ? make_fft_backend() : make_mlmg_backend();
+        local = (sel.kind == BackendKind::FFT) ? make_fft_backend() : (sel.kind == BackendKind::HYPRE) ? make_hypre_backend() : make_mlmg_backend();
         be = local.get();
     }
     R.backend = be->name();

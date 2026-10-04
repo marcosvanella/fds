@@ -37,6 +37,7 @@ public:
 
 std::unique_ptr<PressureBackend> make_fft_backend ();
 std::unique_ptr<PressureBackend> make_mlmg_backend ();
+std::unique_ptr<PressureBackend> make_hypre_backend ();     // HypreBackend.cpp
 
 } // namespace pb
 #endif

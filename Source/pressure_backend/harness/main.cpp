@@ -190,6 +190,7 @@ pb::BackendKind parse_backend (std::string const& s)
 {
     if (s == "fft") { return pb::BackendKind::FFT; }
     if (s == "mlmg") { return pb::BackendKind::MLMG; }
+    if (s == "hypre") { return pb::BackendKind::HYPRE; }
     if (s == "auto") { return pb::BackendKind::Auto; }
     amrex::Abort("backend must be fft|mlmg|auto");
     return pb::BackendKind::Auto;
@@ -372,6 +373,35 @@ void run_selector ()
     {   pb::PressureProblem p = make(false, pb::BC::Neumann); MultiFab a(p.ba, p.dm, 1, 0); a.setVal(1.0);
         p.cell_coef_a = &a;
         expect("cell coefficient a not built", p, pb::Status::NotBuilt, K::Auto, K::Auto); }
+    // HYPRE (assembled-matrix backend): explicit request only, never selected by Auto; same support rules as MLMG.
+    {
+        expect("explicit HYPRE request (neumann)", make(false, pb::BC::Neumann), pb::Status::Ok, K::HYPRE, K::HYPRE);
+        expect("explicit HYPRE request (periodic)", make(true, pb::BC::Periodic), pb::Status::Ok, K::HYPRE, K::HYPRE);
+        expect("explicit HYPRE request (dirichlet)", make(false, pb::BC::Dirichlet), pb::Status::Ok, K::HYPRE, K::HYPRE);
+        pb::PressureProblem p = make(false, pb::BC::Neumann); p.nlevels = 2;
+        expect("composite (2 levels) with explicit HYPRE and no level data not built", p, pb::Status::NotBuilt, K::Auto, K::HYPRE);
+        p = make(false, pb::BC::Neumann); p.bc[pb::face_index(0,1)] = pb::BC::Dirichlet;
+        expect("mixed open/closed faces with explicit HYPRE", p, pb::Status::Ok, K::HYPRE, K::HYPRE);
+        p = make(false, pb::BC::Neumann);
+        iMultiFab cls(p.ba, p.dm, 1, 0); cls.setVal(0);
+        for (MFIter mfi(cls); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); cls[mfi].setVal<RunOn::Host>(1, Box(sm, sm)); } }
+        p.cell_class = &cls;
+        expect("masked cell with explicit HYPRE not built", p, pb::Status::NotBuilt, K::Auto, K::HYPRE);
+        p = make(false, pb::BC::Neumann);
+        iMultiFab unc(p.ba, p.dm, 1, 0); unc.setVal(1);
+        for (MFIter mfi(unc); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); unc[mfi].setVal<RunOn::Host>(0, Box(sm, sm)); } }
+        p.uncovered = &unc;
+        expect("covered cell with explicit HYPRE not built", p, pb::Status::NotBuilt, K::Auto, K::HYPRE);
+        p = make(false, pb::BC::Neumann); p.cylindrical = true;
+        expect("cylindrical geometry with explicit HYPRE not built", p, pb::Status::NotBuilt, K::Auto, K::HYPRE);
+        p = make(false, pb::BC::Neumann);
+        for (int d = 0; d < 3; ++d) { p.cell_width[d].assign(8, Real(0.125)); }
+        p.cell_width[2][3] = Real(0.1875);
+        expect("non-uniform cell widths with explicit HYPRE not built", p, pb::Status::NotBuilt, K::Auto, K::HYPRE);
+        p = make(false, pb::BC::Neumann); MultiFab a(p.ba, p.dm, 1, 0); a.setVal(1.0);
+        p.cell_coef_a = &a;
+        expect("cell coefficient a with explicit HYPRE not built", p, pb::Status::NotBuilt, K::Auto, K::HYPRE);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

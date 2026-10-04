@@ -18,6 +18,7 @@ ap.add_argument("--n", default="64 64 64")
 ap.add_argument("--ratio", type=int, default=2)
 ap.add_argument("--ns", default="32 64")       # coarse sizes for the composite convergence runs
 ap.add_argument("--plane", type=int, default=0)
+ap.add_argument("--be", default="fft mlmg")  # backends for decomp/repeat/mixedfaces/bcdata (space separated)
 ap.add_argument("--faces", default="")        # per-face types, e.g. ND,NN,DD (letters N D P; low then high face per direction)
 A = ap.parse_args()
 os.makedirs(A.work, exist_ok=True)
@@ -67,7 +68,7 @@ def frozen():
 
 def solve_files(np_, mgs, tag):
     pre = os.path.join(A.work, tag)
-    rc, out = run(np_, **base(max_grid_size=mgs, backends="fft mlmg", out=pre))
+    rc, out = run(np_, **base(max_grid_size=mgs, backends=A.be, out=pre))
     ok(rc == 0, f"run {tag} exit 0")
     hashes = {l.split()[1]: kv(l)["hash"] for l in lines(out, "RESULT")}
     pins = {l.split()[1]: (kv(l).get("comp0_pin"), kv(l).get("comp0_removed_mean")) for l in lines(out, "RESULT")}
@@ -84,7 +85,7 @@ def decomp():
         for mgs in (32, 16):
             if (np_, mgs) == (1, 32): continue
             pre, h, pins = solve_files(np_, mgs, f"np{np_}_mgs{mgs}")
-            for b in ("fft", "mlmg"):
+            for b in A.be.split():
                 r = diffrel(f"{pre}_{b}.bin", f"{ref_pre}_{b}.bin")
                 bit = h[b] == ref_h[b]
                 print(f"DECOMP {A.bc} np={np_} mgs={mgs} {b}: rel_l2 vs np1/mgs32 = {r:.3e} bitwise={'yes' if bit else 'no'}")
@@ -95,7 +96,7 @@ def repeat():
     hs = []
     for i in range(3):
         _, h, _ = solve_files(4, 16, f"rep{i}"); hs.append(h)
-    for b in ("fft", "mlmg"):
+    for b in A.be.split():
         same = len({h[b] for h in hs}) == 1
         print(f"REPEAT {A.bc} {b}: hashes {[h[b] for h in hs]}")
         ok(same, f"{b} 3 repeats bitwise identical")
@@ -126,6 +127,80 @@ def singular():
     rc, out = run(1, mode="solve", n_cell=n, bc="neumann", max_grid_size=16, backends="mlmg", remove_mean=1, verbose=1)
     r = kv(lines(out, "RESULT")[0])
     ok(r["nwarn"] == "0" and float(r["comp0_removed_rel"]) < 1e-10, "quiet without offset (removed mean at round-off)")
+
+# ---- HYPRE assembled-matrix backend (frozen/hypre-notes.md) ----------------------------------------------
+def hypsingle():
+    """Single level: FFT, MLMG and HYPRE on the same synthetic problem; HYPRE agrees with both within eps_H."""
+    e = eps_H(A.n)
+    pre = os.path.join(A.work, "s")
+    rc, out = run(4, **base(max_grid_size=16, backends="fft mlmg hypre", out=pre)); print(out)
+    ok(rc == 0, "harness exit 0")
+    for l in lines(out, "RESULT"):
+        r = kv(l)
+        ok(r["status"] == "Ok" and r["residual_ok"] == "1" and r["nwarn"] == "0", f"{l.split()[1]} status Ok, true residual within tolerance, no warning")
+    h = [kv(l) for l in lines(out, "RESULT") if l.split()[1] == "hypre"][0]
+    ok(h["backend"] == "HYPRE", "the HYPRE result was produced by the HYPRE backend")
+    ok(float(h["true_rel2"]) <= 1e-11, f"HYPRE true rel2 {h['true_rel2']} <= 1e-11 (independent residual)")
+    r_hf = diffrel(f"{pre}_hypre.bin", f"{pre}_fft.bin"); r_hm = diffrel(f"{pre}_hypre.bin", f"{pre}_mlmg.bin"); r_mf = diffrel(f"{pre}_mlmg.bin", f"{pre}_fft.bin")
+    print(f"HYPSINGLE {A.bc} n=[{A.n}] hypre_iters={h['iters']} rel_l2 hypre-fft={r_hf:.3e} hypre-mlmg={r_hm:.3e} mlmg-fft={r_mf:.3e} eps_H={e:.1e}")
+    ok(r_hf <= e, f"HYPRE vs FFT rel L2 {r_hf:.2e} <= eps_H"); ok(r_hm <= e, f"HYPRE vs MLMG rel L2 {r_hm:.2e} <= eps_H")
+
+def hypci():
+    """CI check: the same frozen (generated, reference H from the FFT) solves through MLMG and HYPRE must agree within eps_H."""
+    for bc in ("neumann", "periodic", "dirichlet"):
+        pre = os.path.join(A.work, f"case_{bc}")
+        rc, out = run(2, mode="gen", n_cell=A.n, bc=bc, max_grid_size=16, out=pre); ok(rc == 0, f"{bc}: generator exit 0")
+        rc, out = run(4, mode="solve", n_cell=A.n, bc=bc, verbose=1, max_grid_size=8, backends="mlmg hypre", rhs_file=pre + "_rhs.bin", ref_file=pre + "_H.bin", out=pre + "_o")
+        print(out); ok(rc == 0, f"{bc}: harness exit 0")
+        e = eps_H(A.n)
+        for l in lines(out, "CMP"):
+            d = kv(l); ok(float(d["rel_l2"]) <= e, f"{bc}: {l.split()[1]} vs the frozen reference rel L2 {d['rel_l2']} <= {e:.2e}")
+        r = subprocess.run([A.mpiexec, "--oversubscribe", "-np", "1", A.harness, "mode=diff", f"a={pre}_o_hypre.bin", f"b={pre}_o_mlmg.bin", f"n_cell={A.n}", f"bc={bc}"], capture_output=True, text=True)
+        d = kv(lines(r.stdout + r.stderr, "CMP")[0]); rl = float(d["rel_l2"])
+        print(f"HYPCI {bc} n=[{A.n}] hypre-vs-mlmg rel_l2={rl:.3e} max_abs={d.get('max_abs')} eps_H={e:.1e}")
+        ok(rl <= e, f"{bc}: HYPRE vs MLMG rel L2 {rl:.2e} <= eps_H {e:.1e} (CI gate)")
+    # negative control: a loosely converged pair must be flagged by the same comparison (the gate can fail)
+    pre = os.path.join(A.work, "case_neumann")
+    rc, out = run(4, mode="solve", n_cell=A.n, bc="neumann", verbose=0, max_grid_size=8, backends="mlmg hypre", tol_rel=1e-3, out=pre + "_loose")
+    r = subprocess.run([A.mpiexec, "--oversubscribe", "-np", "1", A.harness, "mode=diff", f"a={pre}_loose_hypre.bin", f"b={pre}_loose_mlmg.bin", f"n_cell={A.n}", "bc=neumann"], capture_output=True, text=True)
+    d = kv(lines(r.stdout + r.stderr, "CMP")[0]); rl = float(d["rel_l2"])
+    print(f"HYPCI control (tol_rel=1e-3) hypre-vs-mlmg rel_l2={rl:.3e}")
+    ok(rl > eps_H(A.n) and "FAIL" in (r.stdout + r.stderr), f"negative control: loosely converged HYPRE and MLMG differ by {rl:.1e} > eps_H and the comparison reports FAIL")
+
+def hypcomp():
+    """Composite: HYPRE vs MLMG, independent true residual, bitwise repeatability, then 1/2/4-rank independence."""
+    cases = [("neumann", 2, 2, "layout=0"), ("neumann", 2, 4, "layout=0"), ("periodic", 2, 2, "layout=1"), ("periodic", 2, 4, "layout=0"),
+             ("dirichlet", 2, 2, "layout=0"), ("dirichlet", 2, 4, "layout=2"), ("neumann", 3, 2, "layout=0"), ("periodic", 3, 4, "layout=0"),
+             ("neumann", 2, 2, "full=1"), ("neumann", 2, 2, "plane2d=1"), ("periodic", 2, 2, "plane2d=1"),
+             ("neumann", 2, 2, "bcfaces=ND,DN,NN"), ("neumann", 2, 2, "bcfaces=PP,NN,DD")]
+    for bc, nlev, ratio, extra in cases:
+        kw = dict(mode="hypre_cmp", n=16, nlev=nlev, ratio=ratio, mgs=8)
+        if extra.startswith("bcfaces"): kw["bcfaces"] = extra.split("=")[1]
+        else: kw["bc"] = bc; kw[extra.split("=")[0]] = extra.split("=")[1]
+        rc, out = run(3 if nlev == 3 else 2, **kw)
+        ok(rc == 0, f"hypre_cmp {bc} nlev={nlev} ratio={ratio} {extra}: harness checks")
+        if rc != 0: print(out)
+        l = lines(out, "HYPCMP")[0]; print(l); d = kv(l)
+        ok(float(d["rel2_diff"]) <= 1e-8 and float(d["hypre_true_rel2"]) <= 1e-8 and d["repeat_bitwise"] == "1",
+           f"{bc} nlev={nlev} ratio={ratio} {extra}: HYPRE vs MLMG rel L2 {d['rel2_diff']}, true residual {d['hypre_true_rel2']}, iters hypre {d['hypre_iters']} / mlmg {d['mlmg_iters']} ({d['method']})")
+    # rank independence: the composite solution on 1, 2, 4 ranks (different box distribution) within eps_H of the 1-rank result
+    for bc, ratio in (("neumann", 2), ("periodic", 4)):
+        ref = None
+        for np_ in (1, 2, 4):
+            pre = os.path.join(A.work, f"cd_{bc}_{np_}")
+            rc, out = run(np_, mode="hypre_cmp", n=16, nlev=2, ratio=ratio, bc=bc, mgs=8, out=pre)
+            ok(rc == 0, f"hypre_cmp {bc} r{ratio} np={np_}: harness checks")
+            x = np.fromfile(pre + "_phi.bin")
+            if ref is None: ref = x; continue
+            r = float(np.linalg.norm(x - ref) / np.linalg.norm(ref))
+            print(f"HYPDECOMP composite {bc} ratio={ratio} np={np_} vs np=1: rel_l2 {r:.3e}")
+            ok(r <= 1e-8, f"composite HYPRE {bc} ratio={ratio}: np={np_} equals np=1 within eps_H (rel L2 {r:.2e})")
+
+def hypcache():
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="hypcache", n_cell=A.n, mgs=16, nsolve=5, bcpairs=A.bc); print(out)
+        ok(rc == 0, f"HYPRE set-up cache checks (reuse, bitwise identical, rebuild invalidation), np={np_}")
+
 
 # ---- independent numpy references (no AMReX) -------------------------------------------------------------
 def read_field(path, n):
@@ -376,7 +451,7 @@ def compmixed():
 
 def compns2d():
     for np_, mgs in ((1, 16), (2, 8), (4, 4)):
-        rc, out = run(np_, mode="comp_ns2d", mgs=mgs)
+        rc, out = run(np_, **({"mode": "comp_ns2d", "mgs": mgs} | ({"backend": A.be} if A.be != "fft mlmg" else {})))
         print(out); ok(rc == 0, f"ns2d_16 two-level checks, np={np_} mgs={mgs}")
         l = kv(lines(out, "NS2D")[0]); ok(float(l["true_rel2"]) <= EPS_COMP, f"np={np_} true residual {l['true_rel2']}")
 
@@ -462,11 +537,11 @@ def compgaugedecomp():
 
 def compsel():
     for np_ in (1, 2):
-        rc, out = run(np_, mode="comp_sel"); print(out); ok(rc == 0, f"composite selector checks, np={np_}")
+        rc, out = run(np_, **({"mode": "comp_sel"} | ({"backend": A.be} if A.be != "fft mlmg" else {}))); print(out); ok(rc == 0, f"composite selector checks, np={np_}")
 
 def compws():
     for np_ in (1, 2):
-        rc, out = run(np_, mode="comp_ws"); print(out); ok(rc == 0, f"workspace (D-058) checks, np={np_}")
+        rc, out = run(np_, **({"mode": "comp_ws"} | ({"backend": A.be} if A.be != "fft mlmg" else {}))); print(out); ok(rc == 0, f"workspace (D-058) checks, np={np_}")
 
 def trigger1():
     for np_ in (1, 2):
@@ -512,7 +587,7 @@ def mixedfaces():
     combos = [(a, b, c) for a in letters for b in letters for c in letters]
     mats = {}
     for np_, mgs in ((1, 8), (2, 3)):
-        for be in ("fft", "mlmg"):
+        for be in A.be.split():
             pre = os.path.join(A.work, f"mx_{be}_{np_}")
             rc, out = run(np_, mode="mixed1", n_cell="6 5 4", mgs=mgs, backend=be, sweep=1, out=pre)
             ok(rc == 0, f"mixed1 sweep {be} np={np_}")
@@ -538,7 +613,7 @@ def mixedfaces():
 def bcdata_exact():
     """fold_boundary_data: discrete check (rhs built with explicit data ghosts; folded homogeneous solve reproduces the field) + negative control."""
     for bc in ("ND,DN,NN", "NN,NN,NN", "DD,DD,DD", "PP,ND,DN", "NN,DD,PP"):
-        for be in ("fft", "mlmg"):
+        for be in (A.be.split() if A.be != "fft mlmg" else ("fft", "mlmg")):
             for np_ in (1, 2):
                 rc, out = run(np_, mode="bcdata", part="exact", bcpairs=bc, backend=be, mgs=4)
                 ok(rc == 0, f"bcdata exact bcpairs={bc} {be} np={np_}: harness checks")
@@ -632,7 +707,8 @@ def pressure_bc_map():
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
- "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map}[A.cmd]()
+ "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

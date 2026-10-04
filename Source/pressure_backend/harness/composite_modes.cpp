@@ -10,11 +10,14 @@
 // mode=comp_ws    workspace rebuild checks (D-058).
 #include "PressureIface.H"
 #include "ExactSum.H"
+#include "HypreBackend.H"
 
 #include <AMReX.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H>
+#include <AMReX_MLMG.H>
+#include <AMReX_MLPoisson.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 
@@ -31,6 +34,8 @@
 using namespace amrex;
 
 namespace {
+
+void apply_backend_opts (ParmParse& pp, pb::PressureOptions& o);
 
 int g_cfail = 0;
 void ccheck (bool ok, std::string const& what)
@@ -541,6 +546,7 @@ void run_comp (ParmParse& pp)
     pb::PressureProblem p = make_problem(c, h);
     pb::PressureOptions o;
     o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.residual_tol = eps_H; o.verbose = 1; pp.query("verbose", o.verbose);
+    apply_backend_opts(pp, o);
     pb::PressureWorkspace ws;
     pb::PressureResult r = pb::solve_pressure(p, o, &ws);
     Long ncells = 0; for (int l = 0; l < c.nlev; ++l) { ncells += h.ba[l].numPts(); }
@@ -703,8 +709,27 @@ void run_comp_ns2d (ParmParse& pp)
     pb::PressureLevel L1; L1.ba = ba1; L1.dm = dm1; L1.geom = g1; L1.ref_ratio = r; L1.rhs = &rhs1; L1.phi = &phi1;
     p.levels = {L0, L1};
     pb::PressureOptions o; o.residual_tol = 1e-8; o.removed_mean_warn = 1.0; pp.query("verbose", o.verbose);
+    apply_backend_opts(pp, o);
     pb::PressureWorkspace ws;
     pb::PressureResult res = pb::solve_pressure(p, o, &ws);
+    if (o.backend == pb::BackendKind::HYPRE) {   // against MLMG on the same problem
+        auto v0 = gather_box(phi0, d0), v1 = gather_box(phi1, d1);
+        phi0.setVal(0.0); phi1.setVal(0.0);
+        pb::PressureOptions om = o; om.backend = pb::BackendKind::MLMG; om.tol_rel = 1e-12;
+        pb::PressureResult rm = pb::solve_pressure(p, om);
+        auto m0 = gather_box(phi0, d0), m1 = gather_box(phi1, d1);
+        double dn = 0.0, nn = 0.0;
+        for (std::size_t q = 0; q < v0.size(); ++q) { dn += (v0[q]-m0[q])*(v0[q]-m0[q]); nn += m0[q]*m0[q]; }
+        for (std::size_t q = 0; q < v1.size(); ++q) { dn += (v1[q]-m1[q])*(v1[q]-m1[q]); nn += m1[q]*m1[q]; }
+        ParallelDescriptor::ReduceRealSum(dn); ParallelDescriptor::ReduceRealSum(nn);   // gathered on the I/O rank only
+        Print() << std::setprecision(6) << "NS2DCMP hypre_vs_mlmg rel_l2=" << std::sqrt(dn/nn) << " mlmg_iters=" << rm.backend_status.iterations << " hypre_iters=" << res.backend_status.iterations
+                << " method=" << res.backend_status.hypre_method << " hypre_status=" << pb::to_string(res.status) << " backend=" << res.backend << "\n";
+        ccheck(std::sqrt(dn/nn) <= 1e-8, "ns2d_16 HYPRE equals MLMG (rel L2 " + std::to_string(std::sqrt(dn/nn)) + ")");
+        ccheck(res.backend == "HYPRE", "ns2d_16 solved by the HYPRE backend");
+        // restore the HYPRE solution for the checks below
+        phi0.setVal(0.0); phi1.setVal(0.0);
+        res = pb::solve_pressure(p, o, &ws);
+    }
     Print() << std::setprecision(6) << "NS2D status=" << pb::to_string(res.status) << " iters=" << res.backend_status.iterations
             << " true_rel2=" << res.residual_rel2 << " true_relmax=" << res.residual_relmax << " nunc=" << res.ncells_uncovered
             << " removed_rel=" << res.components[0].removed_rel << " nranks=" << ParallelDescriptor::NProcs() << "\n";
@@ -827,8 +852,11 @@ void run_comp_ns2d (ParmParse& pp)
 // --------------------------------------------------------------------------------------------------------------
 // mode=comp_sel
 // --------------------------------------------------------------------------------------------------------------
-void run_comp_sel ()
+void run_comp_sel (ParmParse& pp)
 {
+    // backend=hypre repeats every composite selector check with HYPRE as the requested backend (same support rules as MLMG)
+    std::string beq = "auto"; pp.query("backend", beq);
+    const pb::BackendKind AU = (beq == "hypre") ? pb::BackendKind::HYPRE : pb::BackendKind::Auto;
     Cfg c; c.n = 16; c.nlev = 2; c.ratio = 2; c.mgs = 8; c.set_bc(pb::BC::Neumann);
     pb::PressureOptions o; o.verbose = 0;
     auto expect = [&] (std::string const& what, Cfg cfg, pb::Status st, std::function<void(pb::PressureProblem&)> mod, pb::BackendKind req, std::string const& frag) {
@@ -847,48 +875,48 @@ void run_comp_sel ()
         ccheck(ok, "composite selector: " + what);
     };
     using S = pb::Status; using K = pb::BackendKind;
-    expect("two levels Ok (Auto -> MLMG)", c, S::Ok, nullptr, K::Auto, "");
+    expect("two levels Ok (Auto -> MLMG)", c, S::Ok, nullptr, AU, "");
     expect("two levels Ok (explicit MLMG)", c, S::Ok, nullptr, K::MLMG, "");
     expect("composite on the FFT backend not built", c, S::NotBuilt, nullptr, K::FFT, "FFT");
-    expect("cylindrical not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.cylindrical = true; }, K::Auto, "cylindrical");
-    expect("mixed open/closed faces Ok (D-057 / M2)", c, S::Ok, [] (pb::PressureProblem& p) { p.bc[pb::face_index(0,1)] = pb::BC::Dirichlet; }, K::Auto, "");
-    expect("non-uniform widths not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { for (int d = 0; d < 3; ++d) { p.cell_width[d].assign(16, Real(1./16)); } p.cell_width[2][3] = Real(0.1); }, K::Auto, "non-uniform");
+    expect("cylindrical not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.cylindrical = true; }, AU, "cylindrical");
+    expect("mixed open/closed faces Ok (D-057 / M2)", c, S::Ok, [] (pb::PressureProblem& p) { p.bc[pb::face_index(0,1)] = pb::BC::Dirichlet; }, AU, "");
+    expect("non-uniform widths not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { for (int d = 0; d < 3; ++d) { p.cell_width[d].assign(16, Real(1./16)); } p.cell_width[2][3] = Real(0.1); }, AU, "non-uniform");
     {
         iMultiFab cls;
         expect("masked cells not built", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
-            cls.define(p.levels[0].ba, p.levels[0].dm, 1, 0); cls.setVal(1); p.cell_class = &cls; }, K::Auto, "masked");
+            cls.define(p.levels[0].ba, p.levels[0].dm, 1, 0); cls.setVal(1); p.cell_class = &cls; }, AU, "masked");
     }
     {
         MultiFab a;
         expect("variable coefficient not built", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
-            a.define(p.levels[0].ba, p.levels[0].dm, 1, 0); a.setVal(1.0); p.cell_coef_a = &a; }, K::Auto, "coefficient");
+            a.define(p.levels[0].ba, p.levels[0].dm, 1, 0); a.setVal(1.0); p.cell_coef_a = &a; }, AU, "coefficient");
     }
     {
         MultiFab a;
         expect("single-level gauge_weight with levels not built (use PressureLevel fields)", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
-            a.define(p.levels[0].ba, p.levels[0].dm, 1, 0); a.setVal(1.0); p.gauge_weight = &a; }, K::Auto, "PressureLevel");
+            a.define(p.levels[0].ba, p.levels[0].dm, 1, 0); a.setVal(1.0); p.gauge_weight = &a; }, AU, "PressureLevel");
     }
     {
         std::vector<std::unique_ptr<MultiFab>> g;
         auto field = [&g] (pb::PressureProblem& p, int l) { g.push_back(std::make_unique<MultiFab>(p.levels[l].ba, p.levels[l].dm, 1, 0)); g.back()->setVal(1.0); return g.back().get(); };
         expect("per-level gauge fields on every level Ok", c, S::Ok, [&] (pb::PressureProblem& p) {
-            for (int l = 0; l < 2; ++l) { p.levels[l].gauge_weight = field(p, l); p.levels[l].gauge_offset = field(p, l); } }, K::Auto, "");
+            for (int l = 0; l < 2; ++l) { p.levels[l].gauge_weight = field(p, l); p.levels[l].gauge_offset = field(p, l); } }, AU, "");
         expect("gauge_weight on one level only invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
-            p.levels[0].gauge_weight = field(p, 0); }, K::Auto, "every level");
+            p.levels[0].gauge_weight = field(p, 0); }, AU, "every level");
         expect("gauge_offset on the fine level only invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
-            p.levels[1].gauge_offset = field(p, 1); }, K::Auto, "every level");
+            p.levels[1].gauge_offset = field(p, 1); }, AU, "every level");
         expect("gauge field with another BoxArray invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
             for (int l = 0; l < 2; ++l) { p.levels[l].gauge_weight = field(p, l); }
             BoxArray b2(p.levels[0].ba.minimalBox()); b2.maxSize(4);
             g.push_back(std::make_unique<MultiFab>(b2, DistributionMapping(b2), 1, 0)); g.back()->setVal(1.0);
-            p.levels[0].gauge_weight = g.back().get(); }, K::Auto, "differ from the level");
+            p.levels[0].gauge_weight = g.back().get(); }, AU, "differ from the level");
     }
-    expect("ratio 3 not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.levels[1].ref_ratio = IntVect(3); }, K::Auto, "ratio");
-    expect("anisotropic ratio not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.levels[1].ref_ratio = IntVect(2,2,4); }, K::Auto, "anisotropic");
-    expect("dirichlet two levels Ok", [&] { Cfg d = c; d.set_bc(pb::BC::Dirichlet); return d; }(), S::Ok, nullptr, K::Auto, "");
-    expect("periodic three levels Ok", [&] { Cfg d = c; d.set_bc(pb::BC::Periodic); d.nlev = 3; d.n = 32; return d; }(), S::Ok, nullptr, K::Auto, "");
-    expect("one-level composite Ok", [&] { Cfg d = c; d.nlev = 1; return d; }(), S::Ok, nullptr, K::Auto, "");
-    expect("plane2d Neumann Ok", [&] { Cfg d = c; d.plane2d = true; return d; }(), S::Ok, nullptr, K::Auto, "");
+    expect("ratio 3 not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.levels[1].ref_ratio = IntVect(3); }, AU, "ratio");
+    expect("anisotropic ratio not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { p.levels[1].ref_ratio = IntVect(2,2,4); }, AU, "anisotropic");
+    expect("dirichlet two levels Ok", [&] { Cfg d = c; d.set_bc(pb::BC::Dirichlet); return d; }(), S::Ok, nullptr, AU, "");
+    expect("periodic three levels Ok", [&] { Cfg d = c; d.set_bc(pb::BC::Periodic); d.nlev = 3; d.n = 32; return d; }(), S::Ok, nullptr, AU, "");
+    expect("one-level composite Ok", [&] { Cfg d = c; d.nlev = 1; return d; }(), S::Ok, nullptr, AU, "");
+    expect("plane2d Neumann Ok", [&] { Cfg d = c; d.plane2d = true; return d; }(), S::Ok, nullptr, AU, "");
     // InvalidInput
     std::vector<std::unique_ptr<MultiFab>> keep;
     auto set_ba = [&keep] (pb::PressureProblem& p, int l, BoxArray const& b) {
@@ -897,29 +925,29 @@ void run_comp_sel ()
         keep.push_back(std::make_unique<MultiFab>(b, p.levels[l].dm, 1, 1)); p.levels[l].phi = keep.back().get();
     };
     expect("level 0 not covering the domain invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
-        set_ba(p, 0, BoxArray(Box(IntVect(0), IntVect(7)))); }, K::Auto, "cover the domain exactly");
+        set_ba(p, 0, BoxArray(Box(IntVect(0), IntVect(7)))); }, AU, "cover the domain exactly");
     expect("fine boxes not aligned to the ratio invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
-        set_ba(p, 1, BoxArray(Box(IntVect(5,5,5), IntVect(12,12,12)))); }, K::Auto, "aligned");
+        set_ba(p, 1, BoxArray(Box(IntVect(5,5,5), IntVect(12,12,12)))); }, AU, "aligned");
     expect("fine level outside the coarse BoxArray invalid", [&] { Cfg d = c; d.nlev = 3; d.n = 32; return d; }(), S::InvalidInput, [&] (pb::PressureProblem& p) {
         // level 2 box (level-2 indices) entirely outside the coarsened range of level 1
-        set_ba(p, 2, BoxArray(Box(IntVect(0,0,0), IntVect(7,7,7)))); }, K::Auto, "nested");
+        set_ba(p, 2, BoxArray(Box(IntVect(0,0,0), IntVect(7,7,7)))); }, AU, "nested");
     expect("no buffer cell around level 2 invalid (3 levels)", [&] { Cfg d = c; d.nlev = 3; d.n = 32; return d; }(), S::InvalidInput, [&] (pb::PressureProblem& p) {
         // level 1 covers [16,47]; a level 2 box flush with its lower edge has no coarse neighbour cell
-        set_ba(p, 2, BoxArray(Box(IntVect(32,32,32), IntVect(63,63,63)))); }, K::Auto, "nested");
+        set_ba(p, 2, BoxArray(Box(IntVect(32,32,32), IntVect(63,63,63)))); }, AU, "nested");
     expect("domain of level 1 not the refined domain invalid", c, S::InvalidInput, [] (pb::PressureProblem& p) {
-        p.levels[1].ref_ratio = IntVect(4); }, K::Auto, "refined by ref_ratio");
+        p.levels[1].ref_ratio = IntVect(4); }, AU, "refined by ref_ratio");
     expect("periodicity not matching the BC invalid", c, S::InvalidInput, [] (pb::PressureProblem& p) {
-        p.bc.fill(pb::BC::Periodic); }, K::Auto, "periodicity");
+        p.bc.fill(pb::BC::Periodic); }, AU, "periodicity");
     {
         MultiFab other;
         expect("rhs layout mismatch invalid", c, S::InvalidInput, [&] (pb::PressureProblem& p) {
-            BoxArray b(p.levels[1].ba.minimalBox()); b.maxSize(4); other.define(b, DistributionMapping(b), 1, 0); p.levels[1].rhs = &other; }, K::Auto, "rhs/phi BoxArray");
+            BoxArray b(p.levels[1].ba.minimalBox()); b.maxSize(4); other.define(b, DistributionMapping(b), 1, 0); p.levels[1].rhs = &other; }, AU, "rhs/phi BoxArray");
     }
     {   // a fine level flush with a non-periodic domain boundary is fine (no buffer needed there); periodic wrap is fine too
         Cfg d = c; d.full = true;
-        expect("fine level over the whole domain Ok (non-periodic)", d, S::Ok, nullptr, K::Auto, "");
+        expect("fine level over the whole domain Ok (non-periodic)", d, S::Ok, nullptr, AU, "");
         d.set_bc(pb::BC::Periodic);
-        expect("fine level over the whole domain Ok (periodic)", d, S::Ok, nullptr, K::Auto, "");
+        expect("fine level over the whole domain Ok (periodic)", d, S::Ok, nullptr, AU, "");
     }
     // legacy: nlevels > 1 on the single-level fields stays NotBuilt
     {
@@ -936,10 +964,12 @@ void run_comp_sel ()
 // --------------------------------------------------------------------------------------------------------------
 // mode=comp_ws: D-058 workspace rebuild
 // --------------------------------------------------------------------------------------------------------------
-void run_comp_ws ()
+void run_comp_ws (ParmParse& pp)
 {
     Cfg c; c.n = 16; c.nlev = 2; c.ratio = 2; c.mgs = 8; c.set_bc(pb::BC::Periodic);
     pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0; o.residual_tol = 1e-8;
+    apply_backend_opts(pp, o);
+    const bool hyp = (o.backend == pb::BackendKind::HYPRE);
     pb::PressureWorkspace ws;
     ccheck(!ws.built() && ws.num_levels() == 0, "empty workspace is not built");
     {
@@ -949,6 +979,12 @@ void run_comp_ws ()
         ccheck(ws.rebuild(p, &msg) == pb::Status::Ok && ws.built() && ws.num_levels() == 2 && ws.matches(p), "rebuild(hierarchy A)");
         pb::PressureResult r = pb::solve_pressure(p, o, &ws);
         ccheck(r.status == pb::Status::Ok && !r.workspace_rebuilt && r.residual_rel2 <= 1e-8, "solve with the workspace, hierarchy A");
+        if (hyp) {
+            ccheck(r.backend == "HYPRE" && ws.hypre_built() && !r.backend_status.plan_reused, "HYPRE set-up built lazily by the first solve and cached in the workspace");
+            h.phi[1]->setVal(0.0); h.phi[0]->setVal(0.0);
+            pb::PressureResult rr = pb::solve_pressure(p, o, &ws);
+            ccheck(rr.status == pb::Status::Ok && rr.backend_status.plan_reused && rr.residual_rel2 <= 1e-8, "second solve reuses the cached HYPRE set-up");
+        }
     }   // hierarchy A (rhs, phi, BoxArrays) destroyed: the workspace must not touch them again
     {
         Cfg c2 = c; c2.mgs = 4;     // different decomposition: stale workspace
@@ -957,18 +993,22 @@ void run_comp_ws ()
         ccheck(!ws.matches(p2), "workspace of A does not match the new decomposition");
         pb::PressureResult r = pb::solve_pressure(p2, o, &ws);
         ccheck(r.status == pb::Status::Ok && r.workspace_rebuilt && r.residual_rel2 <= 1e-8, "stale workspace is rebuilt automatically and flagged");
+        if (hyp) { ccheck(r.backend == "HYPRE" && !r.backend_status.plan_reused && ws.hypre_built(), "HYPRE set-up of the old hierarchy dropped and rebuilt for the new decomposition"); }
         ccheck(ws.matches(p2), "workspace matches after the automatic rebuild");
         // explicit regrid: a different patch
         Cfg c3 = c; c3.full = true;
         Hier h3 = build_hier(c3, 0);
         pb::PressureProblem p3 = make_problem(c3, h3);
         ccheck(ws.rebuild(p3) == pb::Status::Ok && ws.matches(p3), "rebuild(hierarchy C: fine level over the whole domain)");
+        if (hyp) { ccheck(!ws.hypre_built(), "explicit rebuild invalidates the cached HYPRE set-up"); }
         pb::PressureResult r3 = pb::solve_pressure(p3, o, &ws);
         ccheck(r3.status == pb::Status::Ok && !r3.workspace_rebuilt && r3.residual_rel2 <= 1e-8, "solve after explicit rebuild");
+        if (hyp) { ccheck(r3.backend == "HYPRE" && !r3.backend_status.plan_reused && ws.hypre_built(), "HYPRE set-up rebuilt for the new hierarchy after the explicit rebuild"); }
         // rebuild with an unsupported problem leaves the workspace empty
         pb::PressureProblem bad = p3; bad.cylindrical = true;
         std::string msg;
         ccheck(ws.rebuild(bad, &msg) == pb::Status::NotBuilt && !ws.built() && !msg.empty(), "failed rebuild empties the workspace and reports the reason");
+        if (hyp) { ccheck(!ws.hypre_built(), "failed rebuild leaves no HYPRE set-up"); }
     }
 }
 
@@ -1216,16 +1256,223 @@ void run_comp_gauge (ParmParse& pp)
     }
 }
 
+
+// --------------------------------------------------------------------------------------------------------------
+// HYPRE backend (hypre-notes.md): operator equivalence with MLMG, solve agreement, decomposition, selector.
+// --------------------------------------------------------------------------------------------------------------
+Cfg cfg_from_pp (ParmParse& pp, std::string& bcs)
+{
+    Cfg c;
+    pp.query("n", c.n); pp.query("nlev", c.nlev); pp.query("ratio", c.ratio);
+    int full = 0, plane = 0; pp.query("full", full); pp.query("plane2d", plane);
+    c.full = full != 0; c.plane2d = plane != 0;
+    bcs = "neumann"; pp.query("bc", bcs); c.set_bc(cparse_bc(bcs));
+    std::string bf;
+    if (pp.query("bcfaces", bf)) {
+        std::vector<std::string> tok; std::string cur;
+        for (char ch : bf + ",") { if (ch == ',') { tok.push_back(cur); cur.clear(); } else { cur += ch; } }
+        AMREX_ALWAYS_ASSERT(tok.size() == 3);
+        auto L = [] (char ch) { return ch == 'N' ? pb::BC::Neumann : ch == 'D' ? pb::BC::Dirichlet : pb::BC::Periodic; };
+        for (int d = 0; d < 3; ++d) { AMREX_ALWAYS_ASSERT(tok[d].size() == 2); c.bcd[d] = L(tok[d][0]); c.bchi[d] = L(tok[d][1]); }
+        bcs = bf; c.bc = pb::BC::Neumann; c.mixed_faces = true;
+    }
+    pp.query("mgs", c.mgs); pp.query("kx", c.kx); pp.query("ky", c.ky); pp.query("kz", c.kz);
+    if (c.plane2d) { c.ky = 0; }
+    pp.query("ly", c.ly); pp.query("layout", c.layout);
+    return c;
+}
+
+double hash01 (int l, int i, int j, int k)
+{
+    std::uint64_t h = 1469598103934665603ULL;
+    for (int v : {l, i + 1000, j + 1000, k + 1000}) { h ^= std::uint64_t(v); h *= 1099511628211ULL; h ^= h >> 29; }
+    return double(h % 2000003ULL)/1000001.5 - 1.0;
+}
+
+// The matrix the HYPRE backend assembles applied to a random field against MLMG's composite operator (compResidual of b = 0).
+void run_hypre_op (ParmParse& pp)
+{
+    std::string bcs;
+    Cfg c = cfg_from_pp(pp, bcs);
+    AMREX_ALWAYS_ASSERT(!c.plane2d);
+    int dmkind = 0; pp.query("dmkind", dmkind);
+    Hier h = build_hier(c, dmkind);
+    pb::PressureProblem p = make_problem(c, h);
+    const int nlev = c.nlev;
+    // random field on the uncovered cells, covered cells = average down (as the solve does before its residual check)
+    for (int l = 0; l < nlev; ++l) {
+        h.phi[l]->setVal(0.0);
+        for (MFIter mfi(*h.phi[l]); mfi.isValid(); ++mfi) {
+            auto const& a = h.phi[l]->array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = Real(hash01(l, i, j, k)); });
+        }
+    }
+    {   // probe: unit vector at one cell (probe_l, probe_i, probe_j, probe_k)
+        std::vector<int> pr; if (pp.queryarr("probe", pr) && pr.size() == 4) {
+            for (int l = 0; l < nlev; ++l) {
+                h.phi[l]->setVal(0.0);
+                for (MFIter mfi(*h.phi[l]); mfi.isValid(); ++mfi) {
+                    auto const& a = h.phi[l]->array(mfi);
+                    if (l == pr[0] && mfi.validbox().contains(IntVect(pr[1],pr[2],pr[3]))) { a(pr[1],pr[2],pr[3]) = 1.0; }
+                }
+            }
+        }
+    }
+    for (int l = nlev-1; l >= 1; --l) { amrex::average_down(*h.phi[l], *h.phi[l-1], 0, 1, h.ratio[l]); }
+    // MLMG operator
+    Vector<Geometry> geoms(h.geom.begin(), h.geom.end());
+    Vector<BoxArray> bas(h.ba.begin(), h.ba.end());
+    Vector<DistributionMapping> dms(h.dm.begin(), h.dm.end());
+    MLPoisson mlp(geoms, bas, dms, LPInfo());
+    mlp.setMaxOrder(2);
+    auto lb = [] (pb::BC b) { return b == pb::BC::Neumann ? LinOpBCType::Neumann : b == pb::BC::Periodic ? LinOpBCType::Periodic : LinOpBCType::Dirichlet; };
+    Array<LinOpBCType,3> lo{lb(p.bc[0]), lb(p.bc[1]), lb(p.bc[2])}, hi{lb(p.bc[3]), lb(p.bc[4]), lb(p.bc[5])};
+    mlp.setDomainBC(lo, hi);
+    for (int l = 0; l < nlev; ++l) { mlp.setLevelBC(l, nullptr); }
+    MLMG mlmg(mlp);
+    std::vector<std::unique_ptr<MultiFab>> res, zero, y;
+    Vector<MultiFab*> pres; Vector<MultiFab*> pphi; Vector<MultiFab const*> pz;
+    for (int l = 0; l < nlev; ++l) {
+        res.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0)); res[l]->setVal(0.0);
+        zero.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0)); zero[l]->setVal(0.0);
+        y.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0)); y[l]->setVal(0.0);
+        pres.push_back(res[l].get()); pphi.push_back(h.phi[l].get()); pz.push_back(zero[l].get());
+    }
+    mlmg.compResidual(pres, pphi, pz);
+    // HYPRE operator (no pin)
+    std::vector<pb::HypreLayoutLevel> hl;
+    for (int l = 0; l < nlev; ++l) { pb::HypreLayoutLevel L; L.ba = h.ba[l]; L.dm = h.dm[l]; L.geom = h.geom[l]; L.ratio = h.ratio[l]; hl.push_back(L); }
+    pb::HypreOptions ho;
+    pb::HypreSystem sys(hl, pb::effective_bc(p.bc, h.geom[0].Domain()), ho, c.singular(), false);
+    ccheck(sys.ok(), "HYPRE system built: " + sys.message());
+    std::vector<MultiFab const*> px; std::vector<MultiFab*> py;
+    for (int l = 0; l < nlev; ++l) { px.push_back(h.phi[l].get()); py.push_back(y[l].get()); }
+    sys.apply(px, py);
+    double dmax = 0.0, rmax = 0.0, dmax_cf = 0.0;
+    int dump = 0, ndump = 0, dump_level = 0; pp.query("dump", dump); pp.query("dump_level", dump_level);
+    long nbad[4] = {0,0,0,0};
+    for (int l = 0; l < nlev; ++l) {
+        const double V = double(h.geom[l].CellSize(0))*h.geom[l].CellSize(1)*h.geom[l].CellSize(2);
+        for (MFIter mfi(*y[l]); mfi.isValid(); ++mfi) {
+            auto const& ya = y[l]->const_array(mfi);
+            auto const& ra = res[l]->const_array(mfi);
+            auto const& ua = h.unc[l]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (ua(i,j,k) == 0) { return; }
+                const double d = std::abs(ya(i,j,k)/V - ra(i,j,k));
+                dmax = std::max(dmax, d); rmax = std::max(rmax, std::abs(double(ra(i,j,k))));
+                if (d > 1e-9*std::abs(double(ra(i,j,k))) + 1e-9) { ++nbad[l]; }
+                if (dump > 1 && (std::abs(double(ra(i,j,k))) > 1e-9 || std::abs(ya(i,j,k)/V) > 1e-9)) { Print() << "  PROBE l=" << l << " (" << i << "," << j << "," << k << ") hypre=" << ya(i,j,k)/V << " mlmg=" << ra(i,j,k) << "\n"; }
+                if (dump && l >= dump_level && d > 1e-9*std::abs(double(ra(i,j,k))) + 1e-9 && ndump < 12) { ++ndump; Print() << "  DIFF l=" << l << " cell=(" << i << "," << j << "," << k << ") hypre=" << ya(i,j,k)/V << " mlmg=" << ra(i,j,k) << "\n"; }
+            });
+        }
+    }
+    (void)dmax_cf;
+    if (dump) { Print() << "NBAD l0=" << nbad[0] << " l1=" << nbad[1] << " l2=" << nbad[2] << "\n"; }
+    ParallelDescriptor::ReduceRealMax(dmax); ParallelDescriptor::ReduceRealMax(rmax);
+    Print() << std::setprecision(6) << "HYPOP bc=" << bcs << " nlev=" << nlev << " ratio=" << c.ratio << " layout=" << c.layout << " full=" << int(c.full)
+            << " nranks=" << ParallelDescriptor::NProcs() << " rows=" << sys.rows() << " nnz=" << sys.nonzeros()
+            << " max_abs_diff=" << dmax << " max_abs_op=" << rmax << " rel=" << dmax/rmax << "\n";
+    ccheck(dmax/rmax <= 1.0e-12, "HYPRE matrix applied to a random field equals MLMG's composite operator (rel max diff <= 1e-12)");
+}
+
+// backend selection from the command line: backend=auto|fft|mlmg|hypre, krylov=auto|pcg|gmres|bicgstab, coarsen= relax= sweeps= strong= interp= agg=
+void apply_backend_opts (ParmParse& pp, pb::PressureOptions& o)
+{
+    std::string b;
+    if (pp.query("backend", b)) {
+        o.backend = b == "hypre" ? pb::BackendKind::HYPRE : b == "mlmg" ? pb::BackendKind::MLMG : b == "fft" ? pb::BackendKind::FFT : pb::BackendKind::Auto;
+    }
+    std::string k;
+    if (pp.query("krylov", k)) {
+        o.hypre.krylov = k == "pcg" ? pb::HypreKrylov::PCG : k == "gmres" ? pb::HypreKrylov::GMRES : k == "bicgstab" ? pb::HypreKrylov::BiCGSTAB : pb::HypreKrylov::Auto;
+    }
+    pp.query("coarsen", o.hypre.coarsen_type); pp.query("relax", o.hypre.relax_type); pp.query("sweeps", o.hypre.num_sweeps);
+    pp.query("strong", o.hypre.strong_threshold); pp.query("interp", o.hypre.interp_type); pp.query("agg", o.hypre.agg_levels);
+    pp.query("max_iter", o.max_iter);
+}
+
+// HYPRE vs MLMG on the same composite problem: agreement, iteration counts, timing, run-to-run repeatability.
+void run_hypre_cmp (ParmParse& pp)
+{
+    std::string bcs;
+    Cfg c = cfg_from_pp(pp, bcs);
+    int dmkind = 0; pp.query("dmkind", dmkind);
+    double tol_rel = 1e-12; pp.query("tol_rel", tol_rel);
+    double eps_H = 1e-8; pp.query("eps_H", eps_H);
+    std::string out; pp.query("out", out);
+    Hier h = build_hier(c, dmkind);
+    pb::PressureProblem p = make_problem(c, h);
+    pb::PressureOptions om;
+    om.tol_rel = tol_rel; om.removed_mean_warn = 1.0; om.residual_tol = eps_H; om.verbose = 0;
+    pb::PressureOptions oh = om;
+    oh.backend = pb::BackendKind::HYPRE; apply_backend_opts(pp, oh); oh.backend = pb::BackendKind::HYPRE;
+    om.backend = pb::BackendKind::MLMG;
+    auto zero = [&] () { for (auto& m : h.phi) { m->setVal(0.0); } };
+    zero();
+    pb::PressureWorkspace wm;
+    const double t0 = amrex::second();
+    pb::PressureResult rm = pb::solve_pressure(p, om, &wm);
+    const double tm = amrex::second() - t0;
+    auto vm = hier_gather(h, c.nlev);
+    zero();
+    pb::PressureWorkspace wh;
+    const double t1 = amrex::second();
+    pb::PressureResult rh = pb::solve_pressure(p, oh, &wh);
+    const double th = amrex::second() - t1;
+    auto vh = hier_gather(h, c.nlev);
+    // second HYPRE solve in a fresh workspace, and a third reusing the cached set-up
+    zero();
+    pb::PressureWorkspace wh2;
+    pb::PressureResult rh2 = pb::solve_pressure(p, oh, &wh2);
+    auto vh2 = hier_gather(h, c.nlev);
+    zero();
+    const double t3 = amrex::second();
+    pb::PressureResult rh3 = pb::solve_pressure(p, oh, &wh);
+    const double th3 = amrex::second() - t3;
+    auto vh3 = hier_gather(h, c.nlev);
+    double dn = 0.0, nn = 0.0, dmax = 0.0, nmax = 0.0;
+    for (std::size_t q = 0; q < vm.size(); ++q) {
+        const double d = vh[q] - vm[q]; dn += d*d; nn += vm[q]*vm[q]; dmax = std::max(dmax, std::abs(d)); nmax = std::max(nmax, std::abs(vm[q]));
+    }
+    const double rel2 = std::sqrt(dn/std::max(nn, 1e-300)), relmax = dmax/std::max(nmax, 1e-300);
+    Print() << std::setprecision(6) << "HYPCMP n=" << c.n << " nlev=" << c.nlev << " ratio=" << c.ratio << " full=" << int(c.full) << " plane2d=" << int(c.plane2d)
+            << " bc=" << bcs << " layout=" << c.layout << " nranks=" << ParallelDescriptor::NProcs() << " mgs=" << c.mgs
+            << " mlmg_status=" << pb::to_string(rm.status) << " hypre_status=" << pb::to_string(rh.status)
+            << " mlmg_iters=" << rm.backend_status.iterations << " hypre_iters=" << rh.backend_status.iterations << " method=" << rh.backend_status.hypre_method
+            << " rows=" << rh.backend_status.hypre_rows << " nnz=" << rh.backend_status.hypre_nnz
+            << " mlmg_true_rel2=" << rm.residual_rel2 << " hypre_true_rel2=" << rh.residual_rel2
+            << " rel2_diff=" << rel2 << " relmax_diff=" << relmax
+            << " t_mlmg=" << tm << " t_hypre_first=" << th << " t_hypre_reuse=" << th3
+            << " hypre_setup=" << rh.backend_status.hypre_setup_seconds << " hypre_solve=" << rh.backend_status.hypre_solve_seconds
+            << " repeat_bitwise=" << ((vh == vh2 && vh == vh3) ? 1 : 0) << " reuse=" << int(rh3.backend_status.plan_reused)
+            << " gauge_shift_diff=" << (rh.components.empty() || rm.components.empty() ? 0.0 : std::abs(rh.components[0].gauge_shift - rm.components[0].gauge_shift))
+            << " hash=" << hx(fnv(vh)) << "\n";
+    ccheck(rm.status == pb::Status::Ok, "MLMG composite solve status Ok");
+    ccheck(rh.status == pb::Status::Ok, "HYPRE composite solve status Ok (" + rh.message + ")");
+    ccheck(rh.backend == "HYPRE", "HYPRE composite solve was run by the HYPRE backend (" + rh.backend + ")");
+    ccheck(rh.residual_checked && rh.residual_rel2 <= eps_H, "HYPRE composite true residual " + std::to_string(rh.residual_rel2) + " <= eps_H (independent MLMG operator)");
+    ccheck(rel2 <= eps_H, "HYPRE vs MLMG composite solution relative L2 difference " + std::to_string(rel2) + " <= eps_H");
+    ccheck(vh == vh2 && vh == vh3, "HYPRE composite solve is bitwise repeatable (fresh workspace and reused set-up)");
+    ccheck(rh3.backend_status.plan_reused, "second HYPRE solve in the same workspace reuses the set-up");
+    if (!out.empty() && ParallelDescriptor::IOProcessor()) {
+        std::ofstream ofs(out + "_phi.bin", std::ios::binary);
+        ofs.write(reinterpret_cast<const char*>(vh.data()), static_cast<std::streamsize>(vh.size()*sizeof(double)));
+    }
+}
+
 } // anonymous namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp)
 {
     if (mode == "comp") { run_comp(pp); }
     else if (mode == "comp_ns2d") { run_comp_ns2d(pp); }
-    else if (mode == "comp_sel") { run_comp_sel(); }
-    else if (mode == "comp_ws") { run_comp_ws(); }
+    else if (mode == "comp_sel") { run_comp_sel(pp); }
+    else if (mode == "comp_ws") { run_comp_ws(pp); }
     else if (mode == "comp_gauge") { run_comp_gauge(pp); }
     else if (mode == "comp_trigger") { run_comp_trigger(); }
+    else if (mode == "hypre_op") { run_hypre_op(pp); }
+    else if (mode == "hypre_cmp") { run_hypre_cmp(pp); }
     else { return -1; }
     return g_cfail;
 }

@@ -93,3 +93,33 @@ pb_add_test(pb_bcdata_mms   bcdata_mms)
 
 # D-057: boundary-type mapping for one-cell directions and the sweep strings of the driver.
 pb_add_test(pressure_bc_map pressure_bc_map)
+
+# HYPRE assembled-matrix backend (frozen/hypre-notes.md): explicit request only, same discrete operator as MLMG.
+# (a) FFT vs MLMG vs HYPRE agree within eps_H on the single-level cases (Neumann, periodic, Dirichlet, non-cubic, one-cell y).
+foreach(bc neumann periodic dirichlet)
+  pb_add_test(pb_hypre_single_${bc}_34x18x32 hypsingle --bc ${bc} --n "34 18 32")
+  pb_add_test(pb_hypre_single_${bc}_64       hypsingle --bc ${bc} --n "64 64 64")
+endforeach()
+foreach(bc neumann periodic)
+  pb_add_test(pb_hypre_single_${bc}_plane2d  hypsingle --bc ${bc} --n "16 1 16")
+endforeach()
+pb_add_test(pb_hypre_mixed_faces_sweep mixedfaces --be hypre)
+pb_add_test(pb_hypre_bcdata_exact      bcdata_exact --be hypre)
+# (c) decomposition independence (1/2/4 ranks, two box sizes) and run-to-run bitwise repeatability.
+foreach(bc neumann periodic)
+  pb_add_test(pb_hypre_decomp_${bc}_64 decomp --be hypre --bc ${bc} --n "64 64 64")
+  pb_add_test(pb_hypre_repeat_${bc}_64 repeat --be hypre --bc ${bc} --n "64 64 64")
+endforeach()
+# (d) CI gate: the same frozen solves through MLMG and HYPRE must agree within eps_H (with a negative control).
+pb_add_test(pb_hypre_ci_vs_mlmg hypci --n "34 18 32")
+# (b) composite hierarchies: HYPRE vs MLMG, independent true residual, repeatability, rank independence.
+pb_add_test(pb_hypre_comp_vs_mlmg  hypcomp)
+pb_add_test(pb_hypre_comp_ns2d_16  compns2d --be hypre)
+# (e) selector (NotBuilt for masks, covered cells, cylindrical, stretched, variable coefficients) is in pb_selector;
+#     the composite selector checks are repeated with HYPRE as the requested backend.
+pb_add_test(pb_hypre_comp_selector compsel --be hypre)
+pb_add_test(pb_hypre_comp_workspace compws --be hypre)
+foreach(bc "NN,NN,NN" "PP,PP,PP")
+  string(REPLACE "," "" bcn ${bc})
+  pb_add_test(pb_hypre_cache_${bcn} hypcache --bc ${bc} --n "32 32 32")
+endforeach()

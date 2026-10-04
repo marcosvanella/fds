@@ -27,9 +27,10 @@ PressureWorkspace::PressureWorkspace () = default;
 PressureWorkspace::~PressureWorkspace () = default;
 PressureWorkspace::PressureWorkspace (PressureWorkspace&&) noexcept = default;
 PressureWorkspace& PressureWorkspace::operator= (PressureWorkspace&&) noexcept = default;
-bool PressureWorkspace::built () const { return m_impl && (m_impl->nlev > 0 || m_impl->fft); }
+bool PressureWorkspace::built () const { return m_impl && (m_impl->nlev > 0 || m_impl->fft || m_impl->hypre); }
 int PressureWorkspace::num_levels () const { return m_impl ? m_impl->nlev : 0; }
 bool PressureWorkspace::fft_plan_built () const { return m_impl && m_impl->fft; }
+bool PressureWorkspace::hypre_built () const { return m_impl && (m_impl->hypre || m_impl->hsys); }
 void PressureWorkspace::discard () { m_impl.reset(); }
 PressureWorkspace::Impl& PressureWorkspace::ensure_impl ()
 {
@@ -161,7 +162,7 @@ bool impl_matches (PressureWorkspace::Impl const& W, PressureProblem const& p)
 
 bool PressureWorkspace::matches (PressureProblem const& p) const
 {
-    if (p.levels.empty()) { return m_impl && m_impl->fft && m_impl->fft->plan_matches(p); }
+    if (p.levels.empty()) { return m_impl && ((m_impl->fft && m_impl->fft->plan_matches(p)) || (m_impl->hypre && m_impl->hypre->plan_matches(p))); }
     return m_impl && m_impl->nlev > 0 && impl_matches(*m_impl, p);
 }
 
@@ -189,7 +190,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
 {
     Selection s;
     if (requested == BackendKind::FFT) {
-        s.message = "composite (multi-level) solve on the FFT backend is not built: only MLMG does composite"; return s;
+        s.message = "composite (multi-level) solve on the FFT backend is not built: only MLMG and HYPRE do composite"; return s;
     }
     for (auto const& L : p.levels) {
         if (!L.geom.IsCartesian()) {
@@ -241,7 +242,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
         if (rr != 2 && rr != 4) { s.message = "composite refinement ratios other than 2 and 4 are not built"; return s; }
     }
     s.ok = true;
-    s.kind = BackendKind::MLMG;
+    s.kind = (requested == BackendKind::HYPRE) ? BackendKind::HYPRE : BackendKind::MLMG;
     return s;
 }
 
@@ -431,7 +432,8 @@ template <class V> Vector<MultiFab*> ptrs (V const& v)
 PressureResult solve_composite (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws, bool full)
 {
     PressureResult R;
-    R.backend = "MLMG";
+    const bool use_hypre = (o.backend == BackendKind::HYPRE);
+    R.backend = use_hypre ? "HYPRE" : "MLMG";
     PressureWorkspace local;
     if (!ws) { ws = &local; }
     if (!ws->matches(p)) {
@@ -559,17 +561,37 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     Vector<MultiFab const*> pb_;
     for (auto const& m : (ext ? bx : b)) { pb_.push_back(m.get()); }
     BackendStatus bs;
-    try {
-        mlmg.solve(pphi, pb_, Real(o.tol_rel), Real(0.0));
-        bs.converged = true;
-    } catch (std::exception const&) {
-        bs.converged = false;
+    if (!use_hypre) {
+        try {
+            mlmg.solve(pphi, pb_, Real(o.tol_rel), Real(0.0));
+            bs.converged = true;
+        } catch (std::exception const&) {
+            bs.converged = false;
+        }
+        bs.iterations = mlmg.getNumIters();
+        const Real b0 = mlmg.getInitRHS();
+        bs.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
+        R.backend_status = bs;
+        if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *phix[l], *phi[l]); } }
+    } else {
+        // HYPRE: assembled matrix on the original layout (a one-cell direction simply has no term), cached in the workspace.
+        std::vector<HypreLayoutLevel> hl;
+        for (int l = 0; l < nlev; ++l) { HypreLayoutLevel L; L.ba = W.ba[l]; L.dm = W.dm[l]; L.geom = W.geom[l]; L.ratio = W.ratio[l]; hl.push_back(L); }
+        std::array<BC,6> const ebc = effective_bc(p.bc, p.levels[0].geom.Domain());
+        const bool reused = W.hsys && W.hsys->ok() && W.hsys->matches(hl, ebc, o.hypre, ci.singular);
+        if (!reused) { W.hsys = std::make_unique<HypreSystem>(hl, ebc, o.hypre, ci.singular); }
+        if (!W.hsys->ok()) {
+            R.status = Status::NotBuilt; R.message = W.hsys->message(); R.backend = "";
+            W.hsys.reset();
+            return R;
+        }
+        std::vector<MultiFab*> ph; std::vector<MultiFab const*> bb;
+        for (int l = 0; l < nlev; ++l) { ph.push_back(phi[l].get()); bb.push_back(b[l].get()); }
+        bs = W.hsys->solve(ph, bb, o.tol_rel, o.max_iter, o.use_initial_guess);
+        bs.plan_reused = reused;
+        bs.hypre_setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
+        R.backend_status = bs;
     }
-    bs.iterations = mlmg.getNumIters();
-    const Real b0 = mlmg.getInitRHS();
-    bs.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
-    R.backend_status = bs;
-    if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *phix[l], *phi[l]); } }
 
     // Gauge (D-067): sum(V*rho*(phi - KRES)) / sum(V*rho) over the uncovered cells of the hierarchy (exact sums, one
     // fixed-point scale per sum) is removed from phi on all levels; with rho = 1 and KRES = 0 this is the plain exact
