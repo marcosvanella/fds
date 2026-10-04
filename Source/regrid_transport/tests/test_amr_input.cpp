@@ -103,6 +103,18 @@ int main()
             parse("&AMR MAX_LEVEL=1, POST_REGRID_PROJECTION='SOMETIMES' /", re);
             CHECK(re.has_error_containing("POST_REGRID_PROJECTION"));
             CHECK(!ra.has_error_containing("POST_REGRID") && !rb.has_error_containing("POST_REGRID"));
+            // OFF prints a warning (diagnostic setting, not a gate run); AUTO and ON do not
+            CHECK(ra.warnings.empty() && rb.warnings.empty());
+            CHECK(rc.warnings.size() == 1 && rc.warnings[0].find("not valid for a gate run") != std::string::npos);
+            CHECK(rd.warnings.size() == 1);
+        }
+        {   // &MISC EXACT_SUMS is accepted (logical, default F) and has no effect; other &MISC content is not looked at; a non-logical value is an error
+            Report ra, rb, rc, rd;
+            CHECK(!parse("&AMR MAX_LEVEL=1 /", ra).exact_sums && ra.ok());
+            CHECK(parse("&MISC EXACT_SUMS=.TRUE., SIMULATION_MODE='DNS', ANYTHING_ELSE=3 /\n&AMR MAX_LEVEL=1 /", rb).exact_sums && rb.ok() && rb.warnings.empty());
+            CHECK(!parse("&MISC EXACT_SUMS=.FALSE. /", rc).exact_sums && rc.ok());
+            parse("&MISC EXACT_SUMS='maybe' /", rd);
+            CHECK(rd.has_error_containing("EXACT_SUMS"));
         }
         Report r9;
         parse("&AMR MAX_LEVEL=1, MAX_LEVEL=abc /", r9);

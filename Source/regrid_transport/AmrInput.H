@@ -50,6 +50,7 @@ struct AmrParams {
     int output_level_cap = -1;   // OUTPUT_LEVEL_CAP (L_out, IR-008 (b)); -1 = MAX_LEVEL
     VelocityTransfer velocity_transfer = VelocityTransfer::FaceDivFree;  // VELOCITY_TRANSFER, provisional default (FR-012)
     PostRegridProjection post_regrid_projection = PostRegridProjection::Auto;  // POST_REGRID_PROJECTION: 'AUTO' (default, D-063), 'ON' or 'OFF'
+    bool exact_sums = false;     // &MISC EXACT_SUMS: read so that the line is accepted; the AMR code ignores it (its sums follow the FDS-order default of D-028/D-053)
     std::vector<RegionSpec> regions;        // &AMR_REGION lines
 
     // Value for level `lev` of a per-level vector (a single entry applies to every level).
@@ -70,7 +71,7 @@ struct NamelistGroup {
 // Finds every &NAME ... / group in `text`. Text outside groups is ignored (as FDS does); scanning stops at &TAIL.
 std::vector<NamelistGroup> scan_namelists(const std::string& text);
 
-// Parses the &AMR and &AMR_REGION groups of `text` and validates them (IR-003, FR-010: ratios 2 and 4 only; ranges; list lengths;
+// Parses the &AMR and &AMR_REGION groups of `text` (and reads EXACT_SUMS from &MISC, logical, default F, without any other &MISC check) and validates them (IR-003, FR-010: ratios 2 and 4 only; ranges; list lengths;
 // unknown names are errors). `present` is false and defaults are returned when there is no &AMR line.
 AmrParams parse_amr_params(const std::string& text, Report& rep);
 

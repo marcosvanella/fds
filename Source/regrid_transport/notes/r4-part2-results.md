@@ -62,6 +62,9 @@
 - Setting `POST_REGRID_PROJECTION` in `&AMR`: `'AUTO'` (default), `'ON'`, `'OFF'` (also .TRUE./.FALSE.). AUTO projects when some level >= 1 keeps old cells and gains new cells in the
   same regrid (the D-063 condition: new fine faces next to retained ones); with no retained fine cells it is not needed. ON: after every regrid that changed the grids. OFF: never.
   The ruling text states the condition but not the key name or its values; the name and the three values are an implementation choice to be confirmed.
+  `OFF` makes the parser add a warning (`Report::warnings`) saying that the setting is a diagnostic one and not valid for a gate run; the caller prints it into the .out file with the other
+  input warnings, and the gate scripts must refuse a case that carries it. `&MISC EXACT_SUMS` (logical, default F) is read by the same parser so that the line is accepted without error
+  (`AmrParams::exact_sums`); the AMR code does not use it.
 - Results with the real solver, tolerance 1e-12 relative, acceptance bound 1e-9 u/dx_fine, 1 and 4 ranks the same bound values:
   3-D 32^3 two levels ratio 2: max|div u - D| 1.0 -> 7e-14, at most 9 iterations; 2-D 48x1x48 three levels ratio 2: 1.0 -> 2.5e-13 (8 iterations; converges where the mock did not);
   2-D 16x1x16 (ns2d_16 style, one-cell direction y, two levels, ratio 2): 1.4 -> 6e-13; 2-D 32x1x32 ratio 4 (not a gate): 3.5 -> 1e-12.

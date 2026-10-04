@@ -227,6 +227,17 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
                 else if (v == "ON" || v == ".TRUE." || v == "T") p.post_regrid_projection = PostRegridProjection::On;
                 else if (v == "OFF" || v == ".FALSE." || v == "F") p.post_regrid_projection = PostRegridProjection::Off;
                 else rep.error(at_line(g) + "POST_REGRID_PROJECTION must be 'AUTO', 'ON' or 'OFF' (or .TRUE./.FALSE.)");
+                if (p.post_regrid_projection == PostRegridProjection::Off)
+                    rep.warn(at_line(g) + "POST_REGRID_PROJECTION='OFF': no projection after a regrid; the divergence of the new fine faces next to retained ones is not repaired. "
+                                          "This is a diagnostic setting, not valid for a gate run");
+            }
+        } else if (g.name == "MISC") {
+            auto es = g.values.find("EXACT_SUMS");   // the FDS reader owns &MISC; only this one logical is looked at, and it has no effect here
+            if (es != g.values.end()) {
+                std::string v = es->second.size() == 1 ? upper(es->second[0]) : std::string();
+                if (v == ".TRUE." || v == "T" || v == ".T." || v == "TRUE") p.exact_sums = true;
+                else if (v == ".FALSE." || v == "F" || v == ".F." || v == "FALSE") p.exact_sums = false;
+                else rep.error(at_line(g) + "EXACT_SUMS must be .TRUE. or .FALSE.");
             }
         }
     }
