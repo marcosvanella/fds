@@ -17,6 +17,7 @@ target_sources(fds PRIVATE
     ${_rt}/RegridAmrCore.cpp
     ${_rt}/AmrInput.cpp
     ${_rt}/Hierarchy.cpp
+    ${_rt}/InputConverter.cpp
     ${_rt}/TagOps.cpp
     ${_rt}/rt_tag_kernels.F90
     ${_drv}/RegistryTransfer.cpp)

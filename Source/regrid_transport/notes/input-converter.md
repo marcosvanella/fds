@@ -1,0 +1,25 @@
+# Input converter (D-076)
+
+Library `InputConverter.H/.cpp` (in `fds_regrid_transport_core`, no AMReX, no FDS), tool `fds_amr_convert_input`, test `tests/test_input_converter.cpp` (ctest `regrid_transport_input_converter`, `regrid_transport_convert_input_tool`, `regrid_transport_convert_input_tool_no_amr`).
+
+## What it does
+`convert_input(text, ConvertResult&, Report&)` is the whole driver pre-pass on the text of an FDS input:
+1. `find_group_spans`: groups as FDS finds them (an `&` that starts a line, closing `/` outside quotes, stop at `&TAIL`), so a commented-out `! &MESH` line is not read.
+2. `parse_meshes`: `&MESH` lines expanded with `&MULT` as `READ_MESH` does (copies I fastest, then J, then K; skip box; `N_LOWER/N_UPPER` form). Mesh i is FDS mesh i+1 of the original input.
+3. `parse_amr_params` (only the `&AMR`, `&AMR_REGION`, `&MISC` groups, original line numbers kept in messages), `detect_periodic` (`&VENT SURF_ID='PERIODIC'`), then the existing rules: `group_meshes` (IR-002 classification by cell size, ratio 2 and 4, alignment with the parent cell faces, overlaps, no `&AMR` line with finer meshes) and `build_static_hierarchy` (nesting, blocking factor).
+4. Extra checks: the copies of one `&MESH` line must stay on one level; no other group may name a removed mesh by `MESH_ID`; `MPI_PROCESS` of the remaining meshes must stay continuous (FDS ERROR(117)/(118)) when every level-0 line gives it.
+5. `emit_level0_text`: the input unchanged except the finer `&MESH` lines (replaced by one `!` line each), the `&AMR`/`&AMR_REGION` groups (one `!` line each), and **one added `&MESH` line per cover box** after the last `&MESH` line: the level-0 cells under the removed finer meshes (`hierarchy.levels[0].grids` with `mesh == -1`). Without them the unchanged FDS set-up would see a level 0 with a hole. The cover meshes take the `MPI_PROCESS` of the last level-0 mesh when the lines give ranks.
+
+Result: `level0_text` (converted input), `hierarchy`, `params`, `grouping`, `level0_meshes` (original indices, in order = the first meshes of the converted input), `cover_boxes`, `removed_meshes`. The converted level 0 equals `hierarchy.levels[0].grids` box for box, so FDS mesh i+1 of the converted input is level-0 box i. A level-0-only input converts to itself (tested). Errors name the mesh pair (`mesh 1 and mesh 2`), the rule, and for a missing `&AMR` line the line to add.
+
+## Checked
+Unit and round-trip tests as above (45 checks, error cases with controls: misaligned fine mesh, finer mesh without `&AMR` line, ratio 3, overlap, `MESH_ID` of a removed mesh, unknown `MULT_ID`, unterminated group, non-continuous `MPI_PROCESS`). By hand through the real driver (scratch build with the patch below): the Verification input `ns2d_16_int_1to2_refinement` with an `&AMR MAX_LEVEL=1 /` line is converted (12 level-0 meshes + 1 cover mesh, 1 finer mesh removed), FDS set-up and `build_level0` accept it (13 boxes, 16 x 1 x 16 cells, one cell size); without the `&AMR` line the driver stops before FDS reads anything; a single-mesh input passes through byte for byte (no file written).
+
+## Driver patch for Role 1 (not an upstream FDS patch): `notes/driver-patch-main-input-converter.patch`
+Edits `Source/driver/main.cpp` only (guarded by `FDSRT_DRIVER_MODES`, which `DriverSources.cmake` defines; it now also compiles `InputConverter.cpp`). Apply on the driver's `main.cpp` (`patch -p1`; it applies with and without the `--rt-e2e` hook of `docs/upstream-patches/UP-0006-r2b-driver-e2e-hook.patch`). Role 3 does not edit that file.
+- `prepare_amr_input`: every rank converts; if the converted text differs from the input, rank 0 writes `<stem>_amr_level0.fds` in the working directory, all ranks wait, and `fds_setup(0, ...)` reads that file. `build_level0` and `assemble_level0` then see level-0 meshes only (the cover meshes included).
+- `conv.hierarchy` and `conv.params` stay in scope in `main` for the regrid core (`RegridAmrCore(conv.hierarchy, conv.params)`); the step-loop wiring that consumes them (today `TwoLevelRun.cpp:75-99` builds the same objects from a level-0 mesh list) is Role 1's.
+- Open for Role 1: other namelists that carry mesh numbers (none handled except `MESH_ID` by name); `print_pressure_bc` and the end-of-run `fds_setup(mode_end, argv[1])` still get the original name.
+
+## `LevelRegistry.H` header comment (Role 1's file, not edited)
+HEAD still says a level above 0 "does NOT have an FDS binding". The working tree already carries a corrected paragraph (binding by `TimeLoop::bind_level`). One fact worth adding to its "Not built yet for a fine level" list, from the E3b finding (`notes/flux-stage-wiring.md`): wall cells (or an equivalent mirror/periodic/open treatment and the ghost fill) for fine-box faces on the domain edge. Suggested last sentence: "Not built yet for a fine level: wall cells at the domain edge (a fine box on the edge has no wall cells and its edge ghost layer is not filled), wall cells of obstructions, the INTERPOLATED_MESH mask, zone sums (notes/level-binding.md, notes/two-level-run.md)."

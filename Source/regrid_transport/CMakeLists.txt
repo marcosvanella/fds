@@ -18,7 +18,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 # AMReX-independent part: &AMR parser (R0), IR-002 grouping, input checks, static hierarchy (R1).
-add_library(fds_regrid_transport_core STATIC AmrInput.cpp Hierarchy.cpp)
+add_library(fds_regrid_transport_core STATIC AmrInput.cpp Hierarchy.cpp InputConverter.cpp)
 target_include_directories(fds_regrid_transport_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fds_regrid_transport_core PRIVATE -Wall -Wextra)
 
@@ -109,6 +109,22 @@ if (BUILD_TESTING)
     target_include_directories(test_hierarchy PRIVATE tests)
     target_compile_options(test_hierarchy PRIVATE -Wall -Wextra)
     add_test(NAME regrid_transport_hierarchy COMMAND test_hierarchy ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases)
+
+    # D-076 input converter: classification, level-0-only input text, hierarchy, round trip, error cases (pure C++), and its command line tool
+    add_executable(fds_amr_convert_input ConvertInputTool.cpp)
+    target_link_libraries(fds_amr_convert_input PRIVATE fds_regrid_transport_core)
+    target_compile_options(fds_amr_convert_input PRIVATE -Wall -Wextra)
+    add_executable(test_input_converter tests/test_input_converter.cpp)
+    target_link_libraries(test_input_converter PRIVATE fds_regrid_transport_core)
+    target_include_directories(test_input_converter PRIVATE tests)
+    target_compile_options(test_input_converter PRIVATE -Wall -Wextra)
+    add_test(NAME regrid_transport_input_converter COMMAND test_input_converter ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases)
+    # the tool on the FR-016 gate mesh lines: convert, then convert its own output (a level-0-only input converts to itself)
+    add_test(NAME regrid_transport_convert_input_tool
+             COMMAND sh -c "$<TARGET_FILE:fds_amr_convert_input> ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/ns2d_16_int_1to2.fds -o ${CMAKE_CURRENT_BINARY_DIR}/ns2d_level0.fds && $<TARGET_FILE:fds_amr_convert_input> ${CMAKE_CURRENT_BINARY_DIR}/ns2d_level0.fds -o ${CMAKE_CURRENT_BINARY_DIR}/ns2d_level0_again.fds && cmp ${CMAKE_CURRENT_BINARY_DIR}/ns2d_level0.fds ${CMAKE_CURRENT_BINARY_DIR}/ns2d_level0_again.fds")
+    # negative control: without the &AMR line the same tool run must fail
+    add_test(NAME regrid_transport_convert_input_tool_no_amr
+             COMMAND sh -c "grep -v '^&AMR' ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/ns2d_16_int_1to2.fds > ${CMAKE_CURRENT_BINARY_DIR}/ns2d_noamr.fds; ! $<TARGET_FILE:fds_amr_convert_input> ${CMAKE_CURRENT_BINARY_DIR}/ns2d_noamr.fds")
 
     if (RT_HAVE_AMREX)
         add_executable(test_amrcore tests/test_amrcore.cpp tests/fds_stubs.cpp)
