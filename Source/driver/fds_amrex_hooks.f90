@@ -27,6 +27,12 @@ REAL(EB), PUBLIC, SAVE :: OUT_T = 0._EB, OUT_DT = 0._EB
 INTEGER,  PUBLIC, SAVE :: OUT_ICYC = 0
 !> Set .TRUE. by the patched FDS_SETUP (patch 0006) when set-up returns; the driver calls MODE=3 only if it is .TRUE. (an unpatched main.f90 would run END_FDS).
 LOGICAL,  PUBLIC, SAVE :: STEP_OUTPUTS_PATCHED = .FALSE.
+!> Patch 0011: when .TRUE. the patched FDS_SETUP(MODE=3) also runs the per-mesh dump loop of MAIN_LOOP (DUMP_MESH_OUTPUTS: slices, boundary files, Plot3D, ...). Default .FALSE.
+!> (set by fds_hook_set_mesh_dumps), so the behaviour of patch 0006 is unchanged until the driver asks.
+LOGICAL,  PUBLIC, SAVE :: OUT_MESH_DUMPS = .FALSE.
+!> Patch 0012: number of output meshes (the meshes of the FDS output files, which may exceed NMESHES once boxes of finer levels are output meshes). 0 (default) = NMESHES.
+!> Must be set (fds_hook_set_out_meshes) before fds_setup(0), because ASSIGN_FILE_NAMES sizes the output tables.
+INTEGER,  PUBLIC, SAVE :: N_OUT_MESHES = 0
 
 TYPE, PUBLIC :: BOX_VIEW_TYPE
    REAL(EB), POINTER, DIMENSION(:,:,:)   :: U=>NULL(),V=>NULL(),W=>NULL(),US=>NULL(),VS=>NULL(),WS=>NULL(),D=>NULL(),DS=>NULL(),H=>NULL(),HS=>NULL(), &
@@ -36,7 +42,7 @@ END TYPE BOX_VIEW_TYPE
 
 TYPE(BOX_VIEW_TYPE), ALLOCATABLE, TARGET, PUBLIC, SAVE :: BOX_VIEW(:)
 
-PUBLIC :: FDS_HOOK_SET_FLAG,FDS_HOOK_SET_VIEW,FDS_HOOK_SET_STEP,FDS_HOOK_STEP_OUTPUTS,FDS_HOOK_FINE_ABORT,FDS_HOOK_FINE_GUARD,FDS_HOOK_SET_FINE_READY,FDS_HOOK_SHADOW,SHADOW_PROC,SHADOW_IF,FDS_HOOK_BIND_VIEW,FDS_HOOK_L0_ONLY
+PUBLIC :: FDS_HOOK_SET_FLAG,FDS_HOOK_SET_VIEW,FDS_HOOK_SET_STEP,FDS_HOOK_SET_MESH_DUMPS,FDS_HOOK_SET_OUT_MESHES,FDS_HOOK_STEP_OUTPUTS,FDS_HOOK_FINE_ABORT,FDS_HOOK_FINE_GUARD,FDS_HOOK_SET_FINE_READY,FDS_HOOK_SHADOW,SHADOW_PROC,SHADOW_IF,FDS_HOOK_BIND_VIEW,FDS_HOOK_L0_ONLY
 
 !> D-056 (option B): the set of kernel wrappers (fds_kernels.f90 entry names) that may run on a fine-level mesh number (NM > NMESHES). Empty until patch 0007 is validated and the
 !> kernels are switched to POINT_TO_BOX: every wrapper aborts on a fine number now. Set by FDS_HOOK_FINE_READY (also callable from the draft driver file fds_fine_mesh_b.f90).
@@ -73,6 +79,18 @@ REAL(C_DOUBLE), VALUE :: T,DT
 INTEGER(C_INT), VALUE :: ICYC
 OUT_T = T ; OUT_DT = DT ; OUT_ICYC = ICYC
 END SUBROUTINE FDS_HOOK_SET_STEP
+
+!> Switch the per-mesh dump loop of FDS_SETUP(MODE=3) on (FLAG/=0) or off (patch 0011).
+SUBROUTINE FDS_HOOK_SET_MESH_DUMPS(FLAG) BIND(C,NAME='fds_hook_set_mesh_dumps')
+INTEGER(C_INT), VALUE :: FLAG
+OUT_MESH_DUMPS = (FLAG/=0)
+END SUBROUTINE FDS_HOOK_SET_MESH_DUMPS
+
+!> Set the number of output meshes N_OUT_MESHES (patch 0012); effective only if called before fds_setup(0).
+SUBROUTINE FDS_HOOK_SET_OUT_MESHES(N) BIND(C,NAME='fds_hook_set_out_meshes')
+INTEGER(C_INT), VALUE :: N
+N_OUT_MESHES = N
+END SUBROUTINE FDS_HOOK_SET_OUT_MESHES
 
 !> Make BOX_VIEW(NM)%<WHICH> a view of the C array P: rank 3 (LB(1:3), EXT(1:3)) or, for ZZ (WHICH=21) and ZZS (WHICH=22), rank 4 (LB(1:4), EXT(1:4)).
 !> WHICH: 1 U 2 V 3 W 4 US 5 VS 6 WS 7 D 8 DS 9 H 10 HS 11 KRES 12 FVX 13 FVY 14 FVZ 15 RHO 16 RHOS 17 MU 18 TMP 19 Q 20 RSUM. NM: 1-based box number;

@@ -34,6 +34,7 @@
 namespace fdsamr { int level_bind_check(TimeLoop& loop, const Level0& l0, double dt0); }   // tests/level_bind_check.cpp
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
+extern "C" void fds_hook_set_out_meshes(int n);  // patch 0012: output-mesh count for the output tables (default NMESHES)
 extern "C" void fds_p_params(int* ip, double* rp);
 extern "C" void fds_p_mesh_info(int nm, int* mi, double* r);
 extern "C" void fds_k_visc(int nm, int est);
@@ -152,6 +153,7 @@ int main(int argc, char** argv)
             amrex::Print() << "FDS-AMReX: input converter: " << conv.meshes.size() << " meshes, " << conv.level0_meshes.size() << " level-0 meshes, " << conv.removed_meshes.size()
                            << " finer meshes removed, " << conv.cover_boxes.size() << " cover meshes added, hierarchy levels " << conv.hierarchy.top + 1 << "\n";
 #endif
+            if (const char* e = std::getenv("FDSTL_OUT_MESHES")) fds_hook_set_out_meshes(std::atoi(e));  // test switch for patch 0012
             fds_setup(0, fds_input, &dt);
 
             fdsamr::Level0 l0 = fdsamr::build_level0();

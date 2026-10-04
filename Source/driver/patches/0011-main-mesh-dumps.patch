@@ -1,0 +1,41 @@
+--- a/Source/main.f90
++++ b/Source/main.f90
+@@ -12,7 +12,7 @@
+ !> \param DT_OUT Initial time step from READ_DATA (passed out to the driver)
+ SUBROUTINE FDS_SETUP(MODE,FNAME,DT_OUT) BIND(C,NAME='fds_setup')
+ USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_DOUBLE,C_CHAR,C_NULL_CHAR,C_INT
+-USE FDS_AMREX_HOOKS, ONLY: OUT_T,OUT_DT,OUT_ICYC,STEP_OUTPUTS_PATCHED
++USE FDS_AMREX_HOOKS, ONLY: OUT_T,OUT_DT,OUT_ICYC,STEP_OUTPUTS_PATCHED,OUT_MESH_DUMPS
+ #else
+ PROGRAM FDS
+ #endif
+@@ -120,7 +120,7 @@
+ IF (MODE==3) THEN
+    ! End-of-step outputs for the C++ driver: the same calls, in the same order, as the end of MAIN_LOOP (UPDATE_GLOBAL_OUTPUTS per mesh,
+    ! EXCHANGE_GLOBAL_OUTPUTS, UPDATE_CONTROLS, DUMP_GLOBAL_OUTPUTS, WRITE_DIAGNOSTICS). The driver has set T, DT, ICYC (FDS_HOOK_SET_STEP)
+-   ! and advanced the fields; the slice/boundary/particle dumps of MAIN_LOOP are outside the M2a scope and are not called.
++   ! and advanced the fields; the slice/boundary/particle dumps of MAIN_LOOP are called only when OUT_MESH_DUMPS is set (patch 0011).
+    T    = OUT_T
+    DT   = OUT_DT
+    ICYC = OUT_ICYC
+@@ -129,6 +129,20 @@
+    ENDDO
+    CALL EXCHANGE_GLOBAL_OUTPUTS
+    CALL UPDATE_CONTROLS(T,DT,CTRL_STOP_STATUS,.FALSE.)
++   IF (OUT_MESH_DUMPS) THEN
++      ! Per-mesh dumps (patch 0011): the same loop as MAIN_LOOP (slices, boundary files, Plot3D, particles, device and profile files of each
++      ! mesh), switched on by the driver (FDS_HOOK_SET_MESH_DUMPS); the VTK-HDF padding loop of MAIN_LOOP is not replicated.
++      N_WRITTEN = 0
++      WROTE_SL3D = .FALSE.
++      WROTE_SL2D = .FALSE.
++      WROTE_SMOKE3D = .FALSE.
++      WROTE_BNDF = .FALSE.
++      WROTE_PART = .FALSE.
++      DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
++         CALL DUMP_MESH_OUTPUTS(T,DT,NM,.FALSE.)
++         N_WRITTEN = N_WRITTEN + 1
++      ENDDO
++   ENDIF
+    CALL DUMP_GLOBAL_OUTPUTS
+    LO10 = INT(LOG10(REAL(MAX(1,ABS(ICYC)),EB)))
+    DIAGNOSTICS = MOD(ICYC,10**LO10)==0 .OR. MOD(ICYC,DIAGNOSTICS_INTERVAL)==0 .OR. T>=T_END
