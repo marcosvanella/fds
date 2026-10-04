@@ -369,7 +369,7 @@ void run_selector ()
         expect("masked cell with explicit FFT not built", p, pb::Status::NotBuilt, K::Auto, K::FFT);
         { iMultiFab bad(p.ba, p.dm, 1, 0); bad.setVal(5);
           pb::PressureProblem q = p; q.cell_class = &bad;
-          expect("cell_class code 5 invalid", q, pb::Status::InvalidInput, K::Auto, K::Auto); }
+          expect("cell_class code 5 invalid", q, pb::Status::InvalidInput, K::MLMG, K::Auto); }
         iMultiFab zero(p.ba, p.dm, 1, 0); zero.setVal(0);
         p.cell_class = &zero;
         expect("all-zero cell_class is unmasked", p, pb::Status::Ok, K::FFT, K::Auto); }
