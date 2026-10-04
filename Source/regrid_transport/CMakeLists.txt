@@ -161,6 +161,11 @@ if (BUILD_TESTING)
         target_include_directories(test_regrid_core PRIVATE tests ${DRV}/tests)
         add_test(NAME regrid_transport_regrid_core COMMAND test_regrid_core)
         add_test(NAME regrid_transport_regrid_core_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_regrid_core>)
+        add_executable(test_tag_buffer_large tests/test_tag_buffer_large.cpp tests/fds_stubs.cpp)
+        target_link_libraries(test_tag_buffer_large PRIVATE fds_regrid_transport_amrex)
+        target_include_directories(test_tag_buffer_large PRIVATE tests ${DRV}/tests)
+        add_test(NAME regrid_transport_tag_buffer_large COMMAND test_tag_buffer_large)
+        add_test(NAME regrid_transport_tag_buffer_large_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_tag_buffer_large>)
         add_test(NAME regrid_transport_regrid_core_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_regrid_core> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
         set_tests_properties(regrid_transport_regrid_core regrid_transport_regrid_core_np4 regrid_transport_regrid_core_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")   # one thread per rank: the test is small and oversubscribed threads only slow it
 
