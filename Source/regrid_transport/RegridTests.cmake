@@ -24,3 +24,33 @@ add_test(NAME regrid_transport_blob_registry COMMAND test_blob_registry)
 add_test(NAME regrid_transport_blob_registry_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_blob_registry>)
 add_test(NAME regrid_transport_blob_registry_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_blob_registry> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
 set_tests_properties(regrid_transport_blob_registry regrid_transport_blob_registry_np4 regrid_transport_blob_registry_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")
+
+# R4 GPU path of the tagging kernels (K2 Fortran OpenMP target): the same kernel source built twice, host default and offload source (RT_OFFLOAD),
+# each against an independent reference, and their outputs compared bitwise. Without an accelerator the offload source runs its target regions on
+# the host (this checks the directive path and the has_device_addr/is_device_ptr clauses, not device memory). On a GPU machine configure with
+# -DRT_OFFLOAD_FLAGS="-mp=gpu;-gpu=mem:managed" (nvfortran) to run on the device.
+if (CMAKE_Fortran_COMPILER AND OpenMP_Fortran_FOUND)
+    set(RT_OFFLOAD_FLAGS "" CACHE STRING "extra Fortran compile+link flags of the offload build of the tagging kernels (default: OpenMP only, host fallback)")
+    set(RT_TK_SRC ${CMAKE_CURRENT_SOURCE_DIR}/rt_tag_kernels.F90 ${CMAKE_CURRENT_SOURCE_DIR}/tests/tag_kernel_check.F90)
+    set_source_files_properties(${RT_TK_SRC} PROPERTIES Fortran_PREPROCESS ON)
+    add_executable(tag_kernel_check_host ${RT_TK_SRC})
+    set_target_properties(tag_kernel_check_host PROPERTIES Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/mod_tk_host)
+    target_link_libraries(tag_kernel_check_host PRIVATE OpenMP::OpenMP_Fortran)
+    add_executable(tag_kernel_check_offload ${RT_TK_SRC})
+    set_target_properties(tag_kernel_check_offload PROPERTIES Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/mod_tk_off)
+    target_compile_definitions(tag_kernel_check_offload PRIVATE RT_OFFLOAD)
+    target_compile_options(tag_kernel_check_offload PRIVATE ${RT_OFFLOAD_FLAGS})
+    target_link_options(tag_kernel_check_offload PRIVATE ${RT_OFFLOAD_FLAGS})
+    target_link_libraries(tag_kernel_check_offload PRIVATE OpenMP::OpenMP_Fortran)
+    add_test(NAME regrid_transport_tagkernel_host COMMAND tag_kernel_check_host)
+    add_test(NAME regrid_transport_tagkernel_offload COMMAND tag_kernel_check_offload)
+    add_test(NAME regrid_transport_tagkernel_host_vs_offload
+             COMMAND ${CMAKE_COMMAND} -DHOST=$<TARGET_FILE:tag_kernel_check_host> -DOFFLOAD=$<TARGET_FILE:tag_kernel_check_offload>
+                     -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/compare_tag_kernel_outputs.cmake)
+    set_tests_properties(regrid_transport_tagkernel_host regrid_transport_tagkernel_offload regrid_transport_tagkernel_host_vs_offload
+                         PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2" PASS_REGULAR_EXPRESSION "TAGKERNEL PASS|bitwise identical")
+else()
+    message(STATUS "regrid_transport: no Fortran/OpenMP, tagging-kernel host/offload check not built")
+    add_test(NAME regrid_transport_tagkernel_host_vs_offload COMMAND ${CMAKE_COMMAND} -E echo "SKIP: no Fortran OpenMP compiler")
+    set_tests_properties(regrid_transport_tagkernel_host_vs_offload PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP:")
+endif()
