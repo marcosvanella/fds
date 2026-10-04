@@ -68,7 +68,8 @@ void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const
         amrex::BoxArray fcells = amrex::convert(fine[d]->boxArray(), amrex::IntVect::TheCellVector());
         fcells.coarsen(ratio);
         amrex::BoxArray cb = amrex::convert(fcells, amrex::IntVect::TheDimensionVector(d));
-        amrex::MultiFab tmp(cb, fine[d]->DistributionMap(), 1, 0);
+        const int nc = fine[d]->nComp();
+        amrex::MultiFab tmp(cb, fine[d]->DistributionMap(), nc, 0);
         tmp.setVal(0.0);
         for (amrex::MFIter mfi(tmp); mfi.isValid(); ++mfi) {
             const amrex::Box cfaces = mfi.validbox();   // coarse faces nodal in d
@@ -83,12 +84,14 @@ void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const
                     lo[e] = ci[e] * r[e];
                     hi[e] = (e == d) ? lo[e] : lo[e] + r[e] - 1;
                 }
-                double s = 0.0; int n = 0;
-                for (int kk = lo[2]; kk <= hi[2]; ++kk) for (int jj = lo[1]; jj <= hi[1]; ++jj) for (int ii = lo[0]; ii <= hi[0]; ++ii) { s += f(ii, jj, kk); ++n; }
-                c(i, j, k) = s / n;
+                for (int m = 0; m < nc; ++m) {
+                    double s = 0.0; int n = 0;
+                    for (int kk = lo[2]; kk <= hi[2]; ++kk) for (int jj = lo[1]; jj <= hi[1]; ++jj) for (int ii = lo[0]; ii <= hi[0]; ++ii) { s += f(ii, jj, kk, m); ++n; }
+                    c(i, j, k, m) = s / n;
+                }
             });
         }
-        crse[d]->ParallelCopy(tmp, 0, 0, 1, 0, 0);
+        crse[d]->ParallelCopy(tmp, 0, 0, nc, 0, 0);
     }
 }
 

@@ -37,7 +37,7 @@ void prolong_faces_level(const std::array<amrex::MultiFab*, 3>& fine, const std:
                          const amrex::IntVect& ratio, const std::array<const amrex::MultiFab*, 3>& old_fine = {nullptr, nullptr, nullptr});
 
 // Fine -> coarse mean of the faces: every coarse face that carries fine faces gets the mean of the (r_t1 * r_t2) fine faces that lie on it (area average; the
-// normal-velocity flux through the coarse face is then the sum of the fine ones). Only coarse faces that coincide with fine faces are written (interface included).
+// normal-velocity flux through the coarse face is then the sum of the fine ones). All components of the arrays (same count on both levels), also used for face fluxes. Only coarse faces that coincide with fine faces are written (interface included).
 void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const std::array<amrex::MultiFab*, 3>& crse, const amrex::IntVect& ratio);
 
 // max over the valid cells of `vel` (three face MultiFabs, same cell BoxArray) of |div u - D|, div u = sum_d (U_d(hi) - U_d(lo)) / dx_d; D = nullptr: target 0.

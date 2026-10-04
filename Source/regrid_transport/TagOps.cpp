@@ -36,18 +36,23 @@ signed char* tag_ptr(amrex::TagBoxArray& tags, const amrex::MFIter& mfi, Lay& l)
     l = bounds(a);
     return reinterpret_cast<signed char*>(a.p);
 }
+// Same grids and same box-to-rank map (equal, not necessarily the same reference-counted object: a field of the driver's level-0 registry is built from its own BoxArray).
+bool same_layout(const amrex::FabArrayBase& x, const amrex::FabArrayBase& y)
+{
+    return x.DistributionMap() == y.DistributionMap() && x.boxArray().CellEqual(y.boxArray());
+}
 }  // namespace
 
 void tag_cells(amrex::TagBoxArray& tags, const amrex::MultiFab& q, const amrex::MultiFab* den, int den_comp, const amrex::iMultiFab* covered,
                const TagCriterion& c)
 {
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(amrex::isMFIterSafe(tags, q), "tag_cells: field and tags must share BoxArray and DistributionMapping");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(same_layout(tags, q), "tag_cells: field and tags must share BoxArray and DistributionMapping");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(c.keepfac > 0.0 && c.keepfac <= 1.0, "tag_cells: TAG_KEEP must be in (0,1]");
     for (int d = 0; d < 3; ++d)
         if (c.dirs[d] && c.mode == TagMode::Diff)
             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(q.nGrowVect()[d] >= 1, "tag_cells: the field needs one ghost layer in every active direction");
-    if (den) AMREX_ALWAYS_ASSERT_WITH_MESSAGE(amrex::isMFIterSafe(tags, *den) && den->nGrowVect().allGE(q.nGrowVect()), "tag_cells: den layout");
-    if (covered) AMREX_ALWAYS_ASSERT_WITH_MESSAGE(amrex::isMFIterSafe(tags, *covered), "tag_cells: mask layout");
+    if (den) AMREX_ALWAYS_ASSERT_WITH_MESSAGE(same_layout(tags, *den) && den->nGrowVect().allGE(q.nGrowVect()), "tag_cells: den layout");
+    if (covered) AMREX_ALWAYS_ASSERT_WITH_MESSAGE(same_layout(tags, *covered), "tag_cells: mask layout");
     const int mode = c.mode == TagMode::Above ? 0 : 1, rel = c.relative ? 1 : 0, use_den = den ? 1 : 0, use_cov = covered ? 1 : 0;
     const int dirs[3] = {c.dirs[0], c.dirs[1], c.dirs[2]};
     for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
