@@ -22,3 +22,5 @@ Nothing is blocked on you for D-074; it is recorded as accepted by the Chief Arc
 ## Also carried in v0.4.38 (no action by you)
 - D-076: an input with level-0 meshes of different resolution is FDS-only as written. A converter turns the finer meshes into refinement levels, and an abort guard (driver patch 0010) stops anything that slips through.
 - D-077: the host/device flip-budget gate for the solid-phase solve is ratified.
+
+Note (v0.4.41): four inputs counted IN above (`rng_32`, `rng_64`, `cloud_drag`, `lumped_stoich_soot`) cannot pass set-up on the reference build; they move to OUT when the scope list is regenerated (A-74), which makes 678 IN in both modes and 53 OUT.
