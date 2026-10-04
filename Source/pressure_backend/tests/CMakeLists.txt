@@ -90,3 +90,6 @@ pb_add_test(pb_mixed_faces_sweep mixedfaces)
 # Inhomogeneous boundary data folded into the right-hand side (M2 item d).
 pb_add_test(pb_bcdata_exact bcdata_exact)
 pb_add_test(pb_bcdata_mms   bcdata_mms)
+
+# D-057: boundary-type mapping for one-cell directions and the sweep strings of the driver.
+pb_add_test(pressure_bc_map pressure_bc_map)

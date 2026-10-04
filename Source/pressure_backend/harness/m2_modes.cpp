@@ -11,6 +11,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
+#include <AMReX_FFT_Poisson.H>
 
 #include <algorithm>
 #include <chrono>
@@ -516,6 +517,113 @@ void run_bcdata (ParmParse& pp)
     }
 }
 
+// --------------------------------------------------------------------------------------------------------------
+// mode=fftraw: amrex::FFT::Poisson called directly (no common layer, no effective BC) for the D-057 mapping note.
+//   keys: n_cell, bcpairs, out. Same right-hand side as mixed1. Prints FFTRAW and dumps rhs / phi.
+// mode=bcmap: selector / status checks of the D-057 mapping (one-cell directions, periodicity guards).
+// --------------------------------------------------------------------------------------------------------------
+void run_fftraw (ParmParse& pp)
+{
+    Vector<int> n{16, 1, 16}; pp.queryarr("n_cell", n);
+    std::string bcs = "NN,NN,NN"; pp.query("bcpairs", bcs);
+    std::string out; pp.query("out", out);
+    S1 s = make_s1(n, bcs, 8);
+    MultiFab rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1);
+    for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+        auto const& a = rhs.array(mfi);
+        const Real dx = s.dx;
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = smooth_rhs((i+0.5)*dx, (j+0.5)*dx, (k+0.5)*dx) + 0.5*hash_noise(i,j,k) + 0.3; });
+    }
+    phi.setVal(0.0);
+    auto fb = [] (pb::BC b) { return b == pb::BC::Neumann ? FFT::Boundary::even : b == pb::BC::Periodic ? FFT::Boundary::periodic : FFT::Boundary::odd; };
+    Array<std::pair<FFT::Boundary,FFT::Boundary>,AMREX_SPACEDIM> fbc{
+        std::make_pair(fb(s.bc[0]), fb(s.bc[3])), std::make_pair(fb(s.bc[1]), fb(s.bc[4])), std::make_pair(fb(s.bc[2]), fb(s.bc[5]))};
+    FFT::Poisson<MultiFab> solver(s.geom, fbc);
+    solver.solve(phi, rhs);
+    Print() << "FFTRAW bcpairs=" << bcs << " n=" << n[0] << "x" << n[1] << "x" << n[2] << "\n";
+    if (!out.empty()) { write_field(out + "_rhs.bin", gather_s(rhs, s.domain)); write_field(out + "_phi.bin", gather_s(phi, s.domain)); }
+}
+
+void run_bcmap (ParmParse&)
+{
+    struct Case { const char* what; int nx, ny, nz; const char* pairs; pb::Status st; const char* frag; int singular; };
+    const Case cases[] = {
+        // the strings of the driver sweep, with the one-cell y (n = 16 x 1 x 16)
+        {"PP,NN,PP (91 inputs)", 16, 1, 16, "PP,NN,PP", pb::Status::Ok, "", 1},
+        {"NN,NN,NN (86 inputs)", 16, 1, 16, "NN,NN,NN", pb::Status::Ok, "", 1},
+        {"PP,NN,NN (25 inputs)", 16, 1, 16, "PP,NN,NN", pb::Status::Ok, "", 1},
+        {"DD,DD,DD (1 input: fully open 2-D box, y follows)", 16, 1, 16, "DD,DD,DD", pb::Status::Ok, "", 0},
+        {"ND,NN,NN (17 inputs)", 16, 1, 16, "ND,NN,NN", pb::Status::Ok, "", 0},
+        {"DD,NN,NN (4 inputs)", 16, 1, 16, "DD,NN,NN", pb::Status::Ok, "", 0},
+        {"NN,NN,ND (4 inputs)", 16, 1, 16, "NN,NN,ND", pb::Status::Ok, "", 0},
+        {"DD,NN,ND (3 inputs)", 16, 1, 16, "DD,NN,ND", pb::Status::Ok, "", 0},
+        {"ND,NN,ND (2 inputs)", 16, 1, 16, "ND,NN,ND", pb::Status::Ok, "", 0},
+        {"DN,NN,DD (1 input)", 16, 1, 16, "DN,NN,DD", pb::Status::Ok, "", 0},
+        // Dirichlet faces in the one-cell y (never produced by the driver for the verification set): act as Neumann
+        {"one-cell y: D faces only in y -> singular (y term does not exist)", 16, 1, 16, "NN,DD,NN", pb::Status::Ok, "", 1},
+        {"one-cell y: ND in y with closed x, z -> singular", 16, 1, 16, "NN,ND,PP", pb::Status::Ok, "", 1},
+        {"one-cell y: DN in y, x open -> nonsingular", 16, 1, 16, "DD,DN,NN", pb::Status::Ok, "", 0},
+        // one-cell x or z
+        {"one-cell x, Neumann (exact)", 1, 16, 16, "NN,NN,NN", pb::Status::Ok, "", 1},
+        {"one-cell x, periodic (exact)", 1, 16, 16, "PP,NN,NN", pb::Status::Ok, "", 1},
+        {"one-cell z, periodic (exact)", 16, 16, 1, "NN,NN,PP", pb::Status::Ok, "", 1},
+        {"one-cell x, DD refused", 1, 16, 16, "DD,NN,NN", pb::Status::NotBuilt, "one-cell x", -1},
+        {"one-cell x, ND refused", 1, 16, 16, "ND,NN,NN", pb::Status::NotBuilt, "one-cell x", -1},
+        {"one-cell x, DN refused", 1, 16, 16, "DN,DD,DD", pb::Status::NotBuilt, "one-cell x", -1},
+        {"one-cell z, DD refused", 16, 16, 1, "NN,NN,DD", pb::Status::NotBuilt, "one-cell z", -1},
+        {"one-cell z, DN refused", 16, 16, 1, "DD,DD,DN", pb::Status::NotBuilt, "one-cell z", -1},
+    };
+    for (auto const& c : cases) {
+        for (pb::BackendKind req : {pb::BackendKind::Auto, pb::BackendKind::MLMG}) {
+            S1 s = make_s1(Vector<int>{c.nx, c.ny, c.nz}, c.pairs, 8);
+            MultiFab rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1);
+            fill_smooth(s, rhs, 0.3); phi.setVal(7.0);
+            pb::PressureProblem p = problem_of(s, rhs, phi);
+            pb::PressureOptions o; o.verbose = 0; o.backend = req; o.removed_mean_warn = 1.0e9;
+            pb::PressureResult r = pb::solve_pressure(p, o);
+            const std::string tag = std::string(c.what) + (req == pb::BackendKind::Auto ? " [auto]" : " [mlmg]");
+            bool good = (r.status == c.st);
+            if (c.st == pb::Status::Ok) {
+                good = good && r.backend == (req == pb::BackendKind::Auto ? "FFT" : "MLMG") && !r.components.empty() && int(r.components[0].singular) == c.singular;
+                good = good && r.residual_checked && r.residual_ok && r.warnings.empty();
+            } else {
+                good = good && r.message.find(c.frag) != std::string::npos && phi.min(0) == 7.0 && phi.max(0) == 7.0;
+            }
+            Print() << "  " << tag << ": status=" << pb::to_string(r.status) << " backend=" << r.backend << " singular=" << (r.components.empty() ? -1 : int(r.components[0].singular))
+                    << " true_rel2=" << r.residual_rel2 << " nwarn=" << r.warnings.size() << (r.message.empty() ? "" : " msg=\"" + r.message + "\"") << "\n";
+            mcheck(good, tag);
+        }
+    }
+    // periodicity guards: the interface refuses a BC that does not match the Geometry (a driver "code 0 on a non-periodic direction" never gets here)
+    {
+        S1 s = make_s1(Vector<int>{16, 1, 16}, "NN,NN,NN", 8);
+        MultiFab rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1);
+        fill_smooth(s, rhs, 0.0); phi.setVal(7.0);
+        pb::PressureProblem p = problem_of(s, rhs, phi);
+        pb::PressureOptions o; o.verbose = 0;
+        p.bc[0] = pb::BC::Periodic; p.bc[3] = pb::BC::Periodic;      // periodic BC, non-periodic Geometry
+        pb::PressureResult r = pb::solve_pressure(p, o);
+        mcheck(r.status == pb::Status::InvalidInput && r.message.find("eriodic") != std::string::npos && phi.max(0) == 7.0, "periodic BC on a non-periodic Geometry: InvalidInput (" + r.message + ")");
+        p.bc[0] = pb::BC::Periodic; p.bc[3] = pb::BC::Neumann;
+        r = pb::solve_pressure(p, o);
+        mcheck(r.status == pb::Status::InvalidInput, "periodic on one face only: InvalidInput (" + r.message + ")");
+        S1 sp = make_s1(Vector<int>{16, 1, 16}, "PP,NN,NN", 8);
+        MultiFab rhs2(sp.ba, sp.dm, 1, 0), phi2(sp.ba, sp.dm, 1, 1); fill_smooth(sp, rhs2, 0.0); phi2.setVal(7.0);
+        pb::PressureProblem q = problem_of(sp, rhs2, phi2);
+        q.bc[0] = pb::BC::Neumann; q.bc[3] = pb::BC::Neumann;           // periodic Geometry, Neumann BC
+        r = pb::solve_pressure(q, o);
+        mcheck(r.status == pb::Status::InvalidInput, "periodic Geometry with a Neumann BC: InvalidInput (" + r.message + ")");
+    }
+    // effective_bc() itself
+    {
+        Box d1(IntVect(0), IntVect(15, 0, 15)), d3(IntVect(0), IntVect(15));
+        std::array<pb::BC,6> a{pb::BC::Dirichlet, pb::BC::Dirichlet, pb::BC::Dirichlet, pb::BC::Neumann, pb::BC::Dirichlet, pb::BC::Periodic};
+        auto e1 = pb::effective_bc(a, d1), e3 = pb::effective_bc(a, d3);
+        mcheck(e1[1] == pb::BC::Neumann && e1[4] == pb::BC::Neumann && e1[0] == pb::BC::Dirichlet && e1[2] == pb::BC::Dirichlet && e1[5] == pb::BC::Periodic, "effective_bc: one-cell y turns only the y Dirichlet faces into Neumann");
+        mcheck(e3 == a, "effective_bc: unchanged when y has more than one cell");
+    }
+}
+
 } // namespace
 
 int run_m2_mode (std::string const& mode, ParmParse& pp)
@@ -524,6 +632,8 @@ int run_m2_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "fftcache") { run_fftcache(pp); }
     else if (mode == "mixed1") { run_mixed1(pp); }
     else if (mode == "bcdata") { run_bcdata(pp); }
+    else if (mode == "fftraw") { run_fftraw(pp); }
+    else if (mode == "bcmap") { run_bcmap(pp); }
     else { return -1; }
     return g_m2fail;
 }

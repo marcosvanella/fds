@@ -484,7 +484,7 @@ def fftcache():
         l = lines(out, "FFTCACHE")
         ok(len(l) == 1, "timing line present")
 
-def dense_op(n, bc):
+def dense_op(n, bc, skip=()):
     """Dense 7-point operator (unit cell width h = 1/max(n)); ghost of a Neumann face = +phi, Dirichlet = -phi, periodic wraps.
     A one-cell direction y drops its term (D-057 / FDS TWO_D); this reference is used for n >= 2 in every direction."""
     nx, ny, nz = n; N = nx*ny*nz; h = 1.0/max(n)
@@ -495,6 +495,7 @@ def dense_op(n, bc):
             for i in range(nx):
                 r = ix(i, j, k); c = [i, j, k]
                 for d in range(3):
+                    if d in skip: continue
                     for side in (0, 1):
                         t = c[:]; t[d] += -1 if side == 0 else 1
                         b = bc[d][side]
@@ -561,10 +562,77 @@ def bcdata_mms():
     e1, e2 = float(kv(lines(o1, "BCDATA")[0])["err_l2"]), float(kv(lines(o2, "BCDATA")[0])["err_l2"])
     ok(rc == 0 and rc2 == 0 and abs(e1 - e2) <= 1e-6 * e1, f"FFT and MLMG give the same error {e1:.6e} {e2:.6e}")
 
+def solve_dense(M, b, sing):
+    if sing:
+        xr = np.linalg.lstsq(M, b - b.mean(), rcond=None)[0]; return xr - xr.mean()
+    return np.linalg.solve(M, b)
+
+def rel(a, b): return np.abs(a - b).max() / max(np.abs(b).max(), 1e-300)
+
+def pressure_bc_map():
+    """D-057: FDS boundary strings of the driver sweep (one-cell y) -> backend / BC, 2-D operator, singular handling, refusals."""
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="bcmap"); print(out)
+        ok(rc == 0, f"bcmap status / selector / guard checks, np={np_}")
+    n = [16, 1, 16]
+    strings = [("PP,NN,PP", 91), ("NN,NN,NN", 86), ("PP,NN,NN", 25), ("DD,DD,DD", 1), ("ND,NN,NN", 17), ("DD,NN,NN", 4), ("NN,NN,ND", 4),
+               ("DD,NN,ND", 3), ("ND,NN,ND", 2), ("DN,NN,DD", 1), ("NN,DD,NN", 0), ("NN,ND,PP", 0), ("DD,DN,NN", 0)]
+    for s_, cnt in strings:
+        bc = s_.split(","); sing = all(ch in "NP" for pair in [bc[0], bc[2]] for ch in pair)   # y never decides singularity
+        M2 = dense_op(n, bc, skip=(1,)); M3 = dense_op(n, bc)
+        for be in ("fft", "mlmg"):
+            for np_ in (1, 2):
+                pre = os.path.join(A.work, f"map_{s_.replace(',', '')}_{be}_{np_}")
+                rc, out = run(np_, mode="mixed1", n_cell="16 1 16", mgs=8, backend=be, bcpairs=s_, out=pre)
+                ok(rc == 0, f"{s_} ({cnt} inputs) {be} np={np_}: solved")
+                d = kv(lines(out, "MIXED")[0])
+                ok(d["status"] == "Ok" and d["backend"] == ("FFT" if be == "fft" else "MLMG"), f"{s_} {be}: status Ok, backend {d['backend']}")
+                ok(int(d["singular"]) == int(sing), f"{s_} {be}: singular={d['singular']} (x and z faces decide)")
+                ok(float(d["true_rel2"]) <= 1e-9, f"{s_} {be}: library true residual (2-D operator) {d['true_rel2']} <= 1e-9")
+                b = np.fromfile(pre + "_rhs.bin"); x = np.fromfile(pre + "_phi.bin")
+                e2 = rel(x, solve_dense(M2, b, sing))
+                ok(e2 <= 1e-9, f"{s_} {be} np={np_}: equals the dense 2-D operator (rel err {e2:.1e})")
+                # only a Dirichlet face in y distinguishes the 2-D from the full operator
+                if "D" in bc[1]:
+                    e3 = rel(x, solve_dense(M3, b, all(ch in 'NP' for pair in bc for ch in pair)))
+                    ok(e3 > 1e-3, f"{s_} {be}: differs from the full 3-D operator with the y Dirichlet term (rel diff {e3:.2e}): the y term is dropped")
+    # raw amrex::FFT::Poisson: the one-cell direction is ignored whatever its BC
+    for ytype in ("PP", "NN", "DD", "ND", "DN"):
+        s_ = f"NN,{ytype},NN" if ytype != "PP" else "NN,PP,NN"
+        bc = s_.split(",")
+        pre = os.path.join(A.work, f"raw_{ytype}")
+        rc, out = run(1, mode="fftraw", n_cell="16 1 16", bcpairs=s_, out=pre); ok(rc == 0, f"raw FFT::Poisson {s_}: ran")
+        b = np.fromfile(pre + "_rhs.bin"); x = np.fromfile(pre + "_phi.bin")
+        sing = True   # x,z closed
+        e2 = rel(x - x.mean(), solve_dense(dense_op(n, bc, skip=(1,)), b, True))
+        ok(e2 <= 1e-9, f"raw FFT::Poisson y={ytype}: equals the 2-D operator, y term ignored whatever the BC (rel {e2:.1e})")
+        if "D" in ytype:
+            Mf = dense_op(n, bc)          # full operator: y Dirichlet term -2/h^2 keeps the matrix non-singular
+            e3 = rel(x, np.linalg.solve(Mf, b))
+            ok(e3 > 1e-3, f"raw FFT::Poisson y={ytype}: DISAGREES with the full 3-D operator (rel diff {e3:.2e})")
+    # one-cell z / x with a Dirichlet face: raw FFT drops a term FDS keeps -> the interface must refuse
+    for s_, nn in (("NN,NN,DD", [16, 16, 1]), ("DD,NN,NN", [1, 16, 16])):
+        pre = os.path.join(A.work, f"raw_thin_{s_.replace(',', '')}")
+        rc, out = run(1, mode="fftraw", n_cell=" ".join(map(str, nn)), bcpairs=s_, out=pre); ok(rc == 0, f"raw FFT::Poisson {s_} {nn}")
+        b = np.fromfile(pre + "_rhs.bin"); x = np.fromfile(pre + "_phi.bin")
+        bc = s_.split(",")
+        e = rel(x, np.linalg.solve(dense_op(nn, bc), b))
+        ok(e > 1e-3, f"raw FFT::Poisson {s_} on {nn}: wrong vs the full operator (rel diff {e:.2e}); the interface refuses it (bcmap)")
+    for s_, nn in (("NN,NN,PP", [16, 16, 1]), ("PP,NN,NN", [1, 16, 16]), ("NN,NN,NN", [1, 16, 16])):
+        pre = os.path.join(A.work, f"lib_thin_{s_.replace(',', '')}")
+        rc, out = run(1, mode="mixed1", n_cell=" ".join(map(str, nn)), bcpairs=s_, backend="fft", mgs=8, out=pre); ok(rc == 0, f"library {s_} {nn}")
+        b = np.fromfile(pre + "_rhs.bin"); x = np.fromfile(pre + "_phi.bin")
+        e = rel(x, solve_dense(dense_op(nn, s_.split(",")), b, True))
+        ok(e <= 1e-9, f"library {s_} on {nn}: one-cell x/z with N or P is exact (rel {e:.1e})")
+    # singular problems use FFT::Poisson, never PoissonHybrid
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "FFTBackend.cpp")).read()
+    code = "\n".join(l.split("//")[0] for l in src.splitlines())
+    ok("FFT::Poisson<MultiFab>" in code and "PoissonHybrid" not in code, "FFTBackend uses FFT::Poisson only (PoissonHybrid is never selected)")
+
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
- "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms}[A.cmd]()
+ "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
