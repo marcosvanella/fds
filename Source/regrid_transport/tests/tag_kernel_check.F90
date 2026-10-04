@@ -143,7 +143,8 @@ do rel = 0, 1
    call rt_tag_count(lo, hi, tag, qlo, qhi, cnt)
    cs = checksum(tag(lo(1):hi(1), lo(2):hi(2), lo(3):hi(3)))
    nset = count(ref /= 0_c_signed_char)
-   write (*, '(a,i0,a,i0,i0,i0,i0,a,i0,a,i0)') 'TK geom=', seed, ' mode/den/cov/rel=', mode, use_den, use_cov, rel, ' count=', cnt, ' sum=', cs
+   write (*, '(a,i0,a,i0,i0,i0,i0,a,i0,a,i0)') 'TK geom=', seed, ' mode/den/cov/rel=', mode, use_den, use_cov, rel, &
+         ' count=', cnt, ' sum=', cs
    if (any(tag(lo(1):hi(1), lo(2):hi(2), lo(3):hi(3)) /= ref)) then
       nfail = nfail + 1
       write (*, '(a)') 'TAGKERNEL mismatch with the independent reference'
