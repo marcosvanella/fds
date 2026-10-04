@@ -184,3 +184,11 @@ D-075 pressure results and open answers (`docs/pressure/07` sections 11 and 12).
 - (e) Role 2 HYPRE backend: Krylov defaults accepted (PCG with BoomerAMG for one level, GMRES(30) for a hierarchy); pin row excluded from the residual check and reported separately; `residual_tol` not relaxed; backend option stays on `PressureOptions`.
 - (f) Solid-phase face-write table: a table refused by `face_write_check` makes the driver abort with the report (owner: Chief Architect with the Wall Loops Engineer).
 - (g) Radiation batched launch layer (one launch per wavefront plane across all boxes of a level): Integration Lead (D-073 (f)).
+
+## Update 2026-10-04 (n): level-jump EXTERNAL_WALL check (D-076)
+
+- (a) Fine boxes have no wall cells at a level jump; the jump is handled by ghost fill and flux overwrite. The NIC>1 loops (`wall.f90:897`, `divg.f90:219`) run over zero walls on a fine box.
+- (b) The whole route is not provable by reading. It is proved at run time by the D-065 Q1 abort guard at the end of `INITIALIZE_MESH_EXCHANGE_1` (new numbered driver patch, Legacy Mapper, validated on both compilers) and a level-0 NIC=1 assertion test (V&V Lead).
+- (c) Finer `&MESH` lines are not filtered in `read.f90`. The driver gets an input pre-pass (converter) that writes a level-0-only input and builds the `&AMR` hierarchy from the removed meshes. `main.cpp` calls `parse_amr_params` and the hierarchy builder; `assemble_level0` gets only level-0 meshes. Owner: Role 3 with Role 1, after the domain-edge fix. Until then, inputs with finer meshes abort at `FdsAmr.cpp:30` with a message that names the converter.
+- (d) Classification: race_test_1/4 and the four derived 2:1 cases run via `_r4` copies or converter output (originals FDS-only); three inputs convert to refinement levels; `duct_flow_uglmat_refine` waits for FR-040 R3; stretched-grid and embedded inputs are FDS-only. The Legacy Mapper's list is the reference.
+- (e) FM_Burner 5 mm inputs have a coarse/fine face with 2 or more species and are FDS-only in AMR mode until converted. The stale header comment at `LevelRegistry.H:8-11` is for its owner to fix.
