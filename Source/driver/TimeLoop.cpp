@@ -250,6 +250,8 @@ struct TimeLoop::Impl {
         o.dzz.reset(new amrex::MultiFab(Lv.ba, Lv.dm, std::max(1, ns), 0));
         o.drho->setVal(0.0); o.dzz->setVal(0.0);
         o.bc.reset(new BcStep(Lv, F));
+        if (!std::getenv("FDSTL_LEGACY_BCSTEP_OFFSET")) o.bc->set_mesh_offset(nm0);   // (FDSTL_LEGACY_BCSTEP_OFFSET=1: offset 0 as before S14.4, reproducer of the level-0 ghost overwrite, notes/fine-velocity-bc.md)
+        // BcStep calls the FDS routines with the FDS mesh number of the bound box (the registry Level carries offset 0)
         o.bc->ext_ghost = true;   // requirement of levels > 0 (BcStep::exchange): the driver saves the face velocities, MATCH_VELOCITY is not run
         LevelCtx x;
         x.lev = &Lv; x.F = &F; x.bc = o.bc.get(); x.sd = &L.m_reg->side_data(lev); x.drho = o.drho.get(); x.dzz = o.dzz.get();

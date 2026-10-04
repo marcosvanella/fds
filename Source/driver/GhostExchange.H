@@ -68,6 +68,7 @@ public:
     BcStep(const Level0& l0, Fields& F);
     // Optional hook called with true/false around the velocity boundary routines: the driver uses it to turn box-interface walls into no-wall faces while
     // VELOCITY_BC runs (its edge loop would otherwise use the OMESH interpolation branch instead of the regular edge formulas of the single mesh).
+    void set_mesh_offset(int off) { m_mesh_offset = off; }   // FDS mesh number of box i = off + i + 1 (a bound fine level: FINE_LEVEL(lev)%NM0)
     bool ext_ghost = false;   // EXTERNAL_GHOSTS_FILLED mode (patches 0003/0004): MATCH_VELOCITY is skipped by FDS, the driver saves the face velocities instead
     std::function<void(bool)> iface_hook;
     CfGhostHook cf_ghost_hook;   // optional, see CfGhostRequest
@@ -88,6 +89,7 @@ public:
 
 private:
     const Level0& m_l0;
+    int m_mesh_offset = 0;   // FDS mesh number of box i is m_mesh_offset + i + 1: the registry Level of a fine level carries 0, TimeLoop::bind_level sets the offset of the bound boxes
     Fields& m_F;
     bool local(int i) const;
     void fill_omesh();

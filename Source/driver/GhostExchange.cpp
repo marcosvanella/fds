@@ -5,6 +5,7 @@
 #include <AMReX_MultiFab.H>
 #include <AMReX_ParallelDescriptor.H>
 
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <string>
@@ -74,7 +75,7 @@ void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir)
     }
 }
 
-BcStep::BcStep(const Level0& l0, Fields& F) : m_l0(l0), m_F(F) {}
+BcStep::BcStep(const Level0& l0, Fields& F) : m_l0(l0), m_mesh_offset(l0.fds_mesh_offset), m_F(F) {}
 
 bool BcStep::local(int i) const { return m_l0.dm[i] == amrex::ParallelDescriptor::MyProc(); }
 
@@ -110,7 +111,7 @@ void BcStep::fill_omesh()
             }
             if (amrex::ParallelDescriptor::NProcs() > 1) amrex::ParallelDescriptor::Bcast(buf.data(), n, owner);
             for (int nm = 0; nm < nbox; ++nm)
-                if (local(nm)) fds_g_fill_om(nm + 1 + m_l0.fds_mesh_offset, nom + 1 + m_l0.fds_mesh_offset, kv.second, nb.lb, nb.ext, nc, buf.data());
+                if (local(nm)) fds_g_fill_om(nm + 1 + m_mesh_offset, nom + 1 + m_mesh_offset, kv.second, nb.lb, nb.ext, nc, buf.data());
         }
     }
     g_prof[1] += amrex::second() - tp0;
@@ -141,14 +142,14 @@ void BcStep::after_exchange(int code, double t, double dt)
     (void)dt;
     const int nbox = static_cast<int>(m_l0.ba.size());
     if (code != 1 && code != 3 && code != 4 && code != 6) return;
-    // A level > 0 has no external wall cell: its domain-edge ghosts are the mirror rule (mirror_domain_edges), its coarse-fine ghosts the composite fill. FDS's VELOCITY_BC on a fine box, run after
-    // fill_omesh, overwrote the periodic z/x ghost layer of the LEVEL-0 face velocity (U(5,-1), W(-1,5)): the first predictor then saw wrong FVX/FVZ at the periodic faces and the composite PRHS did not
-    // telescope (removed mean 1.6, div error dt*1.6). Both are therefore not run on a level > 0 (FDSTL_SKIPAFT=0 restores them for the investigation: bit 1 save_uvw, 2 fill_omesh, 4 velocity_bc skipped).
-    static const int dbg_skip = std::getenv("FDSTL_SKIPAFT") ? std::atoi(std::getenv("FDSTL_SKIPAFT")) : 6;
+    // A level > 0 has no external wall cell: its domain-edge ghosts are the mirror rule (mirror_domain_edges), its coarse-fine ghosts the composite fill. FDSTL_SKIPAFT (debug) skips steps on a
+    // level > 0: bit 1 save_uvw, 4 velocity_bc (bit 2 was fill_omesh: never run on a fine level, a fine box has no OMESH). Default 0 (S14.4). Until S14.3 the default was 6 because VELOCITY_BC of a fine box overwrote the periodic ghosts of LEVEL 0:
+    // the cause was the mesh number (this BcStep called the FDS routines with box index + 1 instead of FINE_LEVEL NM0 + box index + 1, so they ran on level-0 mesh objects); see notes/fine-velocity-bc.md.
+    static const int dbg_skip = std::getenv("FDSTL_SKIPAFT") ? std::atoi(std::getenv("FDSTL_SKIPAFT")) : 0;
     const bool fine_dbg = m_l0.level > 0;
     if (ext_ghost && (code == 3 || code == 6) && !(fine_dbg && (dbg_skip & 1)))   // UVW_SAVE: the face velocities before the match (DENSITY restores them at the wall faces)
         for (int nm = 0; nm < nbox; ++nm)
-            if (local(nm)) { fds_g_phase(code == 3 ? 1 : 0); fds_p_save_uvw(nm + 1 + m_l0.fds_mesh_offset, code == 3 ? 1 : 0); }
+            if (local(nm)) { if (std::getenv("FDSTL_SAVEDBG")) std::fprintf(stderr, "SAVEDBG rank %d level %d box %d of %d fds_mesh %d offset %d\n", amrex::ParallelDescriptor::MyProc(), m_l0.level, nm, nbox, nm + 1 + m_mesh_offset, m_mesh_offset); fds_g_phase(code == 3 ? 1 : 0); fds_p_save_uvw(nm + 1 + m_mesh_offset, code == 3 ? 1 : 0); }
     if (ext_ghost && (code == 3 || code == 6)) {
         // the periodic domain faces: FDS's MATCH_VELOCITY averages the two copies of the flow face (patch 0003 skips it, the driver does it on the AMReX data)
         static const char* const pn[2][3] = {{"U", "V", "W"}, {"US", "VS", "WS"}};
@@ -158,20 +159,20 @@ void BcStep::after_exchange(int code, double t, double dt)
         for (int d = 0; d < 3; ++d)
             if (m_l0.dom.periodic[d] && m_F.has(pn[code == 3][d])) m_F.fill_ghosts(pn[code == 3][d]);
     }
-    if (!(fine_dbg && (dbg_skip & 2))) fill_omesh();   // after the match: FDS's MATCH_VELOCITY also writes the averaged values into OMESH, which VELOCITY_BC reads for the periodic ghosts
+    if (!fine_dbg) fill_omesh();   // a fine box has no OMESH (no neighbour mesh objects): its same-level ghosts come from the AMReX fill, MESHES(NM) must not be indexed with a fine number   // after the match: FDS's MATCH_VELOCITY also writes the averaged values into OMESH, which VELOCITY_BC reads for the periodic ghosts
     ProfScope prof_bc(3);
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
         if (code == 3 || code == 6) {
             fds_g_phase(code == 3 ? 1 : 0);
-            if (!ext_ghost) fds_g_match(nm + 1 + m_l0.fds_mesh_offset);
+            if (!ext_ghost) fds_g_match(nm + 1 + m_mesh_offset);
         }
     }
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
-        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); if (!(fine_dbg && (dbg_skip & 4))) fds_g_velocity_bc(t, nm + 1 + m_l0.fds_mesh_offset, code == 3 ? 1 : 0); if (iface_hook) iface_hook(false); }
+        if (code == 3 || code == 6) { fds_g_phase(code == 3 ? 1 : 0); if (iface_hook) iface_hook(true); if (!(fine_dbg && (dbg_skip & 4))) { if (std::getenv("FDSTL_SAVEDBG")) std::fprintf(stderr, "SAVEDBG velocity_bc rank %d level %d fds_mesh %d\n", amrex::ParallelDescriptor::MyProc(), m_l0.level, nm + 1 + m_mesh_offset); fds_g_velocity_bc(t, nm + 1 + m_mesh_offset, code == 3 ? 1 : 0); } if (iface_hook) iface_hook(false); }
         else {
-            fds_g_viscosity_bc(nm + 1 + m_l0.fds_mesh_offset, code == 4 ? 1 : 0);
+            fds_g_viscosity_bc(nm + 1 + m_mesh_offset, code == 4 ? 1 : 0);
             // FDS ends COMPUTE_VISCOSITY with clamped copies of MU, KRES in the edge cells of the domain; the full ghost fill above replaced them by periodic images
             const amrex::Box& b = m_l0.ba[nm];
             const amrex::Box& d = m_l0.geom.Domain();
@@ -181,7 +182,7 @@ void BcStep::after_exchange(int code, double t, double dt)
                 if (b.bigEnd(dir) == d.bigEnd(dir)) mask |= 2 << (2 * dir);
             }
             const int which = (skip_fix("mu") ? 0 : 1) | (skip_fix("kres") ? 0 : 2);   // bit 0: MU, bit 1: KRES
-            if (which) fds_g_mu_edges_dom(nm + 1 + m_l0.fds_mesh_offset, mask, which);
+            if (which) fds_g_mu_edges_dom(nm + 1 + m_mesh_offset, mask, which);
         }
     }
 }
@@ -228,7 +229,7 @@ void BcStep::wall_bc(int predictor, double t, double dt)
 {
     fds_g_phase(predictor);
     for (int nm = 0; nm < static_cast<int>(m_l0.ba.size()); ++nm)
-        if (local(nm)) fds_g_wall_bc(t, dt, nm + 1 + m_l0.fds_mesh_offset);
+        if (local(nm)) fds_g_wall_bc(t, dt, nm + 1 + m_mesh_offset);
 }
 
 void BcStep::replay_velocity(double t, double dt, bool predictor)
@@ -242,9 +243,9 @@ void BcStep::replay_velocity(double t, double dt, bool predictor)
     fds_g_phase(predictor ? 0 : 1);   // FDS calls VELOCITY_BC(final velocities) with CORRECTOR set (main.f90 1174) and VELOCITY_BC(estimated) with PREDICTOR set (969)
     for (int nm = 0; nm < nbox; ++nm) {
         if (!local(nm)) continue;
-        fds_g_viscosity_bc(nm + 1 + m_l0.fds_mesh_offset, predictor ? 0 : 1);
-        fds_g_mu_edges(nm + 1 + m_l0.fds_mesh_offset);   // the clamped edge-cell copies of MU, KRES that COMPUTE_VISCOSITY ends with (a frozen state has them from the periodic fill)
-        fds_g_velocity_bc(t, nm + 1 + m_l0.fds_mesh_offset, predictor ? 0 : 1);
+        fds_g_viscosity_bc(nm + 1 + m_mesh_offset, predictor ? 0 : 1);
+        fds_g_mu_edges(nm + 1 + m_mesh_offset);   // the clamped edge-cell copies of MU, KRES that COMPUTE_VISCOSITY ends with (a frozen state has them from the periodic fill)
+        fds_g_velocity_bc(t, nm + 1 + m_mesh_offset, predictor ? 0 : 1);
     }
     fds_g_phase(predictor ? 1 : 0);
 }

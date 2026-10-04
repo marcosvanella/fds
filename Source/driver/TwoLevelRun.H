@@ -23,6 +23,7 @@ struct TwoLevelOptions {
     std::string outdir = ".";
     std::string chid = "two_level";
     int log_every = 1;
+    int boundary_test = 0;           // 1: call stage_boundary(1,3) and (1,6) on the bound fine level and check level 0 is untouched; 2: same with the pre-S14.1 level-0-only guard (must stop the run)
 };
 
 // Returns the number of failed checks (0 = completed). Prints one line per step: composite mass, drift, max |div u - D| by level.

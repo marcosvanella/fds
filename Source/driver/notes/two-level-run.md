@@ -21,10 +21,10 @@ K2 kernel launches are blocking and are not issued on AMReX streams. Per-box con
 reads what a K2 launch wrote.
 
 ## Numbers (ns2d_16_l0, patch coarse cells 4..11, ratio (2,1,2), 1 rank, flux overwrite on)
-* Level 0 periodic ghost corruption (the last open cause of the composite PRHS mean): `after_exchange(6)` run for a fine box (fill_omesh, then VELOCITY_BC of the fine mesh) overwrote the
-  periodic z ghost rows of the LEVEL-0 U (and the x ghost columns of W); the first predictor FVX/FVZ at the periodic faces then differed from the single-level run (sums 91.8 vs 10.6 at the two faces of a
-  periodic pair) and the sum of PRHS did not telescope (6.38 = removed mean 1.6 x domain volume). A level > 0 has no external wall cell, so `BcStep::after_exchange` no longer runs fill_omesh or
-  VELOCITY_BC on it (`FDSTL_SKIPAFT=0` restores them). The cause inside the fine-mesh VELOCITY_BC is not understood; to be checked when fine walls are built.
+* Level 0 periodic ghost corruption (the last open cause of the composite PRHS mean): `after_exchange(6)` run for a fine box (fill_omesh, then VELOCITY_BC) overwrote the periodic z ghost rows of the
+  LEVEL-0 U (and the x ghost columns of W). ROOT CAUSE (S14.4, `notes/fine-velocity-bc.md`): the `BcStep` of a fine level was built from the registry `Level`, whose `fds_mesh_offset` is 0, so it called
+  the FDS routines with mesh number box index + 1 instead of NM0 + box index + 1: they ran on level-0 mesh objects. Fixed by `BcStep::set_mesh_offset(nm0)` in `bind_level`; save_uvw and VELOCITY_BC (fill_omesh is level 0 only)
+  run on a fine level again (default `FDSTL_SKIPAFT=0`), results identical to the skip. Reproducer: `tests/run_stage_boundary_fine_check.sh`.
 * Result after the fixes: 40 steps (t = 0.42): composite mass 3.947843523 -> same, relative change 1.3e-14; rho*Z the same; max|div u - D| over the uncovered cells 1.8e-12 (level 0 6e-14,
   level 1 1.8e-12), removed mean of the Poisson right-hand side 4e-13 (relative to rms 4e-17), 100 composite solves with MLMG.
 * Debug switches: `FDSTL_GHOSTDBG=1` (RANGE/DIVERR/RHSSUM/WRAP lines; 2: field ranges; 3: worst cell and Poisson residual), `FDSTL_TLDIAG=1` (PROBE lines of the level-0 ghost rows).

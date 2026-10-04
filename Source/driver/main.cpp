@@ -209,6 +209,7 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--blocking") == 0 && i + 1 < argc) to.blocking = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--projection") == 0 && i + 1 < argc) to.projection = argv[++i];
                     else if (std::strcmp(argv[i], "--no-overwrite") == 0) to.overwrite = false;
+                    else if (std::strcmp(argv[i], "--stage-boundary-test") == 0) to.boundary_test = (i + 1 < argc && std::strcmp(argv[i + 1], "legacy") == 0) ? (++i, 2) : 1;
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) { to.outdir = argv[++i]; ro.outdir = to.outdir; }
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) { to.chid = argv[++i]; ro.chid = to.chid; }
                     else if (std::strcmp(argv[i], "--log-every") == 0 && i + 1 < argc) to.log_every = std::atoi(argv[++i]);

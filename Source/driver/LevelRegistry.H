@@ -11,6 +11,11 @@
 // level: wall cells at the domain edge (a fine box on the edge has no wall cells; its edge ghost layer is filled by the mirror rule of BcStep, periodic and Neumann/mirror faces only), wall cells of obstructions,
 // the INTERPOLATED_MESH mask, zone sums (notes/level-binding.md, notes/two-level-run.md).
 //
+// New fine level, derived stage fields (architect ruling): RegistryTransfer transfers the conserved state (rho*Z, faces); the stage arrays D, DS, RSUM, MU, KRES, H, HS of a new level are
+// NOT transferred. FDS skips the density/EOS update in the first cycle, so a new level would divide by RSUM = 0 in DIVERGENCE_PART_1. Rule: RegistryTransfer::derive injects the PARENT value
+// (piecewise constant, the coarse cell under each fine cell) into those seven arrays of the new level, before the first stage runs; the stage then recomputes them from the fine state.
+// Not derived yet: TMP/RSUM from the fine ZZ by the EOS (the injected parent values stand in until the first density update). TwoLevelRun.cpp sets the hook; notes/two-level-run.md.
+//
 // Kernel-facing rules (M2a): (a) passive scalars are the Fields' business (ncomp = N_TOTAL_SCALARS); (b) only uniform Cartesian metrics (Level::dx).
 #ifndef FDS_LEVELREGISTRY_H_
 #define FDS_LEVELREGISTRY_H_

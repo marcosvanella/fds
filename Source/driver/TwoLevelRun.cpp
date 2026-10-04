@@ -19,6 +19,8 @@
 #include "RegridAmrCore.H"
 #include "TimeLoopWiring.H"
 
+extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
+
 namespace fdsamr {
 
 namespace {
@@ -169,6 +171,29 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     amrex::Print() << "TWO-LEVEL: level 1 = " << reg.level(1).ba.size() << " box(es), " << reg.level(1).ba.numPts() << " cells, ratio (" << rr[0] << "," << rr[1] << "," << rr[2] << "), blocking factor "
                    << o.blocking << ", flux overwrite " << (o.overwrite ? "on" : "off") << ", projection " << o.projection << "\n";
     const int nl = finest + 1;
+    if (o.boundary_test != 0) {
+        // stage_boundary(1,3) and (1,6): the boundary routines FDS runs after the exchanges of the predictor and the corrector, on the bound fine level (fds_p_save_uvw on a fine box number, and with
+        // FDSTL_SKIPAFT=0 also fill_omesh / VELOCITY_BC). Test 2 restores the pre-S14.1 guard (level-0 numbers only): the call must then stop the run. Fine-level calls must leave level 0 alone.
+        if (o.boundary_test == 2) fds_p_set_legacy_save_guard(1);
+        std::vector<amrex::MultiFab> keep;
+        const char* vn[3] = {"U", "V", "W"};
+        for (int d = 0; d < 3; ++d) { const amrex::MultiFab& m = reg.fields(0)[vn[d]]; keep.emplace_back(m.boxArray(), m.DistributionMap(), m.nComp(), m.nGrow()); amrex::MultiFab::Copy(keep.back(), m, 0, 0, m.nComp(), m.nGrow()); }
+        amrex::Print() << "STAGE-BOUNDARY-FINE: calling stage_boundary(1,3) and stage_boundary(1,6)" << (o.boundary_test == 2 ? " with the pre-S14.1 level-0-only guard" : "") << "\n";
+        loop.stage_boundary(1, 3);
+        loop.stage_boundary(1, 6);
+        double worst = 0.0;
+        for (int d = 0; d < 3; ++d) {
+            const amrex::MultiFab& m = reg.fields(0)[vn[d]];
+            amrex::MultiFab diff(m.boxArray(), m.DistributionMap(), m.nComp(), m.nGrow());
+            amrex::MultiFab::Copy(diff, m, 0, 0, m.nComp(), m.nGrow());
+            amrex::MultiFab::Subtract(diff, keep[d], 0, 0, m.nComp(), m.nGrow());
+            const double w = diff.norminf(0, m.nGrow());
+            amrex::Print() << "STAGE-BOUNDARY-FINE: level 0 " << vn[d] << " (ghost layers included) changed by max |diff| " << w << "\n";
+            worst = std::max(worst, w);
+        }
+        amrex::Print() << "STAGE-BOUNDARY-FINE: returned, level 0 U/V/W max change " << worst << (worst == 0.0 ? " (PASS)" : " (FAIL)") << "\n";
+        return worst == 0.0 ? 0 : 1;
+    }
 
     // ---- the fine level's own D, KRES, MU, ... by one corrector-form pass, then the post-regrid projection of the two-level velocity with that D (the body of the hook, Role 3 PostRegridProjection)
     loop.set_state(0.0, dt_setup, 0);

@@ -34,6 +34,11 @@ PUBLIC :: FDS_P_PARAMS,FDS_P_MESH_INFO,FDS_P_GET,FDS_P_MFD,FDS_P_DENS,FDS_P_DENS
           FDS_P_BAROCLINIC,FDS_P_NOFLUX,FDS_P_RHS,FDS_P_GET_PRHS,FDS_P_BMAX,FDS_P_H_GHOST,FDS_P_RESID,FDS_P_VELERR,FDS_P_GET_ERR,FDS_P_SET_WALL_COUNTER,&
           FDS_P_STOP_STATUS,FDS_P_CLEAR_ATTACHED,FDS_P_TOTAL_ITER,FDS_P_IFACE_WALLS,FDS_P_WALL_DUMP,FDS_P_SAVE_UVW,FDS_P_EDGE_DUMP,FDS_P_ZERO_DOT
 
+PUBLIC :: FDS_P_SET_LEGACY_SAVE_GUARD
+
+!> Test switch (tests/run_stage_boundary_fine_check.sh): restore the guard fds_p_save_uvw had before S14.1 (level-0 numbers only), so that the test can show that a fine box number aborted there.
+LOGICAL, SAVE :: SAVE_UVW_LEGACY_GUARD = .FALSE.
+
 CONTAINS
 
 !> Case flags and constants. IP(1:) integers, RP(1:) reals (layout documented in TimeLoop.cpp).
@@ -554,6 +559,7 @@ INTEGER(C_INT), VALUE :: NM,PRED
 TYPE(MESH_TYPE), POINTER :: M
 REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW
 INTEGER :: IW
+IF (SAVE_UVW_LEGACY_GUARD) CALL FDS_HOOK_L0_ONLY('fds_p_save_uvw',NM,NMESHES)
 CALL FDS_HOOK_FINE_GUARD('fds_p_save_uvw',NM,NMESHES)   ! a fine box has no external wall cells: the loop below is empty
 M => BOX_OBJ(NM)
 IF (PRED/=0) THEN ; UU => M%US ; VV => M%VS ; WW => M%WS ; ELSE ; UU => M%U ; VV => M%V ; WW => M%W ; ENDIF
@@ -572,6 +578,11 @@ DO IW=1,M%N_EXTERNAL_WALL_CELLS
    END ASSOCIATE
 ENDDO
 END SUBROUTINE FDS_P_SAVE_UVW
+
+SUBROUTINE FDS_P_SET_LEGACY_SAVE_GUARD(ON) BIND(C,NAME='fds_p_set_legacy_save_guard')
+INTEGER(C_INT), VALUE :: ON
+SAVE_UVW_LEGACY_GUARD = (ON/=0)
+END SUBROUTINE FDS_P_SET_LEGACY_SAVE_GUARD
 
 !> Diagnostic (env FDSTL_EDGES): write EDGE(:)%OMEGA(-2:2) then EDGE(:)%TAU(-2:2) of box NM (NE x 5 each, column-major like the reference dump E_OMEGA/E_TAU) to the file FN.
 SUBROUTINE FDS_P_EDGE_DUMP(NM,FN,NC) BIND(C,NAME='fds_p_edge_dump')
