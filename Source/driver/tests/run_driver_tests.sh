@@ -5,6 +5,8 @@
 #   1. driver_unit_tests on 1 and 4 ranks (IR-005 index round trip, ghosts, fill, side data, registry, IR-007 skeleton)
 #   2. fds_amr --selftest on shunn3_32 (1 rank) and shunn3_4mesh_32 (4 ranks): FDS bounds vs table, alias read/write, side data from FDS cells
 #   3. the side-data hash of the 1-mesh and the 4-mesh runs must be equal (same 32^3 domain, layout independent)
+#   4. run_stage_boundary_fine_check.sh (stage_boundary(1,3|6) on a bound fine level, with its two negative controls)
+#   5. (optional, DRIVER_DENSITY_CHECK=1; about 25 min on one shared core) run_two_level_density_check.sh: variable-density two-level run, flux overwrite ON vs OFF, 1 and 4 ranks
 # FDS ends the set-up run with STOP (exit 0), so the FDS-linked checks are judged from their PASS/FAIL lines.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd); source "$HERE/env.sh" > /dev/null 2>&1
@@ -27,5 +29,7 @@ for spec in "shunn3_32 1" "shunn3_4mesh_32 4"; do
   h+=("$(grep -o 'SIDEDATA_HASH [0-9a-f]*' "$RUN/stdout.txt" | head -1)")
 done
 if [ -n "${h[0]}" ] && [ "${h[0]}" = "${h[1]}" ]; then echo "PASS side-data hash equal for 1 mesh and 4 meshes: ${h[0]}"; else echo "FAIL side-data hash differs: '${h[0]}' vs '${h[1]}'"; rc=1; fi
+bash "$HERE/run_stage_boundary_fine_check.sh" "$BLD" "$BLD/run/stageboundary" || rc=1
+if [ "${DRIVER_DENSITY_CHECK:-0}" = 1 ]; then bash "$HERE/run_two_level_density_check.sh" "$BLD" "$BLD/run/density" || rc=1; fi
 [ $rc = 0 ] && echo "ALL DRIVER TESTS PASS" || echo "DRIVER TESTS FAILED"
 exit $rc

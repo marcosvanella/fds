@@ -1,0 +1,26 @@
+Driver test input of the variable-density two-level run (tests/run_two_level_density_check.sh): doubly periodic unit square, one 16 x 1 x 16 mesh, two species of different molecular weight
+(a heavy tracer blob in the lighter background: density contrast 1.6, non-zero D from the diffusion), uniform temperature, uniform wind along x and z so that the blob crosses the
+coarse-fine interfaces of the fine patch. The same case as four 8 x 1 x 8 meshes, one per rank, is blob_16_4m.fds.
+
+&HEAD CHID='blob_16_l0', TITLE='Variable density tracer blob, one coarse mesh, two-level driver test' /
+
+&MESH IJK=16,1,16, XB=0.0,1.0,-0.05,0.05,0.0,1.0 /
+
+&TIME T_END=1.0 /
+
+&MISC SIMULATION_MODE='DNS', STRATIFICATION=.FALSE., NOISE=.FALSE., CFL_MAX=0.25/
+
+&WIND U0=1.0, W0=0.5 /
+&RADI RADIATION=.FALSE./
+
+&SPEC ID='BACKGROUND',BACKGROUND=.TRUE.,MW=28.0,VISCOSITY=0.002,DIFFUSIVITY=0.002,SPECIFIC_HEAT=1.0 /
+&SPEC ID='TRACER',MW=44.0,VISCOSITY=0.002,DIFFUSIVITY=0.002,SPECIFIC_HEAT=1.0 /
+
+&INIT XB=0.20,0.40,-0.05,0.05,0.40,0.60, SPEC_ID(1)='TRACER', MASS_FRACTION(1)=1.0 /
+
+&VENT PBX=0, SURF_ID='PERIODIC' /
+&VENT PBX=1, SURF_ID='PERIODIC' /
+&VENT PBZ=0, SURF_ID='PERIODIC' /
+&VENT PBZ=1, SURF_ID='PERIODIC' /
+
+&TAIL /

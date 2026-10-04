@@ -1,0 +1,27 @@
+Driver test input of the variable-density two-level run (tests/run_two_level_density_check.sh): the case blob_16_l0.fds as four 8 x 1 x 8 meshes, one per MPI rank.
+
+&HEAD CHID='blob_16_4m', TITLE='Variable density tracer blob, four meshes (one per rank), two-level driver test' /
+
+&MESH IJK=8,1,8, XB=0.0,0.5,-0.05,0.05,0.0,0.5, MPI_PROCESS=0/
+&MESH IJK=8,1,8, XB=0.5,1.0,-0.05,0.05,0.0,0.5, MPI_PROCESS=1/
+&MESH IJK=8,1,8, XB=0.0,0.5,-0.05,0.05,0.5,1.0, MPI_PROCESS=2/
+&MESH IJK=8,1,8, XB=0.5,1.0,-0.05,0.05,0.5,1.0, MPI_PROCESS=3/
+
+&TIME T_END=1.0 /
+
+&MISC SIMULATION_MODE='DNS', STRATIFICATION=.FALSE., NOISE=.FALSE., CFL_MAX=0.25/
+
+&WIND U0=1.0, W0=0.5 /
+&RADI RADIATION=.FALSE./
+
+&SPEC ID='BACKGROUND',BACKGROUND=.TRUE.,MW=28.0,VISCOSITY=0.002,DIFFUSIVITY=0.002,SPECIFIC_HEAT=1.0 /
+&SPEC ID='TRACER',MW=44.0,VISCOSITY=0.002,DIFFUSIVITY=0.002,SPECIFIC_HEAT=1.0 /
+
+&INIT XB=0.20,0.40,-0.05,0.05,0.40,0.60, SPEC_ID(1)='TRACER', MASS_FRACTION(1)=1.0 /
+
+&VENT PBX=0, SURF_ID='PERIODIC' /
+&VENT PBX=1, SURF_ID='PERIODIC' /
+&VENT PBZ=0, SURF_ID='PERIODIC' /
+&VENT PBZ=1, SURF_ID='PERIODIC' /
+
+&TAIL /

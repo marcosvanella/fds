@@ -45,3 +45,27 @@ reads what a K2 launch wrote.
 * The multi-box and 4-rank runs need no same-level seam FV averaging on this case (fine boxes of one level share the faces through the AMReX exchange); a case with a flux through a seam of two fine boxes that are not exchanged is not covered.
 * Before S14.4 the 4-rank runs with 16 fine boxes crashed (segfault in `fds_p_save_uvw`, then in `fds_g_fill_om`): the BcStep mesh-number offset, `notes/fine-velocity-bc.md`.
 * Role 3's regrid tests against the committed `RegistryTransfer` (standalone `regrid_transport` build): all 14 ctest entries pass (celltransfer, regrid_core 1/4 ranks and rank check, facetransfer, species_avgdown, blob_registry 1/4 ranks and rank check, moving_blob_p3 1/4 ranks); `test_regrid_core` worst composite change per regrid 1.87e-16, clips 0, 6 of 6 regrids changed the grids, hierarchy hash 9678b9b0b9139a7b, data hash 1cbb18482dc6ee2d.
+
+## Variable-density two-level case (discriminating overwrite control)
+
+The constant-density runs above cannot tell the interface flux overwrite (D-050, vv/test-plan.md 5.12.6) from its absence: with uniform density the
+coarse and fine mass fluxes agree and the drift stays at round-off. `tests/cases/blob_16_l0.fds` (one mesh) and `blob_16_4m.fds` (four 8x1x8 meshes,
+one per rank) are the 16x1x16 doubly periodic unit square with a uniform wind (U0=1, W0=0.5) and a 28/44 species blob (`&INIT`, TRACER, 0.2 to 0.4 in x,
+0.4 to 0.6 in z), so density and the species mass fractions vary across the coarse/fine interface. The fine patch is coarse cells 4..11 in x and z (at np 4 it spans all four meshes). `tests/run_two_level_density_check.sh <build> [work] [steps1=100] [steps4=40]` runs it three ways at
+1 and 4 ranks (ON; OFF = `--no-overwrite`; REF = a fine level that covers the whole domain) and checks ON drift <= 1e-12, OFF drift >= 1e-5, and the
+last-step max|div u - D| of the two-level run within 3x of REF. `run_driver_tests.sh` runs it with `DRIVER_DENSITY_CHECK=1` and always runs
+`run_stage_boundary_fine_check.sh`.
+
+| run | steps | mass change | rho*Z1 change | rho*Z2 change |
+|---|---|---|---|---|
+| np 1 ON | 100 | -9.1e-15 | -1.1e-14 | -2.2e-15 |
+| np 1 OFF | 100 | 2.5e-4 (worst 1.4e-3) | 5.7e-4 | -3.8e-3 |
+| np 1 REF | 100 | -1.7e-14 | -1.8e-14 | -2.8e-15 |
+| np 4 ON | 40 | 1.6e-15 | 2.0e-15 | -6.1e-16 |
+| np 4 OFF | 40 | -1.4e-3 | 2.8e-3 | -5.6e-2 |
+| np 4 REF | 40 | 3.5e-15 | 3.8e-15 | -4.0e-16 |
+
+max|div u - D| over uncovered cells: the worst-over-steps value is 1.436 in all six runs. It is the first step (the baroclinic term is lagged when
+`PRESSURE_ITERATIONS` is not iterated; the single-level driver run of `blob_32` shows the same large error, so it is not a two-level effect) and does not depend on the
+overwrite. The last step is the comparison that matters: np 1 0.633 (two-level) vs 0.623 (REF), np 4 0.664 vs 0.709. The overwrite changes conservation
+(round-off versus 1e-3 to 6e-2) and not the divergence error, so the two numbers are reported together.
