@@ -255,6 +255,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     amrex::Print() << "TWO-LEVEL RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";
     amrex::Print() << "TWO-LEVEL RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
                    << ", fine H ghost cells set " << cr.h_ghost_cells << "\n";
+    if (cr.res_checked > 0) amrex::Print() << "TWO-LEVEL RESULT pressure residual check: " << cr.res_checked << " solves checked, largest residual " << cr.res_check_max << ", largest limit " << cr.res_limit_max << " (round-off floor " << cr.res_floor_max << "), " << cr.res_failed << " above the limit\n";
     amrex::Print() << "TWO-LEVEL RESULT cf scalar ghost hook: calls " << cfs.calls << ", fine ghost cells " << cfs.fine_ghost_cells << ", covered cells " << cfs.covered_cells << ", conflicts " << cfs.conflicts << "\n";
     return fails;
 }

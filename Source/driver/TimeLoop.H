@@ -120,6 +120,8 @@ public:
         long solves = 0, iterations = 0, h_ghost_cells = 0;
         double removed_mean = 0.0, removed_rel = 0.0;   // largest over the solves (backend: mean actually removed from the RHS, relative to its rms)
         std::string backend;
+        long res_checked = 0, res_failed = 0;                         // solves with the residual check (FDSTL_PBCHECK=1 or FDSTL_PBV), and those with residual_check > residual_limit
+        double res_check_max = 0.0, res_limit_max = 0.0, res_floor_max = 0.0;   // largest residual_check, residual_limit = max(residual_tol, residual_floor), residual_floor (Role 2, A-67)
     };
     const CompositeReport& composite_report() const;
     void prime_levels();

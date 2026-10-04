@@ -51,6 +51,7 @@ void fds_g_match_flux(int nm);
 void fds_setup(int mode, const char* fname, double* dt_out);
 int fds_hook_step_outputs();
 void fds_hook_set_step(double t, double dt, int icyc);
+void fds_hook_set_mesh_dumps(int flag);  // patch 0011: per-mesh dump loop in fds_setup(mode=3), default off
 // D-031 gather clip (fds_clip_gather.f90)
 void fds_clip_density(const int* qlo, const int* qhi, const int* mlo, const int* mhi, const int* llo, const int* lhi, const int* dlo, const int* dhi,
                       const int* vlo, const int* vhi, const double* rhop, const int* mask, const double* dx, const double* dy, const double* dz, double rmin,
@@ -338,6 +339,10 @@ struct TimeLoop::Impl {
         zone_setup();
         fds_outputs = fds_hook_step_outputs() != 0 && std::getenv("FDSTL_NO_FDS_OUTPUTS") == nullptr;
         amrex::Print() << "FDS-AMReX: FDS output writers (devc/hrr/mass/steps/out) " << (fds_outputs ? "driven through fds_setup(mode=3)" : "not available (main.f90 patch 0006 absent or FDSTL_NO_FDS_OUTPUTS set)") << "\n";
+        if (fds_outputs && std::getenv("FDSTL_MESH_DUMPS") != nullptr) {  // patch 0011 (per-mesh dumps: slices, boundary files, Plot3D, ...)
+            fds_hook_set_mesh_dumps(1);
+            amrex::Print() << "FDS-AMReX: per-mesh FDS dumps on (FDSTL_MESH_DUMPS, needs main.f90 patch 0011)\n";
+        }
         if (const char* e = std::getenv("FDSTL_FLUXCHK")) fluxchk = std::atoi(e);
         if (const char* e = std::getenv("FDSTL_FLUXCHK_KINDS")) fluxchk_kinds = std::atoi(e);
         if (const char* e = std::getenv("FDSTL_WSEAM")) wseam = std::atoi(e);
@@ -832,7 +837,7 @@ struct TimeLoop::Impl {
         phi->setVal(0.0);
         const pb::PressureResult r = pb::solve_pressure(p, o);
         if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("pressure interface: ") + pb::to_string(r.status) + ": " + r.message);
-        if (std::getenv("FDSTL_PBV")) { amrex::Print() << "  [pb] backend=" << r.backend << " res_rel2=" << r.residual_rel2 << " relmax=" << r.residual_relmax << " rhs max=" << rhs->norminf(0) << " phi max=" << phi->norminf(0); for (auto& c : r.components) amrex::Print() << " removed_mean=" << c.removed_mean << " rel=" << c.removed_rel; for (auto& w : r.warnings) amrex::Print() << " W:" << w; amrex::Print() << "\n"; }
+        if (std::getenv("FDSTL_PBV")) { amrex::Print() << "  [pb] backend=" << r.backend << " res_rel2=" << r.residual_rel2 << " relmax=" << r.residual_relmax << " residual_check=" << r.residual_check << " residual_limit=" << r.residual_limit << " residual_floor=" << r.residual_floor << " ok=" << r.residual_ok << " rhs max=" << rhs->norminf(0) << " phi max=" << phi->norminf(0); for (auto& c : r.components) amrex::Print() << " removed_mean=" << c.removed_mean << " rel=" << c.removed_rel; for (auto& w : r.warnings) amrex::Print() << " W:" << w; amrex::Print() << "\n"; }
         if (const char* e = std::getenv("FDSTL_PDUMP")) {
             // hand-over for the one-solve check against another Poisson solver (Role 2): the right-hand side PRHS (FDS IPS=0 layout, valid cells, I fastest) and the level solution
             // that becomes H/HS, both in the cell layout of the level (global, written by rank 0): <outdir>/pdump_<icyc>_<P|C>_{rhs,phi}.bin (doubles), dx dy dz in pdump_dx.txt
@@ -984,13 +989,20 @@ struct TimeLoop::Impl {
         pb::PressureOptions o;
         o.backend = pb::BackendKind::Auto;
         o.verbose = std::getenv("FDSTL_PBV") ? 1 : 0;
-        o.check_residual = std::getenv("FDSTL_PBV") != nullptr;
+        o.check_residual = std::getenv("FDSTL_PBV") != nullptr || std::getenv("FDSTL_PBCHECK") != nullptr;   // the size-scaled residual check of Role 2 (residual_limit = max(residual_tol, residual_floor))
         o.trigger = pb::SolveRoutine;
         const pb::PressureResult r = pb::solve_pressure(p, o, pws.get());
         if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("composite pressure solve: ") + pb::to_string(r.status) + ": " + r.message);
         ++crep.solves;
         for (const auto& ci : r.components) { crep.removed_mean = std::max(crep.removed_mean, std::abs(ci.removed_mean)); crep.removed_rel = std::max(crep.removed_rel, ci.removed_rel); }
         crep.iterations += r.backend_status.iterations;
+        if (r.residual_checked) {
+            ++crep.res_checked;
+            crep.res_check_max = std::max(crep.res_check_max, r.residual_check);
+            crep.res_limit_max = std::max(crep.res_limit_max, r.residual_limit);
+            crep.res_floor_max = std::max(crep.res_floor_max, r.residual_floor);
+            if (!r.residual_ok) ++crep.res_failed;
+        }
         crep.backend = r.backend;
         std::vector<std::array<amrex::MultiFab*, 3>> grad(nl);
         std::vector<std::unique_ptr<amrex::MultiFab>> gown;
