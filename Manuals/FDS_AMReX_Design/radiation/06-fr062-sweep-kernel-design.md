@@ -176,3 +176,129 @@ For the Legacy Mapper:
 
 For the Generator Engineer:
 8. Is a loop over a cell list with `CYCLE` and a bounded `PRIVATE` set (the `SLICE_LOOP` body) on your list? If yes, the cell body can be generated and the hand-written part shrinks to the plane scheduling.
+
+---
+
+## Addendum 1 (D-073): rulings, kernel descriptor, angle loop
+
+Status: stages 1 to 3 in progress (kernels written, drift check and bitwise test in `amrex/s4_mass/s5_gen/s5_rad_sweep/`, branch `s5-gen`). The kernel file is `s5rad_sweep_k2.F90` (module `s5rad_sweep_k2`); the host helpers are in `s5rad_sweep_host.F90`. Every signature below is the one in that file; where this text and the file differ, the file is right and this text is to be corrected.
+
+### 1. Rulings recorded (answers to §f)
+
+| § f item | D-073 ruling | Effect on this design |
+|---|---|---|
+| 1 option A baseline | Accepted: plane-parallel across boxes, serial over angles. Angle batching only after measurement shows launch latency dominates, with the ordered-chain rules for option B; `B=1` for mirror (and cylindrical). | Stage 1 is option A. Stage 8 (batching) stays closed until measured. |
+| 2 ghost-cell `UII`/`UIID` | May be "not bit-reproduced" provided the V&V Lead confirms that nothing reads them (outputs, wall code, devices). The check is listed in the stage-3 test. | `test/sweep_ghost_reads.py` lists every reader (§6). The single-box kernel path does reproduce the ghost cells; the box-split path may not. |
+| 3 T0 test | Accepted: box split against multi-mesh FDS, byte-identical `IL`/`UIID`/`QR` on 2 and 8 boxes and 1/2/4 ranks. It does not test the FR-005 exemption. | Stage 5 as written in §e. |
+| 4 hand-written K2 kernel | Accepted with: cell-body arithmetic copied verbatim by line range; drift check against `radi.f90` in CI; K2 CI check and kernel lint passing; registry entry tagged hand-written/FR-062; no FMA contraction (`-gpu=nofma`). Regenerate the cell body later if the generator supports cell-list loops with `CYCLE`. | Done in the file (marks `!S5RAD_COPY radi.f90:a-b`), `check_sweep_drift.py`, `s5rad_sweep.toml`. |
+| 5 cylindrical | Out of the first release. Cylindrical meshes stay FDS-only in AMR mode. | Stage 9 and the cylindrical rows of §a and §b are closed. The host refuses `CYLINDRICAL=T`. The kernels contain no cylindrical term. |
+| 6 register | The sweep is registered as claim L1242, tagged hand-written (the Legacy Mapper owns the register). | Registry data in `s5rad_sweep.toml` (`[meta]`: claim, tag, FR-062, D-073). |
+| 7 box-level batching | Belongs to the Integration Lead's driver layer. Per-box plane index ranges (box id, plane index, lo/hi in the two in-plane directions) as a small device array uploaded once per regrid; K2 launches are blocking and host-synchronous, no stream. | §2 and §3 are written to that. |
+
+### 2. Kernel descriptor
+
+**Launch unit.** One blocking launch per (band, update, angle `N`, plane `D`). The plane kernels' thread space is `(box, k', j')` in 3D and `(box, k')` in 2D, where `(i',j',k')` are corner-relative cell offsets (see below). The host passes the widths `KW`, `JW` of the thread space for plane `D` (the maximum of the in-plane extents over all boxes, from `s5rad_plane_widths3d` / `s5rad_plane_widths2d`); a thread outside its box's rectangle, or with `D >= NPL(box)`, returns without writing.
+
+**What the plane kernel indexes by**
+
+| Index | Where it comes from | Meaning |
+|---|---|---|
+| box id `IB`, 1..`NB` | thread index; last (trailing) dimension of every field array | the box. `BOX_IBAR(IB)`, `BOX_JBAR(IB)`, `BOX_KBAR(IB)` give its size. Boxes smaller than `NXM,NYM,NZM` are padded; the plane kernels never touch the padding. |
+| plane index `D`, 0..`NPL(IB)-1` | scalar argument | `D = i'+j'+k'`. `NPL(IB) = IBAR+JBAR+KBAR-2` (2D, `J=1`: `IBAR+KBAR-1`). The host launches `D = 0,1,..,max(NPL)-1` in ascending order, one blocking launch each. |
+| in-plane lo/hi per box | `PLN(1:4,D,IB) = (k' lo, k' hi, j' lo, j' hi)` int32, `PLN(4,0:NPLMAX-1,NB)`; 2D: `PLN2(1:2,D,IB) = (k' lo, k' hi)` | bounding rectangle of plane `D` in the two in-plane directions (octant independent). `k' lo = max(0, D-(IBAR-1)-(JBAR-1))`, `k' hi = min(KBAR-1, D)`, `j' lo = max(0, D-(IBAR-1)-(KBAR-1))`, `j' hi = min(JBAR-1, D)`. The third offset follows: `i' = D-j'-k'`; the thread skips the cell if `i'` is outside `0..IBAR-1`. The table is built by `s5rad_plane_table3d/2d` and uploaded once per regrid (together with `NPL`, `BOX_*BAR`). |
+| octant signs `ISTEP,JSTEP,KSTEP` | scalar arguments, each +1 or -1 | as upstream 4386-4429: `-1` where `DLX(N)<0`, `DLY(N)<0`, `DLZ(N)<0`. They map the offsets to the cell: `I = 1+i'` if `ISTEP>0`, else `IBAR-i'` (same for `J`, `K`). The upwind cells are `(I-ISTEP,J,K)`, `(I,J-JSTEP,K)`, `(I,J,K-KSTEP)`. `s5rad_octant` computes them on the host. |
+| angle index `N`, 1..`NRA` | scalar argument | selects `DLX(N)`, `DLY(N)`, `DLZ(N)`, `RSA(N)` (device arrays of length `NRA`, read as in the original: `ABS(DLX(N))`, `RSA(N)`); `DLN(-3:3,N)` and `DLM(N,1:3)` in the wall kernels. |
+| band `IBND` | scalar to the wall kernels, `s5rad_ils`, `s5rad_open_ilw_zero`, `s5rad_uiid_acc` (as the `ISL` slice) | the plane kernels do not take the band: the host passes the band's `EXTCOE` and `RTE_SOURCE` (arrays `(0:NXM+1,0:NYM+1,0:NZM+1,NB)` of that band). The band indexes `BR_ILW(:,:,IBND)`, `ILR(:,:,IBND)`, `ILS(:,:,IBND)`. |
+
+**Signatures** (all `bind(c)`; `integer(c_int)` and `real(c_double)`; scalars by value; arrays explicit-shape):
+
+```
+s5rad_plane3d(NB,NXM,NYM,NZM,NPLMAX,KW,JW,D,ISTEP,JSTEP,KSTEP,SOLID_PARTICLES,NCELL,NRA,N,RFPI,
+              BOX_IBAR,BOX_JBAR,BOX_KBAR,NPL,PLN,DX,DY,DZ,EXTCOE,RTE_SOURCE,CELL_INDEX,CELL_SOLID,CELL_ILW,
+              DLX,DLY,DLZ,RSA,IL,IL_UP)
+s5rad_plane2d(NB,NXM,NZM,NPLMAX,KW,D,ISTEP,KSTEP,SOLID_PARTICLES,NCELL,NRA,N,RFPI,
+              BOX_IBAR,BOX_KBAR,NPL2,PLN2,DX,DZ,EXTCOE,RTE_SOURCE,CELL_INDEX,CELL_SOLID,CELL_ILW,
+              DLX,DLZ,RSA,IL,IL_UP)                     ! J = 1; the y extent of the arrays is 0:2
+s5rad_il_fill(NB,NXM,NYM,NZM,BBFA,RPI_SIGMA,TMPA4,IL)
+s5rad_cell_ilw_reset(NCELL,CELL_ILW)
+s5rad_uiid_zero(NB,NXM,NYM,NZM,NS,ISL,UIID)
+s5rad_open_ilw_zero(NWE,NBR,NRA,NSB,IBND,ANGLE_INC_COUNTER,W_BTYPE,W_BR_INDEX,BR_ILW)
+s5rad_wall1(NB,NXM,NYM,NZM,NW,NCELL,NBR,NRA,NSB,NICR,N,IBND,TWO_D,BBFA,RPI_SIGMA,TMPA4,RPI,
+            W_BOX,W_BTYPE,W_BR_INDEX,W_IOR,W_II,W_JJ,W_KK,W_IIG,W_JJG,W_KKG,W_EMISSIVITY,W_TMP_EXTERIOR,W_RAMP_VAL,
+            W_NIC_MIN,W_NIC_MAX,DLN,DLM,TMP_0,OUTRAD_W,INRAD_W,ILR,CELL_INDEX,IL,CELL_ILW,BR_ILW)
+s5rad_wall2(NB,NXM,NYM,NZM,NW,NBR,NRA,NSB,N,IBND,TWO_D,W_BOX,W_BTYPE,W_BR_INDEX,W_IOR,W_IIG,W_JJG,W_KKG,DLN,IL,INRAD_W,BR_ILW)
+s5rad_wall3(NB,NXM,NYM,NZM,NW,NBR,NRA,NSB,N,IBND,ANGLE_INC_COUNTER,W_BOX,W_BTYPE,W_BR_INDEX,W_IOR,W_IIG,W_JJG,W_KKG,DLN,IL,BR_ILW)
+s5rad_uiid_acc(NB,NXM,NYM,NZM,NS,NRA,N,ISL,WEIGH_CYL,RSA,IL,UIID)
+s5rad_ils(NB,NXM,NYM,NZM,NICS,NRA,NSB,N,IBND,ILS_BOX,IIO_S,JJO_S,KKO_S,IL,ILS)
+```
+
+`NXM,NYM,NZM` are the maximum box sizes (`NYM=1` in 2D). `ISL` is the `UIID` slice: `IBND` for wide band and WSGG, `ANGLE_INC_COUNTER` for gray. `TWO_D` is 0 or 1. The wall kernels run one thread per wall over all boxes (`W_BOX(IW)` is the box).
+
+**Array layouts** (Fortran column-major; box is always the last index of a field):
+
+| Array | Shape | Notes |
+|---|---|---|
+| `IL`, `IL_UP`, `EXTCOE`, `RTE_SOURCE` | `(0:NXM+1, 0:NYM+1, 0:NZM+1, NB)` | one ghost layer per box at `0` and `BOX_*BAR+1`. `IL` is a working array, not an output. |
+| `UIID` | `(0:NXM+1, 0:NYM+1, 0:NZM+1, NS, NB)` | `NS` = `UIIDIM` (number of bands for wide band and WSGG, `ANGLE_INCREMENT` for gray). Slice `ISL` is zeroed and accumulated; the other slices are not touched. |
+| `UII`, `QR` | per box `(0:IBAR+1, 0:JBAR+1, 0:KBAR+1)` | formed after the update by the generated kernels `rad_uii_sum` (`S4 = S4 + UIID(:,:,:,N4)` in ascending `N4`) and `rad_qr_wb` / `rad_qr_gray`; the test runs them on a single box. Stacking them over `NB` needs a box dimension in those kernels (driver layer). |
+| `DX`, `DY`, `DZ`, `TMP_0` | `(0:NXM+1,NB)`, `(0:NYM+1,NB)`, `(0:NZM+1,NB)` | box-wise grid data |
+| `CELL_INDEX` | `(0:NXM+1,0:NYM+1,0:NZM+1,NB)` | global cell number `IC` (0 = no record); `CELL_SOLID(IC)` is 0/1, `CELL_ILW(IC,1:3)` |
+| wall tables | `W_*(NW)`, `NW = sum over boxes of NWE+NWI` | flat over all boxes; `W_BOX` gives the box; `W_II..W_KKG` are the ghost cell `(II,JJ,KK)` and the gas cell `(IIG,JJG,KKG)` of the wall; `W_RAMP_VAL` is `EVALUATE_RAMP(T-T_BEGIN,...)` done on the host once per update for open walls with `TMP_EXTERIOR>0` |
+| `BR_ILW` | `(NBR, NRA, NSB)` | slot-fastest table of `05`; `W_BR_INDEX(IW)` is the slot (global over boxes) |
+| `DLN`, `DLM` | `(-3:3,NRA)`, `(NRA,3)` | as `DLN(IOR,N)`, `DLM(N,\|IOR\|)` |
+| `ILR`, `ILS` | `(NICR,NRA,NSB)`, `(NICS,NRA,NSB)` | the `IL_R` of all other meshes concatenated per box (wall positions `W_NIC_MIN/MAX`); `IL_S` of all boxes concatenated, `ILS_BOX(LL)` is the box of entry `LL` |
+
+**Host duties and refusals.** The host refuses `CYLINDRICAL`, `CC_IBM`, `RAD_DIFF_SCHEME>1`, CFACE walls and the particle ORIENTATION loops in this release. It asserts, per table build: every non-NULL wall owns a unique ghost cell `(II,JJ,KK)` and a unique `BR_ILW` slot (no two threads write one element); `CELL_INDEX /= 0` for the gas cell of every solid-type wall; `D < NPL(IB)` ranges are those of `PLN`. Zero direction cosines together with solid walls on opposite faces of a one-cell-wide pocket would make two walls write one `CELL_ILW` element in the original as well; the host does not need to handle it but the test avoids it.
+
+### 3. Angle-loop structure (per band, per update)
+
+```
+DO IBND = 1, NSB                       ! 1 only for gray
+  DO I_UIID = 1, N_UPDATES             ! ANGLE_INCREMENT for UPDATE_ALL_ANGLES, else 1
+    ANGLE_INC_COUNTER = MOD(ANGLE_INC_COUNTER,ANGLE_INCREMENT)+1            ! host
+    s5rad_uiid_zero(ISL), s5rad_open_ilw_zero, s5rad_il_fill                ! 3 launches
+    DO N = NRA-ANGLE_INC_COUNTER+1, 1, -ANGLE_INCREMENT                     ! descending, host loop
+      s5rad_cell_ilw_reset
+      s5rad_wall1                      ! ghost cells, CELL_ILW, mirror/open/interpolated/solid
+      octant signs from DLX(N),DLY(N),DLZ(N)
+      DO D = 0, max(NPL)-1             ! ascending, one blocking launch per plane
+        s5rad_plane3d (or plane2d)
+      s5rad_wall2, s5rad_wall3         ! INRAD_W, ILW chains in N order
+      s5rad_uiid_acc                   ! UIID chain in descending N
+      s5rad_ils                        ! IL_S(:,N,IBND), disjoint per angle
+    ENDDO
+  ENDDO
+  (wide band) QR band kernel
+ENDDO
+UII = SUM(UIID,4), QR (gray)
+```
+
+Launches per angle: `max(NPL) + 6`; per update 3 more. Everything is serial over angles and planes and host-synchronous: no stream, no event. The chains over angles (`UIID`, `INRAD_W`, `ILW(ANGLE_INC_COUNTER)`, the mirror read of `ILW(DLM)`) therefore keep the original order by construction. Box-level launch batching (several boxes per launch) is already in the kernels (box id in the thread space); which boxes go into one launch, and when the tables are uploaded, is the driver's decision. The angle loop and the octant arithmetic stay on the host; they are not in the kernel file.
+
+Arithmetic rules for the kernel file: FMA contraction off (gfortran `-ffp-contract=off`, nvfortran `-gpu=nofma`); no regrouping of the sums in the copied lines (`AIU_SUM`, `A_SUM`, the `RAP*(...)` product); `MAX` as written. The test mutants include FMA contraction and regrouped sums and must fail.
+
+### 4. Stage 2/3 tests (what is checked)
+
+`test/run_sweep.sh` builds the verbatim upstream sweep (radi.f90 lines 4287-4899 minus the ranges listed as omitted in `s5rad_sweep.toml`, cut by `make_sweep_tests.py`; nothing is retyped) and the kernel path, runs the same random state through both and compares bit for bit: `IL`, `IL_UP`, `UIID` (interior and full array), `UII`, `QR`, `CELL_ILW`, `INRAD_W`, every `ILW` slot (all walls, angles, bands, including the open-wall accumulations), `IL_S`, the angle counter and the completed flag. Cases: 3D and 2D; gray, WSGG and wide band; all eight octants; solid cells and cells without record; open, mirror, interpolated, solid and NULL walls; zero direction cosines; `UPDATE_ALL_ANGLES`; stacked boxes of different sizes; plane tables partition every box. Flag sets as the other radiation tests, 1 and 4 threads. Mutants (`run_sweep_mutants.sh`): wrong octant sign, wrong plane order, ascending angle order, FMA contraction, regrouped sums, solid cell written, `CELL_ILW` ignored, wrong upwind cell, wrong mirror partner and others; each must fail.
+
+### 5. CI
+
+`check_sweep_drift.py` (marked blocks equal to the upstream lines at the pinned commit through the documented renames; omitted ranges pinned by hash; every statement of each sweep region is copied, omitted or glue), `docs/tools/k2_ci_check.py` and `docs/tools/kernel_lint.py --clauses-only` on `s5rad_sweep_k2.F90`. The default K2 globs do not include the new directory; CI must pass the file explicitly (or the glob must be extended; an edit of the shared tools is not mine to make).
+
+### 6. Ghost cells of UII/UIID/QR (D-073 (2)): readers to confirm
+
+`test/sweep_ghost_reads.py` runs `git grep` for `UII`, `UIID`, `QR` over `Source/*.f90` at the pinned commit and classifies every line; an unclassified line fails the check. Result at `bee11f0329`: whole-array statements inside `RADIATION_FVM` only feed other ghost elements; loops in `divg.f90`, `radi.f90`, `ccib.f90`, `dump.f90` (Q_DOT) are interior; the wall code reads `UII(BC%IIG,BC%JJG,BC%KKG)` (gas cell). Nine lines need the V&V Lead's confirmation:
+
+1. `dump.f90:3918, 3920, 3921, 4107, 4109, 4110`: the restart (core) file writes and reads the complete `QR`, `UII`, `UIID` including the ghost layer. If the ghost layer is not reproduced, the bytes of the restart file differ there, and a restart reads them back.
+2. `dump.f90:8767, 8769`: output quantities INTEGRATED INTENSITY and RADIATION LOSS read `UII(II,JJ,KK)`, `QR(II,JJ,KK)` at a device or slice index; `CASE(16)` (absorption coefficient) clamps the index into `1..IBAR`, these two do not. Can a device or slice address the ghost layer?
+3. `dump.f90:9184`: particle device temperature reads `UII(II,JJ,KK)` at the device cell.
+
+In the single-box kernel path the ghost cells of `UIID`, `UII`, `QR` are bit-identical to the original (the test counts it). Only the box-split path may differ there.
+
+### 7. Status of the stages and what is open
+
+| Stage | State |
+|---|---|
+| 1 kernels | 3D and 2D Cartesian; K2 CI and clause lint pass; drift check passes (see the commit of the kernel files) |
+| 2/3 tests | bitwise test written; first run: all groups pass on gfortran O2 at 1 and 4 threads; full flag-set run and the mutation run are in progress and will be reported with their commit |
+| open | V&V confirmation of §6; the ILD* arrays (stage 7); a box dimension in the generated `UII`/`QR` kernels for stacked boxes; registration of claim L1242 by the Legacy Mapper; measurement of launch latency before any angle batching; the nvfortran `-gpu=nofma` build of the file has not been run (no nvfortran on the development machine) |

@@ -1,6 +1,6 @@
 # 07. A-56 backend comparison plan (MLMG vs assembled HYPRE vs FFT) and first results
 
-**Status: plan complete; first accuracy set measured; the R=64 cause established (section 8); repeat-timing tables in sections 7.4 and 7.5 are filled as the runs finish (marked PENDING until then).**
+**Status: plan complete (sections 1 to 6); first accuracy set measured (7.1 to 7.3, 7.6); R=64 cause established (section 8); stairwell repeats done (7.5); first-set timing repeats partly done, the H rows for the hallway, sealed and stretched-Dirichlet cases and one GPU row are PENDING because the test machine was not quiet (7.4); fold sign check (section 11) and mixed N/D excess (section 12) done; P3-R02 measured on the composite MLMG (section 13). Not committed.**
 Measured = run. Read = source only. Unverified = neither.
 Software: sections 1 to 10 (except where stated) use the common-layer tip of the pressure backend (tree this repository, commit `1f3f4de4c4`; latest `Source/pressure_backend` commit `29c2f9aa4a`, which contains the D-067 defaults from `a4a1073952`), read only and built unchanged. Sections 11 and 12 use the later tip `626c5f4b7f` (adds mixed open/closed faces, `fold_boundary_data`, the D-057 mapping check), built unchanged in a scratch directory. AMReX 26.09 and HYPRE v2.32.0-24 for that tip; the assembled-HYPRE and stretched/masked harnesses (docs 05, 06) use AMReX 99ddfda and the same HYPRE.
 Machines: CPU timing and all GPU runs on an owner-provided NVIDIA test machine (pinned performance cores, 1 thread per rank, one GPU, managed arena). CPU accuracy checks of the tip ran on the shared build box.
@@ -11,10 +11,11 @@ Machines: CPU timing and all GPU runs on an owner-provided NVIDIA test machine (
 2. **What is measurable today:** the product backend (common layer + MLMG + FFT) can be compared MLMG-vs-FFT on the uniform box only. Assembled HYPRE is not in the product backend; it exists only in the study harnesses. Masked, stretched and mixed-face cases are `NotBuilt` in the product backend (section 9), so those rows use the harnesses and are labelled as such.
 3. **First set, accuracy (all pass):** MLMG vs FFT on the product tip, 32³ to 128³, Neumann, periodic and Dirichlet, 1 and 2 ranks: worst 7.0e-14 against eps_H 1e-8 to 3.9e-8 (section 7.1). D-067 mode checks: 65 of 65 checks pass (section 7.2). Harness cases (uniform 100³ Dirichlet, hallways open, hallways sealed, stairwell with three zones, stretched 64³ at R=1, 8, 64): every backend pair on CPU and GPU agrees with the assembled-HYPRE reference to at most 5.0e-11, six orders below eps_H (section 7.3).
 4. **R=64 slowness (task 2): cause established.** AMReX's HYPRE interface hands HYPRE the row-scaled matrix `D⁻¹A` (unit diagonal), which is not symmetric when the diagonal varies. On a stretched grid the diagonal varies (7.3× at R=64), and the FDS option set uses PCG, which needs a symmetric matrix. The first bottom solve then diverges until its 200-iteration cap; later solves recover. It is not an anisotropy/coarsening problem: BoomerAMG on the same unscaled matrix needs 27 iterations. Recommended setting: `hypre.hypre_solver=BiCGSTAB` with the bottom tolerance 1e-11 (about 8× faster at 64³, and the only converging setting at 1M and R=64 on CPU), until AMReX can pass the unscaled or symmetrically scaled matrix (section 8).
-5. **Stairwell repeats (task 3):** section 7.5.
+5. **Stairwell repeats (task 3):** section 7.5. 3 repeats per row, 36 runs, none rejected; H is 2.6× faster than Mf on CPU and 6.2× on GPU (8 CPU ranks: Mf 2.70 s, H 1.04 s; GPU: Mf 1.19 s, H 0.193 s); BiCGSTAB (Mb) does not help on this uniform-spacing case.
 6. **Fold sign check (task 4):** the three signs of `fold_boundary_data` (low-side Neumann `+g/h`, high-side Neumann `-g/h`, Dirichlet `-2 H_b/h²`) are **right**: derived from `pres.f90` (section 11.1) and confirmed by a nonzero-data run against a dense matrix built the FDS way (24 of 24 cases, worst 4.4e-14; each sign flip gives differences of 0.31 to 3.6 relative to max |H|) and by a manufactured-solution convergence test (section 11.2 and 11.3). No FDS run with nonzero wall data and an H dump exists in the V&V area (section 11.4).
 7. **Mixed N/D error excess (task 5):** not the solver tolerance and not the wall stencil. It is a smooth, domain-wide discretisation effect: the coarse truncation error outside the refined patch is no longer partly cancelled by the patch's own truncation error, and the C/F interface adds a smaller second-order remainder (section 12).
-8. **Not measurable yet:** items in section 9 (HYPRE inside the product backend, composite masked/stretched/mixed-face cases, GPU build of the product tip, FDS H references).
+8. **P3-R02 pressure tolerance (section 13):** on the composite MLMG (two levels, D-067 defaults) the measured `max|div u - D - c|` after projection is **2.8e-12 at eps_rel 1e-12 and 6.9e-9 at 1e-9** for n = 32 (U/dx_fine = 64), i.e. 4.4e-14 and 1.1e-10 times U/dx_fine, against the working bound 1e-9·U/dx_fine (met with margins of 22,000 and 9); every projected case satisfies the derived bound `10·eps_rel·B + 20·eps_mach·U/dx_fine` (tightest margin 11 at 1e-12), and the unprojected control fails it. The working bound is broken only at eps_rel 1e-6.
+9. **Not measurable yet:** items in section 9 (HYPRE inside the product backend, composite masked/stretched/mixed-face cases, GPU build of the product tip, FDS H references).
 
 ## 2. Requirement and metric
 
@@ -111,13 +112,67 @@ Reference: assembled HYPRE (H), one CPU rank, one solve, tolerance 1e-10. Entrie
 - **Reuse of earlier data:** the stairwell one-rank Mf vs H agreement was first reported in doc 06 §8 (same order of magnitude); doc 05 reported only residuals and the manufactured-solution error (identical for all backends to four digits, max 8.22e-5), so this table is the first backend-vs-backend metric on hallways. The doc 06 64³ stretched error table (Mf and H identical error to the printed digits) remains valid.
 - Raw dumps and the table generator: `scratch/pressure-signoff/a56/test machine/logs/a56/acc_table.txt`, `a56_cmp.py`.
 
-### 7.4 Solve time, first set (re-measured with the quiet-machine protocol)
+### 7.4 Solve time, first set (re-measured with the quiet-machine protocol): PARTLY PENDING
 
-PENDING: filled from the repeat runs (uniform Dirichlet 100³, hallways open and sealed, stretched 100³ R=8 Neumann and Dirichlet; Mf, H and, where it matters, Mb; 8 CPU ranks and 1 GPU; 2 repeats). Until then the doc 05 tables (mms, hallD, sealD) and doc 06 §7 (stretched 1M) stand; the single-run R=64 results at 1M are in section 8.
+Cases: uniform Dirichlet 100³ (`mms`), hallways open (`hallD`) and sealed (`sealD`), stretched 1M at R = 8 Neumann (`strN8`) and Dirichlet (`strD8`). Backends Mf, H and, for `sealD` and `strN8`, Mb. 8 CPU ranks (pinned performance cores) and 1 GPU; 2 repeats, interleaved, each a fresh process, quiet-machine gate and rejection rules as in 7.5. No run was rejected for temperature or clock (package at most 96 °C, never 30 s at or above 95 °C; held clocks 3.3 to 4.4 GHz on 8 ranks, GPU SM 2430 MHz).
 
-### 7.5 Masked stairwell repeats (task 3)
+**What happened.** The Mf rows are complete (2 repeats each). In the repeat driver, a shell variable used for the case name was overwritten by the package-temperature variable of the quiet-machine check, so the output files of most H and Mb runs were named after a temperature and overwritten by later runs with the same name. Only runs whose name occurs once in the log can be trusted; the rows below use only those and show how many of the repeats are valid. A corrected driver (`a56_time_rep2.sh` in the scratch results directory, reruns only the affected H and Mb rows) was started and stopped before its first run: the test machine was not quiet (another process group, about 15 busy CPUs, for the whole 15 minutes I watched; the quiet gate needs at most 1.5). The affected rows therefore remain **PENDING** (marked in the table); the numbers in the table are measured and valid, but with fewer repeats than planned where stated.
 
-PENDING: Mf, H and Mb, 1/4/8 CPU ranks and GPU, 3 repeats each, median and spread; replaces the single-repeat table in doc 06 §8.
+| Device | Case | Backend | Valid repeats | Re-solve per repeat (s) | Median (s) | Spread | Iterations | Pkg max (C) | Clock (MHz) |
+|---|---|---|---|---|---|---|---|---|---|
+| 8 CPU ranks | mms | Mf | 2 of 2 (rep 1,2) | 0.2415, 0.2373 | 0.2394 | 1.7% | 23 | 93 | 4343 |
+| 8 CPU ranks | mms | H | 1 of 2 (rep 1) | 0.3924 | 0.3924 | - | 21 | 90 | 3545 |
+| 1 GPU | mms | Mf | 2 of 2 (rep 1,2) | 0.1678, 0.1678 | 0.1678 | 0.0% | 23 | 92 | 2430 |
+| 1 GPU | mms | H | 1 of 2 (rep 1) | 0.09428 | 0.09428 | - | 21 | 94 | 2430 |
+| 8 CPU ranks | hallD | Mf | 2 of 2 (rep 1,2) | 0.3744, 0.3721 | 0.3733 | 0.6% | 15 | 94 | 4382 |
+| 8 CPU ranks | hallD | H | 0 of 2 | PENDING | | | | | |
+| 1 GPU | hallD | Mf | 2 of 2 (rep 1,2) | 0.2413, 0.2411 | 0.2412 | 0.1% | 15 | 95 | 2430 |
+| 1 GPU | hallD | H | 1 of 2 (rep 2) | 0.1194 | 0.1194 | - | 23 | 88 | 2430 |
+| 8 CPU ranks | sealD | Mf | 2 of 2 (rep 1,2) | 2.295, 2.274 | 2.284 | 0.9% | 4 | 94 | 3588 |
+| 8 CPU ranks | sealD | H | 0 of 2 | PENDING | | | | | |
+| 8 CPU ranks | sealD | Mb | 2 of 2 (rep 1,2) | 1.917, 1.913 | 1.915 | 0.2% | 1 | 96 | 3589 |
+| 1 GPU | sealD | Mf | 2 of 2 (rep 1,2) | 0.8349, 0.835 | 0.835 | 0.0% | 4 | 92 | 2430 |
+| 1 GPU | sealD | H | 0 of 2 | PENDING | | | | | |
+| 1 GPU | sealD | Mb | 1 of 2 (rep 2) | 7.502 | 7.502 | - | 2 | 93 | 2430 |
+| 8 CPU ranks | strN8 | Mf | 2 of 2 (rep 1,2) | 1.479, 1.479 | 1.479 | 0.0% | 4 | 93 | 3552 |
+| 8 CPU ranks | strN8 | H | 2 of 2 (rep 1,2) | 0.4484, 0.4481 | 0.4482 | 0.1% | 24 | 93 | 3575 |
+| 8 CPU ranks | strN8 | Mb | 2 of 2 (rep 1,2) | 0.9216, 0.9237 | 0.9227 | 0.2% | 1 | 92 | 3544 |
+| 1 GPU | strN8 | Mf | 2 of 2 (rep 1,2) | 0.3615, 0.3615 | 0.3615 | 0.0% | 3 | 90 | 2430 |
+| 1 GPU | strN8 | H | 1 of 2 (rep 1) | 0.1104 | 0.1104 | - | 24 | 89 | 2430 |
+| 1 GPU | strN8 | Mb | 1 of 2 (rep 2) | 0.2167 | 0.2167 | - | 1 | 90 | 2430 |
+| 8 CPU ranks | strD8 | Mf | 2 of 2 (rep 1,2) | 0.5938, 0.5992 | 0.5965 | 0.9% | 54 | 93 | 3331 |
+| 8 CPU ranks | strD8 | H | 0 of 2 | PENDING | | | | | |
+| 1 GPU | strD8 | Mf | 2 of 2 (rep 1,2) | 0.3979, 0.3974 | 0.3977 | 0.1% | 54 | 89 | 2430 |
+| 1 GPU | strD8 | H | 0 of 2 | PENDING | | | | | |
+
+Reading (valid rows only): Mf repeats agree within 0.0 to 1.7% on CPU and GPU. On the uniform and stretched 1M cases H is faster than Mf: strN8 CPU 0.448 s against 1.479 s (3.3×), strN8 GPU 0.110 s against 0.362 s (3.3×), mms GPU 0.094 s against 0.168 s (1.8×); on mms CPU H is slower than Mf (0.392 s against 0.239 s). Mb helps where Mf does not converge fast: strN8 CPU 0.923 s against 1.479 s (1.6×, one V-cycle against four) and GPU 0.217 s against 0.362 s (1.7×); on `sealD` CPU 1.915 s against 2.284 s (1.2×). The `sealD` GPU Mb value (7.5 s, one valid repeat, 2 V-cycles) disagrees with the CPU row and with the GPU `strN8` Mb row and is **not confirmed**: it needs its repeat before use. Until the PENDING rows are filled, the doc 05 tables and doc 06 §7 stand for those rows; the single-run R=64 results at 1M are in section 8.
+
+### 7.5 Masked stairwell repeats (task 3) (measured, quiet-machine protocol)
+
+Case as in doc 06 §8: stairwell union, 1,634,654 unknowns, three components (one open, two sealed), synthetic right-hand side, tolerance 1e-10, no warm-up. Rows: Mf (MLMG + HYPRE with the FDS option set, PCG), H (assembled HYPRE, PCG), Mb (Mf with `hypre.hypre_solver=BiCGSTAB` and bottom tolerance 1e-11, the section 8.4 setting). **3 repeats per row, interleaved by repeat** (all rows once, then again), each repeat a fresh process. Before every run the machine had to be quiet (pinned performance cores at least 85% idle, at most 1.5 busy CPUs overall, package below 70 °C); a run was to be rejected and repeated if the package stayed at or above 95 °C for 30 s, if the median pinned-core clock fell below 4200 (1 rank), 3300 (4 ranks) or 2800 (8 ranks) MHz, or the GPU SM clock median below 2000 MHz. **No run was rejected: all 36 were accepted at the first attempt.** The package touched 97 °C once (a short setup spike on one H run, never 30 s), otherwise at most 94 °C. The median is of the three per-repeat re-solve medians; "spread" is (max - min)/median over the three repeats.
+
+| Backend | Ranks | Repeats | Re-solve median (s) | Min-max (s) | Spread (max-min)/median | Iterations | First solve median (s) | Setup median (s) | Timed solves per run | Package max (°C) | Core clock median (MHz) / GPU SM (MHz) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Mf | 1 CPU | 3 | 5.785 | 5.704-5.864 | 2.8% | 3 | 9.907 | 4.2 | 10 | 94 | 5200 / - |
+| H | 1 CPU | 3 | 2.216 | 2.214-2.258 | 2.0% | 27 | 2.225 | 3.25 | 20 | 92 | 5200 / - |
+| Mb | 1 CPU | 3 | 7.413 | 7.396-7.524 | 1.7% | 1 | 11.63 | 4.21 | 10 | 88 | 5200 / - |
+| Mf | 4 CPU | 3 | 2.781 | 2.779-2.992 | 7.6% | 3 | 4.458 | 1.58 | 20 | 92 | 4192 / - |
+| H | 4 CPU | 3 | 1.09 | 1.084-1.166 | 7.5% | 25 | 1.009 | 1.46 | 40 | 94 | 4200 / - |
+| Mb | 4 CPU | 3 | 3.772 | 3.552-3.831 | 7.4% | 1 | 5.257 | 1.71 | 20 | 94 | 4162 / - |
+| Mf | 8 CPU | 3 | 2.7 | 2.538-2.768 | 8.5% | 3 | 3.336 | 0.632 | 20 | 94 | 3574 / - |
+| H | 8 CPU | 3 | 1.036 | 0.9443-1.042 | 9.4% | 26 | 0.795 | 0.989 | 40 | 97 | 3540 / - |
+| Mb | 8 CPU | 3 | 3.421 | 3.123-3.62 | 14.5% | 1 | 3.929 | 0.508 | 20 | 93 | 3565 / - |
+| Mf | 1 GPU | 3 | 1.191 | 1.191-1.191 | 0.1% | 3 | 1.858 | 0.667 | 30 | 92 | - / 2430 |
+| H | 1 GPU | 3 | 0.1934 | 0.1934-0.1936 | 0.1% | 26 | 0.1952 | 0.223 | 50 | 93 | - / 2430 |
+| Mb | 1 GPU | 3 | 1.263 | 1.262-1.263 | 0.1% | 1 | 1.929 | 0.666 | 30 | 92 | - / 2430 |
+
+Reading: (1) The CPU repeats agree within 1.7 to 14.5% (largest at 8 ranks, where 8 pinned cores share a package at 3.5 GHz); the single-rank and GPU rows within 3%. (2) H is faster than Mf by 2.6× (8 ranks), 2.6× (4), 2.6× (1 rank) and 6.2× (GPU). (3) On this case Mb (BiCGSTAB) is **not** faster than Mf: 1 V-cycle instead of 3, but 1.3× slower per solve on CPU and 1.06× on GPU. The BiCGSTAB setting is a remedy for stretched cells (section 8); on this uniform-spacing masked case the diagonal does not vary, so Mf's PCG is not affected and BiCGSTAB only adds cost. (4) Compared with the single-repeat table of the first version of doc 06 §8, the GPU medians agree to 1%; the CPU medians differ by 5 to 18% (the first version ran at lower, uncontrolled core clocks: the old single-rank Mf row, 6.52 s, is now 5.79 s at a held 5.2 GHz, and the old single-rank H row 2.70 s is now 2.22 s).
+
+Raw log: `stair_rep.log` and the table `stair_rep_table.md` in the scratch results directory.
+
+### 7.6 Rerun of the uniform CI subset and the D-067 modes on the later tip (measured)
+
+Tip `626c5f4b7f` (mixed faces, `fold_boundary_data`, D-057 mapping check), built unchanged. The same 11 configurations as in 7.1 with both mean kinds (22 runs, MLMG vs FFT, 1 and 2 ranks): **22 of 22 pass, worst relative L2 difference 7.0e-14** (eps_H 1e-8 to 3.9e-8), identical to the earlier tip within round-off. D-067 mode checks (`meankind`, `comp_gauge`, `comp`, `comp_sel`, `exactsum`, `selector`, 2 ranks): **65 of 65 checks pass, none fail.** One batch of the 128³ cases was killed by memory pressure on the shared machine and was repeated alone; the repeated runs pass.
 
 ## 8. Why Mf is slow at stretching ratio R = 64 (task 2)
 
@@ -217,6 +272,7 @@ Not established: why the first solve diverges rather than merely stalls (the pre
 - Section 8 experiments are single runs on a shared machine (not the quiet-machine protocol); only the factor differences of 2× or more are significant. The 1M R=64 numbers are single runs.
 - The GPU rows of the R=64 batch ran with the host package at 77 to 92 °C (GPU plateau) and low host clocks; GPU solves are device-bound, but treat them as indicative.
 - The local AMReX build used for the unscaled experiment is a copy of the tree at 99ddfda with one compile flag; it is not committed anywhere.
+- Scratch cleanup: the large regenerable files (rebuilt FDS binaries, objects, restart and run dumps of the mean-removal study; raw field dumps of the D-067 mode checks; the transferred R=64 archive) were deleted once their results were in docs 06 and 07; scripts, logs and result text are kept.
 - Open: runtime option or symmetric scaling in the AMReX HYPRE interface and its upstream test; a product-side guard that selects the Krylov method by the diagonal spread; HYPRE inside the product backend (needed for A-56 in CI); H dump from a real FDS case for the final A-56 sign-off.
 
 ## 11. Fold sign check (task 4): `fold_boundary_data` against FDS's own H
@@ -323,3 +379,44 @@ Controls on the geometry: a fine level over the whole domain (`full=1`) gives ex
 - **A discretisation effect that is smooth and domain-wide.** The fine-level error of a composite solve is not bounded by the fine grid's own accuracy; it carries the elliptic influence of the coarse truncation error outside the patch. With the half-integer N/D modes the coarse-outside and patch parts partly cancel in the uniform solve; the composite removes the cancellation (this reproduces about 85% of the composite error), and the C/F interface and the fine-grid part contribute the remaining 13 to 15%, concentrated in the cells next to it. All of it converges at second order (orders 1.89 to 2.04).
 - **Consequence for the harness:** the relaxed check (order instead of "fine below uniform coarse") is right, but the stated reason ("the solution need not vanish at the patch edges") is not what the data show. A sharper acceptance test is the order per region plus the ratio to the uniform fine error constant in n (the values in 12.2), or comparing with a uniform solve on the same cells restricted to the same region.
 - **Open:** I did not test non-matching wall data (a solution with nonzero second derivative at a Dirichlet wall), where the ghost-cell closure has an O(1) local truncation term; the global order there is the known second order, but I have not measured it.
+
+## 13. P3-R02: divergence error after projection on the composite MLMG (measured)
+
+Question (test plan P3-R02): the bound `max|div u - D - c| <= 10·eps_rel·B + 20·eps_mach·U/dx_fine`, with eps_rel the solver relative tolerance, B = max|div u* - D| before the projection, eps_mach = 2.2e-16, c the constant removed by the mean removal, compared with the working bound 1e-9·U/dx_fine (accepted at eps_rel = 1e-12).
+
+Setup (tip `626c5f4b7f`, D-067 defaults, volume-weighted mean removal; driver `a56_proj.cpp` in the scratch directory; results `p3r02_results.txt`):
+- Two-level composite hierarchy on the unit cube, refined patch = the middle half of the coarse domain in each direction, uncovered coarse cells plus fine cells.
+- Face velocity `u*` sampled analytically on every level (smooth field with zero normal component at closed walls, amplitude U); coarse faces under the fine level replaced by the average of the fine faces (`average_down_faces`), the same rule the backend uses for the gradient. Cell source `D = U·(0.3 + 0.5 sin(3πx) cos(2πy) sin(πz))`.
+- Projection: `b = div u* - D` on uncovered cells (composite divergence), `solve_pressure` for `lap H = b`, `face_gradient_composite` for the face gradients of H, `u = u* - grad H`. The observable is `max|div u - D - c|` over the uncovered cells of both levels, where c is the removed mean (closed box: the volume mean of b, which equals the value the backend reports; open or mixed faces: no singularity, c = 0).
+- B (a priori maximum of b) is 9.7 for U = 1; U/dx_fine = 64 (n = 32, ratio 2), 128 (n = 64 or n = 32 with ratio 4).
+
+| Case (face types) | eps_rel | V-cycles | max abs(div u - D - c) | divided by U/dx_fine | Derived bound divided by U/dx_fine | Working bound 1e-9 met | Derived bound met |
+|---|---|---|---|---|---|---|---|
+| n=32, ratio 2, `NN,NN,NN` | 1e-12 | 11 | 2.84e-12 | 4.4e-14 | 1.5e-12 | yes | yes |
+| | 1e-9 | 8 | 6.85e-9 | 1.1e-10 | 1.5e-9 | yes | yes |
+| | 1e-6 | 6 | 1.47e-6 | 2.3e-8 | 1.5e-6 | no | yes |
+| | none (no projection) | - | 9.39 | 0.15 | 1.5e-12 | no | **no** |
+| n=64, ratio 2, `NN,NN,NN` | 1e-12 | 12 | 2.01e-12 | 1.6e-14 | 7.6e-13 | yes | yes |
+| | 1e-9 | 9 | 2.03e-9 | 1.6e-11 | 7.6e-10 | yes | yes |
+| | none | - | 9.42 | 0.074 | 7.6e-13 | no | **no** |
+| n=32, ratio 4, `NN,NN,NN` | 1e-12 | 11 | 5.48e-12 | 4.3e-14 | 7.6e-13 | yes | yes |
+| | 1e-9 | 9 | 7.70e-10 | 6.0e-12 | 7.6e-10 | yes | yes |
+| n=32, ratio 2, `DD,DD,DD` | 1e-12 | 10 | 8.87e-12 | 1.4e-13 | 1.5e-12 | yes | yes |
+| | 1e-9 | 8 | 2.02e-9 | 3.2e-11 | 1.5e-9 | yes | yes |
+| | none | - | 9.69 | 0.15 | 1.5e-12 | no | **no** |
+| n=32, ratio 2, `ND,DN,NN` | 1e-12 | 12 | 1.82e-12 | 2.9e-14 | 1.5e-12 | yes | yes |
+| | 1e-9 | 9 | 3.91e-9 | 6.1e-11 | 1.5e-9 | yes | yes |
+| n=32, ratio 2, `NN,NN,NN`, U = 100 | 1e-12 | 11 | 2.78e-10 | 4.4e-14 | 1.5e-12 | yes | yes |
+| | 1e-9 | 8 | 6.85e-7 | 1.1e-10 | 1.5e-9 | yes | yes |
+| n=64, ratio 2, `NN,NN,NN`, 2 ranks | 1e-12 | 12 | 2.07e-12 | 1.6e-14 | 7.6e-13 | yes | yes |
+
+(The derived-bound column shows the bound itself divided by U/dx_fine, to be compared with the measured column. At eps_rel = 1e-12 the bound is dominated by the 10·eps_rel·B term (9.7e-11); the machine-precision term 20·eps_mach·U/dx_fine is 2.8e-13 for n = 32, ratio 2, i.e. 0.3% of it.)
+
+Findings:
+1. **At eps_rel = 1e-12 the measured error is 1.6e-14 to 1.4e-13 times U/dx_fine** (2.0e-12 to 8.9e-12 absolute for U = 1), which is 7,000 to 62,000 times below the working bound 1e-9·U/dx_fine. It is also inside the derived bound in every case, with margins of 11 (`DD,DD,DD`, the tightest), 18 (ratio 4), 34 (n = 32), 49 (n = 64) and 53 (`ND,DN,NN`). The measured value is 0.2 to 0.9 of `eps_rel·B`, so the factor 10 in the derived bound is about right in size (the Dirichlet case uses 0.9 of it).
+2. **At eps_rel = 1e-9 the measured error is 6.0e-12 to 1.1e-10 times U/dx_fine**, still inside the 1e-9·U/dx_fine working bound (margin 9 to 170) and inside the derived bound (measured 0.07 to 0.4 of it). At 1e-6 the working bound is exceeded (2.3e-8 times U/dx_fine) while the derived bound still holds, as expected: the working bound 1e-9·U/dx_fine is valid for solver tolerances of about 1e-9 or tighter, not looser.
+3. **Scaling:** the error is proportional to U (U = 100 gives 100 times the absolute error and the same ratio to U/dx_fine) and follows the solver tolerance times B, not the grid: from eps_rel 1e-12 to 1e-9 the error grows by 140 to 2,400 times (a factor 1,000 in the tolerance; the V-cycle count steps in whole cycles, so the measured value jumps with it). The same holds at n = 32 and 64, ratio 2 and 4, and with 2 ranks.
+4. **Negative control:** with no projection (phi = 0, the solver correcting nothing) the observable is B itself (9.4 to 9.7, i.e. 0.07 to 0.15 times U/dx_fine) and fails the bound by about 10 orders at eps_rel 1e-12; the test is sensitive.
+5. **Mean removal:** the constant c in the closed case is -0.29995 (n = 32), the volume mean of b, equal to the backend's reported `removed_mean` to all printed digits; subtracting it is what makes the observable small. With open faces c = 0 as expected.
+
+Limits: the field `u*` is smooth and synthetic and the hierarchy is static (a centred patch), not a regrid seam of a real run; the observable is therefore the pure solver-plus-composite-gradient part, which is what the bound is derived for. The real regrid test (P3-R02 on a run with a seam) still needs the driver. The bound's factor of 10 and the U/dx_fine floor were not stressed (eps_mach term 0.3% of the bound at 1e-12); a case with B much smaller than U/dx_fine would test the floor.

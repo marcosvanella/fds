@@ -119,22 +119,24 @@ Findings: (a) with no imbalance the two removals differ by under 1% of the error
 
 Stairwell union (11 meshes, 192×176×552 padded, `dx` = 0.1, `ba=drop`, 1,637,828 gas cells, one connected component as built). `cutk=60 190` turns two z-planes into one-cell gaps, giving **three components: one OPEN (545,550 cells, vent on the low-y face) and two sealed (204,594 and 884,512 cells)**, 1,634,654 unknowns. The harness runs a union-find check (`COMPCHECK`) that agrees with the flood fill, shows one pin per sealed component and none in the open one. RHS synthetic, zero mean per sealed component, uniform `dx` (so arithmetic and volume-weighted removals coincide here). Tolerance 1e-10; no warm-up; solve-only median over the stated number of solves; max_grid_size 32 (CPU) / 64 (GPU).
 
-| Backend | Ranks | Iters | Setup s | Re-solve median s | p90 s | Peak mem sum MB | Solves |
+| Backend | Ranks | Iters | Setup s | Re-solve median s (3 repeats) | Min-max s | Spread | Timed solves |
 |---|---|---|---|---|---|---|---|
-| Mf | 1 CPU | 3 | 5.45 | 6.52 | 6.96 | 2771 | 10 |
-| H | 1 CPU | 27 | 4.45 | 2.70 | 2.90 | 874 | 20 |
-| Mf | 4 CPU | 3 | 1.75 | 3.11 | 3.63 | 3047 | 20 |
-| H | 4 CPU | 25 | 1.92 | 1.19 | 1.29 | 1192 | 40 |
-| Mf | 8 CPU | 3 | 0.84 | 2.57 | 2.65 | 3477 | 20 |
-| H | 8 CPU | 26 | 1.39 | 0.954 | 0.971 | 1909 | 40 |
-| Mf | 1 GPU | 3 | 0.96 | 1.20 | 1.20 | 1394 | 30 |
-| H | 1 GPU | 26 | 0.73 | 0.195 | 0.195 | 1367 | 50 |
+| Mf | 1 CPU | 3 | 4.2 | 5.785 | 5.704-5.864 | 2.8% | 10 |
+| H | 1 CPU | 27 | 3.25 | 2.216 | 2.214-2.258 | 2.0% | 20 |
+| Mf | 4 CPU | 3 | 1.58 | 2.781 | 2.779-2.992 | 7.6% | 20 |
+| H | 4 CPU | 25 | 1.46 | 1.09 | 1.084-1.166 | 7.5% | 40 |
+| Mf | 8 CPU | 3 | 0.632 | 2.7 | 2.538-2.768 | 8.5% | 20 |
+| H | 8 CPU | 26 | 0.989 | 1.036 | 0.9443-1.042 | 9.4% | 40 |
+| Mf | 1 GPU | 3 | 0.667 | 1.191 | 1.191-1.191 | 0.1% | 30 |
+| H | 1 GPU | 26 | 0.223 | 0.1934 | 0.1934-0.1936 | 0.1% | 50 |
+
+3 repeats per row, interleaved, on a quiet machine (protocol and the Mb rows in doc 07 §7.5); no run was rejected. Replaces the single-repeat table of the first version (the GPU medians agree within 1%; the CPU medians differ by 5 to 18% because the first version ran at lower, uncontrolled core clocks, e.g. one-rank Mf 6.52 s, now 5.79 s). Setup is the median set-up time of the repeats.
 
 Single open component (no cut, same geometry): Mf 8 CPU 2.63 s, H 8 CPU 0.988 s, Mf GPU 1.29 s, H GPU 0.209 s. Splitting into three components costs nothing measurable (−2% and −4% on CPU, within the p90 spread).
 
 Per-component true residuals (relative L2, one rank run; all three components, both backends): Mf 6.6e-12 (c1) to 2.8e-11 (c2); H 1.3e-11 to 6.9e-11; the 8-rank H run reaches 1.5e-10 on the large sealed component (requested 1e-10 is global). The post-removal `ΣF/Σ|F|` per sealed component is 1e-14 or less in every run. **Mf and H agree per component** (one-rank dump, constant removed per component): relative L2 8.4e-12 (open), 5.8e-13 and 1.2e-11 (sealed).
 
-Caveats: Mf on a pinned singular component builds one MG level (the pin blocks coarsening), so an MLMG iteration is a full HYPRE solve, as in doc 05. The package temperature reached 95 to 97 °C in three Mf runs (never 30 s above 95, so the guard did not stop them), and the one-rank Mf run's median core clock was low (1.2 GHz), so the one-rank Mf row is probably pessimistic. Single repeats; no spread beyond p90.
+Caveats: Mf on a pinned singular component builds one MG level (the pin blocks coarsening), so an MLMG iteration is a full HYPRE solve, as in doc 05. In the repeat runs the package reached at most 97 °C (one short setup spike), never 30 s at or above 95 °C, and the held core clocks were 5.2 GHz (1 rank), 4.2 GHz (4) and 3.5 GHz (8). The Mf-versus-H gap is not a clock artefact.
 
 ## 9. Task 4: D-057 2-D (single-y-cell) review from the pressure side
 
@@ -157,8 +159,8 @@ Pressure-side conclusion: the single-cell-y handling works for FFT (Neumann/peri
 ## 10. Failures, caveats and open items
 
 - First stairwell `COMPCHECK` attempt failed (rc=6) because `cutk` was given comma-separated; AMReX arrays are space-separated. Re-run, no effect on results.
-- Stretched 64³ runs use 2 timed solves at 4 ranks: accuracy, not timing. The 1M rows have 10 (CPU) and 20 (GPU) timed solves, single repeats.
-- Mf at R=64 and the one-rank stairwell Mf row (low core clock) are the weakest timing numbers; cause of the R=64 slowdown not investigated.
+- Stretched 64³ runs use 2 timed solves at 4 ranks: accuracy, not timing. The 1M stretched rows have 10 (CPU) and 20 (GPU) timed solves, single repeats; the stairwell rows (§8) have 3 repeats.
+- The cause of the Mf slowdown at R=64 is established in doc 07 §8 (AMReX hands HYPRE the row-scaled, nonsymmetric matrix; PCG then diverges at the first bottom solve); remedies and the recommended setting are there.
 - The synthetic RHS means iteration counts on real FDS flow fields are still not measured (as in doc 05).
 - Hidden-direction + Neumann behaviour not resolved (section 9). Periodic one-cell y in the assembled matrix not run. Driver zone sums in a refined 2-D case not run. Patch 0005 not built against master, no debug build.
 - Decision for the Architect: gauge for FFT-solved cases (section 5, item 6).

@@ -51,7 +51,7 @@ Test program `test/s5_rad_bitwise.F90`; cases built by `test/make_rad_tests.py`;
 - **Solid cells.** `CELL_INDEX`/`CELL` with solid and mixed cells for the three `KFST4_GAS` kernels.
 - **Tied and odd cases.** `QR_CLIP` equal to `CHI_R*Q` (clip tie), `WEIGH_CYL` equal to 1 and 2 and random, `NS` in 1, 2, 5, 6, 12 (one, few and many angle-set bins), `N` over the angle range, `RSA_RAT` positive and negative.
 - **Guarded kernels.** The cases for `rad_qrw_*` are skipped (and counted as guard-skipped, 148 in the run) when the original `IF` would not run them; the test does not claim anything about them in that case.
-- **Wall loop L1239.** The generated `rad_wall_qin_zero` against the original loop with: walls with and without `B1`, `NULL_BOUNDARY` walls, and `TMP_GAS_FRONT` of a positive value, zero, -0 and -1e-300.
+- **Wall loop L1239.** The generated `rad_wall_qin_zero` against the original loop with: walls with and without `B1`, `NULL_BOUNDARY` walls, and `TMP_GAS_FRONT` of a positive value, zero, -0 and -1e-300. The surface table has the index range 0..N_SURF+N_SURF_RESERVED (two reserved entries and entry 0 with random values that must not be used) and is read through `W_SURF_INDEX`, as the generator emits it since the per-surface tables were added.
 - **Threads and flags.** Serial and OpenMP at 1, 4 and 8 threads; flag sets O0, O2, O0omp, O2omp, O2omp_off (`-DS4_OFFLOAD`), O2omp_dpd (`-DS4_OFFLOAD -DS5_FORCE_DPD`). All with `-ffp-contract=off`. Exact comparison of the bit patterns of every element of every output array (`same3`, `same4`, `same1`), ghost layers included, so an extra or missing write shows.
 - **Pass status.** See §7 for the final run.
 
@@ -163,3 +163,7 @@ The survey numbers (36975d7) for L1239, L1243, L1245, L1248 are 3886-3892, 4961-
 **To the Wall Loops Engineer.** Radiation needs `B1_PRESENT` in the flat wall table and a ragged `BR_ILW(NRA,NBANDS,wall)` table. Details in `00-r1-signoff.md`. The L1243 specification test is ready (`spec_open_qin`) and is the acceptance test for the generated kernel.
 
 **To the Chief Architect.** The R1 sign-off text is in `00-r1-signoff.md` (accept L1239; accept with change L1243 and L1248; L1245 host; L1242 not covered). It is for you and the Legacy Mapper to apply to `docs/amrex/blocked-loop-families.md`.
+
+## Result lines for the V&V gate
+
+`test/run_rad.sh` writes, per flag set, `<OUT>/<flagset>/run.log` with one line per kernel: `KERNEL <name> PASS|FAIL cases=N mismatches=M vacuous=V` (the 17 kernels; `SPEC open_qin_spec ...` for the hand-written L1243 specification kernel), then the summary line and `RESULT: PASS|FAIL`. A kernel is FAIL when any launch differs in any bit or when the coverage rule of the case table was not met (`vacuous=1`). None of the 17 kernels calls a libm transcendental (`libm_check` on the generated text and on the upstream lines: nothing found); `rad_gray_kfst4` has `TMP**4` (integer exponent).

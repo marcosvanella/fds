@@ -24,11 +24,11 @@ L0394,GPU Wall Loops Engineer,translated,wall_bc_dp on the s5-wall branch (P3 so
 L0405,GPU Wall Loops Engineer,translated,wall_spec_adv2 on the s5-wall branch (S3 wall accumulate); Solid Phase claim released
 L0880,Legacy Mapper,in progress,S2 package: the four mass-flux wall nests are finished but not committed to s5-gen; counted in the coverage figure
 L0882,Legacy Mapper,in progress,S2 package: the four mass-flux wall nests are finished but not committed to s5-gen; counted in the coverage figure
-L0401,Legacy Mapper,claimed,S2 package; wall nest with pointer scratch and array constructors
+L0401,Legacy Mapper,claimed,"S2 package; wall nest with pointer scratch and array constructors; Sign-off (Species & Combustion Lead, combustion/02-signoffs-patch0003-gather-mp5.md, section ""MP5 Z_TEMP pad""): patch 0001 ACCEPT with one physics note (0 pad gives MP5 a fake far-side value; match it on the device; low priority)"
 L0403,Legacy Mapper,claimed,S2 package
-L0398,Legacy Mapper,claimed,S2 package (and S3 wall accumulate)
-L0876,Legacy Mapper,claimed,S1 scatter (two-pass gather)
-L0877,Legacy Mapper,claimed,S1 scatter (two-pass gather); the update nest is already translated
+L0398,Legacy Mapper,claimed,"S2 package (and S3 wall accumulate); Sign-off (Species & Combustion Lead, combustion/02-signoffs-patch0003-gather-mp5.md, section ""MP5 Z_TEMP pad""): patch 0002 ACCEPT with the same physics note"
+L0876,Legacy Mapper,claimed,"S1 scatter (two-pass gather); Sign-off (Species & Combustion Lead, combustion/02-signoffs-patch0003-gather-mp5.md, section ""Patch 0003"", request 2): do the same two-pass split for this density loop in a second patch; clip gather prototype conditions as for L0877"
+L0877,Legacy Mapper,claimed,"S1 scatter (two-pass gather); the update nest is already translated; Sign-off (Species & Combustion Lead, combustion/02-signoffs-patch0003-gather-mp5.md, sections ""Patch 0003"" and ""Clip gather prototype""): patch 0003 ACCEPT (scatter order, rounding, flag and threading checked); non-blocking request: mesh-persistent scratch instead of a per-call ALLOCATE (about 60 bytes per cell); clip gather prototype ACCEPT as the S1 device path with conditions (a) explicit left-to-right sum over -3..3, (b) integer reductions for NCLIP/NLO/NHI, (c) time a case with many clipped cells"
 L1355,Legacy Mapper,claimed,cell-loop batch (Vreman)
 L1315,Legacy Mapper,claimed,cell-loop batch (TEST_FILTER)
 L1316,Legacy Mapper,claimed,cell-loop batch (TEST_FILTER)
@@ -48,7 +48,7 @@ L1485,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-t
 L0823,AMR Solid Phase Lead,claimed,host-side event code (REASSIGN_WALL_CELLS); the device deliverable is a table-refresh trigger (wall-bc-translation-plan.md section 11); no device kernel planned
 L1486,AMR Solid Phase Lead,claimed,WALL_BC ghost values loop 1; wall-bc-translation-plan.md
 L1487,AMR Solid Phase Lead,claimed,WALL_BC thin-wall loop 0; wall-bc-translation-plan.md
-L1239,AMR Radiation Lead,claimed,R1 zero of Q_RAD_IN where TMP_GAS_FRONT<=0; needs the B1_PRESENT wall-table flag (radiation 00-r1-signoff); kernel rad_wall_qin_zero is already in the committed radiation sidecar
-L1243,AMR Radiation Lead,claimed,R1 open-boundary Q_RAD_IN; blocked on the ragged BR_ILW(NRA bands wall) table; per-band temporary starting at +0
-L1248,AMR Radiation Lead,claimed,R1 INTERPOLATE_IL wall loop; low priority and host first; blocked on the ragged BR_ILW table; keep the ILW_OLD copy
-L1245,AMR Radiation Lead,not planned (host),R1 RADF file write; host code
+L1239,AMR Radiation Lead,claimed,"R1 zero of Q_RAD_IN where TMP_GAS_FRONT<=0; needs the B1_PRESENT wall-table flag (radiation 00-r1-signoff); kernel rad_wall_qin_zero is already in the committed radiation sidecar; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT; line numbers re-verified radi.f90:3887-3893"
+L1243,AMR Radiation Lead,claimed,"R1 open-boundary Q_RAD_IN; blocked on the ragged BR_ILW(NRA bands wall) table; per-band temporary starting at +0; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT WITH CHANGE (per-band temporary; flat chain fails bitwise); line numbers re-verified radi.f90:4965-4974"
+L1248,AMR Radiation Lead,claimed,"R1 INTERPOLATE_IL wall loop; low priority and host first; blocked on the ragged BR_ILW table; keep the ILW_OLD copy; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT WITH CHANGE, low priority, host acceptable (keep ILW_OLD copy); line numbers re-verified radi.f90:3651-3662"
+L1245,AMR Radiation Lead,not planned (host),"R1 RADF file write; host code; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT as host code; line numbers re-verified radi.f90:5048-5063"

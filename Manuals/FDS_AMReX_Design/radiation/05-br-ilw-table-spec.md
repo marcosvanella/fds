@@ -110,9 +110,16 @@ B1_Q_RAD_IN(IW) = Q
 
 Conditions kept from the original (radi.f90:4965-4974): `IW=1,N_EXTERNAL_WALL_CELLS` only, `BOUNDARY_TYPE==OPEN_BOUNDARY` only. `B1_INDEX==0` cannot occur for an open wall; the original has no guard, so the kernel has none, but the flag `B1_PRESENT` (below) is read for L1239. A flat chain over bands and angles is not bitwise equal for NSB>1 (tested: 51 mismatches). Compile with FMA contraction off for these kernels if bitwise equality against gfortran is claimed.
 
+### Additional rules for L1243 and B1_PRESENT
+
+- **Ownership of Q_RAD_IN.** Covered coarse OPEN walls are not in the owner list (row ownership): a wall row covered by a finer box has no owner row of its own and gets no `Q_RAD_IN` from the kernel.
+- **Summation order.** The L1243 bitwise claim holds for gfortran's `SUM` order only (ascending, one accumulator per band). ifx may vectorise `SUM` and change the order; for ifx the claim becomes "within rounding" unless the kernel's explicit chain is the reference (the kernel's chain is the one written in the rule above).
+- **B1_PRESENT is the pure flag.** `W_B1_PRESENT(IW)` is exactly `B1_INDEX /= 0`; it does not include the `NULL_BOUNDARY` test. The L1243 kernel keeps its own `NULL_BOUNDARY` test (it does not take it from `B1_PRESENT`), and L1239 combines both as the original does (`B1_INDEX==0 .OR. BOUNDARY_TYPE==NULL_BOUNDARY`).
+- **Q_RAD_IN belongs to the owner row, conditional on EMISSIVITY staying per surface** (func.f90:4920). If `EMISSIVITY` ever becomes per cell or per band-dependent state outside the surface record, the owner-row rule for `Q_RAD_IN` has to be re-examined.
+
 ## 8. B1_PRESENT
 
-`W_B1_PRESENT(IW) = 1` if `WALL(IW)%B1_INDEX /= 0`, else 0 (int, extent `NWE+NWI`). Used by L1239 (radi.f90:3887-3893), where the original test is `B1_INDEX==0 .OR. BOUNDARY_TYPE==NULL_BOUNDARY` then `SF%TMP_GAS_FRONT<=0 -> B1%Q_RAD_IN = 0`. Semantics: a gather index of 0 means "no `BOUNDARY_PROP1` record", and the flat tables `B1_*` are then undefined for that wall, so the kernel must not read them. For all walls with `B1_PRESENT=0` the kernel does nothing. Also build `SF_TMP_GAS_FRONT(IW)` (existing `SURFACE` gather through `SURF_INDEX`). The generated kernel `rad_wall_qin_zero` already uses `W_B1_PRESENT`; the sidecar injects the component through `type_comps` until the wall table has it.
+`W_B1_PRESENT(IW) = 1` if `WALL(IW)%B1_INDEX /= 0`, else 0 (int, extent `NWE+NWI`). Used by L1239 (radi.f90:3887-3893), where the original test is `B1_INDEX==0 .OR. BOUNDARY_TYPE==NULL_BOUNDARY` then `SF%TMP_GAS_FRONT<=0 -> B1%Q_RAD_IN = 0`. Semantics: a gather index of 0 means "no `BOUNDARY_PROP1` record", and the flat tables `B1_*` are then undefined for that wall, so the kernel must not read them. For all walls with `B1_PRESENT=0` the kernel does nothing. The generator now reads `SURFACE(WALL%SURF_INDEX)%TMP_GAS_FRONT` as the per-surface table `SF_TMP_GAS_FRONT(0:N_SURF+N_SURF_RESERVED)` indexed through the wall table `W_SURF_INDEX(IW)` (generated interface: `IBAR,JBAR,KBAR,NWI,NWE,N_SURF,N_SURF_RESERVED,B1_Q_RAD_IN,SF_TMP_GAS_FRONT,W_B1_PRESENT,W_BOUNDARY_TYPE,W_SURF_INDEX`); an earlier version of this note and of the test assumed a per-wall gather `SF_TMP_GAS_FRONT(IW)`. The generated kernel `rad_wall_qin_zero` already uses `W_B1_PRESENT`; the sidecar injects the component through `type_comps` until the wall table has it.
 
 ## 9. L1248 (INTERPOLATE_IL) and the ping-pong
 

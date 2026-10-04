@@ -168,3 +168,19 @@ D-073 radiation sweep kernel design (`docs/radiation/06-fr062-sweep-kernel-desig
 - (e) Cylindrical geometry is out of the first release (FDS-only in AMR mode).
 - (f) Box-level launch batching is a driver-layer item (Integration Lead).
 - (g) The Radiation Lead R1 sign-off is applied in `blocked-loop-families.md`.
+
+## Update 2026-10-04 (m): FR-003 scope and pressure results (D-074, D-075)
+
+D-074 FR-003 scope for the pressure-code-0 inputs (A-62).
+- (a) The 23 inputs with pressure code 0 (21 `soborot_*`, `bound_test_1`, `bound_test_2`; one-cell Dirichlet, no pressure solve) are FDS-only in every mode.
+- (b) `fds_amr` aborts on them with a clear message that names the FDS executable. No no-pressure-solve mode is added to the driver; revisit only if the owner wants them in the AMR executable.
+- (c) FR-003 coverage is the verification set minus these 23, listed in the spec. No verification input has a one-cell x or z direction (wording confirmed with the V&V Lead).
+
+D-075 pressure results and open answers (`docs/pressure/07` sections 11 and 12).
+- (a) Fold sign convention confirmed (low Neumann `rhs += g/h`, high Neumann `rhs -= g/h`, Dirichlet `rhs -= 2*H_b/h^2`, `phi = H`): 24 of 24 cases against an FDS-style dense matrix, worst 4.4e-14, each sign flip gives 0.31 to 3.6 relative difference. No FDS run with nonzero wall data and an H dump exists, so A-09b stays open.
+- (b) Mixed Neumann/Dirichlet fine-level excess is a smooth domain-wide discretisation effect (about 85% from lost coarse truncation-error cancellation inside the patch, 13 to 15% from the coarse/fine interface). The harness checks order per region and a constant-in-n ratio to the uniform fine error. Non-matching Dirichlet wall data is untested.
+- (c) P3-R02 stays gated at `1e-9*U/dx_fine` at solver tolerance 1e-12; measured values (7,000 to 62,000 times below) are reported alongside; no tightening until a second case family confirms.
+- (d) Slow stretched-grid HYPRE bottom solve: AMReX hands HYPRE a row-scaled non-symmetric matrix while PCG is selected. Workaround `hypre_solver=BiCGSTAB`, bottom tolerance 1e-11. A symmetric-scaling change in `habec_ijmat` is a candidate upstream patch, delivered as a patch file for the owner after AMReX tests.
+- (e) Role 2 HYPRE backend: Krylov defaults accepted (PCG with BoomerAMG for one level, GMRES(30) for a hierarchy); pin row excluded from the residual check and reported separately; `residual_tol` not relaxed; backend option stays on `PressureOptions`.
+- (f) Solid-phase face-write table: a table refused by `face_write_check` makes the driver abort with the report (owner: Chief Architect with the Wall Loops Engineer).
+- (g) Radiation batched launch layer (one launch per wavefront plane across all boxes of a level): Integration Lead (D-073 (f)).

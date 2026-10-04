@@ -62,12 +62,12 @@ Exit codes: 0 pass, 1 findings, 2 usage or tool error.
 stay bitwise, with the +0/-0 rule. A kernel that calls a libm function is compared with a per-value tolerance of at most 2 ulp instead (the device and
 host math libraries differ in the last bit; ulp = unit in the last place). K2-10 flags every such call: `**` with a non-integer exponent (a real
 constant such as `ONTH`, a real variable, or a real expression such as `1._EB/3._EB`; an integer, an integer variable, or a real literal with an
-integral value such as `2._EB` is not a libm power), and the functions `exp, log, log10, sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh,
+integral value such as `2._EB` is not a libm power; D-072: the exponent is judged by its value as written, so `x**2._EB` is not flagged), and the functions `exp, log, log10, sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh,
 asinh, acosh, atanh, erf, erfc, gamma, log_gamma, hypot, bessel_*` (also the `d...` and `alog` names). Declare-target callees are checked too. A kernel is
 registered with a `[[libm]]` entry (kernel, `tolerance_ulp` > 0 and <= 2, optional `functions` list where `pow` stands for `**`, optional `file`,
 `measured_ulp`, `dt_coupled`, `ruling`, a `reason`, `status`); its calls then print as NOTE "accepted: category libm, tolerance 2 ulp". A call of a
 function that is not in the entry's list, a call in another kernel, or an entry with a tolerance above 2 ulp (registry load error) is not accepted,
-and a proposed entry fails `--strict` like a proposed waiver. A `[[libm]]` entry that matches no call is a K2-09 warning. The first entry is
+and a proposed entry fails `--strict` like a proposed waiver. A `[[libm]]` entry that matches no call is a K2-09 warning. Whether a compiler emits a `pow` call for an integer exponent at low optimisation is a build-flag question (check the build flags), not a source finding, and K2-10 does not report it. The registry only records the tolerance; the 2-ulp comparison itself is the V&V Lead's gate in the device harness (D-072). The first entry is
 `cfl_wall_max` (`pow`, 2 ulp, measured 1 ulp, feeds the time step, so the run-level tolerance used for cross-compiler runs applies to what depends on it).
 
 **Prototypes (D-068).** The hand-written S4 files (`s4_mass_k2.F90`, `s4_mass_k2_dc.F90`, `s4d_k2.F90`) and the K1 comparison code (`s4_driver.cpp`,
@@ -147,7 +147,7 @@ device compute only the elementwise terms. The optional exact fixed-point sum is
 | ZS-02 | the cell nest is not K outermost, J, I innermost; a loop has a negative step (a step that is not a literal is a warning); an accumulation sits in no recognised nest (warning) |
 | ZS-03 | for one array the nests are not in the order cells, walls, cut faces |
 | ZS-04 | an accumulation sits inside `omp parallel`, `target`, `simd`, `do concurrent` or under `atomic`/`critical` |
-| ZS-06 | (note) the update sits in a per-cell wall list loop (`DO IWP = W_CSR_GAS_PTR(ICELL), W_CSR_GAS_PTR(ICELL+1)-1`, one thread per gas cell, walls in list order); accepted as in the reviewed wall-list design, relying on the list builder and its tests |
+| ZS-06 | (note) the update sits in a per-cell wall list loop (`DO IWP = W_CSR_GAS_PTR(ICELL), W_CSR_GAS_PTR(ICELL+1)-1`, one thread per gas cell, walls in list order); accepted as a note, with no waiver, by the wall-list design review in `docs/solid/07-sp2-sp3-kernel-review.md` (D-072), relying on the list builder and its tests; a test asserts the message names that file |
 | ZS-05 | (`k2`) a target region writes a zone-sum array, adds into an array element whose subscript holds no loop index, or has `reduction(+)` or `atomic` |
 | ZS-10 | (`log`) the terms of a zone are not applied in the FDS order |
 | ZS-11 | (`log`) the reported `result` is not, bit for bit, the serial chain of the logged terms (only a warning with several ranks) |
@@ -189,6 +189,7 @@ Self-check (exit 1 on a failure):
 | PM-04 | a golden kernel has no kernel text (neither in `generated/s5gen_k2.F90` nor in a `test/*.golden`) |
 | PM-05 | (warning) a golden kernel is missing from the argument manifest or the header; the gate registry disagrees with the map. `--strict` makes warnings fail |
 | PM-07 | a `[[libm]]` registry entry names a kernel that is not mapped |
+| PM-08 | (D-072) a `ported.toml` entry names a kernel that is not mapped, lacks `reviewed_by` or `set_by`, names a kernel with no device run on record, or names a libm kernel without `ulp_gate_passed = true` |
 | PM-06 | `device_runs.toml` names a kernel that is not mapped, names one twice, has a state other than `on-record` / `on-record-open-note`, or an open-note entry without a note |
 
 "Device run on record" repeats what `check_device_logs.py` lists for the kernel set; it is a registry note, not a check of log files.
@@ -197,11 +198,18 @@ Self-check (exit 1 on a failure):
 (the registry belongs to the gate, so it is not edited from here). A kernel in the overlay gets the status `device`; a run with one open
 numerical question (`state = "on-record-open-note"`) gives `device-note`; a kernel with a `[[libm]]` registry entry (D-070) gives `device-libm`, "device run on record, libm tolerance 2 ulp (D-070)". The 8 target regions with `reduction(max|min)` (the kernels
 `cfl_max`, `cfl_wall_max`, `vn_max`, `div_extrema`) need a device run before they count as ported, so the map has a section of its own
-for them and a `port_state` field in the JSON: "not ported: a reduction region needs a device run", "device run on record", or "device run on
-record, with one open numerical note". The rounds 4 to 7 run on a GPU (default and distribute-parallel-do builds, about 25 scenarios)
+for them and a `port_state` field in the JSON for every kernel: "not ported" ("not ported: a reduction region needs a device run" for those kernels), "device run on record", "device run on
+record, with one open numerical note", "device run on record, libm tolerance 2 ulp (D-070)", or "ported". The rounds 4 to 7 run on a GPU (default and distribute-parallel-do builds, about 25 scenarios)
 is on record for all 20 kernels; 19 of them show no difference to the host result. `cfl_wall_max` shows a last-bit difference of UVWMAX in
 three scenarios (the power function of the device math library); ruling D-070 puts it in the `libm` category with a tolerance of 2 ulp (measured 1), so
-it is labelled `device-libm`. D-070 does not say that a kernel is "ported", so no kernel is called ported here. Delete an overlay entry once the gate registry lists the run.
+it is labelled `device-libm`.
+
+**"Ported" (D-072).** A kernel is ported when all of these hold: a device run is on record on real fields; the result is within the class tolerance
+(bitwise, or at most 2 ulp for a libm kernel); the kernel owner has reviewed it; and `tools/ci_checks.sh` (the four tools with `--strict`) passes.
+The Integration Lead sets it, by adding the kernel to `tools/ported.toml` (`[[ported]]` with `kernels`, `reviewed_by`, `set_by`, and for a libm
+kernel `ulp_gate_passed = true`). A libm kernel can be ported once the V&V Lead's ulp gate exists and passes. A device run alone does not make a
+kernel ported: the `port_state` field says "device run on record" and the `Ported` column in the map says `no`. The file is empty now, so no kernel is
+called ported. The legend of the map gives the same definition. Delete an overlay entry once the gate registry lists the run.
 
 ## Quick start
 

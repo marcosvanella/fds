@@ -1,26 +1,145 @@
-# Next work per role (kept by the Chief Architect)
 
-Owner rule: nobody sits idle. Each row says what the role is on, what is ready next, and what blocks it. The Chief Architect updates this file at each milestone and reports to the project coordinator when a role has no ready work. A role that finishes its list tells the Chief Architect.
+# Next work per role
 
-Status as of the weekend work restart, from the latest reports.
+Owner rule: nobody sits idle. Each role has an ordered list of ready items, each with a source reference (document path and item id). The Chief Architect owns these lists; the Spec & Program Lead refreshed the previous version at spec v0.4.35, and this is the Chief Architect's refresh (r2) through D-075. Where another list differs, this one wins. A role that finishes its list tells the Chief Architect. "Dry risk" is the chance the role runs out of ready work within two days (low: five or more ready items; medium: three or four; high: fewer than three or all blocked).
 
-Decisions since the last list: D-056 fine-level mesh objects by option B (condition met for 0005/0006; 0007-0009 still need oneAPI validation), D-057 2-D/singular pressure BC mapping owner, D-058 R4 tagging and regrid design, D-059 shared corner ghost cells accepted, D-060 normal-linear face prolongation, D-061 flux override ordering and W2 once per stage.
+Status as of spec v0.4.35 plus D-074 and D-075, next-work revision r2.
 
-| Role | Ready work, in order | Blocked or waiting on |
-|---|---|---|
-| Role 1, Data Layout | (1) two-level end-to-end run of the periodic 2-D case (`ns2d_16` 1-to-2 refinement) with Role 3's override lists wired to the flux hooks; check composite mass and the max abs(div u - D); (2) hook the registry entry points to Role 3's regrid transfer; (3) FR-072 output plan with the Legacy Mapper's list of mesh-looping output routines (ADR-004); (4) first level-0 + level-1 timing run for the Integration Lead | oneAPI validation of 0007-0009 before physics use |
-| Role 2, Pressure Backend | (1) M2: assembled-matrix HYPRE PCG+BoomerAMG backend and the MLMG backend behind the solver-agnostic interface; (2) rebuild entry point after regrid (D-058); (3) 2-D and singular-case mapping check (D-057) using Role 1's `notes/fft-thin-direction-check.md` | A-56 comparison from the Pressure Lead for the default |
-| Role 3, Regrid and Transport | (1) R2b: flux-override adapter against Role 1's hooks (patch 0009) and a two-level conservation run; (2) R4 part 2: registry integration of the transfer operators (begin/end_regrid, fill_initial_level); (3) moving-blob test at the driver level; (4) GPU path for tagging kernels (K2, host loops proven) | Role 1 two-level run |
-| AMReX Integration Lead | (1) review Role 1's flux-hooks design (`notes/flux-hooks-design.md`) and report; (2) stage-1 GPU spike on the test machine (standing approval), including the wall-seam GPU needs in `notes/wall-seam-design.md`; (3) apply the rule 7 macro form in `s4_omp.inc` and re-time | none |
-| Pressure Solver Lead | (1) A-56 backend comparison (MLMG vs HYPRE, eps_H) plan and first run; (2) review the 2-D mapping (D-057); (3) single-thread device add measurement for zone sums (P1 note) | none |
-| Legacy Mapper | (1) list of every output routine that loops over meshes for FR-072/ADR-004; (2) send the patch 0003 sign-off request to the Species Lead; (3) O3 (L1402) uniqueness-assertion review routing; (4) check that patch 0007-0009 touch no other code path that uses `MESHES(NM)` with a fine mesh number | none |
-| Species and Combustion Lead | (1) review patch 0003; (2) combustion under refinement note for D-050/D-058 (species clip accounting, `Z_TEMP` pad of 0001/0002); (3) species tagging threshold advice for R4 | none |
-| Solid Phase Lead | (1) fine-level solid phase plan (1-D wall conduction under refinement; OBST deferred); (2) review the generated SP2/SP4 kernels once the Wall Loops Engineer lands them | generator output for (2) |
-| Radiation Lead | (1) blocked-loop sign-off for the radiation family (still open); (2) FR-062 sweep implementation notes for Phase 4; (3) radiation under regrid (what must be rebuilt) | none |
-| V&V Lead | (1) Phase 3 acceptance case list for two-level runs (conservation, FR-016 baseline, blob) and thresholds; (2) FDS-only marking for the 23 pressure-code-0 inputs; (3) 2-D (`ns2d_16`) test for D-057; (4) Debug build for the patch-check tool; (5) multi-box merge tests for `CHECK_STABILITY`/`CHECK_DIVERGENCE` | Debug build |
-| Spec and Program Lead | (1) carry D-056 to D-061 into the spec and IR/NFR text; (2) chase the Radiation and Species sign-offs; (3) update the roadmap for dates given by Roles 1 and 3 | none |
-| GPU Generator Engineer | (1) coverage items for VELOCITY_FLUX, mass flux, predictor, corrector, DIV_PART_2; (2) P1/V1 summation-order statements | none |
-| GPU Wall Loops Engineer | (1) wall loops with the Solid and Species conditions (SP2 per-target gather, SP4 scratch sums, S2 guarded assertion); (2) O3 (L1402) | none |
-| GPU Mesh Data Loops Engineer | (1) `PATCH_VELOCITY_FLUX` (L1390); (2) remaining O2 edge and exchange loops (D-055 excludes `NOM>0` branches) | none |
-| GNU Build Chief | (1) Release and Debug reference binaries current; (2) validate patches 0005-0009 with gfortran `-fcheck=all` and the Debug build; (3) runtime checks of the OFF build | none |
-| Intel Build Chief | (1) validate patches 0007-0009 with 0005/0006 under oneAPI; (2) kernelcheck, decomposition check, csmag check under oneAPI; (3) same-compiler baseline option for the output gate | none |
+Decisions since the previous list: D-072 (libm list, "ported" definition, solid-phase rulings), D-073 (radiation sweep kernel design), D-074 (the 23 pressure-code-0 inputs are FDS-only in every mode; `fds_amr` aborts naming the FDS executable), D-075 (pressure results: fold sign confirmed, mixed Neumann/Dirichlet excess explained, P3-R02 bound kept, HYPRE Krylov defaults, face-write table abort, launch layer owner).
+
+Done recently: the composite two-level MLMG solve and the HYPRE assembled backend; patches 0005 to 0009 validated on oneAPI and GNU Debug; the four mass-flux wall nests registered (86 to 90 kernels, 92 across the `s5-four` and `s5-wall` branches); Species and Radiation R1 sign-offs; Intel Release baseline; P3-R02 measured 7,000 to 62,000 times below its bound; shared-disk cleanup.
+
+Shared references used below: the ranked loop list `amrex/loop-work-list.md` (and `amrex/loop_work_list.csv`; loop ids `Lnnnn`), the stage-1 plan `amrex/stage1-gpu-spike-plan.md` (work packages `WPn`), the blocked-loop families `amrex/blocked-loop-families.md` (ids P1 to P4, S1 to S4, SP1 to SP4, R1, V1, V2, O1 to O4), and the action log in `README.md` (ids `A-nn`).
+
+Summary of dry risk: Role 1 low (overloaded, not dry); Role 2 low; Role 3 medium; Integration Lead low; Pressure Lead medium; Legacy Mapper low; Species and Combustion medium; Solid Phase low; Radiation medium; V&V low; Spec Lead low; Generator Engineer low; Wall Loops Engineer medium; Mesh Data Loops Engineer low; GNU Build Chief medium; Intel Build Chief medium.
+
+## Data layout, pressure and transport implementers
+
+**Role 1, Data Layout. Dry risk: low (the list is long and the order matters).**
+1. Fine-box physical-domain ghost fill and wall cells on every domain-edge face: level-0 treatment, periodic and Neumann or mirror only, abort with a clear message otherwise (`README.md` A-60, D-071 (g), R-65). First priority; it gates Role 3's tolerance tightening.
+2. `D_PBAR_DT` level-1 zone binding (`bind_level`, Phase 3 two-level transport test).
+3. `stage_boundary(1,3|6)` abort for the unsupported boundary faces on fine boxes (A-60; same message style as item 1).
+4. E1 predictor `DIV1` gap (`amrex/stage1-gpu-spike-plan.md` WP1b, Role 1's dump-point notes).
+5. Call `install_post_regrid_projection` from the time loop (D-063; `POST_REGRID_PROJECTION = AUTO | ON | OFF`).
+6. Apply the Integration Lead's WP1b dump-point patch (`amrex/stage1-gpu-spike-plan.md` WP1b).
+7. Output patches 0010 and 0011, after the Legacy Mapper's line-number check (`roadmap.md`, output patches row).
+8. FR-072 output plan with the Legacy Mapper's list of mesh-looping output routines (ADR-004, `amrex/fr072-output-amrex-notes.md`).
+Blocked on: item 7 waits for the Legacy Mapper. Nothing else.
+
+**Role 2, Pressure Backend. Dry risk: low.**
+1. M4: FDS right-hand-side dump patch and an FDS-derived frozen case, so the fold and the solve are compared against FDS data and not only the dense matrix (`pressure/07-a56-backend-comparison-plan.md` section 11.4, A-09b, D-075 (1)). Delivered as a patch file (D-051).
+2. Pin-row residual handling: exclude the pin row from the residual check and report it separately; `residual_tol` is not relaxed (D-075 (5)).
+3. Loop translation: the pressure-side items proposed to the Pressure Lead in `amrex/pressure-velocity-h-loops.md` and the open `pres.f90` loops in `amrex/loop-work-list.md` (L1211 to L1222, L1206 to L1208 are the largest open ones); claim before starting (claim protocol, section 4 of the list).
+4. Upstream issue draft for the AMReX row-scaling problem (PoissonHybrid singular mean is in `upstream-issues/`; add the HYPRE row-scaling note with the `habec_ijmat` symmetric-scaling candidate, D-075 (4)). Draft only, not sent.
+5. "Hierarchy changed, rebuild" entry point (D-058; host rebuild allowed until Phase 11, D-047) and the composite solve with an arbitrary per-level right-hand side date (gates the full two-level `ns2d_16` run).
+6. 2-D and singular-case mapping check (D-057).
+Blocked on: nothing.
+
+**Role 3, Regrid and Multi-Level Transport. Dry risk: medium (items 1 and 4 wait for Role 1).**
+1. Confirm the P3-B09 (1) propagation distance d(n) = 4n against the driver ghost depth and extra reads (A-61); hand the value to the V&V Lead.
+2. Tighten `MASS_TOL` and `E1_ZZ_TOL` to round-off once Role 1's fine-box domain-edge fix lands (A-60, D-071 (g)).
+3. Larger-case tag-buffer assertions (`role3-regrid-transport-plan.md`, tagging section; V&V P3 tagging cases).
+4. Align the plan wording to interface flux overwrite, no reflux, FR-016 (a) at step 1 (A-58 open part).
+5. Two-level driver runs of the FR-016 gate cases, then the moving blob (A-58 thresholds, `vv/test-plan.md` section 5.12.6).
+6. t = 0 hierarchy, tagging and regrid on the real FDS stages (FR-012).
+Blocked on: Role 1 (items 2 and 5 need the edge fix and `bind_level`).
+
+**AMReX Integration Lead. Dry risk: low.**
+1. FASTMATH CMake pin: review and apply the patch (D-068, lint rules BF-05 and BF-07 fail until it is applied; `docs/tools/` registry).
+2. Per-kernel tolerance class in the device harness (D-070, D-072 (b); `amrex/stage1-gpu-spike-plan.md` 7.10d), then set "ported" status in the kernel map per D-072 (c).
+3. Sweep launch layer: one launch per wavefront plane across all boxes of a level (D-073 (f), D-075 (7); `radiation/06-fr062-sweep-kernel-design.md` option A).
+4. WP8 flat tables on the device (owner proposal: Integration Lead) and WP11 wall kernels in the driver (after generator change W1, `WLIST`/`NWL`), `amrex/stage1-gpu-spike-plan.md`.
+5. Rule-7 macro form in `s4_omp.inc` and re-time (`amrex/s4-k2-single-source.md`; D-072 (d)).
+6. Open actions A-28, A-31, A-44, A-48, A-49, A-51, A-54 (`README.md`).
+Blocked on: GPU time on the test machine for items 2 and 4.
+
+**Pressure Solver Lead. Dry risk: medium.**
+1. A-56 backend comparison to the end: composite and masked cases with the HYPRE backend, report in `pressure/07` and `pressure/06`; delete regenerable scratch afterwards.
+2. Second case family for P3-R02 so the bound can be reviewed for tightening (D-075 (3)).
+3. Non-matching Dirichlet wall data test on the hierarchy (D-075 (2): untested).
+4. Single-thread device add measurement for zone sums (stage-1 plan section on P1/V1 summation).
+5. Loop candidates for the pressure domain: L1365 and the `pres.f90` loops listed in `amrex/pressure-velocity-h-loops.md`; claim in the register.
+Blocked on: nothing.
+
+## Domain leads
+
+**Legacy Mapper. Dry risk: low.**
+1. Driver-code check that the AMR route never builds `EXTERNAL_WALL` at a coarse/fine level jump, and the AMR-mode status of the seven multi-mesh NIC>1 inputs; check the validation inputs (D-072 (f); `solid/05-fine-level-solid-plan.md`, `amrex/loop-work-list.md` L1485).
+2. WP3 generator coverage in the order of the generator answers (`amrex/stage1-gpu-spike-plan.md` WP3, `amrex/stage1-generator-answers.md`) and WP9b (split the divergence chain at the DIF hook).
+3. Register the radiation sweep as claim L1242 with the hand-written FR-062 tag (D-073 (d)); paste the Species and Radiation sign-offs into the claim register (A-59).
+4. Line-number check for output patches 0010 and 0011 (unblocks Role 1).
+5. List of every output routine that loops over meshes (FR-072, ADR-004, `amrex/fr072-output-amrex-notes.md`).
+6. Cell-loop batch L1355, L1315, L1316, L1321 and S2 package L0398, L0401 (`amrex/loop-work-list.md` section 3); A-34.
+
+**Species and Combustion Lead. Dry risk: medium.**
+1. Review the revised patch 0003 and the density-loop patch (L0876, mass.f90:799-849) when the Legacy Mapper posts them (`combustion/02-signoffs-patch0003-gather-mp5.md`, A-59).
+2. Take the open loops proposed to this lead: L1272 SETTLING_VELOCITY (1.325 %, S4, needs a per-species table and a split into three kernels), L0397, L0866, L0875 (generator gaps), L0596 and L1273 (`amrex/loop-work-list.md` section 6).
+3. Species tagging cases for R4 and the clip-line budget test inputs requested in `combustion/03-combustion-under-refinement-and-tagging.md` section 4 (with Role 3 and the V&V Lead).
+4. S3 mask-table definition for L0399 and L0406 (six-flag `WALL_INDEX`; blocked-loop families S3).
+5. Review of the sweep and wall-kernel results that touch species fields: `Z_TEMP` pad for MP5 (`solid/08-new-wall-kernel-review.md` M1).
+
+**Solid Phase Lead. Dry risk: low.**
+1. Fine-level solid plan follow-ups under D-064, D-065 and D-072 (e): flip-budget gate definition with the V&V Lead, 1-D solve cap check in the harness (`solid/05-fine-level-solid-plan.md`, `solid/06-solve-port-test-design.md`).
+2. Follow-ups W1 to W5 from `solid/08-new-wall-kernel-review.md` section 7 (W1 is now ruled: abort with the report, D-075 (6)); answer the open section 6 items.
+3. O3 (L1402) uniqueness-assertion review, together with the Wall Loops Engineer (`amrex/blocked-loop-families.md` O3).
+4. Claim the loops proposed to this lead: L1470, L1471 (HT3D exchange, T4), L1452, L0817 and the `vege.f90` loops L1330 to L1340 (`amrex/loop-work-list.md` section 3, Wall split).
+5. Review the generated SP2 and SP4 kernels as the device run B results land.
+
+**Radiation Lead. Dry risk: medium.**
+1. Sweep stages 1 to 3 (`radiation/06-fr062-sweep-kernel-design.md` section e): `BR_ILW` slot table and boundary kernels, 3D plane kernel on one box, full angle sequence; bitwise acceptance as listed.
+2. Follow-ups R1 to R4 from `solid/08-new-wall-kernel-review.md` section 7 (tolerance class question for the open-boundary cases, row-ownership sentence in `radiation/05-br-ilw-table-spec.md`, owner rule OQ-S6).
+3. Radiation under regrid: wall `ILW` across levels, random rotation versus regrid, periodic self-coupling (`radiation/04-radiation-phase4-notes.md`, open items for the radiation ADR; FR-063).
+4. Confirm with the V&V Lead that nothing reads ghost `UII` and `UIID` (D-073 (b)).
+5. Radiation verification variants (A-50) with the V&V Lead.
+
+**V&V Lead. Dry risk: low.**
+1. Device-tier 2-ulp harness (D-070, D-072 (b); `vv/test-plan.md` device tier).
+2. P3-B09 distance into the test plan and `vv-runs/phase3/phase3_cases.csv` after Role 3 confirms (A-61); include the observed front.
+3. Gate hookup for the radiation kernels: apply the gate-rad patch to the gate script (adds the `rad` kernel family and its `KERNEL` result lines; `radiation/03-radiation-translation-notes.md`).
+4. Rerun the Debug `int_1to2` case with a longer timeout and the 13 skipped four-rank Intel cases when the test machine is idle (`vv/baseline_status.md`).
+5. Carry D-074 into the case inventory and the FR-003 list (`vv/case_inventory.md`, A-62 closed).
+6. A-46 CSV rerun, A-47 baselines, A-26, A-39, A-42, A-49.
+
+## GPU and build roles
+
+**GPU Generator Engineer. Dry risk: low.**
+1. DIVERGENCE_PART_1 nests: L0365, L0369, L0381, L0379 and the small nests L0371, L0377, L0380, L0386 (`amrex/loop-work-list.md` section 3; `amrex/s4d-divergence-part1-map.md`).
+2. Generator change W1: `WLIST`/`NWL` indirection in the wall kernels (unblocks WP11, `amrex/stage1-gpu-spike-plan.md`).
+3. Merge `s5-four` and `s5-wall` onto one branch and regenerate once (`solid/08-new-wall-kernel-review.md` G3); sidecar justification for scatters (G2) and the "every array argument is in the device list" structural test (G1).
+4. L1375 EVALUATE_RAMP and the cell-list loop with `CYCLE` for the radiation plane body if wanted (`radiation/06-fr062-sweep-kernel-design.md` question 8).
+5. P1 and V1 summation-order statements (`amrex/blocked-loop-families.md`).
+
+**GPU Wall Loops Engineer. Dry risk: medium.**
+1. W1 to W5 from `solid/08-new-wall-kernel-review.md` section 7 (face-write refusal as a hard stop in table build and refresh, test additions, `wall_checks.py` builders).
+2. O3 (L1402) uniqueness-assertion review with the Solid Phase Lead.
+3. SP2 per-target gather, SP4 scratch sums and S2 guarded assertion (conditions from the Solid and Species leads, `solid/04-blocked-loop-signoff.md`).
+4. L1358 COMPUTE_VISCOSITY wall part (table needed) and L1359, L0375 (`amrex/loop-work-list.md` section 3).
+5. WP8/WP11 wall-table gather on the device with the Integration Lead.
+
+**GPU Mesh Data Loops Engineer. Dry risk: low.**
+1. Device run B of the four registered wall nests (`amrex/stage1-gpu-spike-plan.md` 7.13b; `solid/08` section 2).
+2. Neighbour-mesh (T4) loops: L1363, L1364, L1366 (in progress), L1367, L1399 (`amrex/loop-work-list.md`, `amrex/o2-edge-exchange-scope.md`; D-055 excludes `NOM>0` branches).
+3. "Ported" listing in `ported.toml` for the kernels with a device run on record, per D-072 (c), and the strict `ci_checks` pass.
+4. Remaining O2 edge and exchange loops.
+
+**GNU Build Chief. Dry risk: medium.**
+1. Debug check of upstream patch UP-0008 (`upstream-patches/README.md`).
+2. Add `csmag_32_fishpak` to `run_kernelcheck.sh` and fix the `FDS_K_MATCH` UBOUND bug (D-072 (g)).
+3. Keep the Release and Debug reference binaries current for the merged tip (`vv/environment.md`); regenerate `vv-runs/refbin` entries on a new tip.
+4. Build and test the pinned `AMReX_CUDA_FASTMATH=OFF` change on GNU after the Integration Lead applies it (D-068).
+5. A-27 (GNU HYPRE pin and the second AMReX install).
+
+**Intel Build Chief. Dry risk: medium.**
+1. `-prec-div` speed cost measurement and build notes (D-069; `vv/environment.md`).
+2. Same-compiler baseline option for the output gate and `-prec-div` ifx kernelcheck references with `FDSREF_STEPS=2,3` (D-069, D-072 (g)).
+3. Run the 13 skipped four-rank Intel baseline cases and the Debug `int_1to2` rerun with V&V (`vv/baseline_status.md`).
+4. A-36 optional ifx compile check for K2 (NFR-045) on the generated kernels.
+5. Intel-side check of the FASTMATH pin and the radiation gate family once applied.
+
+## Program
+
+**Spec and Program Lead. Dry risk: low.**
+1. Carry D-074 and D-075 into the spec (FR-003 list of the 23 FDS-only inputs; FR-006; FR-039 harness wording; HYPRE defaults) and close A-62.
+2. Chase the Role 3 plan alignment (A-58), the A-61 confirmation, the Role 2 composite-solve date and the Role 1 domain-edge date.
+3. Update the roadmap for dates given by Roles 1, 2 and 3.
+4. Track the 90-kernel registration and the "ported" listings (D-072 (c)).
