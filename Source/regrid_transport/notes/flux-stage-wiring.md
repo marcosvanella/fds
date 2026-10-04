@@ -46,7 +46,8 @@ What the runs showed (gfortran and oneAPI agree to the digits printed; 1 and 4 r
 - FDS skips the density update while ICYC <= 1 (DENSITY_PRE_CLIP), so a driver that starts its own step counter must start the first step at cycle 2. A first version of this mode did not and
   the ADV read-out was identically zero; the symptom was a transport test that "conserved" because nothing moved. `Env::icyc` starts at 1 now.
 - Advection only (species diffusivity set to 1e-12): overwrite ON conserves the composite species to 2e-14 over 6 steps, OFF drifts 4.3e-5 (E3a).
-- With the default diffusivity: ON 4.4e-7, OFF 4.3e-5 (E3b, 6 steps, 100 times better but NOT round-off). **Cause found, not ours (Role 1, level binding):** a fine box of the 2D cases has
+- **Closed (driver commits 8fd2a22801, 3091c7cb39, 87d3f1a975):** the domain-edge mirror of the fine level and the parent-value injection of the stage arrays (`RegistryTransfer::derive`; the direct `bind_level` modes of `DriverModes.cpp` do the same, `inject_parent_stage_arrays`) bring E3b to round-off: ON 6e-16 on 1 rank and 1e-16 on 4 ranks (limit MASS_TOL = 1e-13), OFF 4.4e-5 (negative control, more than 7e7 times larger); E1 RHO and both ZZ agree to 3e-16 on 1 and 4 ranks (limit E1_ZZ_TOL = 1e-13), with a negative control (another blob smoothing) that fails the same comparison. The text below is the history of the finding.
+- With the default diffusivity (before the fix): ON 4.4e-7, OFF 4.3e-5 (E3b, 6 steps, 100 times better but NOT round-off). **Cause found, not ours (Role 1, level binding):** a fine box of the 2D cases has
   one cell in y, so its y faces are domain-edge faces; the fine level has no wall cells there (listed gap "fine-box domain-edge wall cells" in `Source/driver/notes/level-binding.md`) and its y
   ghost layer is never filled (ZZ, RHO, RHO_D read 0 at J=0 and JBAR+1 in every stage). `DIVERGENCE_PART_1` then differences against it: RHO_D_DZDY(:,0,:) = -5e-5 on the smooth profile, a spurious
   species flux through the y faces (level 0 has MIRROR walls there and gives exactly 0). The interface overwrites are exact: per stage the composite sum of the advective divergence is 0 (to 1e-17
@@ -56,11 +57,11 @@ What the runs showed (gfortran and oneAPI agree to the digits printed; 1 and 4 r
   Experiments (smooth profile, u = 1, 6 steps): zeroing the fine y-edge diffusive flux in the divergence (scratch overlay, not committed) gives 1.3e-15 instead of 4.4e-7; the same case in 3D
   (triply periodic, fine box y range 4..11, so no edge) gives 5e-15, and a 3D fine box covering all of y (periodic images fill the ghosts) 4e-14. Tests: E3c (the 3D interior box, with overwrite OFF as negative
   control, 4.6e-6) and E1c below. What Role 1 needs: wall cells (or an equivalent mirror/periodic/open treatment, as level 0 has) for fine-box faces on the domain edge, or the fill of those
-  ghost layers. No change in `regrid_transport` can fix it (the fine DIV1 reads the ghost itself); E3b keeps its loose bound until then and must be tightened to E3A_TOL.
+  ghost layers. No change in `regrid_transport` can fix it (the fine DIV1 reads the ghost itself); (done: MASS_TOL is now round-off.)
 - E1 (full-domain level 1 against the uniform fine run): RHO equal to 1e-15, ZZ differs by 5e-6 per step in every cell (4e-5 after 6 steps), also for pure diffusion with zero velocity. This is
   the same defect (the full-domain fine box in 2D has the unbound y edge, the uniform fine reference run has MIRROR walls): the 3D triply periodic version (E1c, 32^3 fine against 16^3 + full level 1)
   agrees to 3e-16 for RHO and both ZZ. The "KNOWN GAP" of `level-binding.md` (predictor DS differs by up to 0.4 % on a level with non-uniform species) is very probably the same cause (not rerun here).
-  The 2D E1 keeps RHO to 1e-12 and ZZ to 1e-4 until Role 1 binds the edge; then tighten E1_ZZ_TOL.
+  (done: E1_ZZ_TOL is now 1e-13.)
 - Level-1 D / DS fields read back from the registry hold a uniform -0.24 1/s (level 0: 1e-15) after DIVERGENCE_PART_1 on a uniform-temperature, uniform-pressure state: the composite zone
   term (D_PBAR_DT over the levels of a zone) is not bound yet (listed in `level-binding.md`); the first prime pass also leaves D as NaN on level 1. Not used by the species update.
 - E2: a uniform state stays uniform (exact) across the interface for 6 steps. E5: corner blobs run, D-059 count printed (32 covered coarse cells serve one ghost face, 16 serve two faces; patch of 8 x 8 coarse cells).

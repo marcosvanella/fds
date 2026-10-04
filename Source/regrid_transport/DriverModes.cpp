@@ -145,6 +145,33 @@ void init_profile(Env& e, int lev)
     }
 }
 
+// The stage arrays that a regrid does not transfer (D, DS, RSUM, MU, KRES, H, HS) of a new fine level take the parent cell value (piecewise constant), as the driver's two-level run does
+// (TwoLevelRun.cpp, Role 1): FDS skips the density update in cycle 1, so the first DIVERGENCE_PART_1 of the fine level reads RSUM, MU and KRES that nothing has filled yet. RTE2E_NODERIVE=1
+// switches this off (diagnosis only).
+void inject_parent_stage_arrays(LevelRegistry& reg, int level)
+{
+    if (level < 1) return;
+    const Level& lf = reg.level(level);
+    amrex::BoxArray cba = lf.ba;
+    cba.coarsen(lf.ref_ratio_from_parent);
+    const amrex::IntVect ratio = lf.ref_ratio_from_parent;
+    for (const char* nm : {"D", "DS", "RSUM", "MU", "KRES", "H", "HS"}) {
+        if (!reg.fields(level).has(nm) || !reg.fields(level - 1).has(nm)) continue;
+        amrex::MultiFab& Df = reg.fields(level)[nm];
+        amrex::MultiFab ct(cba, lf.dm, Df.nComp(), 0);
+        ct.setVal(0.0);
+        ct.ParallelCopy(reg.fields(level - 1)[nm], 0, 0, Df.nComp(), 0, 0, reg.level(level - 1).geom.periodicity());
+        for (amrex::MFIter mfi(Df); mfi.isValid(); ++mfi) {
+            auto d = Df.array(mfi);
+            auto c = ct.const_array(mfi);
+            const int nc = Df.nComp();
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                for (int n = 0; n < nc; ++n) d(i, j, k, n) = c(amrex::coarsen(i, ratio[0]), amrex::coarsen(j, ratio[1]), amrex::coarsen(k, ratio[2]), n);
+            });
+        }
+    }
+}
+
 void make_level1(Env& e, bool transfer = true)
 {
     const Level& L0 = e.reg.level(0);
@@ -162,7 +189,10 @@ void make_level1(Env& e, bool transfer = true)
     (void)L0;
     e.reg.begin_regrid();
     e.reg.make_level(fl);
-    if (transfer) e.tr->fill_new_level(fl);
+    if (transfer) {
+        if (!std::getenv("RTE2E_NODERIVE")) e.tr->derive = [&e](int lev) { inject_parent_stage_arrays(e.reg, lev); };
+        e.tr->fill_new_level(fl);
+    }
     e.reg.end_regrid();
     if (transfer) e.tr->hierarchy_done(false);
 }
@@ -466,6 +496,8 @@ int mode_ghost(TimeLoop& loop, const fdsamr::Level0& l0, const Opt& o0)
         {"corrector RHO/ZZ/TMP/RSUM", "DENS_P", false, {"RHO", "ZZ"}, {"TMP", "RSUM"}},
         {"predictor RHOS/ZZS", "DENS_C", true, {"RHOS", "ZZS"}, {}},
         {"viscosity MU/KRES", "VISC_P", false, {}, {"MU", "KRES"}},
+        {"divergence D (predictor)", "DIV1_P", true, {}, {"D"}},       // D is exchanged by code 1 (ExchangeFields.H); DIV1_P is the state right after that exchange
+        {"divergence DS (corrector)", "DIV1_C", false, {}, {"DS"}},    // DS is exchanged by code 4
     };
     const std::vector<std::string> all_cell = {"RHO", "RHOS", "ZZ", "ZZS", "TMP", "RSUM", "MU", "KRES", "D", "DS"};
     for (const Case& cs : cases) {
