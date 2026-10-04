@@ -108,6 +108,9 @@ if (BUILD_TESTING)
         add_test(NAME regrid_transport_regrid_core_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_regrid_core> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
         set_tests_properties(regrid_transport_regrid_core regrid_transport_regrid_core_np4 regrid_transport_regrid_core_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")   # one thread per rank: the test is small and oversubscribed threads only slow it
 
+        # R4 part 2 tests (face prolongation, registry transfer, dynamic blob end to end): RegridTests.cmake
+        include(${CMAKE_CURRENT_SOURCE_DIR}/RegridTests.cmake)
+
         # R2b: interface flux overwrite (runner, shared-ghost count, mock transport tests): FluxTests.cmake
         include(${CMAKE_CURRENT_SOURCE_DIR}/FluxTests.cmake)
 
