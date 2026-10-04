@@ -11,3 +11,7 @@ Dirichlet and FDS-derived cases are M2 and M4.
 reference against FDS dumps), `stretched_study_results.txt` (its output for the cases in the note),
 `fds_dump_hook.py` (scratch-only edit of a copy of `pres.f90`; never applied to the reference tree) and the two small
 FDS inputs in `fds_cases/`.
+
+`hypre-notes.md` documents the HYPRE assembled-matrix backend (operator, C/F treatment, pin, tolerance, agreement and iteration
+numbers, timing against MLMG, limitations). `mixed-nd-hierarchy-note.md` reports where the fine-level excess error of mixed
+Neumann/Dirichlet directions sits on a hierarchy (measured with `pb_harness mode=err_map`).

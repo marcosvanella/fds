@@ -168,6 +168,12 @@ enum SolveTrigger : unsigned { SolveRoutine = 0u, SolveFirst = 1u, SolveFirstAft
 //  coarsen_type:   BoomerAMG coarsening (FDS 8 = PMIS).     relax_type: smoother (FDS 18 = L1-Jacobi, symmetric).
 //  num_sweeps:     sweeps per level.                        strong_threshold: BoomerAMG strength threshold, < 0 = HYPRE default.
 //  interp_type:    interpolation, < 0 = HYPRE default.      agg_levels: aggressive coarsening levels.
+// Tolerance: the Krylov solver is run to 0.1*tol_rel (its recurrence residual is slightly optimistic); `converged` is judged against
+// tol_rel. Singular problems are pinned by an identity row (FDS ULMAT), which concentrates the round-off of all other residuals in
+// the pin row, so the independent true residual of a large singular problem (about 1e6 unknowns) can exceed 1e-12 although the
+// solution is accurate to 1e-13 (frozen/hypre-notes.md, section "Limitations"). Typical counts at tol_rel 1e-12: 20-27 PCG
+// iterations single level, 18-28 GMRES iterations composite (MLMG: 9-12); a tuned set (coarsen 10, relax 6, strong 0.5, agg 1)
+// needs 19-22 and is about 2x faster.
 enum class HypreKrylov { Auto, PCG, GMRES, BiCGSTAB };
 struct HypreOptions {
     HypreKrylov krylov = HypreKrylov::Auto;

@@ -8,11 +8,12 @@ CPU. FFT and single-level MLMG backends behind `PressureIface.H`; the common lay
 | `PressureIface.H/.cpp` | problem/options/result types, selector, `solve_pressure()` |
 | `PressureBackend.H`, `FFTBackend.cpp`, `MLMGBackend.cpp` | backend contract; `FFT::Poisson`; `MLPoisson` at `setMaxOrder(2)` |
 | `Composite.H`, `CompositeSolve.cpp` | composite (multi-level) solve: selector and layout checks, `PressureWorkspace`, `solve_pressure` composite path, `face_gradient_composite` |
+| `HypreBackend.H/.cpp` | HYPRE assembled-matrix backend (IJ matrix of the MLMG composite operator, PCG/GMRES/BiCGSTAB + BoomerAMG, identity-row pin); explicit request only; see `frozen/hypre-notes.md` |
 | `CommonLayer.H/.cpp` | components and pins, mean removal, gauge, reference operator, true residual |
 | `ExactSum.H` | private mask-aware volume-weighted exact fixed-point sum (decomposition independent) |
 | `harness/` | standalone CMake project and key=value driver `pb_harness` (no FDS sources); `main.cpp` single-level modes, `composite_modes.cpp` composite modes (`comp`, `comp_ns2d`, `comp_sel`, `comp_ws`) |
 | `tests/` | CTest registrations and `pb_test.py` |
-| `frozen/` | see `frozen/README.md`; `mean-removal-vs-fds.md` (note), `stretched_study.py`, `fds_dump_hook.py`, `fds_cases/` (FDS study) |
+| `frozen/` | see `frozen/README.md`; `hypre-notes.md` (HYPRE backend), `mixed-nd-hierarchy-note.md` (where the mixed N/D excess error sits), `mean-removal-vs-fds.md` (note), `stretched_study.py`, `fds_dump_hook.py`, `fds_cases/` (FDS study) |
 
 Mean removal and gauge (D-067; `PressureIface.H` header comment, `CommonLayer.H`): exact sums, per singular component.
 Default mean removal is the composite volume-weighted mean over the uncovered cells (`PressureProblem::mean_kind =
@@ -54,3 +55,10 @@ Single run: `mpirun -np 4 pb_harness n_cell="64 64 64" bc=neumann max_grid_size=
 - Harness modes `trigger1`, `comp_trigger`, `fftcache`; ctests `pb_trigger_single_*`, `pb_comp_trigger`, `pb_fftcache_*`.
 - `fold_boundary_data` / `BoundaryData`: inhomogeneous Dirichlet/Neumann wall data folded into the rhs (sign convention in the header and frozen/m2-notes.md).
 - Mixed open/closed faces (any per-direction NN/DD/ND/DN/PP) on FFT, MLMG and composite; `effective_bc()` for a one-cell y.
+
+## HYPRE backend (see frozen/hypre-notes.md)
+
+- `PressureOptions::backend = BackendKind::HYPRE` (never chosen by Auto; the backend option lives on `PressureOptions`, not on `PressureProblem`), settings in `PressureOptions::hypre` (`HypreOptions`: Krylov, BoomerAMG parameters), tolerance and iteration cap are `tol_rel` / `max_iter`.
+- Same discrete operator as MLMG (7-point, second order, MLMG's C/F ghost and reflux), assembled from host buffers; single level and composite (ratios 2 and 4, n levels, one-cell y). Mean removal and gauge are the common layer's. Same `NotBuilt` rules as MLMG.
+- The set-up (matrix and AMG hierarchy) is cached in `PressureWorkspace` and dropped by `rebuild`; `PressureWorkspace::hypre_built()`.
+- Harness: `backends="fft mlmg hypre"` (single level), `mode=hypre_cmp` (composite HYPRE vs MLMG), `mode=hypre_op` (operator oracle against MLMG), `mode=hypcache`, `backend=hypre` on `comp`, `comp_ns2d`, `comp_sel`, `comp_ws`, `mixed1`, `bcdata`; `mode=err_map` (error by distance to C/F and domain faces). ctests `pb_hypre_*` (21).
