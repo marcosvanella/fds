@@ -2,7 +2,7 @@
 # Driver-level end-to-end checks of the multi-level transport (R2b): Role 3's FluxStageRunner between the stage pieces of Role 1's TimeLoop, a level 1 bound by TimeLoop::bind_level
 # (patches 0007-0009, fine-level FDS kernels) over the FDS cases of tests/cases. Run with the gfortran and the oneAPI (ifx) builds, same numbers.
 # usage: run_e2e_driver.sh <driver-build> [work-dir]        Exit 0 all pass, 1 a check failed, 77 skipped (no driver / driver without the --rt-e2e hook / no bind_level).
-# The driver needs the hook of docs/upstream-patches/0006-r2b-driver-e2e-hook.patch (Source/driver/main.cpp and CMakeLists.txt include DriverSources.cmake): `fds_amr <case> --rt-e2e <test>`.
+# The driver needs the hook of docs/upstream-patches/UP-0006-r2b-driver-e2e-hook.patch (Source/driver/main.cpp and CMakeLists.txt include DriverSources.cmake): `fds_amr <case> --rt-e2e <test>`.
 # The velocity is prescribed (constant) and the pressure solve is not run: the FDS stages of one step are viscosity, ADV read-out/overrides, density, exchange 1/4, boundary, velocity flux,
 # WALL_BC, DIF read-out/overrides, DIVERGENCE_PART_1, run level by level (DriverModes.cpp). Two species of equal molecular weight; the second is a passive tracer.
 #   E1 full-domain level 1 equals the uniform-fine run (RHO and both ZZ, field by field), 1 and 4 ranks
@@ -34,7 +34,7 @@ run() {  # run <np> <case> <args...>  -> stdout of the run, stored in $LAST
 }
 run 1 rt_blob2d_16 list
 if ! echo "$LAST" | grep -q "RTE2E modes"; then
-  echo "SKIP all: this driver has no --rt-e2e mode (apply docs/upstream-patches/0006-r2b-driver-e2e-hook.patch: Source/driver/main.cpp + CMakeLists.txt include DriverSources.cmake)"; exit 77
+  echo "SKIP all: this driver has no --rt-e2e mode (apply docs/upstream-patches/UP-0006-r2b-driver-e2e-hook.patch: Source/driver/main.cpp + CMakeLists.txt include DriverSources.cmake)"; exit 77
 fi
 fails=0
 pass() { echo "PASS $1"; }
@@ -44,7 +44,7 @@ lt() { python3 -c "import sys; sys.exit(0 if float('$1') < float('$2') else 1)";
 BLOB="--blob 0.25 0.5 0.375 0.625"          # tracer blob aligned with the coarse cells of the 16 x 16 case
 DT=0.005                                      # CFL 0.24 on the 32 x 32 grid for (u, w) = (1, 0.5)
 for np in 1 4; do
-  S=""; MS=100000; MS1=100000; [ $np = 4 ] && { S="_np4"; MS=8; MS1=16; }   # one fine box on 1 rank; 4 ranks: one fine box per rank (several boxes on one rank need docs/upstream-patches/0007-r2b-fill-om-bounds.patch)
+  S=""; MS=100000; MS1=100000; [ $np = 4 ] && { S="_np4"; MS=8; MS1=16; }   # one fine box on 1 rank; 4 ranks: one fine box per rank (several boxes on one rank need docs/upstream-patches/UP-0007-r2b-fill-om-bounds.patch)
   C16=rt_blob2d_16$S; C32=rt_blob2d_32$S
   # ---- E1
   rm -f E1A_np$np.* E1B_np$np.*

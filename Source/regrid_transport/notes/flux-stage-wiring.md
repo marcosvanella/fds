@@ -35,7 +35,7 @@ The advective override value is face value x the single interface-face velocity.
 
 ## R2b: wired against the committed hooks (S12 FluxStages, patches 0007-0009) — status: run against the validated patch set (0005-0009, commit 1f3f4de4c4) with gfortran 14 and oneAPI ifx/Intel MPI; same numbers
 Role 1 split the stage as asked (`apply_flux_divergence` = density only, `readout_dif` / `run_divergence_part1` separate), so the runner is used as designed; no change to `FluxStageRunner`.
-`DriverModes.cpp` (`fds_amr <case> --rt-e2e transport|ghost|list`, entered through the hook of `docs/upstream-patches/0006-r2b-driver-e2e-hook.patch`) runs one transport-only step as
+`DriverModes.cpp` (`fds_amr <case> --rt-e2e transport|ghost|list`, entered through the hook of `docs/upstream-patches/UP-0006-r2b-driver-e2e-hook.patch`) runs one transport-only step as
 predictor then corrector, each: `stage_state`; `stage_viscosity` (all levels, coarse first); `compute_stage_fluxes` (ADV read-out); runner ADV overrides; `apply_flux_divergence` (finest first);
 `stage_exchange` (code 1 / 4: the coarse-fine ghost hook of `install_cf_ghost_hooks` runs here) and `stage_boundary`; `stage_velocity_flux`; `stage_init_divergence`; `stage_wall_bc`;
 `readout_dif` (all levels); runner DIF overrides; `run_divergence_part1` (finest first). The velocity is prescribed and constant (no pressure solve); a level 1 is made with the registry transfer
@@ -67,6 +67,6 @@ What the runs showed (gfortran and oneAPI agree to the digits printed; 1 and 4 r
 - E4 (`ghost` mode, `ns2d_16_l0` with the dumps of the instrumented FDS run of `ns2d_16_int_1to2_refinement`, step 2 and 3): the ghost layers 1 and 2 written by a real `stage_exchange` agree
   with the FDS values to 5e-15 (RHO, ZZ, TMP, RSUM; corrector and predictor forms), except the hole-corner cells, reported separately: KRES at 4 hole-corner cells differs (42 %, the D-059 shared cells).
 - Findings for Role 1: (1) the `IBAR_MAX`/`JBAR_MAX`/`KBAR_MAX` raise in `fds_fine_level.f90` (heap corruption in VELOCITY_FLUX when a fine box is larger than every level-0 mesh) is in the working tree now;
-  (2) `FDS_G_FILL_OM` crashes for several fine boxes on one rank (`docs/upstream-patches/0007-r2b-fill-om-bounds.patch`); (3) `stage_boundary(1, 3|6)` aborts in `fds_p_save_uvw`
+  (2) `FDS_G_FILL_OM` crashes for several fine boxes on one rank (`docs/upstream-patches/UP-0007-r2b-fill-om-bounds.patch`); (3) `stage_boundary(1, 3|6)` aborts in `fds_p_save_uvw`
   ("not a level-0 FDS mesh"), so the velocity-matching codes are run on level 0 only here (the prescribed velocity is constant); (4) the level-1 D / DS and the NaN above.
 - `tests/run_e2e_driver.sh <build>` runs E1 to E5 on 1 and 4 ranks (E4 with `RT_FR016_DUMP=<prefix>`), then Role 1's two-level prescribed-velocity test (`driver_unit_tests`, which uses our override lists).
