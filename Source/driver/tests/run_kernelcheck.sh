@@ -3,7 +3,7 @@
 # written by the scratch reference generator (tests/refdump, unpatched FDS + write-only hooks).
 # usage: run_kernelcheck.sh <build-dir> <ref-runs-dir> [work-dir]
 #   <ref-runs-dir>/<case>/ holds <case fds file> and ref.dump (4-mesh: ref.dump, ref.dump.2, .3, .4)
-#   cases: shunn3_32, csmag_32, shunn3_32_clip, shunn3_4mesh_32__1mesh, shunn3_4mesh_32 (native, 4 ranks + window of the 1-mesh dump, with and without the clip active
+#   cases: shunn3_32, csmag_32, csmag_32_fishpak (csmag_32 with &PRES FISHPAK_BC=0,0,0 /, tests/cases/csmag_32_fishpak.fds stored as csmag_32.fds in its directory; dump with FDSREF_STEPS=2,3), shunn3_32_clip, shunn3_4mesh_32__1mesh, shunn3_4mesh_32 (native, 4 ranks + window of the 1-mesh dump, with and without the clip active
 #   (shunn3_4mesh_32__1mesh_clip): the 4-box gather clip against the single-mesh clip)
 # Every kernel tag must print BITWISE-OK; any DIFFER makes the script fail.
 # ghost modes: dump = ghosts from the dump; full+bc / face+bc = level ghost fill (full or face-neighbour-only) with the boundary-condition-step ghost values
@@ -41,6 +41,7 @@ plain() { # like run, plus the plain-mode gate on the per-tag counts
 for g in dump full+bc face+bc; do
   run "shunn3_32.$g"            1 shunn3_32 shunn3_32.fds "$REF/shunn3_32/ref.dump" --ghost=$g
   run "csmag_32.$g"             1 csmag_32 csmag_32.fds "$REF/csmag_32/ref.dump" --ghost=$g
+  run "csmag_32_fishpak.$g" 1 csmag_32_fishpak csmag_32.fds "$REF/csmag_32_fishpak/ref.dump" --ghost=$g
   run "shunn3_32_clip.$g"       1 shunn3_32_clip shunn3_32.fds "$REF/shunn3_32_clip/ref.dump" --ghost=$g
   run "1mesh.$g"                1 shunn3_4mesh_32__1mesh shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh/ref.dump" --ghost=$g
   run "4mesh_native.$g"         4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32/ref.dump" --ghost=$g
@@ -50,6 +51,7 @@ done
 for g in full face; do
   plain "shunn3_32.$g"            1 shunn3_32 shunn3_32.fds "$REF/shunn3_32/ref.dump" --ghost=$g
   plain "csmag_32.$g"             1 csmag_32 csmag_32.fds "$REF/csmag_32/ref.dump" --ghost=$g
+  plain "csmag_32_fishpak.$g" 1 csmag_32_fishpak csmag_32.fds "$REF/csmag_32_fishpak/ref.dump" --ghost=$g
   plain "shunn3_32_clip.$g"       1 shunn3_32_clip shunn3_32.fds "$REF/shunn3_32_clip/ref.dump" --ghost=$g
   plain "1mesh.$g"                1 shunn3_4mesh_32__1mesh shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh/ref.dump" --ghost=$g
   plain "4mesh_native.$g"         4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32/ref.dump" --ghost=$g
@@ -63,6 +65,7 @@ for g in full face; do
   export FDSKC_STRIPDUMP=1
   plain "shunn3_32.$g+strips"            1 shunn3_32 shunn3_32.fds "$REF/shunn3_32/ref.dump" --ghost=$g
   plain "csmag_32.$g+strips"             1 csmag_32 csmag_32.fds "$REF/csmag_32/ref.dump" --ghost=$g
+  plain "csmag_32_fishpak.$g+strips" 1 csmag_32_fishpak csmag_32.fds "$REF/csmag_32_fishpak/ref.dump" --ghost=$g
   plain "shunn3_32_clip.$g+strips"       1 shunn3_32_clip shunn3_32.fds "$REF/shunn3_32_clip/ref.dump" --ghost=$g
   plain "1mesh.$g+strips"                1 shunn3_4mesh_32__1mesh shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32__1mesh/ref.dump" --ghost=$g
   plain "4mesh_native.$g+strips"         4 shunn3_4mesh_32 shunn3_4mesh_32.fds "$REF/shunn3_4mesh_32/ref.dump" --ghost=$g

@@ -250,6 +250,8 @@ python3 tests/refdump/rd.py ref.dump                                            
 ```
 `FDSREF_STEPS` = time-step counts to dump (default 2,3; each dumped step has a predictor and a corrector record per kernel). `FDSREF_RHOMIN/RHOMAX` = stress mode:
 the density limits are narrowed so that the clip is active, every array touched is restored (the run ends with an instability stop, the dump is complete).
+Use the default `FDSREF_STEPS=2,3` for every kernel-check dump. A step range that includes step 1 (for example `1,2`) puts the initial-pass records of ICYC 1 into the dump; the driver's ghost fill cannot reproduce those, and the check then reports a spurious DIV1 difference in the outer cell shell in every driver-fill mode (seen as 11538 of 4048179 elements on `csmag_32_fishpak`; with the correct range DIV1 is bitwise in all five modes).
+`csmag_32_fishpak` is gated by `run_kernelcheck.sh` like the other cases: `<ref-runs-dir>/csmag_32_fishpak/` holds `tests/cases/csmag_32_fishpak.fds` copied under the name `csmag_32.fds` (CHID `csmag_32`), `cbc32_uvw.csv` (`Verification/Turbulence`) and `ref.dump` from `FDSREF_FILE=ref.dump FDSREF_STEPS=2,3 <scratch build>/fds csmag_32.fds`.
 The instrumented binary reproduces the baseline hrr, mass and restart output bitwise (checked for `shunn3_32` and `shunn3_4mesh_32__1mesh`).
 
 Raw format (stream, unformatted, little endian; REAL = float64, INTEGER = int32):
