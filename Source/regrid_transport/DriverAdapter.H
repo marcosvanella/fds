@@ -36,8 +36,9 @@ struct CfHookStats {
 // Cell-centred scalars only: RHO/RHOS+ZZ/ZZS, TMP, RSUM, MU, KRES, D, DS; H/HS and the face fields are skipped. Level 0 and a missing coarser level: no-op.
 fdsamr::CfGhostHook make_cf_ghost_hook(fdsamr::LevelRegistry& reg, const ThermoProvider& th = ThermoProvider(), CfHookStats* stats = nullptr);
 
-// Fine -> coarse volume average of the given fields (all transfer scalars if names is empty) for levels top-1 .. 0, finest first, so that data propagates
-// through the whole hierarchy. Covered coarse cells only.
+// Fine -> coarse restriction of the given fields (all transfer scalars if names is empty) for levels top-1 .. 0, finest first, so that data propagates
+// through the whole hierarchy. Covered coarse cells only. Species: RHO with ZZ (and RHOS with ZZS) are restricted by average_down_species (rho and rho*Z averaged,
+// Z rebuilt as rho*Z/rho); the mass fractions are NEVER averaged linearly (that breaks the species mass, ~1e-4 relative at a flame front). Other fields: volume mean.
 void average_down_registry(fdsamr::LevelRegistry& reg, const std::vector<std::string>& names = {});
 
 }  // namespace fdsrt

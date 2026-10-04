@@ -15,6 +15,32 @@ void average_down_cells(const amrex::MultiFab& fine, amrex::MultiFab& crse, cons
     amrex::average_down(fine, crse, fine_geom, crse_geom, scomp, ncomp, ratio);
 }
 
+void average_down_species(const amrex::MultiFab& rho_f, const amrex::MultiFab& zz_f, amrex::MultiFab& rho_c, amrex::MultiFab& zz_c, const amrex::iMultiFab& covered_c,
+                          const amrex::Geometry& fine_geom, const amrex::Geometry& crse_geom, const amrex::IntVect& ratio)
+{
+    const int ns = zz_f.nComp();
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(zz_c.nComp() == ns, "average_down_species: component counts differ");
+    amrex::MultiFab rzf(zz_f.boxArray(), zz_f.DistributionMap(), ns, 0), rzc(zz_c.boxArray(), zz_c.DistributionMap(), ns, 0);
+    for (amrex::MFIter mfi(rzf); mfi.isValid(); ++mfi) {
+        auto r = rho_f.const_array(mfi); auto z = zz_f.const_array(mfi); auto o = rzf.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { for (int n = 0; n < ns; ++n) o(i, j, k, n) = r(i, j, k) * z(i, j, k, n); });
+    }
+    for (amrex::MFIter mfi(rzc); mfi.isValid(); ++mfi) {
+        auto r = rho_c.const_array(mfi); auto z = zz_c.const_array(mfi); auto o = rzc.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { for (int n = 0; n < ns; ++n) o(i, j, k, n) = r(i, j, k) * z(i, j, k, n); });
+    }
+    average_down_cells(rzf, rzc, fine_geom, crse_geom, ratio, 0, ns);
+    average_down_cells(rho_f, rho_c, fine_geom, crse_geom, ratio, 0, 1);
+    for (amrex::MFIter mfi(rzc); mfi.isValid(); ++mfi) {
+        auto q = rzc.const_array(mfi); auto m = covered_c.const_array(mfi);
+        auto rho = rho_c.const_array(mfi); auto z = zz_c.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            if (!m(i, j, k)) return;
+            for (int n = 0; n < ns; ++n) z(i, j, k, n) = q(i, j, k, n) / rho(i, j, k);
+        });
+    }
+}
+
 long fill_cf_ghosts_pc(amrex::MultiFab& fine, const amrex::MultiFab& crse, const amrex::Geometry& fine_geom, const amrex::Geometry& crse_geom,
                        const amrex::IntVect& ratio, int nlayers, int scomp, int ncomp)
 {

@@ -14,6 +14,33 @@ bool is_transfer_scalar(const fdsamr::Fields& F, const std::string& name)
     return F.spec(name).stag == fdsamr::Stag::Cell;
 }
 
+// Restriction of the named fields of level l to level l-1: a density with its mass fractions (RHO+ZZ, RHOS+ZZS) is restricted by average_down_species (rho and rho*Z
+// averaged, Z rebuilt); a mass-fraction field named without its density gets the density of the same stage averaged as well. Other fields: plain volume average.
+static void average_down_fields(fdsamr::LevelRegistry& reg, int l, const std::vector<std::string>& names)
+{
+    const fdsamr::Level& lf = reg.level(l);
+    const fdsamr::Level& lc = reg.level(l - 1);
+    fdsamr::Fields& Ff = reg.fields(l);
+    fdsamr::Fields& Fc = reg.fields(l - 1);
+    auto has = [&](const std::string& n) { return std::find(names.begin(), names.end(), n) != names.end(); };
+    const amrex::iMultiFab* cov = reg.covered_mask(l - 1);
+    for (const char* pr : {"RHO", "RHOS"}) {
+        const std::string rho = pr, zz = (rho == "RHO") ? "ZZ" : "ZZS";
+        const bool want_zz = has(zz) && Ff.has(zz) && Fc.has(zz) && Ff.has(rho) && Fc.has(rho);
+        if (want_zz) {
+            AMREX_ALWAYS_ASSERT_WITH_MESSAGE(cov != nullptr, "average_down_fields: no covered mask");
+            average_down_species(Ff[rho], Ff[zz], Fc[rho], Fc[zz], *cov, lf.geom, lc.geom, lf.ref_ratio_from_parent);
+        } else if (has(rho) && Ff.has(rho) && Fc.has(rho)) {
+            average_down_cells(Ff[rho], Fc[rho], lf.geom, lc.geom, lf.ref_ratio_from_parent, 0, 1);
+        }
+    }
+    for (const std::string& n : names) {
+        if (n == "RHO" || n == "RHOS" || n == "ZZ" || n == "ZZS") continue;
+        if (!Ff.has(n) || !Fc.has(n)) continue;
+        average_down_cells(Ff[n], Fc[n], lf.geom, lc.geom, lf.ref_ratio_from_parent, 0, Fc[n].nComp());
+    }
+}
+
 fdsamr::CfGhostHook make_cf_ghost_hook(fdsamr::LevelRegistry& reg, const ThermoProvider& th, CfHookStats* stats)
 {
     return [&reg, th, stats](const fdsamr::CfGhostRequest& rq) {
@@ -43,7 +70,7 @@ fdsamr::CfGhostHook make_cf_ghost_hook(fdsamr::LevelRegistry& reg, const ThermoP
         std::vector<std::string> nf, nc;
         ScalarStage fs = stage(Ff, nf), cs = stage(Fc, nc);
         if (!fs.rho || !cs.rho || nf != nc) return;
-        for (const std::string& n : nf) average_down_cells(Ff[n], Fc[n], lf.geom, lc.geom, lf.ref_ratio_from_parent, 0, Fc[n].nComp());
+        average_down_fields(reg, l, nf);
         Thermo tc, tf;
         if (th.rsum && th.pbar) {
             tc.n_tracked = tf.n_tracked = th.n_tracked;
@@ -62,15 +89,13 @@ fdsamr::CfGhostHook make_cf_ghost_hook(fdsamr::LevelRegistry& reg, const ThermoP
 void average_down_registry(fdsamr::LevelRegistry& reg, const std::vector<std::string>& names)
 {
     for (int l = reg.num_levels() - 2; l >= 0; --l) {
-        const fdsamr::Level& lc = reg.level(l);
-        const fdsamr::Level& lf = reg.level(l + 1);
-        fdsamr::Fields& Fc = reg.fields(l);
+        const fdsamr::Fields& Fc = reg.fields(l);
         const fdsamr::Fields& Ff = reg.fields(l + 1);
         const std::vector<std::string> use = names.empty() ? Fc.names() : names;
-        for (const std::string& n : use) {
-            if (!is_transfer_scalar(Fc, n) || !Ff.has(n)) continue;
-            average_down_cells(Ff[n], Fc[n], lf.geom, lc.geom, lf.ref_ratio_from_parent, 0, Fc[n].nComp());
-        }
+        std::vector<std::string> sel;
+        for (const std::string& n : use)
+            if (is_transfer_scalar(Fc, n) && Ff.has(n)) sel.push_back(n);
+        average_down_fields(reg, l + 1, sel);
     }
 }
 
