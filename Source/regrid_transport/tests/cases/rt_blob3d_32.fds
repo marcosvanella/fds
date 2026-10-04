@@ -1,0 +1,23 @@
+&HEAD CHID='rt_blob3d_32', TITLE='Role 3 e2e: 32x32x32 mesh, triply periodic' /
+This is a driver test input of the Role 3 end-to-end tests (tests/run_e2e_driver.sh): triply periodic unit cube, two species of equal molecular weight (the second one is a passive
+tracer; the tracer blobs and the constant velocity are set by the test mode, not by this input), uniform temperature.
+
+&MESH IJK=32,32,32, XB=0.0,1.0,0.0,1.0,0.0,1.0 /
+
+&TIME T_END=1.0 /
+
+&MISC SIMULATION_MODE='DNS', STRATIFICATION=.FALSE., NOISE=.FALSE., CFL_MAX=0.25 /
+
+&RADI RADIATION=.FALSE./
+
+&SPEC ID='BACKGROUND',BACKGROUND=.TRUE.,MW=28.0,VISCOSITY=0.002,SPECIFIC_HEAT=1.0 /
+&SPEC ID='TRACER',MW=28.0,VISCOSITY=0.002,SPECIFIC_HEAT=1.0 /
+
+&VENT PBX=0, SURF_ID='PERIODIC' /
+&VENT PBX=1, SURF_ID='PERIODIC' /
+&VENT PBY=0, SURF_ID='PERIODIC' /
+&VENT PBY=1, SURF_ID='PERIODIC' /
+&VENT PBZ=0, SURF_ID='PERIODIC' /
+&VENT PBZ=1, SURF_ID='PERIODIC' /
+
+&TAIL /

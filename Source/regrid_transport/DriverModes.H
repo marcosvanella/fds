@@ -1,7 +1,7 @@
 // DriverModes.H: driver-level end-to-end modes of Role 3 (R2b), run INSIDE fds_amr on the real TimeLoop. Entered from the driver's main() as
 //   fds_amr <case.fds> --rt-e2e <test> [options]        (hook: DriverHook.patch; sources: DriverSources.cmake)
 // Nothing here is part of a normal run; a driver without the hook has no such mode and tests/run_e2e_driver.sh then skips (exit 77).
-// PRE-VALIDATION: the fine level runs the FDS kernels through TimeLoop::bind_level (patches 0007-0009, GNU build; the oneAPI validation of those draft patches is pending).
+// The fine level runs the FDS kernels through TimeLoop::bind_level (patches 0007-0009, validated; run with gfortran and oneAPI).
 #ifndef FDSRT_DRIVERMODES_H_
 #define FDSRT_DRIVERMODES_H_
 

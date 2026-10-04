@@ -1,4 +1,4 @@
-// DriverModes.cpp: Role 3 driver-level end-to-end modes (R2b); see DriverModes.H. PRE-VALIDATION (GNU build, patches 0007-0009 draft).
+// DriverModes.cpp: Role 3 driver-level end-to-end modes (R2b); see DriverModes.H. Built and run with gfortran and with oneAPI (ifx), patches 0005-0009 as validated.
 //
 // Mode "transport": prescribed constant velocity (no pressure solve, no velocity update), two species of equal molecular weight (the second one is a passive tracer blob), uniform density
 // and temperature. One step is the FDS stage sequence of TimeLoop::advance() with the pressure and velocity parts left out, run through the per-level stage entry points, with Role 3's
@@ -47,6 +47,7 @@ struct Opt {
     std::string test = "transport";
     std::string mode = "patch";        // patch | full | none
     int p[4] = {4, 11, 4, 11};         // coarse cell range x0 x1 z0 z1 of the level-1 patch
+    int py[2] = {-1, -1};              // coarse cell range y0 y1 of the patch (default: the whole y extent; a 3D case with an interior range keeps the fine box off every domain edge)
     int steps = 6;
     bool overwrite = true;
     double u0 = 1.0, w0 = 0.5;
@@ -68,6 +69,7 @@ Opt parse(int argc, char** argv)
         const std::string a = argv[i];
         auto need = [&](int n) { if (i + n >= argc) amrex::Abort("rt-e2e: missing value after " + a); };
         if (a == "--patch") { need(4); for (int q = 0; q < 4; ++q) o.p[q] = std::atoi(argv[++i]); o.mode = "patch"; }
+        else if (a == "--py") { need(2); o.py[0] = std::atoi(argv[++i]); o.py[1] = std::atoi(argv[++i]); }
         else if (a == "--full") o.mode = "full";
         else if (a == "--none") o.mode = "none";
         else if (a == "--steps") { need(1); o.steps = std::atoi(argv[++i]); }
@@ -148,7 +150,7 @@ void make_level1(Env& e, bool transfer = true)
     const Level& L0 = e.reg.level(0);
     const amrex::Box dom = e.l0.geom.Domain();
     amrex::Box cb = dom;
-    if (e.o.mode == "patch") cb = amrex::Box(amrex::IntVect(e.o.p[0], dom.smallEnd(1), e.o.p[2]), amrex::IntVect(e.o.p[1], dom.bigEnd(1), e.o.p[3]));
+    if (e.o.mode == "patch") cb = amrex::Box(amrex::IntVect(e.o.p[0], e.o.py[0] >= 0 ? e.o.py[0] : dom.smallEnd(1), e.o.p[2]), amrex::IntVect(e.o.p[1], e.o.py[0] >= 0 ? e.o.py[1] : dom.bigEnd(1), e.o.p[3]));
     const amrex::IntVect rr(e.o.ratio, dom.length(1) == 1 ? 1 : e.o.ratio, e.o.ratio);
     fdsrt::LevelLayout fl;
     fl.level = 1;
@@ -247,14 +249,14 @@ void stage(Env& e, bool pred, bool with_density, bool first_pass = true)
     TR("set_overrides");
     set_ov(e, FluxKind::Dif);
     TR("run_divergence_part1");
-    down(e, [&](int l) { e.fs->run_divergence_part1(l); });
+    down(e, [&](int l) { if (l > 0 && std::getenv("RTE2E_NO_REDIV1_FINE")) return; e.fs->run_divergence_part1(l); });
 }
 
 // velocity positions of the step (exchange + MATCH_VELOCITY / VELOCITY_BC), as TimeLoop::advance() has them; the velocity itself is prescribed and not updated
 void velocity_match(Env& e, int code, bool pred)
 {
     TR("velocity_match " << code);
-    // Level 0 only: the velocity boundary routines of a fine level (MATCH_VELOCITY bookkeeping, fds_p_save_uvw) are not fine-ready in the draft patches 0007-0009 (found by this test: the call
+    // Level 0 only: the velocity boundary routines of a fine level (MATCH_VELOCITY bookkeeping, fds_p_save_uvw) are not fine-ready in patches 0007-0009 (found by this test: the call
     // aborts with "mesh number 2 is not a level-0 FDS mesh"). The fine velocity is constant everywhere including its ghost faces here, so nothing is lost for this prescribed-velocity test.
     e.loop.stage_exchange(0, code, pred);
     e.loop.stage_boundary(0, code);
@@ -379,7 +381,7 @@ int mode_transport(TimeLoop& loop, const fdsamr::Level0& l0, const Opt& o)
     e.dt = o.dt > 0.0 ? o.dt : 0.24 / umax;
     e.t = 0.0;
     amrex::Print() << "RTE2E " << o.label << " levels = " << e.nl << ", level-1 boxes = " << (e.nl > 1 ? static_cast<int>(e.reg.level(1).ba.size()) : 0)
-                   << ", dt = " << e.dt << ", steps = " << o.steps << ", overwrite = " << (o.overwrite ? "on" : "off") << ", velocity = (" << o.u0 << ", " << o.w0 << ") [pre-validation]\n";
+                   << ", dt = " << e.dt << ", steps = " << o.steps << ", overwrite = " << (o.overwrite ? "on" : "off") << ", velocity = (" << o.u0 << ", " << o.w0 << ")\n";
     if (e.nl > 1) {
         const GhostShareCount gc = count_shared_ghost_cells(e.reg.level(1).ba, e.reg.level(1).ref_ratio_from_parent, e.reg.level(0).geom);
         amrex::Print() << "RTE2E " << o.label << " D-059 shared ghost cells: " << gc.to_string() << "\n";
