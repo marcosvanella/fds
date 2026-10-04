@@ -125,6 +125,9 @@ if (BUILD_TESTING)
     # negative control: without the &AMR line the same tool run must fail
     add_test(NAME regrid_transport_convert_input_tool_no_amr
              COMMAND sh -c "grep -v '^&AMR' ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/ns2d_16_int_1to2.fds > ${CMAKE_CURRENT_BINARY_DIR}/ns2d_noamr.fds; ! $<TARGET_FILE:fds_amr_convert_input> ${CMAKE_CURRENT_BINARY_DIR}/ns2d_noamr.fds")
+    # grid stretching in AMR mode is refused (D-030; test-plan N-5b input): the tool must exit non-zero
+    add_test(NAME regrid_transport_convert_input_tool_trn_refused
+             COMMAND sh -c "! $<TARGET_FILE:fds_amr_convert_input> ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/amr_nic_guard_neg_conv_pass.fds")
 
     if (RT_HAVE_AMREX)
         add_executable(test_amrcore tests/test_amrcore.cpp tests/fds_stubs.cpp)

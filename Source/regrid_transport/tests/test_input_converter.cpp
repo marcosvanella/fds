@@ -267,6 +267,47 @@ int main(int argc, char** argv)
         std::printf("PENDING: patch 0010 guard check (ERROR 9001 on race_test_1_r4 unconverted): patch not committed or validated; converter-side equal-level-0 assertion in force\n");
     }
 
+    {   // grid stretching in AMR mode (D-030): refused whenever an &AMR line is present; the same input without the &AMR line is a plain FDS input and passes through
+        const std::string neg = fdsrt_test::read_file(dir + "/amr_nic_guard_neg_conv_pass.fds");   // test-plan N-5b: race_test_1 layout, mesh 3 at 0.05, mesh 5 stretched by TRNX_ID, &AMR MAX_LEVEL=0
+        CHECK(!neg.empty() && has(neg, "TRNX_ID='XSTRETCH'") && has(neg, "&AMR MAX_LEVEL=0"));
+        Report r;
+        ConvertResult c;
+        CHECK(!convert_input(neg, c, r) && !c.ok);
+        CHECK(r.errors.size() == 1 && r.has_error_containing("TRNX_ID on a &MESH line is not allowed in AMR mode") && r.has_error_containing("input line 10"));
+        if (!r.errors.empty()) std::printf("  refusal text: %s\n", r.errors[0].c_str());
+        // the cell sizes the README of that input claims: the mesh lines are six equal 0.05 cells (what the converter would have seen), mesh 3 is 6 x 6 x 4 cells of 0.05
+        {
+            Report q;
+            std::vector<GroupSpan> sp = find_group_spans(neg, q);
+            std::vector<MeshLine> ml;
+            std::vector<MeshInput> mm;
+            CHECK(parse_meshes(neg, sp, ml, mm, q) && mm.size() == 6);
+            double worst = 0;
+            for (const MeshInput& mi : mm) for (int d = 0; d < 3; ++d) worst = std::max(worst, std::fabs(std::fabs(mi.xb[2 * d + 1] - mi.xb[2 * d]) / mi.ijk[d] - 0.05));
+            CHECK(worst < 1e-12);
+        }
+        // control: the same input with the stretching removed (TRNX_ID key and the three &TRNX lines) converts (6 level-0 meshes, nothing removed): the refusal is due to the stretching only
+        std::string plain = neg;
+        for (size_t p0; (p0 = plain.find(", TRNX_ID='XSTRETCH'")) != std::string::npos;) plain.erase(p0, std::string(", TRNX_ID='XSTRETCH'").size());
+        for (size_t p0; (p0 = plain.find("&TRNX ")) != std::string::npos;) plain.erase(p0, plain.find('\n', p0) - p0 + 1);
+        CHECK(!has(plain, "&TRNX") && !has(plain, "TRNX_ID="));
+        Report r2;
+        ConvertResult c2;
+        const bool ok2 = convert_input(plain, c2, r2);
+        if (!ok2) show(r2);
+        CHECK(ok2 && c2.removed_meshes.empty() && c2.level0_meshes.size() == 6 && c2.cover_boxes.empty());
+        // a stand-alone &TRNZ group (and a &TRNY) with an &AMR line is refused with its line number; with MAX_LEVEL=0 and equal meshes too (AMR mode = an &AMR line)
+        Report r3;
+        ConvertResult c3;
+        CHECK(!convert_input(example(0.5, "&AMR MAX_LEVEL=1, REF_RATIO=2, BLOCKING_FACTOR=2, MAX_GRID_SIZE=32 /", false, "&TRNZ ID='T', CC=0.5, PC=0.4 /\n"), c3, r3) && r3.has_error_containing("&TRNZ is not allowed in AMR mode"));
+        Report r4;
+        ConvertResult c4;
+        CHECK(!convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n&TRNY ID='T', CC=0.5, PC=0.4 /\n&AMR MAX_LEVEL=0 /\n&TAIL /\n", c4, r4) && r4.has_error_containing("&TRNY (input line 2): &TRNY is not allowed in AMR mode"));
+        Report r5;
+        ConvertResult c5;
+        CHECK(convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n&TRNY ID='T', CC=0.5, PC=0.4 /\n&TAIL /\n", c5, r5));   // no &AMR line: FDS-only input, untouched
+    }
+
     std::printf("test_input_converter: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

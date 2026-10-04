@@ -290,6 +290,23 @@ bool convert_input(const std::string& text, ConvertResult& out, Report& rep)
         if (rep.errors.size() > nerr0) return false;
     }
 
+    // AMR mode (an &AMR line is present) refuses grid stretching: &TRNX/&TRNY/&TRNZ and TRNX_ID/TRNY_ID/TRNZ_ID on a &MESH line. The converter and the level-0 set-up work on the
+    // IJK/XB cell sizes, which a transformation changes behind their back (stretched cells give interfaces with NIC > 1); stretched grids stay FDS-only (D-030).
+    if (out.params.present) {
+        for (const GroupSpan& s : spans) {
+            std::string what;
+            if (s.name == "TRNX" || s.name == "TRNY" || s.name == "TRNZ") what = "&" + s.name;
+            else if (s.name == "MESH") {
+                const NamelistGroup g = parse_span(text, s);
+                for (const char* k : {"TRNX_ID", "TRNY_ID", "TRNZ_ID"})
+                    if (!str1(g, k).empty()) { what = std::string(k) + " on a &MESH line"; break; }
+            }
+            if (what.empty()) continue;
+            rep.error(where(s) + ": " + what + " is not allowed in AMR mode (an &AMR line is present): grid stretching changes the cell sizes that IJK and XB give, so the stretched grid stays FDS-only; remove the &TRNX/&TRNY/&TRNZ groups and the TRN?_ID keys, or remove the &AMR line.");
+            return false;
+        }
+    }
+
     if (!parse_meshes(text, spans, out.mesh_lines, out.meshes, rep)) return false;
     out.periodic = detect_periodic(text, spans);
 
