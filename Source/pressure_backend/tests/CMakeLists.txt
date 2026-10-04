@@ -76,3 +76,13 @@ endforeach()
 pb_add_test(pb_comp_trigger comptrigger)
 pb_add_test(pb_fftcache_neumann fftcache --bc "NN,NN,NN" --n "32 32 32")
 pb_add_test(pb_fftcache_periodic fftcache --bc "PP,PP,PP" --n "32 32 32")
+
+# Mixed open/closed faces (D-057 / M2) on a two-level hierarchy: convergence against a manufactured solution
+# (N at the low and D at the high face: cos((k+1/2) pi x); D low, N high: sin((k+1/2) pi x)).
+foreach(faces "ND,NN,NN" "DD,NN,ND" "NN,PP,DN" "DN,NN,DD")
+  string(REPLACE "," "" fn ${faces})
+  pb_add_test(pb_comp_faces_${fn} compconv --faces ${faces} --ns "32 64")
+endforeach()
+pb_add_test(pb_comp_faces_plane2d_DDNNDD compconv --faces "DD,DD,DD" --plane 1 --ns "32 64")
+pb_add_test(pb_comp_faces_plane2d_NDDDNN compconv --faces "ND,DD,NN" --plane 1 --ns "32 64")
+pb_add_test(pb_mixed_faces_sweep mixedfaces)

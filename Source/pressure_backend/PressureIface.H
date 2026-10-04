@@ -14,8 +14,7 @@
 //
 // Not built (returned as Status::NotBuilt, never a silent fallback): masked cells (obstructed/solid, known-value
 // or pinned cells), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
-// (cylindrical, RZ) geometry, variable coefficients, mixed open/closed domain faces (single level and
-// composite), anisotropic refinement ratios (except ratio 1 in a one-cell direction), ratios other than 2 and 4,
+// (cylindrical, RZ) geometry, variable coefficients, a Dirichlet face in a one-cell x or z direction, anisotropic refinement ratios (except ratio 1 in a one-cell direction), ratios other than 2 and 4,
 // composite on the FFT backend, and a multi-level request through the single-level fields (`nlevels` > 1 with an
 // empty `levels`).
 //
@@ -61,6 +60,22 @@ enum class MeanKind { Volume, ScaledArithmetic };
 
 // Domain face index: side*3 + dir (side 0 = low, 1 = high; dir 0..2 = x,y,z).
 inline int face_index (int dir, int side) { return side*3 + dir; }
+
+// Effective boundary types (D-057). A one-cell y direction is the FDS TWO_D case: the y term of the operator is dropped
+// (FFT::Poisson sets its y factor to 0 for a length-1 direction whatever the BC, and a Neumann or periodic MLPoisson
+// direction of one cell contributes 0 too). A Dirichlet face of a one-cell y therefore does not make the problem
+// non-singular and does not change the operator: it is treated as Neumann by every backend, by the reference
+// operator and by the singular-component test. Any other BC is unchanged. `dom0` is the (coarsest) domain.
+// A Dirichlet face of a one-cell x or z direction is NOT equivalent (the term -2 phi/dx^2 stays) and is NotBuilt.
+inline std::array<BC,6> effective_bc (std::array<BC,6> bc, amrex::Box const& dom0)
+{
+    if (dom0.length(1) == 1) {
+        for (int side = 0; side < 2; ++side) {
+            if (bc[face_index(1,side)] == BC::Dirichlet) { bc[face_index(1,side)] = BC::Neumann; }
+        }
+    }
+    return bc;
+}
 
 // One level of a composite request. All fields are mandatory. One component, valid cells only.
 // Levels are ordered coarse to fine. Level 0 covers its domain exactly (as the single-level API requires).

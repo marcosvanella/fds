@@ -101,8 +101,8 @@ images considered); rhs/phi layouts match; Geometry periodicity matches the BC.
 ## NotBuilt (clear message, phi untouched)
 
 Composite on the FFT backend; cylindrical or non-Cartesian geometry; non-uniform `cell_width`; coefficients;
-`component_id`, `cell_class`, `uncovered` masks; the single-level `gauge_weight/offset` fields together with `levels`; mixed open/closed faces; Dirichlet in a one-cell
-direction; anisotropic ratios (except 1 in the one-cell direction); ratios other than 2 and 4; non-homogeneous Dirichlet.
+`component_id`, `cell_class`, `uncovered` masks; the single-level `gauge_weight/offset` fields together with `levels`; Dirichlet in a one-cell x or z
+direction (mixed open/closed faces and the one-cell y with Dirichlet faces are built, see m2-notes.md); anisotropic ratios (except 1 in the one-cell direction); ratios other than 2 and 4; non-homogeneous Dirichlet.
 HYPRE is not used (default bottom solver); if a HYPRE bottom solver is added later, set `hypre.adjust_singular_matrix=1`.
 
 ## Tests (ctest, `pb_comp_*`)

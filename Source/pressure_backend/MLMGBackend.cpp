@@ -29,8 +29,9 @@ public:
         LPInfo info;
         MLPoisson mlp({p.geom}, {p.ba}, {p.dm}, info);
         mlp.setMaxOrder(2);
-        Array<LinOpBCType,AMREX_SPACEDIM> lo{lin_bc(p.bc[face_index(0,0)]), lin_bc(p.bc[face_index(1,0)]), lin_bc(p.bc[face_index(2,0)])};
-        Array<LinOpBCType,AMREX_SPACEDIM> hi{lin_bc(p.bc[face_index(0,1)]), lin_bc(p.bc[face_index(1,1)]), lin_bc(p.bc[face_index(2,1)])};
+        std::array<BC,6> const eb = effective_bc(p.bc, p.geom.Domain());
+        Array<LinOpBCType,AMREX_SPACEDIM> lo{lin_bc(eb[face_index(0,0)]), lin_bc(eb[face_index(1,0)]), lin_bc(eb[face_index(2,0)])};
+        Array<LinOpBCType,AMREX_SPACEDIM> hi{lin_bc(eb[face_index(0,1)]), lin_bc(eb[face_index(1,1)]), lin_bc(eb[face_index(2,1)])};
         mlp.setDomainBC(lo, hi);
         mlp.setLevelBC(0, &phi);      // homogeneous Dirichlet values; other BCs ignore the ghost data
         MLMG mlmg(mlp);

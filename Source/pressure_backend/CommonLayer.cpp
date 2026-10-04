@@ -41,7 +41,8 @@ ComponentMap label_components (PressureProblem const& p, bool record_pin)
     ComponentInfo ci;
     ci.id = 0;
     bool open = false;
-    for (int f = 0; f < 6; ++f) { open = open || (p.bc[f] == BC::Dirichlet); }
+    std::array<BC,6> const ebc = effective_bc(p.bc, p.geom.Domain());
+    for (int f = 0; f < 6; ++f) { open = open || (ebc[f] == BC::Dirichlet); }
     ci.singular = !open;
     ci.ncells = p.ba.numPts();
 
@@ -229,7 +230,7 @@ void apply_operator (PressureProblem const& p, MultiFab& phi, MultiFab& out)
     const Box dom = p.geom.Domain();
     const auto dx = p.geom.CellSizeArray();
     Real idx2[3] = {1.0/(dx[0]*dx[0]), 1.0/(dx[1]*dx[1]), 1.0/(dx[2]*dx[2])};
-    std::array<BC,6> bc = p.bc;
+    std::array<BC,6> bc = effective_bc(p.bc, dom);
     for (MFIter mfi(out); mfi.isValid(); ++mfi) {
         auto const& a = phi.const_array(mfi);
         auto const& o = out.array(mfi);

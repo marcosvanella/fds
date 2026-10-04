@@ -25,16 +25,17 @@ public:
     // Key of the cached plan: BoxArray, DistributionMapping, Geometry and the six boundary types.
     bool plan_matches (PressureProblem const& p) const override
     {
-        return m_plan && m_bc == p.bc && m_ba == p.ba && m_dm == p.dm && same_geometry(m_geom, p.geom);
+        return m_plan && m_bc == effective_bc(p.bc, p.geom.Domain()) && m_ba == p.ba && m_dm == p.dm && same_geometry(m_geom, p.geom);
     }
     void prepare (PressureProblem const& p) override
     {
         m_plan.reset();
-        m_ba = p.ba; m_dm = p.dm; m_geom = p.geom; m_bc = p.bc;
+        m_ba = p.ba; m_dm = p.dm; m_geom = p.geom; m_bc = effective_bc(p.bc, p.geom.Domain());
+        std::array<BC,6> const& eb = m_bc;
         Array<std::pair<FFT::Boundary,FFT::Boundary>,AMREX_SPACEDIM> fbc{
-            std::make_pair(fft_bc(p.bc[face_index(0,0)]), fft_bc(p.bc[face_index(0,1)])),
-            std::make_pair(fft_bc(p.bc[face_index(1,0)]), fft_bc(p.bc[face_index(1,1)])),
-            std::make_pair(fft_bc(p.bc[face_index(2,0)]), fft_bc(p.bc[face_index(2,1)]))};
+            std::make_pair(fft_bc(eb[face_index(0,0)]), fft_bc(eb[face_index(0,1)])),
+            std::make_pair(fft_bc(eb[face_index(1,0)]), fft_bc(eb[face_index(1,1)])),
+            std::make_pair(fft_bc(eb[face_index(2,0)]), fft_bc(eb[face_index(2,1)]))};
         m_plan = std::make_unique<FFT::Poisson<MultiFab>>(p.geom, fbc);
     }
     BackendStatus solve (PressureProblem const& p, PressureOptions const&,

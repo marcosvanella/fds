@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 
@@ -275,12 +276,73 @@ void run_fftcache (ParmParse& pp)
             << " plan_build_ms=" << 1e3*t_build << " speedup=" << t_fresh/t_ws2 << " plan_builds=" << ws.fft_plan_builds() << " plan_reuses=" << ws.fft_plan_reuses() << "\n";
 }
 
+// --------------------------------------------------------------------------------------------------------------
+// mode=mixed1: one solve with the given face types, rhs and solution dumped for the dense numpy reference.
+//   keys: n_cell, bcpairs (NN,DD,ND ...), mgs, backend=fft|mlmg|auto, out=<prefix>
+//   prints MIXED status=<> backend=<> msg=<> and the library's own true-residual rel2.
+// --------------------------------------------------------------------------------------------------------------
+Real hash_noise (int i, int j, int k)
+{
+    std::uint64_t h = 1469598103934665603ULL;
+    for (int v : {i, j, k}) { h ^= std::uint64_t(v + 1000); h *= 1099511628211ULL; h ^= h >> 29; }
+    return Real(double(h % 2000003ULL) / 1000001.5 - 1.0);
+}
+
+void write_field (std::string const& fname, std::vector<double> const& v)
+{
+    if (!ParallelDescriptor::IOProcessor()) { return; }
+    std::ofstream f(fname, std::ios::binary);
+    f.write(reinterpret_cast<const char*>(v.data()), std::streamsize(v.size()*sizeof(double)));
+}
+
+void mixed_one (Vector<int> const& n, std::string const& bcs, int mgs, std::string const& be, std::string const& out)
+{
+    S1 s = make_s1(n, bcs, mgs);
+    MultiFab rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1);
+    for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+        auto const& a = rhs.array(mfi);
+        const Real dx = s.dx;
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { a(i,j,k) = smooth_rhs((i+0.5)*dx, (j+0.5)*dx, (k+0.5)*dx) + 0.5*hash_noise(i,j,k) + 0.3; });
+    }
+    phi.setVal(0.0);
+    pb::PressureProblem p = problem_of(s, rhs, phi);
+    pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9;   // the rhs is deliberately incompatible
+    o.backend = (be == "fft") ? pb::BackendKind::FFT : (be == "mlmg") ? pb::BackendKind::MLMG : pb::BackendKind::Auto;
+    o.tol_rel = 1.0e-13; o.max_iter = 100;
+    pb::PressureResult r = pb::solve_pressure(p, o);
+    Print() << std::setprecision(6) << "MIXED bcpairs=" << bcs << " status=" << pb::to_string(r.status) << " backend=" << (r.backend.empty() ? std::string("none") : r.backend)
+            << " singular=" << (r.components.empty() ? -1 : int(r.components[0].singular))
+            << " true_rel2=" << r.residual_rel2 << " msg=[" << r.message << "]\n";
+    if (r.status == pb::Status::Ok && !out.empty()) {
+        write_field(out + "_rhs.bin", gather_s(rhs, s.domain));
+        write_field(out + "_phi.bin", gather_s(phi, s.domain));
+    }
+}
+
+void run_mixed1 (ParmParse& pp)
+{
+    Vector<int> n{6, 5, 4}; pp.queryarr("n_cell", n);
+    int mgs = 4; pp.query("mgs", mgs);
+    std::string bcs = "NN,NN,NN"; pp.query("bcpairs", bcs);
+    std::string be = "auto"; pp.query("backend", be);
+    std::string out; pp.query("out", out);
+    int sweep = 0; pp.query("sweep", sweep);
+    if (!sweep) { mixed_one(n, bcs, mgs, be, out); return; }
+    // all 5^3 combinations of {PP, NN, DD, ND, DN} per direction, in the order the python reference expects
+    const char* L[5] = {"PP", "NN", "DD", "ND", "DN"};
+    int idx = 0;
+    for (int a = 0; a < 5; ++a) for (int b = 0; b < 5; ++b) for (int c = 0; c < 5; ++c) {
+        mixed_one(n, std::string(L[a]) + "," + L[b] + "," + L[c], mgs, be, out + "_" + std::to_string(idx++));
+    }
+}
+
 } // namespace
 
 int run_m2_mode (std::string const& mode, ParmParse& pp)
 {
     if (mode == "trigger1") { run_trigger1(pp); }
     else if (mode == "fftcache") { run_fftcache(pp); }
+    else if (mode == "mixed1") { run_mixed1(pp); }
     else { return -1; }
     return g_m2fail;
 }

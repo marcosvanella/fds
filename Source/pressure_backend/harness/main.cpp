@@ -344,8 +344,8 @@ void run_selector ()
         expect("composite (2 levels) not built", p, pb::Status::NotBuilt, K::Auto, K::Auto);
         expect("composite with explicit MLMG not built", p, pb::Status::NotBuilt, K::Auto, K::MLMG); }
     {   pb::PressureProblem p = make(false, pb::BC::Neumann); p.bc[pb::face_index(0,1)] = pb::BC::Dirichlet;
-        expect("mixed open/closed faces not built", p, pb::Status::NotBuilt, K::Auto, K::Auto);
-        expect("mixed open/closed faces with explicit MLMG not built", p, pb::Status::NotBuilt, K::Auto, K::MLMG); }
+        expect("mixed open/closed faces -> FFT (M2)", p, pb::Status::Ok, K::FFT, K::Auto);
+        expect("mixed open/closed faces with explicit MLMG", p, pb::Status::Ok, K::MLMG, K::MLMG); }
     {   pb::PressureProblem p = make(false, pb::BC::Neumann);
         iMultiFab cls(p.ba, p.dm, 1, 0); cls.setVal(0);
         for (MFIter mfi(cls); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); cls[mfi].setVal<RunOn::Host>(1, Box(sm, sm)); } }

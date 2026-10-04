@@ -18,6 +18,7 @@ ap.add_argument("--n", default="64 64 64")
 ap.add_argument("--ratio", type=int, default=2)
 ap.add_argument("--ns", default="32 64")       # coarse sizes for the composite convergence runs
 ap.add_argument("--plane", type=int, default=0)
+ap.add_argument("--faces", default="")        # per-face types, e.g. ND,NN,DD (letters N D P; low then high face per direction)
 A = ap.parse_args()
 os.makedirs(A.work, exist_ok=True)
 fails = []
@@ -273,6 +274,7 @@ def meankind_uniform():
 EPS_COMP = 1e-8          # composite eps_H: true residual (relative)
 
 def comp_run(np_, **kw):
+    if A.faces: kw["bcfaces"] = A.faces
     rc, out = run(np_, mode="comp", bc=A.bc, **kw)
     ok(rc == 0, f"composite harness exit 0 ({' '.join(f'{k}={v}' for k, v in kw.items())})")
     if rc != 0: print(out)
@@ -480,10 +482,60 @@ def fftcache():
         l = lines(out, "FFTCACHE")
         ok(len(l) == 1, "timing line present")
 
+def dense_op(n, bc):
+    """Dense 7-point operator (unit cell width h = 1/max(n)); ghost of a Neumann face = +phi, Dirichlet = -phi, periodic wraps.
+    A one-cell direction y drops its term (D-057 / FDS TWO_D); this reference is used for n >= 2 in every direction."""
+    nx, ny, nz = n; N = nx*ny*nz; h = 1.0/max(n)
+    ix = lambda i, j, k: i + nx*(j + ny*k)
+    M = np.zeros((N, N))
+    for k in range(nz):
+        for j in range(ny):
+            for i in range(nx):
+                r = ix(i, j, k); c = [i, j, k]
+                for d in range(3):
+                    for side in (0, 1):
+                        t = c[:]; t[d] += -1 if side == 0 else 1
+                        b = bc[d][side]
+                        M[r, r] -= 1/h**2
+                        if 0 <= t[d] < n[d]: M[r, ix(*t)] += 1/h**2
+                        elif b == "P": t[d] %= n[d]; M[r, ix(*t)] += 1/h**2
+                        elif b == "N": M[r, r] += 1/h**2
+                        elif b == "D": M[r, r] -= 1/h**2
+    return M
+
+def mixedfaces():
+    """Every per-direction combination of {PP,NN,DD,ND,DN} (125 sets of faces) against the dense reference, FFT and MLMG."""
+    n = [6, 5, 4]; letters = ["PP", "NN", "DD", "ND", "DN"]
+    combos = [(a, b, c) for a in letters for b in letters for c in letters]
+    mats = {}
+    for np_, mgs in ((1, 8), (2, 3)):
+        for be in ("fft", "mlmg"):
+            pre = os.path.join(A.work, f"mx_{be}_{np_}")
+            rc, out = run(np_, mode="mixed1", n_cell="6 5 4", mgs=mgs, backend=be, sweep=1, out=pre)
+            ok(rc == 0, f"mixed1 sweep {be} np={np_}")
+            ml = lines(out, "MIXED"); ok(len(ml) == 125, f"{be} np={np_}: 125 sweep lines")
+            worst = 0.0; nbad = 0
+            for idx, cb in enumerate(combos):
+                d = kv(ml[idx]); name = ",".join(cb)
+                if d["status"] != "Ok": nbad += 1; print("NOT OK", ml[idx]); continue
+                b = np.fromfile(f"{pre}_{idx}_rhs.bin"); x = np.fromfile(f"{pre}_{idx}_phi.bin")
+                if name not in mats: mats[name] = dense_op(n, cb)
+                M = mats[name]
+                sing = all(ch in "NP" for pair in cb for ch in pair)
+                if int(d["singular"]) != int(sing): nbad += 1; print("BAD singular flag", name, d["singular"])
+                if sing:
+                    xr = np.linalg.lstsq(M, b - b.mean(), rcond=None)[0]; xr -= xr.mean()
+                else:
+                    xr = np.linalg.solve(M, b)
+                e = np.abs(x - xr).max()/np.abs(xr).max(); worst = max(worst, e)
+                if e > 1e-10: nbad += 1; print("BAD", name, e)
+            print(f"{be} np={np_}: worst relative error over 125 combinations {worst:.2e}")
+            ok(nbad == 0 and worst <= 1e-10, f"{be} np={np_}: all 125 combinations agree with the dense operator (worst {worst:.2e})")
+
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
- "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache}[A.cmd]()
+ "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

@@ -127,7 +127,7 @@ void build_impl (PressureWorkspace::Impl& W, PressureProblem const& p)
             per[d] = 1;
             W.egeom[l] = Geometry(dom, RealBox({plo[0],plo[1],plo[2]}, {phi_[0],phi_[1],phi_[2]}), CoordSys::cartesian, per);
         }
-        ebc[face_index(d,0)] = BC::Periodic; ebc[face_index(d,1)] = BC::Periodic;
+        ebc[face_index(d,0)] = BC::Periodic; ebc[face_index(d,1)] = BC::Periodic;     // the hidden direction's term is 0 whatever its BC (D-057)
     }
     LPInfo info;
     Vector<Geometry> geoms(W.egeom.begin(), W.egeom.end());
@@ -216,21 +216,16 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     if (p.gauge_weight || p.gauge_offset) {
         s.message = "PressureProblem::gauge_weight/gauge_offset are single-level fields; with `levels` set use PressureLevel::gauge_weight/gauge_offset"; return s;
     }
-    int nopen = 0;
-    for (int f = 0; f < 6; ++f) { nopen += (p.bc[f] == BC::Dirichlet) ? 1 : 0; }
-    if (nopen != 0 && nopen != 6) {
-        s.message = "composite with mixed open/closed domain faces is not built"; return s;
-    }
     // Ratios and the one-cell direction.
     Box const& dom0 = p.levels[0].geom.Domain();
     int nhidden = 0, hd = -1;
     for (int d = 0; d < 3; ++d) { if (dom0.length(d) == 1) { ++nhidden; hd = d; } }
     if (nhidden > 1) { s.message = "composite with more than one one-cell direction is not built"; return s; }
     if (hd >= 0) {
-        if (p.bc[face_index(hd,0)] == BC::Dirichlet) {
-            s.message = "composite with a Dirichlet face in a one-cell direction is not built (the direction would carry a non-zero operator term)"; return s;
+        // D-057: only a one-cell y is the FDS TWO_D case (its term is dropped, Dirichlet faces act as Neumann: effective_bc).
+        if (hd != 1 && (p.bc[face_index(hd,0)] == BC::Dirichlet || p.bc[face_index(hd,1)] == BC::Dirichlet)) {
+            s.message = "composite with a Dirichlet face in a one-cell x or z direction is not built (the direction would carry a non-zero operator term)"; return s;
         }
-        if (nopen == 6) { s.message = "composite with Dirichlet faces and a one-cell direction is not built"; return s; }
     }
     for (std::size_t l = 1; l < p.levels.size(); ++l) {
         IntVect const& r = p.levels[l].ref_ratio;
@@ -450,7 +445,10 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     R.nlevels = nlev;
 
     bool open = false;
-    for (int f = 0; f < 6; ++f) { open = open || (p.bc[f] == BC::Dirichlet); }
+    {
+        std::array<BC,6> const eb = effective_bc(p.bc, p.levels[0].geom.Domain());
+        for (int f = 0; f < 6; ++f) { open = open || (eb[f] == BC::Dirichlet); }
+    }
     ComponentInfo ci;
     ci.id = 0; ci.singular = !open;
     for (int l = 0; l < nlev; ++l) { ci.ncells += W.nunc[l]; }

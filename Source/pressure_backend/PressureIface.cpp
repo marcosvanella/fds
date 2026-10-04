@@ -89,10 +89,14 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
     if (p.component_id) { s.message = "driver-supplied component ids are not built (masked branch)"; return s; }
     if (has_nonzero(p.cell_class)) { s.message = "masked cells (cell_class != 0: obstructed/solid, known-value or pinned cells) are not built (masked branch)"; return s; }
     if (has_zero(p.uncovered)) { s.message = "covered cells (uncovered == 0) are not built"; return s; }
-    int nopen = 0;
-    for (int f = 0; f < 6; ++f) { nopen += (p.bc[f] == BC::Dirichlet) ? 1 : 0; }
-    if (nopen != 0 && nopen != 6) {
-        s.message = "single level with mixed open/closed domain faces is not built"; return s;
+    // D-057: a Dirichlet face in a one-cell x or z direction keeps a non-zero operator term (-2 phi/dx^2) that neither
+    // FFT::Poisson (factor 0 for a length-1 direction) nor the TWO_D convention reproduces: not built. In a one-cell y
+    // the Dirichlet faces are treated as Neumann (effective_bc, PressureIface.H).
+    for (int d = 0; d < 3; d += 2) {
+        if (p.geom.Domain().length(d) == 1 && (p.bc[face_index(d,0)] == BC::Dirichlet || p.bc[face_index(d,1)] == BC::Dirichlet)) {
+            s.message = std::string("a Dirichlet face in the one-cell ") + (d == 0 ? "x" : "z") + " direction is not built (only a one-cell y direction is the FDS TWO_D case; its Dirichlet faces are treated as Neumann)";
+            return s;
+        }
     }
     s.ok = true;
     s.kind = (requested == BackendKind::Auto) ? BackendKind::FFT : requested;
