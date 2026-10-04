@@ -1,0 +1,204 @@
+# Output of stretched_study.py on dumps of the first predictor solve (step 1) of the two inputs in fds_cases/.
+# 12x10x16 cells, z stretched (cell volume ratio 3), 60 C upper half (rho varies), floor burner (nonzero Neumann data).
+# FDS: reference FireX GNU/Open MPI build with the scratch dump hook (fds_dump_hook.py), HYPRE PCG, tolerance 1e-12.
+
+######## A. closed box, ULMAT HYPRE (FDS_DBG_FORCE_ULMAT=1), RHS offset 0 (as FDS computes it)
+== c_ul_off0/dbg_ULMAT_1.txt: n=(12, 10, 16) periodic=[False, False, False] MTYPE=-2 rhs_offset=0
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   F_H0 / (PRHS*volume) - 1 on interior cells: max 4.44e-16
+   FDS removed mean of F: mean(F) = -4.820182e-19 (dumped F_H0 - F_H1), numpy mean(F) = 8.628442e-20, mean(F)/rms(F) = 2.111e-17
+   volume-weighted alternative: c = sum(F)/sum(v) = 8.628442e-17, |c|/rms(F/v) = 3.166e-17
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 2.53e-14; sum(F1)/sum|F1| = 2.60e-17
+   [arith] x (pinned solve) mean/rms = 9.360e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 1.496e-16
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 3.617e-14, volume-mean removal rel L2 = 2.759e-01
+   [arith] final H vs FDS: mean-removed rel L2 = 3.579e-14, raw rel L2 = 3.590e-14, max abs raw = 1.084e-13, gradient (velocity correction) rel L2 = 1.850e-13
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 2.53e-14; sum(F1)/sum|F1| = 3.48e-17
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 1.479e-16
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 3.622e-14, volume-mean removal rel L2 = 2.759e-01
+   [vol] final H vs FDS: mean-removed rel L2 = 3.581e-14, raw rel L2 = 3.595e-14, max abs raw = 1.085e-13, gradient (velocity correction) rel L2 = 1.851e-13
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 2.51e-14; sum(F1)/sum|F1| = 5.12e-17
+   [none] x (pinned solve) mean/rms = 9.360e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 1.335e-16
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 3.626e-14, volume-mean removal rel L2 = 2.759e-01
+   [none] final H vs FDS: mean-removed rel L2 = 3.593e-14, raw rel L2 = 3.606e-14, max abs raw = 1.086e-13, gradient (velocity correction) rel L2 = 1.853e-13
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 2.272e-16
+
+######## B. closed box, ULMAT HYPRE, scratch RHS offset 0.3 added to PRHS (incompatible RHS)
+== c_ul_off0.3/dbg_ULMAT_1.txt: n=(12, 10, 16) periodic=[False, False, False] MTYPE=-2 rhs_offset=0.3
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   FDS removed mean of F: mean(F) = 3.000000e-04 (dumped F_H0 - F_H1), numpy mean(F) = 3.000000e-04, mean(F)/rms(F) = 7.316e-02
+   volume-weighted alternative: c = sum(F)/sum(v) = 3.000000e-01, |c|/rms(F/v) = 1.094e-01
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 2.38e-14; sum(F1)/sum|F1| = -1.63e-17
+   [arith] x (pinned solve) mean/rms = 9.385e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 4.134e-16
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 4.191e-14, volume-mean removal rel L2 = 2.528e-01
+   [arith] final H vs FDS: mean-removed rel L2 = 4.174e-14, raw rel L2 = 4.208e-14, max abs raw = 1.117e-13, gradient (velocity correction) rel L2 = 1.987e-13
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 2.48e-14; sum(F1)/sum|F1| = 5.12e-17
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 3.069e-02
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 1.249e-01, volume-mean removal rel L2 = 3.274e-01
+   [vol] final H vs FDS: mean-removed rel L2 = 1.249e-01, raw rel L2 = 1.296e-01, max abs raw = 4.802e-02, gradient (velocity correction) rel L2 = 9.241e-02
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 3.21e+00; sum(F1)/sum|F1| = 1.57e-01
+   [none] x (pinned solve) mean/rms = 9.949e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.335e-02
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 7.300e-01, volume-mean removal rel L2 = 8.579e-01
+   [none] final H vs FDS: mean-removed rel L2 = 7.300e-01, raw rel L2 = 7.345e-01, max abs raw = 3.214e+00, gradient (velocity correction) rel L2 = 1.225e+00
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 1.139e-01
+
+######## C. closed box, GLMAT HYPRE (1 MPI rank, as shipped), offset 0
+== c_gl_off0/dbg_GLMAT_1.txt: n=(12, 10, 16) periodic=[False, False, False] MTYPE=-2 rhs_offset=0
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   F_H0 / (PRHS*volume) - 1 on interior cells: max 4.44e-16
+   FDS removed mean of F: mean(F) = 0.000000e+00 (dumped F_H0 - F_H1), numpy mean(F) = 8.628442e-20, mean(F)/rms(F) = 2.111e-17
+   volume-weighted alternative: c = sum(F)/sum(v) = 8.628442e-17, |c|/rms(F/v) = 3.166e-17
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 2.53e-14; sum(F1)/sum|F1| = 2.60e-17
+   [arith] x (pinned solve) mean/rms = 9.360e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 1.900e-17
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.145e-01, volume-mean removal rel L2 = 5.497e-02
+   [arith] final H vs FDS: mean-removed rel L2 = 3.639e-14, raw rel L2 = 3.574e-14, max abs raw = 1.046e-13, gradient (velocity correction) rel L2 = 1.849e-13
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 2.53e-14; sum(F1)/sum|F1| = 3.48e-17
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 1.828e-17
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.145e-01, volume-mean removal rel L2 = 5.497e-02
+   [vol] final H vs FDS: mean-removed rel L2 = 3.641e-14, raw rel L2 = 3.576e-14, max abs raw = 1.047e-13, gradient (velocity correction) rel L2 = 1.850e-13
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 2.51e-14; sum(F1)/sum|F1| = 5.12e-17
+   [none] x (pinned solve) mean/rms = 9.360e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 0.000e+00
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.145e-01, volume-mean removal rel L2 = 5.497e-02
+   [none] final H vs FDS: mean-removed rel L2 = 3.653e-14, raw rel L2 = 3.585e-14, max abs raw = 1.048e-13, gradient (velocity correction) rel L2 = 1.852e-13
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 2.272e-16
+
+######## D. closed box, GLMAT HYPRE (1 MPI rank, as shipped), offset 0.3
+== c_gl_off0.3/dbg_GLMAT_1.txt: n=(12, 10, 16) periodic=[False, False, False] MTYPE=-2 rhs_offset=0.3
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   FDS removed mean of F: mean(F) = 0.000000e+00 (dumped F_H0 - F_H1), numpy mean(F) = 3.000000e-04, mean(F)/rms(F) = 7.316e-02
+   volume-weighted alternative: c = sum(F)/sum(v) = 3.000000e-01, |c|/rms(F/v) = 1.094e-01
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 2.38e-14; sum(F1)/sum|F1| = -1.63e-17
+   [arith] x (pinned solve) mean/rms = 9.385e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.316e-02
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 5.012e-01, volume-mean removal rel L2 = 4.537e-01
+   [arith] final H vs FDS: mean-removed rel L2 = 4.602e-01, raw rel L2 = 4.600e-01, max abs raw = 3.214e+00, gradient (velocity correction) rel L2 = 6.949e-01
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 2.48e-14; sum(F1)/sum|F1| = 5.12e-17
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.930e-02
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 4.560e-01, volume-mean removal rel L2 = 3.991e-01
+   [vol] final H vs FDS: mean-removed rel L2 = 4.076e-01, raw rel L2 = 4.044e-01, max abs raw = 3.175e+00, gradient (velocity correction) rel L2 = 6.829e-01
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 3.21e+00; sum(F1)/sum|F1| = 1.57e-01
+   [none] x (pinned solve) mean/rms = 9.949e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 0.000e+00
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.238e-01, volume-mean removal rel L2 = 5.303e-02
+   [none] final H vs FDS: mean-removed rel L2 = 3.182e-14, raw rel L2 = 7.235e-14, max abs raw = 1.206e-13, gradient (velocity correction) rel L2 = 1.516e-13
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 1.139e-01
+
+######## E. closed box, GLMAT HYPRE with FDS_DBG_FIXMEAN=1 (mean removed as with several ranks), offset 0.3
+== c_glfix_off0.3/dbg_GLMAT_1.txt: n=(12, 10, 16) periodic=[False, False, False] MTYPE=-2 rhs_offset=0.3
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   FDS removed mean of F: mean(F) = 3.000000e-04 (dumped F_H0 - F_H1), numpy mean(F) = 3.000000e-04, mean(F)/rms(F) = 7.316e-02
+   volume-weighted alternative: c = sum(F)/sum(v) = 3.000000e-01, |c|/rms(F/v) = 1.094e-01
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 2.38e-14; sum(F1)/sum|F1| = -1.63e-17
+   [arith] x (pinned solve) mean/rms = 9.385e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 4.134e-16
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 1.941e-01, volume-mean removal rel L2 = 5.397e-02
+   [arith] final H vs FDS: mean-removed rel L2 = 4.175e-14, raw rel L2 = 4.142e-14, max abs raw = 1.076e-13, gradient (velocity correction) rel L2 = 1.987e-13
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 2.48e-14; sum(F1)/sum|F1| = 5.12e-17
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 3.069e-02
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.295e-01, volume-mean removal rel L2 = 1.599e-01
+   [vol] final H vs FDS: mean-removed rel L2 = 1.249e-01, raw rel L2 = 1.296e-01, max abs raw = 4.802e-02, gradient (velocity correction) rel L2 = 9.241e-02
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 3.21e+00; sum(F1)/sum|F1| = 1.57e-01
+   [none] x (pinned solve) mean/rms = 9.949e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.335e-02
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 7.419e-01, volume-mean removal rel L2 = 7.578e-01
+   [none] final H vs FDS: mean-removed rel L2 = 7.300e-01, raw rel L2 = 7.345e-01, max abs raw = 3.214e+00, gradient (velocity correction) rel L2 = 1.225e+00
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 1.139e-01
+
+######## F. periodic x,y + solid z, GLMAT HYPRE (1 rank, as shipped), offset 0
+== p_gl_off0/dbg_GLMAT_1.txt: n=(12, 10, 16) periodic=[True, True, False] MTYPE=-2 rhs_offset=0
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   F_H0 / (PRHS*volume) - 1 on interior cells: max 4.44e-16
+   FDS removed mean of F: mean(F) = 0.000000e+00 (dumped F_H0 - F_H1), numpy mean(F) = 1.610492e-19, mean(F)/rms(F) = 3.938e-17
+   volume-weighted alternative: c = sum(F)/sum(v) = 1.610492e-16, |c|/rms(F/v) = 5.906e-17
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 3.57e-14; sum(F1)/sum|F1| = -2.11e-17
+   [arith] x (pinned solve) mean/rms = 9.360e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 3.561e-17
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.153e-01, volume-mean removal rel L2 = 5.502e-02
+   [arith] final H vs FDS: mean-removed rel L2 = 3.526e-14, raw rel L2 = 3.723e-14, max abs raw = 1.095e-13, gradient (velocity correction) rel L2 = 2.275e-13
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 3.60e-14; sum(F1)/sum|F1| = -4.30e-18
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 3.422e-17
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.153e-01, volume-mean removal rel L2 = 5.502e-02
+   [vol] final H vs FDS: mean-removed rel L2 = 3.524e-14, raw rel L2 = 3.718e-14, max abs raw = 1.092e-13, gradient (velocity correction) rel L2 = 2.275e-13
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 3.44e-14; sum(F1)/sum|F1| = 9.57e-17
+   [none] x (pinned solve) mean/rms = 9.360e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 0.000e+00
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.153e-01, volume-mean removal rel L2 = 5.502e-02
+   [none] final H vs FDS: mean-removed rel L2 = 3.520e-14, raw rel L2 = 3.711e-14, max abs raw = 1.094e-13, gradient (velocity correction) rel L2 = 2.275e-13
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 5.465e-16
+
+######## G. periodic x,y + solid z, GLMAT HYPRE (1 rank, as shipped), offset 0.3
+== p_gl_off0.3/dbg_GLMAT_1.txt: n=(12, 10, 16) periodic=[True, True, False] MTYPE=-2 rhs_offset=0.3
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   FDS removed mean of F: mean(F) = 0.000000e+00 (dumped F_H0 - F_H1), numpy mean(F) = 3.000000e-04, mean(F)/rms(F) = 7.312e-02
+   volume-weighted alternative: c = sum(F)/sum(v) = 3.000000e-01, |c|/rms(F/v) = 1.094e-01
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 3.39e-14; sum(F1)/sum|F1| = -2.05e-17
+   [arith] x (pinned solve) mean/rms = 9.386e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.312e-02
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 4.327e-01, volume-mean removal rel L2 = 3.711e-01
+   [arith] final H vs FDS: mean-removed rel L2 = 3.746e-01, raw rel L2 = 3.794e-01, max abs raw = 1.545e+00, gradient (velocity correction) rel L2 = 5.041e-01
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 3.42e-14; sum(F1)/sum|F1| = 1.07e-16
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.926e-02
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 3.750e-01, volume-mean removal rel L2 = 2.960e-01
+   [vol] final H vs FDS: mean-removed rel L2 = 3.018e-01, raw rel L2 = 3.038e-01, max abs raw = 1.506e+00, gradient (velocity correction) rel L2 = 4.802e-01
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 3.20e+00; sum(F1)/sum|F1| = 1.57e-01
+   [none] x (pinned solve) mean/rms = 9.860e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 0.000e+00
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.335e-01, volume-mean removal rel L2 = 5.524e-02
+   [none] final H vs FDS: mean-removed rel L2 = 1.053e-14, raw rel L2 = 2.382e-14, max abs raw = 3.891e-14, gradient (velocity correction) rel L2 = 5.697e-14
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 1.133e-01
+
+######## H. periodic x,y + solid z, GLMAT HYPRE with FDS_DBG_FIXMEAN=1, offset 0.3
+== p_glfix_off0.3/dbg_GLMAT_1.txt: n=(12, 10, 16) periodic=[True, True, False] MTYPE=-2 rhs_offset=0.3
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   FDS removed mean of F: mean(F) = 3.000000e-04 (dumped F_H0 - F_H1), numpy mean(F) = 3.000000e-04, mean(F)/rms(F) = 7.312e-02
+   volume-weighted alternative: c = sum(F)/sum(v) = 3.000000e-01, |c|/rms(F/v) = 1.094e-01
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 3.39e-14; sum(F1)/sum|F1| = -2.05e-17
+   [arith] x (pinned solve) mean/rms = 9.386e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 2.718e-16
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 1.951e-01, volume-mean removal rel L2 = 5.404e-02
+   [arith] final H vs FDS: mean-removed rel L2 = 3.883e-14, raw rel L2 = 4.024e-14, max abs raw = 1.055e-13, gradient (velocity correction) rel L2 = 2.317e-13
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 3.42e-14; sum(F1)/sum|F1| = 1.07e-16
+   [vol] x (pinned solve) mean/rms = 9.360e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 3.067e-02
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 2.300e-01, volume-mean removal rel L2 = 1.593e-01
+   [vol] final H vs FDS: mean-removed rel L2 = 1.242e-01, raw rel L2 = 1.289e-01, max abs raw = 4.802e-02, gradient (velocity correction) rel L2 = 9.220e-02
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 3.20e+00; sum(F1)/sum|F1| = 1.57e-01
+   [none] x (pinned solve) mean/rms = 9.860e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.332e-02
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 5.907e-01, volume-mean removal rel L2 = 6.099e-01
+   [none] final H vs FDS: mean-removed rel L2 = 5.685e-01, raw rel L2 = 5.808e-01, max abs raw = 1.545e+00, gradient (velocity correction) rel L2 = 7.404e-01
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 1.133e-01
+
+######## I. closed box, ULMAT HYPRE, offset 0.3, second solve (step 2 predictor)
+== c_ul_off0.3/dbg_ULMAT_3.txt: n=(12, 10, 16) periodic=[False, False, False] MTYPE=-2 rhs_offset=0.3
+   volume ratio max/min = 3.000; rho range 1.0516..1.1952
+   FDS removed mean of F: mean(F) = 3.000000e-04 (dumped F_H0 - F_H1), numpy mean(F) = 3.000000e-04, mean(F)/rms(F) = 7.199e-02
+   volume-weighted alternative: c = sum(F)/sum(v) = 3.000000e-01, |c|/rms(F/v) = 1.072e-01
+   [arith] true residual of the scaled system ||K x - F1||/||F1|| = 2.53e-14; sum(F1)/sum|F1| = 8.27e-17
+   [arith] x (pinned solve) mean/rms = 9.375e-01
+   [arith] vs FDS dumped F_H1 (after its mean removal): rel L2 = 1.076e-16
+   [arith] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 5.096e-14, volume-mean removal rel L2 = 2.697e-01
+   [arith] final H vs FDS: mean-removed rel L2 = 5.094e-14, raw rel L2 = 5.160e-14, max abs raw = 1.259e-13, gradient (velocity correction) rel L2 = 2.082e-13
+   [vol] true residual of the scaled system ||K x - F1||/||F1|| = 2.67e-14; sum(F1)/sum|F1| = -4.16e-18
+   [vol] x (pinned solve) mean/rms = 9.348e-01
+   [vol] vs FDS dumped F_H1 (after its mean removal): rel L2 = 3.020e-02
+   [vol] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 1.180e-01, volume-mean removal rel L2 = 3.379e-01
+   [vol] final H vs FDS: mean-removed rel L2 = 1.180e-01, raw rel L2 = 1.220e-01, max abs raw = 4.802e-02, gradient (velocity correction) rel L2 = 9.063e-02
+   [none] true residual of the scaled system ||K x - F1||/||F1|| = 3.15e+00; sum(F1)/sum|F1| = 1.55e-01
+   [none] x (pinned solve) mean/rms = 9.946e-01
+   [none] vs FDS dumped F_H1 (after its mean removal): rel L2 = 7.218e-02
+   [none] vs FDS pre-gauge X after its arithmetic mean removal (XH1): arith-mean removal rel L2 = 6.893e-01, volume-mean removal rel L2 = 8.267e-01
+   [none] final H vs FDS: mean-removed rel L2 = 6.893e-01, raw rel L2 = 6.913e-01, max abs raw = 3.214e+00, gradient (velocity correction) rel L2 = 1.201e+00
+   [arith vs vol] difference of the two solutions (mean-removed rel L2) = 1.077e-01

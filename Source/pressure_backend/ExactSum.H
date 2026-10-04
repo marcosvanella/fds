@@ -4,6 +4,11 @@
 // and summation order. The grid is set by the global maximum |w*x| (an order-independent reduction), so
 // each term is kept to 2^-88 of that maximum; up to 2^38 selected cells cannot overflow the accumulator.
 //
+// Weights: each term is `weight * w(i,j,k) * x(i,j,k)`, where `w` is the optional per-cell weight field `wfield`
+// (same BoxArray and DistributionMapping as `mf`, first component; nullptr = 1). Per-cell volumes of a
+// non-uniform mesh, or rho*volume for the gauge, are passed this way. Without `wfield` the term is
+// `weight * x`, exactly as before.
+//
 // Cell selection: `uncovered` (nonzero = counted; nullptr = all cells) and `label` (component id >= 0;
 // negative = excluded; nullptr = component 0). Both must share the BoxArray and DistributionMapping of `mf`.
 #ifndef PB_EXACT_SUM_H_
@@ -41,7 +46,8 @@ inline double from_i128 (i128 a, int e)
 
 inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double weight, int ncomp,
                                  amrex::iMultiFab const* uncovered = nullptr,
-                                 amrex::iMultiFab const* label = nullptr)
+                                 amrex::iMultiFab const* label = nullptr,
+                                 amrex::MultiFab const* wfield = nullptr)
 {
     static_assert(sizeof(amrex::Real) == 8, "ExactSum assumes double precision");
     using namespace amrex;
@@ -55,12 +61,14 @@ inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double wei
     for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
         auto const& a = mf.const_array(mfi, comp);
         Array4<int const> u, l;
+        Array4<Real const> wf;
         if (uncovered) { u = uncovered->const_array(mfi); }
         if (label) { l = label->const_array(mfi); }
+        if (wfield) { wf = wfield->const_array(mfi); }
         amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
             int c;
             if (!selected(u, l, i, j, k, c)) { return; }
-            const double t = weight * a(i,j,k);
+            const double t = wfield ? weight * wf(i,j,k) * a(i,j,k) : weight * a(i,j,k);
             if (!std::isfinite(t)) { red[1] = 1.0; } else { red[0] = std::max(red[0], std::abs(t)); }
         });
     }
@@ -75,13 +83,15 @@ inline ExactSumResult exact_sum (amrex::MultiFab const& mf, int comp, double wei
     for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
         auto const& a = mf.const_array(mfi, comp);
         Array4<int const> u, l;
+        Array4<Real const> wf;
         if (uncovered) { u = uncovered->const_array(mfi); }
         if (label) { l = label->const_array(mfi); }
+        if (wfield) { wf = wfield->const_array(mfi); }
         amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
             int c;
             if (!selected(u, l, i, j, k, c)) { return; }
             R.count[c] += 1;
-            const double t = weight * a(i,j,k);
+            const double t = wfield ? weight * wf(i,j,k) * a(i,j,k) : weight * a(i,j,k);
             if (std::isfinite(t)) {
                 acc[c] += detail::to_i128(std::nearbyint(std::ldexp(t, detail::kFracBits - e)));
             }

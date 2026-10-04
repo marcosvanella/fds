@@ -6,8 +6,10 @@
 // defines the discrete operator: the 7-point cell-centred Laplacian (see CommonLayer.H, apply_operator).
 // Backend fluxes are never used.
 //
-// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells, composite (more than one
-// level), covered cells, and an unmasked single level with mixed open/closed domain faces.
+// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells (obstructed/solid, known-value
+// or pinned cells), composite (more than one level), covered cells, non-uniform cell widths, non-Cartesian
+// (cylindrical, RZ) geometry, variable coefficients, and an unmasked single level with mixed open/closed
+// domain faces.
 #ifndef PB_PRESSURE_IFACE_H_
 #define PB_PRESSURE_IFACE_H_
 
@@ -35,7 +37,14 @@ struct PressureProblem {
     int nlevels = 1;                              // > 1 is a composite request: NotBuilt
     amrex::BoxArray ba;                           // level 0
     amrex::DistributionMapping dm;
-    amrex::Geometry geom;                         // dx from geom; periodicity must match `bc`
+    amrex::Geometry geom;                         // dx from geom; periodicity must match `bc`. Cartesian only.
+    // Optional cell widths per direction (one entry per cell of the domain). Empty = uniform, taken from geom.
+    // Widths that are not all equal are NotBuilt: FFT::Poisson and MLPoisson assume uniform spacing. Widths that
+    // are all equal must agree with geom (else InvalidInput).
+    std::array<std::vector<amrex::Real>,3> cell_width;
+    // FDS &MESH CYLINDRICAL=T (x is the radius; matrix rows and RHS are scaled by the radius factor RC). The 3-D
+    // AMReX geometry cannot express it, so the driver sets this flag; true is NotBuilt.
+    bool cylindrical = false;
     std::array<BC,6> bc = {BC::Neumann, BC::Neumann, BC::Neumann, BC::Neumann, BC::Neumann, BC::Neumann};
 
     // Coefficients: M1 supports the unit operator only (nullptr). Non-null is NotBuilt.
@@ -48,6 +57,13 @@ struct PressureProblem {
     amrex::iMultiFab const* uncovered = nullptr;
     // Driver-supplied component ids: M1 labels components itself; non-null is NotBuilt.
     amrex::iMultiFab const* component_id = nullptr;
+
+    // Optional gauge inputs for singular components (FDS SYMM_INDEFINITE gauge, pres.f90 ~1830-1878): after the
+    // solve, phi -= sum(w*(phi - g)) / sum(w) with w = cell volume * gauge_weight and g = gauge_offset. FDS passes
+    // gauge_weight = RHOP (RHO predictor, RHOS corrector) and gauge_offset = KRES. Null = weight 1 / offset 0,
+    // which is the plain volume-weighted mean removal. Same BoxArray/DistributionMapping as `ba`, one component.
+    amrex::MultiFab const* gauge_weight = nullptr;
+    amrex::MultiFab const* gauge_offset = nullptr;
 
     amrex::MultiFab const* rhs = nullptr;         // one component, valid cells only are read
     amrex::MultiFab* phi = nullptr;               // out: H on valid cells (gauge-fixed); in: initial guess if used
@@ -72,7 +88,7 @@ struct ComponentInfo {
     amrex::IntVect pin{0};                        // lowest global index cell; recorded, not applied by MLMG/FFT
     double removed_mean = 0.0;                    // mean actually subtracted from the RHS (0 when at round-off)
     double removed_rel = 0.0;                     // |measured mean| relative to rms of the RHS (component); drives the diagnostic
-    double gauge_shift = 0.0;                     // mean removed from H after the solve
+    double gauge_shift = 0.0;                     // weighted mean (of H - gauge_offset) removed from H after the solve
 };
 
 struct BackendStatus {

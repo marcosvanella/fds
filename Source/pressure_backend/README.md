@@ -10,10 +10,15 @@ Single level, CPU. FFT and single-level MLMG backends behind `PressureIface.H`; 
 | `ExactSum.H` | private mask-aware volume-weighted exact fixed-point sum (decomposition independent) |
 | `harness/` | standalone CMake project and key=value driver `pb_harness` (no FDS sources) |
 | `tests/` | CTest registrations and `pb_test.py` |
-| `frozen/` | see `frozen/README.md` |
+| `frozen/` | see `frozen/README.md`; `mean-removal-vs-fds.md` (note), `stretched_study.py`, `fds_dump_hook.py`, `fds_cases/` (FDS study) |
+
+Mean removal and gauge (`CommonLayer.H`): exact sums, per singular component. On uniform cells `remove_mean` is the
+ULMAT arithmetic mean removal of the volume-scaled RHS; `apply_gauge` takes optional `gauge_weight` (rho) and
+`gauge_offset` (KRES) for the FDS gauge. Per-cell volumes (`MeanKind`) are implemented for the future volume-scaled
+backends. See `frozen/mean-removal-vs-fds.md`.
 
 Selector: FFT only on one level with no masked or covered cells and uniformly closed (Neumann/periodic) or
-uniformly open faces. MLMG on request for the same problems. Masked, composite, variable-coefficient, and mixed
+uniformly open faces. MLMG on request for the same problems. Masked, composite, variable-coefficient, non-uniform cell widths, cylindrical, and mixed
 open/closed single-level requests return `Status::NotBuilt` with a message; `phi` is left untouched.
 
 Build and test (AMReX with MPI, OMP, FFT, LSOLVERS; the install config also needs a Fortran compiler in CMake):

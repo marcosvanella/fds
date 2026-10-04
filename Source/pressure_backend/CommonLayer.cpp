@@ -109,30 +109,105 @@ void subtract_per_component (MultiFab& mf, ComponentMap const& cm, iMultiFab con
 }
 }
 
-void remove_mean (MultiFab& rhs, ComponentMap& cm, iMultiFab const* uncovered, Real vol)
+void remove_mean (MultiFab& rhs, ComponentMap& cm, iMultiFab const* uncovered, Real vol,
+                  MultiFab const* cell_volume, MeanKind kind)
 {
     const int nc = static_cast<int>(cm.comps.size());
-    MeanInfo m = exact_mean(rhs, cm, uncovered, vol);
-    const double bmax = rhs.norm0(0);
-    const double floor_ = std::ldexp(bmax, -52);      // idempotence: below round-off of b itself, leave alone
+    if (!cell_volume) {
+        // Uniform cells: volume-weighted mean of b and arithmetic mean of vol*b differ only by the constant vol.
+        MeanInfo m = exact_mean(rhs, cm, uncovered, vol);
+        const double bmax = rhs.norm0(0);
+        const double floor_ = std::ldexp(bmax, -52);      // idempotence: below round-off of b itself, leave alone
+        std::vector<double> shift(nc, 0.0);
+        for (int c = 0; c < nc; ++c) {
+            ComponentInfo& ci = cm.comps[c];
+            if (!ci.singular) { continue; }
+            if (std::abs(m.mean[c]) > floor_) { shift[c] = m.mean[c]; }
+            ci.removed_mean = shift[c];
+            ci.removed_rel = (m.rms[c] > 0.0) ? std::abs(m.mean[c]) / m.rms[c] : 0.0;   // measured, also when not removed
+        }
+        subtract_per_component(rhs, cm, uncovered, shift);
+        return;
+    }
+    // Per-cell volumes v. F = v*b is the volume-scaled right-hand side of the finite-volume system.
+    MultiFab F(rhs.boxArray(), rhs.DistributionMap(), 1, 0);
+    MultiFab::Copy(F, rhs, 0, 0, 1, 0);
+    MultiFab::Multiply(F, *cell_volume, 0, 0, 1, 0);
+    ExactSumResult sF = exact_sum(F, 0, 1.0, nc, uncovered, &cm.label);
+    std::vector<double> mean(nc, 0.0), rms(nc, 0.0);
+    double scale = 0.0;                                   // largest |term| of the quantity whose mean is removed
+    if (kind == MeanKind::Volume) {
+        ExactSumResult sV = exact_sum(*cell_volume, 0, 1.0, nc, uncovered, &cm.label);
+        MultiFab sq(rhs.boxArray(), rhs.DistributionMap(), 1, 0);
+        MultiFab::Copy(sq, rhs, 0, 0, 1, 0); MultiFab::Multiply(sq, rhs, 0, 0, 1, 0);
+        ExactSumResult s2 = exact_sum(sq, 0, 1.0, nc, uncovered, &cm.label);
+        for (int c = 0; c < nc; ++c) {
+            mean[c] = (sV.sum[c] > 0.0) ? sF.sum[c] / sV.sum[c] : 0.0;
+            rms[c] = (sF.count[c] > 0) ? std::sqrt(s2.sum[c] / double(sF.count[c])) : 0.0;
+        }
+        scale = rhs.norm0(0);
+    } else {
+        MultiFab sq(rhs.boxArray(), rhs.DistributionMap(), 1, 0);
+        MultiFab::Copy(sq, F, 0, 0, 1, 0); MultiFab::Multiply(sq, F, 0, 0, 1, 0);
+        ExactSumResult s2 = exact_sum(sq, 0, 1.0, nc, uncovered, &cm.label);
+        for (int c = 0; c < nc; ++c) {
+            const double n = double(sF.count[c]);
+            mean[c] = (n > 0) ? sF.sum[c] / n : 0.0;
+            rms[c] = (n > 0) ? std::sqrt(s2.sum[c] / n) : 0.0;
+        }
+        scale = F.norm0(0);
+    }
+    const double floor_ = std::ldexp(scale, -52);
     std::vector<double> shift(nc, 0.0);
     for (int c = 0; c < nc; ++c) {
         ComponentInfo& ci = cm.comps[c];
         if (!ci.singular) { continue; }
-        if (std::abs(m.mean[c]) > floor_) { shift[c] = m.mean[c]; }
+        if (std::abs(mean[c]) > floor_) { shift[c] = mean[c]; }
         ci.removed_mean = shift[c];
-        ci.removed_rel = (m.rms[c] > 0.0) ? std::abs(m.mean[c]) / m.rms[c] : 0.0;   // measured, also when not removed
+        ci.removed_rel = (rms[c] > 0.0) ? std::abs(mean[c]) / rms[c] : 0.0;
     }
-    subtract_per_component(rhs, cm, uncovered, shift);
+    if (kind == MeanKind::Volume) {
+        subtract_per_component(rhs, cm, uncovered, shift);
+    } else {
+        for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {      // b_k -= mean(F)/v_k, so that sum(v*b) is zero
+            auto const& a = rhs.array(mfi);
+            auto const& l = cm.label.const_array(mfi);
+            auto const& v = cell_volume->const_array(mfi);
+            Array4<int const> u;
+            if (uncovered) { u = uncovered->const_array(mfi); }
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const int c = l(i,j,k);
+                if (c < 0 || c >= nc || shift[c] == 0.0) { return; }
+                if (u.contains(i,j,k) && u(i,j,k) == 0) { return; }
+                a(i,j,k) -= shift[c] / v(i,j,k);
+            });
+        }
+    }
 }
 
-void apply_gauge (MultiFab& phi, ComponentMap& cm, iMultiFab const* uncovered, Real vol)
+void apply_gauge (MultiFab& phi, ComponentMap& cm, iMultiFab const* uncovered, Real vol,
+                  MultiFab const* cell_volume, MultiFab const* gauge_weight, MultiFab const* gauge_offset)
 {
     const int nc = static_cast<int>(cm.comps.size());
-    MeanInfo m = exact_mean(phi, cm, uncovered, vol);
     std::vector<double> shift(nc, 0.0);
-    for (int c = 0; c < nc; ++c) {
-        if (cm.comps[c].singular) { shift[c] = m.mean[c]; cm.comps[c].gauge_shift = shift[c]; }
+    if (!cell_volume && !gauge_weight && !gauge_offset) {
+        MeanInfo m = exact_mean(phi, cm, uncovered, vol);
+        for (int c = 0; c < nc; ++c) {
+            if (cm.comps[c].singular) { shift[c] = m.mean[c]; cm.comps[c].gauge_shift = shift[c]; }
+        }
+    } else {
+        // shift = sum(W*(phi - g)) / sum(W), W = v*rho (v: cell volume, rho: gauge_weight), g: gauge_offset.
+        MultiFab W(phi.boxArray(), phi.DistributionMap(), 1, 0);
+        if (cell_volume) { MultiFab::Copy(W, *cell_volume, 0, 0, 1, 0); } else { W.setVal(vol); }
+        if (gauge_weight) { MultiFab::Multiply(W, *gauge_weight, 0, 0, 1, 0); }
+        MultiFab X(phi.boxArray(), phi.DistributionMap(), 1, 0);
+        MultiFab::Copy(X, phi, 0, 0, 1, 0);
+        if (gauge_offset) { MultiFab::Subtract(X, *gauge_offset, 0, 0, 1, 0); }
+        ExactSumResult sx = exact_sum(X, 0, 1.0, nc, uncovered, &cm.label, &W);
+        ExactSumResult sw = exact_sum(W, 0, 1.0, nc, uncovered, &cm.label);
+        for (int c = 0; c < nc; ++c) {
+            if (cm.comps[c].singular && sw.sum[c] > 0.0) { shift[c] = sx.sum[c] / sw.sum[c]; cm.comps[c].gauge_shift = shift[c]; }
+        }
     }
     subtract_per_component(phi, cm, uncovered, shift);
 }

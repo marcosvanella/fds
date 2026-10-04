@@ -21,15 +21,36 @@ struct ComponentMap {
 // (lowest global index cell, x fastest) per component. Flood fill over beta != 0 faces is M2.
 ComponentMap label_components (PressureProblem const& p);
 
-// Volume-weighted (cell volume) exact-sum mean removal per singular component, over uncovered cells.
-// Idempotent: a mean at or below 2^-52 max|rhs| is left alone, so a second application is a bitwise no-op.
-// Fills removed_mean and removed_rel of the components. Bitwise independent of decomposition.
-void remove_mean (amrex::MultiFab& rhs, ComponentMap& cm, amrex::iMultiFab const* uncovered,
-                  amrex::Real cell_volume);
+// Which zero mode of the right-hand side is removed when cell volumes vary. The solved system is the unit
+// operator L (cell-centred 7-point, uniform cells), or, for a future non-uniform mesh, the volume-scaled
+// finite-volume system K x = F with F = v*b (rows scaled by the cell volume v, entries area/distance, as FDS
+// ULMAT/UGLMAT build it, pres.f90 ULMAT_SOLVE_ZONE and GET_FH_FROM_PRHS_AND_BCS). Its compatibility condition
+// is the plain sum of F being zero.
+//   Volume:           b -= sum(v*b)/sum(v)         (constant shift of b; F changes by c*v)
+//   ScaledArithmetic: b_k -= mean(F)/v_k           (arithmetic mean of F removed from F, as FDS does)
+// Both make sum(F) zero. They give the same system when v is uniform and differ by a multiple of
+// (v_k - mean v) otherwise; FDS corresponds to ScaledArithmetic (see frozen/mean-removal-vs-fds.md).
+enum class MeanKind { Volume, ScaledArithmetic };
 
-// Gauge after the solve: subtract the exact volume-weighted mean per singular component.
+// Mean removal per singular component, over uncovered cells, with exact sums. Idempotent: a mean at or below
+// 2^-52 of the largest term is left alone, so a second application is a bitwise no-op. Fills removed_mean and
+// removed_rel of the components (for ScaledArithmetic they refer to F = v*b). Bitwise independent of
+// decomposition.
+//  - cell_volume == nullptr: uniform cells of volume `cell_volume_uniform`; both kinds are the same operation
+//    (volume-weighted mean of b, i.e. the arithmetic mean of v*b divided by v).
+//  - cell_volume != nullptr: per-cell volumes (same BoxArray/DistributionMapping), `kind` selects the zero mode.
+void remove_mean (amrex::MultiFab& rhs, ComponentMap& cm, amrex::iMultiFab const* uncovered,
+                  amrex::Real cell_volume_uniform, amrex::MultiFab const* cell_volume = nullptr,
+                  MeanKind kind = MeanKind::ScaledArithmetic);
+
+// Gauge after the solve, per singular component: phi -= sum(W*(phi - g)) / sum(W) over uncovered cells, with
+// W = v*rho. v is the cell volume (per-cell field or the uniform value), rho is `gauge_weight` (null = 1) and
+// g is `gauge_offset` (null = 0). With both null this is the exact volume-weighted mean removed from phi.
+// FDS: rho = RHOP (RHO in the predictor, RHOS in the corrector), g = KRES, H = phi (pres.f90 ~1830-1878).
+// Components that are not singular are not shifted.
 void apply_gauge (amrex::MultiFab& phi, ComponentMap& cm, amrex::iMultiFab const* uncovered,
-                  amrex::Real cell_volume);
+                  amrex::Real cell_volume_uniform, amrex::MultiFab const* cell_volume = nullptr,
+                  amrex::MultiFab const* gauge_weight = nullptr, amrex::MultiFab const* gauge_offset = nullptr);
 
 // out = L phi on valid cells (reference implementation). phi needs >= 1 ghost layer; its ghost cells are
 // overwritten. out has the same BoxArray and DistributionMapping.

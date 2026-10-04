@@ -6,6 +6,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -36,6 +37,20 @@ std::string validate (PressureProblem const& p)
     if (p.ba.minimalBox() != p.geom.Domain() || p.ba.numPts() != p.geom.Domain().numPts()) {
         return "BoxArray does not cover the domain exactly (box domain required)";
     }
+    if (p.gauge_weight && (p.gauge_weight->boxArray() != p.ba || !(p.gauge_weight->DistributionMap() == p.dm) || p.gauge_weight->nComp() < 1)) {
+        return "gauge_weight BoxArray/DistributionMapping differ from the problem or it has no component";
+    }
+    if (p.gauge_offset && (p.gauge_offset->boxArray() != p.ba || !(p.gauge_offset->DistributionMap() == p.dm) || p.gauge_offset->nComp() < 1)) {
+        return "gauge_offset BoxArray/DistributionMapping differ from the problem or it has no component";
+    }
+    for (int d = 0; d < 3; ++d) {
+        if (!p.cell_width[d].empty()) {
+            if (static_cast<int>(p.cell_width[d].size()) != p.geom.Domain().length(d)) { return "cell_width size differs from the domain length"; }
+            for (auto w : p.cell_width[d]) {
+                if (std::abs(w - p.geom.CellSize(d)) > 1.0e-12*p.geom.CellSize(d)) { return "uniform cell_width disagrees with the geometry cell size"; }
+            }
+        }
+    }
     for (int d = 0; d < 3; ++d) {
         const bool lo = p.bc[face_index(d,0)] == BC::Periodic, hi = p.bc[face_index(d,1)] == BC::Periodic;
         if (lo != hi) { return "periodic BC must be set on both faces of a direction"; }
@@ -51,11 +66,23 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
     if (p.nlevels != 1) {
         s.message = "composite (multi-level) pressure solve is not built"; return s;
     }
+    if (p.cylindrical || !p.geom.IsCartesian()) {
+        s.message = "cylindrical (or other non-Cartesian) geometry is not built (FDS CYLINDRICAL scales rows and RHS by the radius factor)"; return s;
+    }
+    for (int d = 0; d < 3; ++d) {
+        auto const& w = p.cell_width[d];
+        if (w.empty()) { continue; }
+        const auto mm = std::minmax_element(w.begin(), w.end());
+        if (*mm.second - *mm.first > 1.0e-12 * std::abs(*mm.second)) {
+            s.message = "non-uniform cell widths (stretched mesh) are not built: FFT::Poisson and MLPoisson assume uniform spacing";
+            return s;
+        }
+    }
     if (p.cell_coef_a || p.face_coef_b[0] || p.face_coef_b[1] || p.face_coef_b[2]) {
         s.message = "variable coefficients (masked or non-unit operator) are not built"; return s;
     }
     if (p.component_id) { s.message = "driver-supplied component ids are not built (masked branch)"; return s; }
-    if (has_nonzero(p.cell_class)) { s.message = "masked cells (cell_class != 0) are not built"; return s; }
+    if (has_nonzero(p.cell_class)) { s.message = "masked cells (cell_class != 0: obstructed/solid, known-value or pinned cells) are not built (masked branch)"; return s; }
     if (has_zero(p.uncovered)) { s.message = "covered cells (uncovered == 0) are not built"; return s; }
     int nopen = 0;
     for (int f = 0; f < 6; ++f) { nopen += (p.bc[f] == BC::Dirichlet) ? 1 : 0; }
@@ -99,7 +126,7 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     R.backend_status = be->solve(p, o, work, b);
 
     // Gauge, then the true residual of the problem the backend was given (mean-removed b).
-    apply_gauge(work, cm, p.uncovered, vol);
+    apply_gauge(work, cm, p.uncovered, vol, nullptr, p.gauge_weight, p.gauge_offset);
     if (o.check_residual) {
         ResidualNorms rn = true_residual(p, work, b);
         R.residual_checked = true;

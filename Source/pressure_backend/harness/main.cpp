@@ -6,6 +6,8 @@
 // mode=gen      write the synthetic RHS and the FFT reference H (gauge-fixed) as raw float64, x fastest.
 // mode=selector check that unsupported requests return an explicit "not built" status.
 // mode=exactsum exact-sum and mean-removal decomposition checks on a deterministic wide-range field.
+// mode=meankind per-cell volume mean removal (both MeanKind) and the rho*volume, KRES gauge on a synthetic stretched
+//               volume field; writes raw files for the independent numpy check (see tests/pb_test.py, meankind).
 // mode=diff     compare two raw fields: a=<file> b=<file> n_cell="nx ny nz" (rel. L2, max abs, eps_H verdict).
 #include "PressureIface.H"
 #include "CommonLayer.H"
@@ -53,6 +55,14 @@ Real rhs_func (Real x, Real y, Real z)
     Real r2 = (x-Real(0.31))*(x-Real(0.31)) + (y-Real(0.57))*(y-Real(0.57)) + (z-Real(0.45))*(z-Real(0.45));
     return std::exp(-r2/Real(0.02)) + Real(0.5)*std::sin(Real(3.)*pi*x)*std::cos(Real(2.)*pi*y+Real(0.4))*(z+Real(0.25));
 }
+
+// Variable density and a KRES-like offset for the gauge tests (cell centres on the unit cube).
+Real rho_func (Real x, Real y, Real z)
+{
+    const Real pi = Real(3.141592653589793238462643383279502884);
+    return Real(1.2)*(Real(1.0) + Real(0.3)*std::sin(Real(2.)*pi*x)*std::cos(pi*y) + Real(0.2)*z);
+}
+Real kres_func (Real x, Real y, Real z) { return Real(0.05)*(x*x + Real(2.)*y - z); }
 
 struct Setup {
     Box domain;
@@ -197,6 +207,7 @@ void run_solve (ParmParse& pp)
     int rm = 1; pp.query("remove_mean", rm); o.remove_mean = (rm != 0);
     pp.query("verbose", o.verbose);
     double inject = 0.0; pp.query("rhs_offset", inject);   // adds a constant to the RHS before the solve
+    int gauge_rho = 0; pp.query("gauge_rho", gauge_rho);   // 1: rho-weighted gauge with KRES offset (FDS SYMM_INDEFINITE)
 
     Print() << "PB solve: n_cell=" << s.domain.length(0) << "x" << s.domain.length(1) << "x" << s.domain.length(2)
             << " bc=" << pb::to_string(s.bc[0]) << " nboxes=" << s.ba.size() << " nranks=" << ParallelDescriptor::NProcs()
@@ -206,6 +217,19 @@ void run_solve (ParmParse& pp)
     if (rhs_file.empty()) { fill_rhs(s, rhs); make_compatible(s, rhs); } else { read_raw(rhs_file, s.domain, rhs); }
     if (inject != 0.0) { rhs.plus(inject, 0, 1, 0); }
 
+    MultiFab rho(s.ba, s.dm, 1, 0), kres(s.ba, s.dm, 1, 0);
+    if (gauge_rho) {
+        for (MFIter mfi(rho); mfi.isValid(); ++mfi) {
+            auto const& r = rho.array(mfi); auto const& k_ = kres.array(mfi);
+            const Real dx = s.dx;
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                r(i,j,k) = rho_func((i+0.5)*dx, (j+0.5)*dx, (k+0.5)*dx);
+                k_(i,j,k) = kres_func((i+0.5)*dx, (j+0.5)*dx, (k+0.5)*dx);
+            });
+        }
+        if (!out.empty()) { write_raw(gather(rho, s.domain), out + "_rho.bin"); write_raw(gather(kres, s.domain), out + "_kres.bin"); }
+    }
+
     MultiFab ref;
     if (!ref_file.empty()) { ref.define(s.ba, s.dm, 1, 0); read_raw(ref_file, s.domain, ref); }
 
@@ -214,6 +238,7 @@ void run_solve (ParmParse& pp)
         pb::PressureProblem p;
         p.ba = s.ba; p.dm = s.dm; p.geom = s.geom; p.bc = s.bc;
         p.rhs = &rhs;
+        if (gauge_rho) { p.gauge_weight = &rho; p.gauge_offset = &kres; }
         auto phi = std::make_unique<MultiFab>(s.ba, s.dm, 1, 1);
         phi->setVal(0.0);
         p.phi = phi.get();
@@ -228,7 +253,8 @@ void run_solve (ParmParse& pp)
             Print() << " comp" << c.id << "_singular=" << (c.singular ? 1 : 0)
                     << " comp" << c.id << "_pin=" << c.pin[0] << "," << c.pin[1] << "," << c.pin[2]
                     << " comp" << c.id << "_removed_mean=" << hexd(c.removed_mean)
-                    << " comp" << c.id << "_removed_rel=" << c.removed_rel;
+                    << " comp" << c.id << "_removed_rel=" << c.removed_rel
+                    << " comp" << c.id << "_gauge_shift=" << hexd(c.gauge_shift);
         }
         std::vector<double> v = gather(*phi, s.domain);
         Print() << " hash=" << hex64(fnv1a(v)) << "\n";
@@ -328,6 +354,16 @@ void run_selector ()
         for (MFIter mfi(unc); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); unc[mfi].setVal<RunOn::Host>(0, Box(sm, sm)); } }
         p.uncovered = &unc;
         expect("covered cell not built", p, pb::Status::NotBuilt, K::Auto, K::Auto); }
+    {   pb::PressureProblem p = make(false, pb::BC::Neumann); p.cylindrical = true;
+        expect("cylindrical geometry not built", p, pb::Status::NotBuilt, K::Auto, K::Auto); }
+    {   pb::PressureProblem p = make(false, pb::BC::Neumann);
+        for (int d = 0; d < 3; ++d) { p.cell_width[d].assign(8, Real(0.125)); }
+        expect("explicit uniform cell widths -> FFT", p, pb::Status::Ok, K::FFT, K::Auto);
+        p.cell_width[2][3] = Real(0.1875);
+        expect("non-uniform cell widths (stretched z) not built", p, pb::Status::NotBuilt, K::Auto, K::Auto);
+        expect("non-uniform cell widths with explicit MLMG not built", p, pb::Status::NotBuilt, K::Auto, K::MLMG);
+        for (int d = 0; d < 3; ++d) { p.cell_width[d].assign(8, Real(0.2)); }
+        expect("uniform cell widths that disagree with geometry are invalid", p, pb::Status::InvalidInput, K::FFT, K::Auto); }
     {   pb::PressureProblem p = make(false, pb::BC::Neumann); MultiFab a(p.ba, p.dm, 1, 0); a.setVal(1.0);
         p.cell_coef_a = &a;
         expect("cell coefficient a not built", p, pb::Status::NotBuilt, K::Auto, K::Auto); }
@@ -389,6 +425,65 @@ void run_exactsum (ParmParse& pp)
     check(ParallelDescriptor::IOProcessor() ? (v1 == v2) : true, "mean removal is idempotent (bitwise)");
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Per-cell volumes of a stretched mesh (varies with j and k): v = dx^3 * f(j,k).
+Real vol_func (Setup const& s, int j, int k)
+{
+    const Real nz = Real(s.domain.length(2));
+    return s.dx*s.dx*s.dx*(Real(0.5) + (k + Real(0.5))/nz)*(Real(1.0) + Real(0.3)*std::sin(Real(j)));
+}
+
+void run_meankind (ParmParse& pp)
+{
+    Setup s = make_setup(pp);
+    std::string out; pp.get("out", out);
+    double offset = 0.5; pp.query("rhs_offset", offset);
+    MultiFab b0(s.ba, s.dm, 1, 0), v(s.ba, s.dm, 1, 0), rho(s.ba, s.dm, 1, 0), kres(s.ba, s.dm, 1, 0), phi0(s.ba, s.dm, 1, 0);
+    for (MFIter mfi(b0); mfi.isValid(); ++mfi) {
+        auto const& b = b0.array(mfi); auto const& vv = v.array(mfi); auto const& r = rho.array(mfi);
+        auto const& kr = kres.array(mfi); auto const& ph = phi0.array(mfi);
+        const Real dx = s.dx;
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+            const Real x = (i+0.5)*dx, y = (j+0.5)*dx, z = (k+0.5)*dx;
+            b(i,j,k) = rhs_func(x, y, z) + offset;     // incompatible: nonzero mean
+            vv(i,j,k) = vol_func(s, j, k);
+            r(i,j,k) = rho_func(x, y, z); kr(i,j,k) = kres_func(x, y, z);
+            ph(i,j,k) = std::cos(Real(3.)*x + y) + z*z + Real(0.7);   // arbitrary field to gauge
+        });
+    }
+    pb::PressureProblem p;
+    p.ba = s.ba; p.dm = s.dm; p.geom = s.geom; p.bc = s.bc;
+    write_raw(gather(b0, s.domain), out + "_b0.bin");
+    write_raw(gather(v, s.domain), out + "_v.bin");
+    write_raw(gather(rho, s.domain), out + "_rho.bin");
+    write_raw(gather(kres, s.domain), out + "_kres.bin");
+    write_raw(gather(phi0, s.domain), out + "_phi0.bin");
+    struct K { const char* name; pb::MeanKind kind; };
+    for (K k : {K{"V", pb::MeanKind::Volume}, K{"S", pb::MeanKind::ScaledArithmetic}}) {
+        MultiFab b(s.ba, s.dm, 1, 0); MultiFab::Copy(b, b0, 0, 0, 1, 0);
+        pb::ComponentMap cm = pb::label_components(p);
+        pb::remove_mean(b, cm, nullptr, 0.0, &v, k.kind);
+        std::vector<double> v1 = gather(b, s.domain);
+        Print() << "MEANKIND " << k.name << " removed_mean=" << hexd(cm.comps[0].removed_mean)
+                << " removed_rel=" << cm.comps[0].removed_rel << " hash=" << hex64(fnv1a(v1)) << "\n";
+        write_raw(v1, out + "_b" + k.name + ".bin");
+        pb::remove_mean(b, cm, nullptr, 0.0, &v, k.kind);
+        std::vector<double> v2 = gather(b, s.domain);
+        check(ParallelDescriptor::IOProcessor() ? (v1 == v2) : true, std::string("mean removal idempotent (bitwise), kind ") + k.name);
+    }
+    {   // gauge with volume field only, and with rho*volume and KRES
+        pb::ComponentMap cm = pb::label_components(p);
+        MultiFab g1(s.ba, s.dm, 1, 0); MultiFab::Copy(g1, phi0, 0, 0, 1, 0);
+        pb::apply_gauge(g1, cm, nullptr, 0.0, &v);
+        write_raw(gather(g1, s.domain), out + "_gV.bin");
+        MultiFab g2(s.ba, s.dm, 1, 0); MultiFab::Copy(g2, phi0, 0, 0, 1, 0);
+        pb::apply_gauge(g2, cm, nullptr, 0.0, &v, &rho, &kres);
+        write_raw(gather(g2, s.domain), out + "_gRK.bin");
+        Print() << "MEANKIND gauge shifts V=" << hexd(0.0) << " RK=" << hexd(cm.comps[0].gauge_shift) << "\n";
+    }
+}
+
 } // namespace
 
 int main (int argc, char* argv[])
@@ -402,7 +497,8 @@ int main (int argc, char* argv[])
         else if (mode == "diff") { run_diff(pp); }
         else if (mode == "selector") { run_selector(); }
         else if (mode == "exactsum") { run_exactsum(pp); }
-        else { amrex::Abort("mode must be solve|gen|diff|selector|exactsum"); }
+        else if (mode == "meankind") { run_meankind(pp); }
+        else { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind"); }
     }
     int fails = g_fail;
     amrex::Finalize();
