@@ -1,13 +1,13 @@
 # 06. Mean removal, solution gauge, stretched cells, masked components, and the D-057 2-D review
 
 **Status: complete for the items below; open items are listed in section 10.** Everything marked "measured" was run; everything marked "read" is from source only; "unverified" is neither.
-FDS `file:line` cites are against FireX `36975d765f` (`src/Source/pres.f90`); the same blocks are in master `ce1f659cd4` at the lines given in patch 0005. AMReX is 99ddfda (26.09), HYPRE v2.32.0-24.
+FDS `file:line` cites are against FireX `36975d765f` (`src/Source/pres.f90`); the same blocks are in master `ce1f659cd4` at the lines given in patch UP-0005. AMReX is 99ddfda (26.09), HYPRE v2.32.0-24.
 Timings: CPU runs on an owner-provided NVIDIA test machine (pinned P-cores, 1 thread per rank) and its GPU (1 rank, managed arena, HYPRE on the device for H); stretched accuracy runs at 64³ are not timing-grade.
 
 ## 1. Answers in short
 
 1. **Study verdict (backend study, commit `6f414db72f`): confirmed**, with one nuance (section 2). FDS removes the arithmetic mean of the volume-scaled RHS `F = V·b`; on stretched cells that is *not* the volume-weighted mean of `b`; both give a compatible system, they pick different compatible RHS when the input is not compatible, and they agree to round-off when it is.
-2. **A real FDS defect was found and patched**: `GLMAT_SOLVER` does not remove the mean of `F_H` (or of `X_H` in the periodic-test-7 fallback) on one MPI rank. Patch `docs/upstream-patches/0005-glmat-singlerank-mean-removal.patch` (section 4).
+2. **A real FDS defect was found and patched**: `GLMAT_SOLVER` does not remove the mean of `F_H` (or of `X_H` in the periodic-test-7 fallback) on one MPI rank. Patch `docs/upstream-patches/UP-0005-glmat-singlerank-mean-removal.patch` (section 4).
 3. **Gauge recommendation** for the Architect: section 5.
 4. **ADR wording** (draft): section 6.
 5. **Stretched and masked runs**: sections 7 and 8. **D-057 review**: section 9.
@@ -48,11 +48,11 @@ So on a unit-spacing scaled operator MLMG's native removal equals FDS's; on the 
 
 If the imbalance is spread per unit volume (a net dilatation error, an inconsistent zone sum), the volume-weighted removal removes exactly it; the arithmetic removal moves a different, cell-count-uniform amount and the solution is wrong by an amount that grows with stretching (section 7). If the imbalance is truly per cell, the opposite holds. FDS's own RHS is compatible up to its zone-sum correction, so in normal runs both are within round-off of each other. The recommendation (section 5) is therefore: default to the volume-weighted removal, keep arithmetic as an FDS-parity option.
 
-## 4. GLMAT single-rank defect and patch 0005
+## 4. GLMAT single-rank defect and patch UP-0005
 
 **Defect (read, confirmed by runs):** on one rank `MEAN_FH` and `MEAN_XH` are 0 in the whole-domain branch (section 2 table). With 2 or more ranks the `ALLREDUCE` fills element 2 and the mean is removed.
 
-**Patch:** `docs/upstream-patches/0005-glmat-singlerank-mean-removal.patch`, two added lines (`SUM_FH(2) = SUM_FH(1)`, `SUM_XH(2) = SUM_XH(1)`), target both lines. `git apply --check` passes on FireX `36975d765f` and master `ce1f659cd4` (offsets -63 and -107). Index row added in `docs/upstream-patches/README.md`. The X-mean fix the Chief asked for (pres.f90 ≈3553-3555) is in the same patch.
+**Patch:** `docs/upstream-patches/UP-0005-glmat-singlerank-mean-removal.patch`, two added lines (`SUM_FH(2) = SUM_FH(1)`, `SUM_XH(2) = SUM_XH(1)`), target both lines. `git apply --check` passes on FireX `36975d765f` and master `ce1f659cd4` (offsets -63 and -107). Index row added in `docs/upstream-patches/README.md`. The X-mean fix the Chief asked for (pres.f90 ≈3553-3555) is in the same patch.
 
 **Behavior-unchanged check (what was run; full text in the patch file):**
 
@@ -162,7 +162,7 @@ Pressure-side conclusion: the single-cell-y handling works for FFT (Neumann/peri
 - Stretched 64³ runs use 2 timed solves at 4 ranks: accuracy, not timing. The 1M stretched rows have 10 (CPU) and 20 (GPU) timed solves, single repeats; the stairwell rows (§8) have 3 repeats.
 - The cause of the Mf slowdown at R=64 is established in doc 07 §8 (AMReX hands HYPRE the row-scaled, nonsymmetric matrix; PCG then diverges at the first bottom solve); remedies and the recommended setting are there.
 - The synthetic RHS means iteration counts on real FDS flow fields are still not measured (as in doc 05).
-- Hidden-direction + Neumann behaviour not resolved (section 9). Periodic one-cell y in the assembled matrix not run. Driver zone sums in a refined 2-D case not run. Patch 0005 not built against master, no debug build.
+- Hidden-direction + Neumann behaviour not resolved (section 9). Periodic one-cell y in the assembled matrix not run. Driver zone sums in a refined 2-D case not run. Patch UP-0005 not built against master, no debug build.
 - Decision for the Architect: gauge for FFT-solved cases (section 5, item 6).
 
 Reproduce: `scratch/pressure-signoff/meanremoval/` (dense check, `patchwork/` binaries, cases, `ref_check.py`), `scratch/pressure-signoff/pressure_1M/` (`src/h2h_str.cpp`, `src/h2h.cpp` with `cutk`/`COMPCHECK`, `src/hid_test.cpp`, `pr06_*.sh`, `results_pr06/`).

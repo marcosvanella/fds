@@ -1,12 +1,12 @@
-# Sign-off note: patch 0009 (opt-in write-only dump of the pressure right-hand side and solved H)
+# Sign-off note: patch UP-0011 (opt-in write-only dump of the pressure right-hand side and solved H)
 
 Patch file: `UP-0011-pressure-rhs-dump.patch` (Source/pres.f90: new routine `PRESSURE_SOLVER_DUMP` and helper `POISSON_FACE_TYPE`, 1 line in the PUBLIC list;
-Source/main.f90: two 6-line call blocks). Target: FireX (tested on 36975d765f); applies with `patch -p1` to master ce1f659cd4 (offset -131 lines in main.f90)
-and to the merged tip bee11f0329 (offset +73 lines). Author: Role 2 (pressure backend). State: proposed; the patch is only meant to produce check data and may
+Source/main.f90: two 6-line call blocks). Target: FireX (tested on 36975d765f); applies with `patch -p1` to master ce1f659cd4 (offset -131 lines in main.f90 and -4 lines for the second `Source/pres.f90` hunk; the first pres.f90 hunk applies without offset)
+and to the merged tip bee11f0329 (offset +73 lines in main.f90, none in pres.f90). Author: Role 2 (pressure backend). State: proposed; the patch is only meant to produce check data and may
 stay local to the AMR branch if the project owner does not want it upstream.
 
 ## What changes (exact hunks)
-1. `Source/main.f90`, `PRESSURE_ITERATION_LOOP`, directly after the `PRESSURE_SOLVER_COMPUTE_RHS` loop and before `SELECT CASE(PRES_FLAG)`:
+1. `Source/main.f90`, in `PRESSURE_ITERATION_SCHEME` (routine start main.f90:1674 at the FDS-AMReX tree), inside the `PRESSURE_ITERATION_LOOP` construct (a loop label, `DO` at main.f90:1696; not a routine), directly after the `PRESSURE_SOLVER_COMPUTE_RHS` loop and before `SELECT CASE(PRES_FLAG)`:
    `DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX ; CALL PRESSURE_SOLVER_DUMP(NM,T,DT,.FALSE.) ; ENDDO`
 2. `Source/main.f90`, directly after the `END SELECT` of the solver choice and before the residual check:
    the same loop with `.TRUE.` (writes H or HS).

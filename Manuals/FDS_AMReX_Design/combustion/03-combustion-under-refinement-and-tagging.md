@@ -19,12 +19,12 @@ Rules proposed:
 4. **Regrid.** Per D-062 the transfer works on rho and rho*Z, so the clip on a child is on rho*Z. Rescaling the children to the parent sum keeps the 1e-12 per-regrid limit of FR-012 only if the rescale is applied after the limiting and before `average_down` is repeated. Count it, and test that the count is 0 on the smooth blob.
 5. **Open question, unchanged** (spec §6 item 1): keep the redistribution level-local, or replace it by a flux limiter so that clipping is only a diagnostic. I still recommend level-local for Phase 3 and the diagnostic form later, because FDS results at T2 do not depend on it for the anchor cases and the gather already exists.
 
-## 2. The `Z_TEMP` pad of patches 0001 and 0002 under refinement
+## 2. The `Z_TEMP` pad of patches UP-0001 and UP-0002 under refinement
 
 - The pad matters at **physical-wall faces only** (`mass.f90:147-179` and the `divg.f90` twins): the one-face calls fill three of the four `Z_TEMP` elements, and MP5 reads the fourth (`func.f90:1443-1448`; `Z_TEMP(3)` for A>0, `Z_TEMP(0)` for A<0, and the fifth stencil point is extrapolated from it). The patches pad with 0 so the result is defined.
 - **Do not reuse the wall path at coarse-fine interfaces.** An interface face of a fine box must use real ghost data from the `FillPatch` (coarse-to-fine interpolation), not a padded wall call. With the 4-element stencil `(I-1, I, I+1, I+2)` the box needs **2 ghost layers** for scalars where a limiter other than the default is used, and the same two layers are needed for the default limiter on the high side. Role 3 should confirm that the scalar `FillPatch` uses `ngrow ≥ 2`, and fail at input time if the chosen limiter needs more than the allocated ghost width.
 - Under the D-050 flux overwrite the coarse face flux is replaced by the area-sum of the fine face fluxes, so a pad error at a wall does not propagate across levels. It stays a local, bounded error at the wall, the same as in single-mesh FDS.
-- Until patches 0001 and 0002 are applied upstream, bitwise tests that use MP5 with wall faces compare against undefined memory. Tests for the other limiters (`SUPERBEE`, `CHARM`, `GODUNOV`, `MINMOD`) are not affected. MP5 stays out of the Phase 3 gate set.
+- Until patches UP-0001 and UP-0002 are applied upstream, bitwise tests that use MP5 with wall faces compare against undefined memory. Tests for the other limiters (`SUPERBEE`, `CHARM`, `GODUNOV`, `MINMOD`) are not affected. MP5 stays out of the Phase 3 gate set.
 
 ## 3. Species tagging advice for R4 (D-058, FR-011)
 

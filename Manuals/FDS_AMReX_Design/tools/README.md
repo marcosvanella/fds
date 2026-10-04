@@ -189,6 +189,7 @@ Self-check (exit 1 on a failure):
 | PM-04 | a golden kernel has no kernel text (neither in `generated/s5gen_k2.F90` nor in a `test/*.golden`) |
 | PM-05 | (warning) a golden kernel is missing from the argument manifest or the header; the gate registry disagrees with the map. `--strict` makes warnings fail |
 | PM-07 | a `[[libm]]` registry entry names a kernel that is not mapped |
+| PM-09 | (A-57 interface note) a `[[caller_bound]]` registry entry names a kernel that is not mapped, an array the kernel does not have, or `kernel_dims` that differ from the declaration in the argument manifest |
 | PM-08 | (D-072) a `ported.toml` entry names a kernel that is not mapped, lacks `reviewed_by` or `set_by`, names a kernel with no device run on record, or names a libm kernel without `ulp_gate_passed = true` |
 | PM-06 | `device_runs.toml` names a kernel that is not mapped, names one twice, has a state other than `on-record` / `on-record-open-note`, or an open-note entry without a note |
 
@@ -210,6 +211,10 @@ The Integration Lead sets it, by adding the kernel to `tools/ported.toml` (`[[po
 kernel `ulp_gate_passed = true`). A libm kernel can be ported once the V&V Lead's ulp gate exists and passes. A device run alone does not make a
 kernel ported: the `port_state` field says "device run on record" and the `Ported` column in the map says `no`. Only the kernels listed in the file are
 called ported (the V&V Lead is the reviewer of record for device results, the Architect co-signs the list; see `docs/amrex/ported-candidates.md`). The legend of the map gives the same definition. Delete an overlay entry once the gate registry lists the run.
+
+**Device runs of the `gsfv_*` kernels, and the proposed `ported.toml` entry.** The six whole-field `gsfv_*` kernels have a device run on record in `device_runs.toml` (stage-1 run on real `GET_SCALAR_FACE_VALUE` calls; evidence only). The one-face callee `GET_SCALAR_FACE_VALUE_PT` and the case `tg128` were not covered. No reviewer and no setter are on record for them, so `ported.toml` does not list them; `tools/patches/ported-gsfv-proposed.toml` holds the proposed entry with the evidence and leaves `reviewed_by` and `set_by` empty for the Integration Lead. No tool reads that file.
+
+**Caller lower bounds (`[[caller_bound]]`).** FDS passes the face velocity `A` with lower bound -1 in the flow direction, while the six `gsfv_*` kernels declare 0. No tool can see the caller's bounds in the kernel text, so this is a record and not a lint rule: a `[[caller_bound]]` entry in `kernel_registry.toml` (`kernels`, `array`, `kernel_dims` as in the argument manifest, `caller_dims` in words, `reason`, `status`) is printed in the map in its own section and in the JSON (`caller_bound` on the row). PM-09 fails if the kernel or array does not exist or if `kernel_dims` no longer equals the declaration in the manifest, so the note goes stale loudly. A kernel whose dummy array bounds differ from the caller's should get such an entry when the difference is found (by a device run or by reading the caller).
 
 ## Quick start
 

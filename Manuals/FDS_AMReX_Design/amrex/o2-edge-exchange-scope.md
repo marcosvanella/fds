@@ -19,6 +19,25 @@ only in multi-mesh cases. The default of the driver is the AMReX ghost fill (`EX
 VISCOSITY_BC, NO_FLUX (the `H` fill) and VELOCITY_BC. So no part of these four needs a kernel while that default holds; what stays on the host is the loop test itself, which costs
 one pass over the external walls with a table lookup. Nothing needs to be translated to keep results bitwise, and no non-`NOM>0` remainder exists to carve out.
 
+### 1a. Status re-check against the current work list (docs commit 4f28cbd) and the pinned sources
+
+The claim of section 1 was checked again. The five loops were re-read in the pinned upstream file (`36975d7`, `Source/velo.f90`) at the cited lines, and the work list and the claim register were compared with the note. Nothing changed:
+
+- L1399 (514-550), L1364 (1376-1400) and L1367 (1858-1897) each begin the wall iteration with `IF (EWC%NOM==0) CYCLE` (L1364: `IF (NOM==0) CYCLE`); everything after it reads `OMESH(NOM)`. On a single mesh no iteration does any work.
+- L1363 (2891-3015) skips every wall that is not `INTERPOLATED_BOUNDARY` and then uses `OMESH(NOM)` and `MESHES(NOM)` with `NOM = EWC%NOM`; an interpolated wall always has a neighbour mesh, so the loop is the neighbour-mesh branch as a whole. In the AMReX build the routine also returns early under `EXTERNAL_GHOSTS_FILLED` (the shared-face flux match is done by the driver), and for one mesh (`NMESHES==1`).
+- L1366 (1463-1559) still reads no neighbour-mesh array: `NOM` only selects the branch and skips internal null walls.
+- The work list (`loop-work-list.md`, generated tables) and the claim register (`loop_claims.csv`) still show L1363, L1364, L1367, L1399 as `claimed` (note "O2 neighbour-mesh loop") and L1366 as `in progress` (the `EXTERNAL_WALL(IW)%NOM` designator is on the s5-wall branch, the loop is not translated). In the generator worktree no committed marker file holds a `wall_no_flux` entry yet; the work is being done there by another worker. This note does not change the claim register.
+
+Status rows (to copy into the work list when its owner next refreshes the hand-written part; the generated tables are not edited by hand):
+
+| loop | routine | translatable? | why | status now |
+|---|---|---|---|---|
+| L1363 | `MATCH_VELOCITY_FLUX` | no | only `INTERPOLATED_BOUNDARY` walls, all neighbour-mesh (`NOM>0`); no kernels for `NOM>0` under D-055 | host; stays claimed, no kernel |
+| L1364 | `NO_FLUX`, fill of `HP` | no | `IF (NOM==0) CYCLE`: only the `NOM>0` branch remains (D-055) | host; stays claimed, no kernel |
+| L1367 | `VELOCITY_BC`, normal ghost face | no | `IF (EWC%NOM==0) CYCLE`: only the `NOM>0` branch remains (D-055) | host; stays claimed, no kernel |
+| L1399 | `VISCOSITY_BC` | no | `IF (EWC%NOM==0) CYCLE`: only the `NOM>0` branch remains (D-055) | host; stays claimed, no kernel |
+| L1366 | `NO_FLUX`, face values at walls | yes | no neighbour-mesh array is read; `NOM` is a flag (table column `EW_NOM`); needs the thin-wall uniqueness check | in progress in the generator worktree; not yet in a committed marker file |
+
 ## 2. The four neighbour-mesh loops: what each would be, if the ruling is ever lifted
 
 Common shape of all four: one iteration per external wall with `NOM>0`; an overlap range `IIO_MIN..IIO_MAX, JJO_MIN..JJO_MAX, KKO_MIN..KKO_MAX` of the neighbour mesh; an inner K,J,I sum over

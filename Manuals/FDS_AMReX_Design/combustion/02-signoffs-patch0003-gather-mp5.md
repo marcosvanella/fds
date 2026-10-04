@@ -1,8 +1,8 @@
-# 02 — Species & Combustion sign-offs: patch 0003, the clip gather prototype, MP5 pad patches 0001/0002
+# 02 — Species & Combustion sign-offs: patch UP-0003, the clip gather prototype, MP5 pad patches UP-0001/UP-0002
 
 Owner: AMR Species & Combustion Lead · Status: review record (DRAFT until the owner accepts). Reviewed against FireX `36975d765f`.
 
-## Patch 0003 (`CHECK_MASS_DENSITY` species loop, two-pass split): ACCEPT
+## Patch UP-0003 (`CHECK_MASS_DENSITY` species loop, two-pass split): ACCEPT
 Checked by reading the patch against `Source/mass.f90:868-937` and by a dry-run apply on the FireX tree (applies, hunks offset by 6 lines).
 1. **Scatter order.** Pass 2 visits cells K, J, I and applies the seven statements in the original order, so every `DELTA_RHO_ZZ` element receives its additions in the original order. Pass 1 reads only `RHO_ZZ` and `RHOP`, which neither the original nor the patched scatter modifies, so the stored amounts equal the ones the original computed inline.
 2. **Rounding.** The original `DELTA - CONST*MASS_N(m)/VC(m)` evaluates as `DELTA - ((CONST*MASS_N(m))/VC(m))`. The patch stores `(CONST*MASS_N(m))/VC(m)` and subtracts it, so the value and the rounding are the same. The division sits between the multiplication and the addition, so no fused multiply-add can form there. This also means the no-FMA flag I asked for earlier is a precaution for the gather, not a requirement for this expression.
@@ -18,8 +18,8 @@ Requests (not blocking):
 - The face mask indices 1..6 map to `MASS_N(-1), (1), (-2), (2), (-3), (3)` as in the original `WALL_INDEX` tests. `CLIP_TERMS` evaluates the same expressions in the same order as `mass.f90:822-839` and `:887-915`, with the species `SOLID`-first and density range-first test order preserved.
 - Conditions for the device version: (a) replace `SUM(MASS_N)` by an explicit left-to-right sum over -3..3 with parentheses, because the K2 compiler may reassociate an intrinsic `SUM` (the same rule as the K2 sum rule); (b) the clipped-cell counters (`NCLIP`, `NLO`, `NHI`) must be integer reductions, which are order independent; (c) each cell recomputes `CLIP_TERMS` up to 7 times, which is acceptable because the early return for in-range cells is cheap, but it should be timed on a case where clipping fires in many cells.
 
-## MP5 `Z_TEMP` pad (patches 0001 and 0002): ACCEPT with one physics note
-- Confirmed: with `FLUX_LIMITER='MP5'` the upwind branch for `A>0` reads `U(I+IP2)` and the branch for `A<0` reads `U(I+IM1)` (`func.f90:1443-1448`). In the one-face wall calls the missing fourth element is exactly that one, so the result depends on stale scratch memory. The other limiters read only the three assigned elements in the branches the wall guards allow. All hunks of 0001 and 0002 apply to the FireX tree by dry run.
+## MP5 `Z_TEMP` pad (patches UP-0001 and UP-0002): ACCEPT with one physics note
+- Confirmed: with `FLUX_LIMITER='MP5'` the upwind branch for `A>0` reads `U(I+IP2)` and the branch for `A<0` reads `U(I+IM1)` (`func.f90:1443-1448`). In the one-face wall calls the missing fourth element is exactly that one, so the result depends on stale scratch memory. The other limiters read only the three assigned elements in the branches the wall guards allow. All hunks of UP-0001 and UP-0002 apply to the FireX tree by dry run.
 - Note: padding with `0._EB` (as `mass.f90` already does) gives MP5 a fake far-side value of zero for the first off-wall face. The monotonicity limiter bounds the effect, but a nearest-value copy would be a more physical pad. This is low priority because MP5 is not a default; for the device version match the 0 pad so that device and host agree.
 
 ## Not signed off

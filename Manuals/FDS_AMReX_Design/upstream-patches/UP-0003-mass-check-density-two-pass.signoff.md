@@ -1,11 +1,11 @@
-# Sign-off request: patch 0003 (CHECK_MASS_DENSITY species clipping loop, two-pass split)
+# Sign-off request: patch UP-0003 (CHECK_MASS_DENSITY species clipping loop, two-pass split)
 
 Reviewer: Species & Combustion Lead. Decision D-051, item 1 (family "`DELTA_RHO_ZZ` scatter, species and combustion loops").
 
 **What changes.** `Source/mass.f90`, `CHECK_MASS_DENSITY`, the species loop (mass.f90:868-925 at FireX 36975d765f). The per-cell
 computation of the neighbour amounts stays as it is. The seven additions into `DELTA_RHO_ZZ` (mass.f90:916-922) move into a second loop
 over the cells in the same order (K, J, I) and read the amounts from two local scratch arrays filled by the first loop. Text of the change:
-`0003-mass-check-density-two-pass.patch` (35 lines added, 8 removed, one routine).
+`UP-0003-mass-check-density-two-pass.patch` (35 lines added, 8 removed, one routine).
 
 **Why.** The GPU generator can run the first loop on the device only if nothing in it writes outside its own cell. The scatter is
 inherently serial (seven cells write to one element, and the order of floating-point additions is part of the result), so it stays on

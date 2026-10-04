@@ -32,7 +32,7 @@ a call must fill the axis `|IOR|`; only the element (1,1,1) of `U_TEMP`/`F_TEMP`
 `WALL_INDEX(n)` must be a literal in -3..-1, 1..3 and the table is never written.
 
 Why the pad: the caller fills three of the four elements and the fourth keeps the value an earlier wall left. Only MP5 reads it. The pad makes the generated code
-deterministic and equals the `DUMMY=0` of mass.f90 and upstream patches 0001/0002. For the limiters 0-4 it changes nothing (tested bitwise against the
+deterministic and equals the `DUMMY=0` of mass.f90 and upstream patches UP-0001/UP-0002. For the limiters 0-4 it changes nothing (tested bitwise against the
 upstream routine).
 
 ## 3. Callee interface assumed
@@ -67,7 +67,7 @@ mechanisms were run together (`test/test_legacy_scratch.py`, second half: genera
   upstream unit has 11 dummies in another order, so the intents of a 4-argument call must come from the derived routine). If the hook patch changes the record's keys (`emit_name`,
   `text`, `file`) the registration must follow.
 * With the real callee (limiters 0-5, MP5 included) the four nests match the upstream loop bitwise. For the divg.f90 nests the reference for MP5 is the loop with the pad of upstream
-  patch 0001 (the verbatim loop reads a stale element there); for the mass.f90 nests the verbatim loop.
+  patch UP-0001 (the verbatim loop reads a stale element there); for the mass.f90 nests the verbatim loop.
 * Without `scratch = true` the hook-only path leaves `US`, `FS`, `ZS` without a declaration: `Gen.gsfv_privates` is set by `emit_call` but nothing in `s5gen.py` reads it. `legacy_ptr`
   declares them (synthetic private locals), so the combination works; the hook patch needs an equivalent when the hooks are used without `legacy_ptr`.
 * Review points for the hook patch: (a) one mechanism must own the pad of the unassigned element (both pad to `0._EB`; a second pad is a no-op); (b) `ZS`/`US`/`FS` must not be renamed;

@@ -4,7 +4,7 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 
 ## 1. State of `tools/ported.toml`
 
-**22 kernels are set** (6 `[[ported]]` entries), aligned with the V&V Lead's review (`vv/ported-review.md`). `reviewed_by` says that the V&V Lead reviewed the device runs and the ulp gate; **the Architect's co-signature of the list is pending** and is not claimed. `set_by` is the Integration Lead. `port_kernel_map.py --strict` accepts all entries (self-check PASS, no PM-08 finding; the map shows 22 kernels as "ported").
+**28 kernels are set** (7 `[[ported]]` entries), aligned with the V&V Lead's review (`vv/ported-review.md`, sections 3 to 9). `reviewed_by` says that the V&V Lead reviewed the device runs and the ulp gate; the Architect co-signed the list as it stands (D-077), with the V&V Lead as reviewer of record in place of the kernel owner (D-072 (c)). `set_by` is the Integration Lead. `port_kernel_map.py --strict` accepts all entries (self-check PASS, no PM-08 finding).
 
 | Entry | Kernels | Class | Device evidence as reviewed |
 |---|---|---|---|
@@ -14,6 +14,7 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 | 4 | `cfl_max`, `vn_max`, `div_extrema` | bitwise | real fields (`csmag_32`, four `dec2_obst` boxes) with `CFL_VELOCITY_NORM` 0 only for `cfl_max`; `div_extrema` only Cartesian with stored divergence off (`CARTVELDIV` all zero); other branches only by the SYNTHETIC rounds 4 to 7 hash run |
 | 5 | `rho_d_dzd`, `h_rho_d_dzd` | bitwise | device coverage only: ZZ and TMP real, `RHO_D` and `D_Z` synthetic, no FDS truth; host gate PASS |
 | 6 | `cfl_wall_max`, `ulp_gate_passed = true` | libm, 2 ulp | gate `ULP` lines PASS: real 32 walls max 1 ulp (only 19 distinct real values), SYNTHETIC 20,000 walls max 2 ulp; the 2 ulp bound is measured for this toolchain, not a guarantee |
+| 7 | `gsfv_central`, `gsfv_godunov`, `gsfv_superbee`, `gsfv_minmod`, `gsfv_charm`, `gsfv_mp5` (6) | bitwise | two device runs on record: stage-1 harness on 1,296 REAL `GET_SCALAR_FACE_VALUE` calls (`shunn3_32`, `dec2_obst`, `csmag_32`; stage1 9715a9e, plan 7.13c, docs 22d7552): device = serial = 4 threads, byte-identical in 7,776 of 7,776 kernel runs, bit-equal to FDS on 1,920,768 of 1,920,768 box cells; and the gate device driver (SYNTHETIC inputs, hash form). Limits: negative `A` with a varying scalar only in `dec2_obst`; `csmag_32` scalar uniform; the one-face callee `GET_SCALAR_FACE_VALUE_PT` is not covered; the caller must pass the address of element (0,0,0). Reviewed and accepted in `vv/ported-review.md` section 9 |
 
 
 **Held out, not in `ported.toml`:**
@@ -23,7 +24,7 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 
 **Open conditions of D-072 (c):**
 - `tools/ci_checks.sh --strict` must be green as ruled. It is not: `k2_ci_check` (K2-03) and `kernel_lint` (CL-07) fail on `s5gen_rad_wall_qin_zero` (`W_SURF_INDEX` missing from the device-address list). Until that is fixed the entries stand for the map only.
-- The ruling asks for the kernel owner's review. The V&V Lead's review is the independent review of the device results; the Architect has to accept it in place of the owner's review (or the owners' reviews are added).
+- The reviewer substitution (V&V Lead in place of the kernel owner) is settled by D-077; nothing open.
 
 ## 2. Evidence (kernel-map names; run on the cc 8.9 test-machine GPU unless stated)
 
@@ -34,9 +35,10 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 | `vflux_fvx/fvy/fvz` | 7.13b: `csmag_32` 33,792 of 33,792 faces per direction and `dec2_obst` box 0 (272 / 512 / 272), device = serial = 4 threads = FDS; negative control with neutralised edge tables fails identically |
 | `cfl_max`, `vn_max`, `div_extrema` | 7.13a: 155 of 155 outputs; scalars and locations equal in five cases; `div_extrema` checked independently |
 | `rho_d_dzd`, `h_rho_d_dzd` | 7.13a neighbours; `RHO_D` synthetic |
+| the six `gsfv_*` kernels | 7.13c and the gate device driver, see entry 7 above |
 | `cfl_wall_max` | 7.10d and the gate `ULP` lines (`vv-runs/gpu_gate/device_logs/stage1_cflw`): host serial = 4 threads = FDS-build value on 32 of 32 real walls (hot-obstruction variant of `dec2_obst`, scratch input); device within 1 ulp (4 of 32 differ); SYNTHETIC sweep max 2 ulp |
 
-Not set: the six `gsfv_*` kernels (no device run), loops without a kernel or marker, and the held-out kernels above.
+Not set: loops without a kernel or marker, and the held-out kernels above. (An earlier version of this file listed the six `gsfv_*` kernels as "no device run"; that was wrong, two device runs are on record, see entry 7 and `tools/device_runs.toml`.)
 
 ## 3. Fast-math pin (D-068): check on a scratch copy
 

@@ -41,7 +41,7 @@ scratch arrays `U_WORK, Z_WORK (-1:3)^3`, `F_WORK (0:3)^3` and the pointers aime
 | # | blocker | lines | state |
 |---|---|---|---|
 | 1 | pointer remap `U_TEMP=>U_WORK` etc. and uses of the scratch pointers | 863-865 | `legacy_ptr.py` rewrites them to private scalars `US`, `FS` and `ZS(0:3)` (`scratch = true` in the sidecar); written for the nests of L0401/L0403, not run on this loop |
-| 2 | array constructors fill three of the four elements of `Z_TEMP` | 872, 882, 889, 896 and the y, z cases | pad to 0 in the rewrite (`Emitter.assign_constructor`); the fourth element is only read by MP5, and upstream patch 0002 would pad it in the source (not applied upstream) |
+| 2 | array constructors fill three of the four elements of `Z_TEMP` | 872, 882, 889, 896 and the y, z cases | pad to 0 in the rewrite (`Emitter.assign_constructor`); the fourth element is only read by MP5, and upstream patch UP-0002 would pad it in the source (not applied upstream) |
 | 3 | pointer callee `GET_SCALAR_FACE_VALUE` called for one face | 874 etc. | the one-face callee `GET_SCALAR_FACE_VALUE_PT(A,Z,F,LIMITER)` from `s5_gsfv.py` exists; its registration (and the `VALUE` dummy intent in `leaf_events`) is open |
 | 4 | `CELL(CELL_INDEX(a,b,c))%WALL_INDEX(n)` | 871, 881, ... | table `WALL_INDEX(0:IBAR+1,0:JBAR+1,0:KBAR+1,-3:3)` exists (policy.arrays) |
 | 5 | accumulate through the wall's gas-cell subscript | 936-937 | needs the cell-to-wall table in ascending wall index and a per-gas-cell gather (design of the Wall Loops Engineer; the same family as L0375, L0394, L0405) |

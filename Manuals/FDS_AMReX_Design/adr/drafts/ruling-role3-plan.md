@@ -202,3 +202,10 @@ D-075 pressure results and open answers (`docs/pressure/07` sections 11 and 12).
 - (e) Shared generator test lock: one full pass per engineer per hour, FIFO under `flock`, 30-minute hold limit; scoped runs need no full lock.
 - (f) `CUNNINGHAM` is added to the libm registry class (2 ulp, not time-step coupled) by the Species and Combustion Lead after a recorded grep check.
 - (g) Ghost `UII`/`UIID`/`QR` are compared interior-only in restart-file checks. The `-gpu=nofma` build and the 8-thread sweep run on the GPU test machine.
+
+## Update 2026-10-04 (p): libm entry for the wall viscosity, gsfv co-sign, Role 1 milestone, patch 0010 on Intel (D-078)
+
+- (a) `wall_visc_les` (`velo.f90:306-351`, `exp` and `pow` with 2.5, 1.25 and 1.5; 2 ulp; `dt_coupled` true) is approved for the libm registry. `dt_coupled` kernels are compared at class tolerance at run level (time-step sequences agree to round-off, not bitwise). The Wall Loops Engineer appends the entry and adds the check.
+- (b) The six `gsfv_*` kernels are co-signed as ported on the V&V review (`vv/ported-review.md` section 9); they count for the map only until `ci_checks --strict` is green; the limits stay in each note.
+- (c) Domain-edge fix accepted. The new fine level takes `RSUM`, `MU`, `KRES`, `D`, `DS`, `H` and `HS` from the parent by `RegistryTransfer::derive`. The skip of `fill_omesh` and `VELOCITY_BC` on level>0 is an interim; the cause is an open item before the Phase 3 gate. For Role 3: the tolerances `MASS_TOL` and `E1_ZZ_TOL` can now be set to round-off against the first two-level numbers (mass and rho*Z drift 1.3e-14 over 40 steps, max abs(div u - D) 1.8e-12). Open: overwrite-off control, multi-box fine level, 4-rank two-level run.
+- (d) Patch 0010 passes on Intel. The N-5 control needs an input that passes the D-076 converter, or a scratch build that bypasses it. Tests key on messages, not exit status.
