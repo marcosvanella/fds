@@ -5,10 +5,10 @@
 // (make_level / remake_level / clear_level) construct and destroy the per-level objects at regrid. Level 0 is the FDS &MESH set: TimeLoop adopts the objects it owns
 // (adopt_level0, non-owning); level 0 layout is fixed by the meshes and cannot be remade.
 //
-// What a level > 0 has today: layout, Fields, SideData (rebuilt from the layout: no obstructions, every face between boxes of the level or towards the coarser level is
-// open, the domain edge is a wall), the covered mask. What it does NOT have is an FDS binding: the kernels take an FDS mesh number, and a fine-level FDS MESH_TYPE
-// object (metrics, wall tables, CELL_INDEX, POINT_TO_BOX route of patch 0005 DRAFT) does not exist (notes/level-interface.md section 3). Level::fds_bound() is false for it,
-// and TimeLoop aborts with that message if a stage is requested on it. No fine-level physics is faked here.
+// What a level > 0 has: layout, Fields, SideData (rebuilt from the layout: no obstructions, every face between boxes of the level or towards the coarser level is
+// open, the domain edge is a wall), the covered mask. The FDS binding is made by TimeLoop::bind_level (fds_fine_level.f90: a fine-level MESH_TYPE with its metrics, cell table and
+// aliased fields; patch 0007/0008 route), after which Level::fds_bound() is true; a level that was not bound still aborts a stage request with a clear message. Not built yet for a fine
+// level: wall cells of obstructions, the INTERPOLATED_MESH mask, zone sums (notes/level-binding.md, notes/two-level-run.md).
 //
 // Kernel-facing rules (M2a): (a) passive scalars are the Fields' business (ncomp = N_TOTAL_SCALARS); (b) only uniform Cartesian metrics (Level::dx).
 #ifndef FDS_LEVELREGISTRY_H_

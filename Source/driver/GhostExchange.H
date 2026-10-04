@@ -57,6 +57,12 @@ using CfGhostHook = std::function<void(const CfGhostRequest&)>;
 //   code 3 (predictor end):  MATCH_VELOCITY, VELOCITY_BC(estimated)     code 6 (corrector end): MATCH_VELOCITY, VELOCITY_BC(final)
 //   code 1 (predictor):      VISCOSITY_BC(final velocities)             code 4 (corrector):     VISCOSITY_BC(estimated)
 // followed, for codes 1 and 4, by WALL_BC (main.f90 886 / 1057) at the caller's convenience through wall_bc(). t, dt: time and step of the stage.
+// Domain-edge ghost layers of a level > 0 (S14). A fine box has no FDS wall cells, so on every non-periodic domain-edge face its ghost layer would stay unset (zero) and the
+// kernels would read it (a spurious diffusive flux through the face). Phase 3 rule for such faces: the mirror (Neumann) copy of the adjacent valid cell, all ghost layers, in
+// every direction in which `mf` is cell-centred; the component normal to the face (nodal in that direction) is left alone (its face is the wall face itself).
+// nodal_dir: direction in which `mf` is nodal (-1 for a cell field). Periodic directions are the same-level fill's business.
+void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir);
+
 class BcStep {
 public:
     BcStep(const Level0& l0, Fields& F);

@@ -554,7 +554,7 @@ INTEGER(C_INT), VALUE :: NM,PRED
 TYPE(MESH_TYPE), POINTER :: M
 REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW
 INTEGER :: IW
-CALL FDS_HOOK_L0_ONLY('fds_p_save_uvw',NM,NMESHES)
+CALL FDS_HOOK_FINE_GUARD('fds_p_save_uvw',NM,NMESHES)   ! a fine box has no external wall cells: the loop below is empty
 M => BOX_OBJ(NM)
 IF (PRED/=0) THEN ; UU => M%US ; VV => M%VS ; WW => M%WS ; ELSE ; UU => M%U ; VV => M%V ; WW => M%W ; ENDIF
 DO IW=1,M%N_EXTERNAL_WALL_CELLS

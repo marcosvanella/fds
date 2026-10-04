@@ -43,6 +43,37 @@ void ghost_exchange(Fields& F, int code, bool predictor)
     }
 }
 
+void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir)
+{
+    const amrex::Box dom = lev.geom.Domain();
+    for (int d = 0; d < 3; ++d) {
+        if (lev.geom.isPeriodic(d) || d == nodal_dir || dom.length(d) < 1) continue;
+        const int ng = mf.nGrow(d);
+        if (ng <= 0) continue;
+        for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+            const amrex::Box vb = mfi.validbox();
+            const amrex::Box fb = mf[mfi].box();
+            auto a = mf.array(mfi);
+            const int nc = mf.nComp();
+            for (int side = 0; side < 2; ++side) {
+                const int edge = side == 0 ? dom.smallEnd(d) : dom.bigEnd(d);
+                const int mine = side == 0 ? vb.smallEnd(d) : vb.bigEnd(d);
+                if (mine != edge) continue;
+                for (int g = 1; g <= ng; ++g) {
+                    amrex::Box slab = fb;
+                    const int idx = side == 0 ? edge - g : edge + g;
+                    slab.setSmall(d, idx); slab.setBig(d, idx);
+                    amrex::IntVect sh(0, 0, 0);
+                    sh[d] = side == 0 ? g : -g;
+                    amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
+                        for (int n = 0; n < nc; ++n) a(i, j, k, n) = a(i + sh[0], j + sh[1], k + sh[2], n);
+                    });
+                }
+            }
+        }
+    }
+}
+
 BcStep::BcStep(const Level0& l0, Fields& F) : m_l0(l0), m_F(F) {}
 
 bool BcStep::local(int i) const { return m_l0.dm[i] == amrex::ParallelDescriptor::MyProc(); }
@@ -93,6 +124,15 @@ void BcStep::exchange(int code, bool predictor)
         CfGhostRequest r{m_l0.level, code, predictor, {}};
         for (const auto& n : exchange_fields(code, predictor)) if (m_F.has(n)) r.fields.push_back(n);
         cf_ghost_hook(r);
+    }
+    if (m_l0.level > 0) {   // domain-edge faces of a fine box: mirror ghost layers (no FDS wall cell there)
+        for (const auto& n : exchange_fields(code, predictor)) {
+            if (!m_F.has(n)) continue;
+            const FieldSpec& sp = m_F.spec(n);
+            int nd = -1;
+            for (int d = 0; d < 3; ++d) if (sp.nodal(d)) nd = d;
+            mirror_domain_edges(m_l0, m_F[n], nd);
+        }
     }
 }
 
