@@ -139,3 +139,11 @@ pb_add_test(pb_resid_limit reslimit --ns "48 96")
 #     faces, periodic wrap; labels/ncells/singular/removed_mean/solution/gauge against an independent dense numpy reference on 1/2/3 ranks;
 #     negative control warns; FFT with a mask is NotBuilt.
 pb_add_test(pb_masked masked)
+
+# (i) E1: MLMG runs to half the requested tolerance (no spurious warning at the default settings, negative controls warn);
+#     E2: the residual verdict is evaluated on the mean-removed solver solution and does not depend on the gauge constant.
+pb_add_test(pb_resid_e1_mlmg   e1mlmg)
+pb_add_test(pb_resid_gauge_independent gaugeindep)
+# R6: HYPRE Neumann smooth N=160 (about 4 million unknowns; long): label "long" so `ctest -LE long` skips it.
+pb_add_test(pb_resid_hypre_n160 hypre160)
+set_tests_properties(pb_resid_hypre_n160 PROPERTIES LABELS long TIMEOUT 900)

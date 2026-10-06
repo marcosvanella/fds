@@ -637,6 +637,7 @@ void run_rescheck (ParmParse& pp)
 
 int run_composite_mode (std::string const& mode, ParmParse& pp);   // composite_modes.cpp
 int run_m2_mode (std::string const& mode, ParmParse& pp);          // m2_modes.cpp
+int run_resid_mode (std::string const& mode, ParmParse& pp);       // resid_modes.cpp (A-67 follow-ups)
 
 int main (int argc, char* argv[])
 {
@@ -654,6 +655,7 @@ int main (int argc, char* argv[])
         else {
             int cf = run_m2_mode(mode, pp);
             if (cf < 0) { cf = run_composite_mode(mode, pp); }
+            if (cf < 0) { cf = run_resid_mode(mode, pp); }
             if (cf < 0) { amrex::Abort("mode must be solve|gen|diff|selector|exactsum|meankind|comp|comp_ns2d|comp_sel|comp_ws|comp_gauge|comp_trigger|trigger1|fftcache|..."); }
             g_fail += cf;
         }

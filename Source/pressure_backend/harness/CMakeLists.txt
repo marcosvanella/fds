@@ -36,7 +36,7 @@ target_include_directories(pressure_backend PUBLIC ${PB_DIR})
 target_compile_definitions(pressure_backend PUBLIC PB_WITH_HYPRE)   # every pressure_backend translation unit must see the same setting
 target_link_libraries(pressure_backend PUBLIC AMReX::amrex)
 
-add_executable(pb_harness main.cpp composite_modes.cpp m2_modes.cpp)
+add_executable(pb_harness main.cpp composite_modes.cpp m2_modes.cpp resid_modes.cpp)
 target_link_libraries(pb_harness PRIVATE pressure_backend)
 
 # M4: FDS-derived frozen cases (own main, reads FDS dumps; frozen/fds_*/README.md)

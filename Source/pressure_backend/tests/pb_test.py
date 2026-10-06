@@ -914,11 +914,60 @@ def masked():
     m = lines(out, "MASKED"); ok(m and "status=NotBuilt" in m[0], f"masked + FFT is NotBuilt [{m[0] if m else out[-200:]}]")
 
 
+# ---- E1/E2/R6: MLMG default tolerance, gauge-independent residual verdict, large-N HYPRE (docs/pressure/08 section 4.2) ----
+def manuf_line(np_, **kw):
+    rc, out = run(np_, mode="manuf", **kw); print(out)
+    r = lines(out, "RESID"); ok(rc == 0 and len(r) == 1, f"manuf {kw}: harness exit 0, one RESID line")
+    return kv(r[0]) if r else {}
+
+def e1mlmg():
+    """E1: MLMG is run to 0.5*tol_rel, so the 3 of 24 default solves of the A-56 table that ended at 1.2e-12..1.3e-12 (N=48 Dirichlet
+    smooth, N=64 Neumann smooth, N=64 Dirichlet noisy) no longer warn at the default residual_tol; negative controls still warn."""
+    for n, bc, noise in ((48, "DD,DD,DD", 0), (64, "NN,NN,NN", 0), (64, "DD,DD,DD", 0.3), (64, "PP,PP,PP", 0)):
+        r = manuf_line(2, n=n, mgs=32, bcpairs=bc, noise=noise, backend="mlmg", expect_warn=0)
+        if not r: continue
+        chk, lim = float(r["check"]), float(r["limit"])
+        ok(r["status"] == "Ok" and r["nwarn"] == "0" and chk <= lim, f"MLMG default n={n} {bc} noise={noise}: no warning (check {chk:.2e} <= limit {lim:.2e}, {r['iters']} iterations)")
+        ok(float(r["own"]) <= 0.5e-12 * 1.0001, f"MLMG default n={n} {bc} noise={noise}: own residual {float(r['own']):.2e} <= 0.5*tol_rel (ran to half the tolerance)")
+    # negative controls: a loose tolerance and an iteration cap must still warn
+    for kw in (dict(tol_rel=1e-6), dict(max_iter=4)):
+        r = manuf_line(2, n=48, mgs=32, bcpairs="DD,DD,DD", backend="mlmg", expect_warn=1, **kw)
+        ok(r.get("nwarn", "0") != "0" and float(r["check"]) > float(r["limit"]), f"MLMG negative control {kw}: warns (check {float(r['check']):.2e} > limit {float(r['limit']):.2e})")
+
+def gaugeindep():
+    """E2: residual, floor and limit are those of the mean-removed solver solution and do not move with the gauge constant (KRES-like
+    offset up to 1e6 times the rms of H); the returned H, by contrast, carries the offset's representation noise (shown for contrast)."""
+    for be, bc in (("mlmg", "NN,NN,NN"), ("hypre", "NN,NN,NN"), ("fft", "PP,PP,PP"), ("mlmg", "PP,PP,PP")):
+        res = {}
+        for k in (0, 100, 1e6):
+            res[k] = manuf_line(2, n=48, mgs=24, bcpairs=bc, backend=be, gauge_k=k, expect_warn=0)
+        if not all(res.values()): continue
+        for k in (100, 1e6):
+            same = all(res[k][f] == res[0][f] for f in ("check", "floor", "limit"))
+            ok(same, f"{be} {bc} gauge_k={k:g}: check/floor/limit identical to gauge_k=0 ({res[k]['check']}, {res[k]['floor']}, {res[k]['limit']})")
+        h0, h6 = float(res[0]["returned_H_rel2"]), float(res[1e6]["returned_H_rel2"])
+        ok(h6 > 100 * h0, f"{be} {bc}: the returned H does feel the offset (rel2 {h0:.1e} -> {h6:.1e}), so the test is sensitive to the gauge")
+        # limit must be identical; err_rel2 may grow with the offset's representation noise (often ~1e-8 at gauge_k=1e6 vs eps_H=1e-8)
+        ok(float(res[1e6]["limit"]) == float(res[0]["limit"]), f"{be} {bc}: limit unchanged at gauge_k=1e6 ({res[1e6]['limit']})")
+        ok(float(res[1e6]["err_rel2"]) < 1e2 * float(res[1e6]["epsH"]), f"{be} {bc}: solution error {float(res[1e6]['err_rel2']):.1e} still modest vs eps_H {float(res[1e6]['epsH']):.1e} at gauge_k=1e6")
+
+def hypre160():
+    """R6: one real HYPRE Neumann smooth-data solve at N=160 (the regime that motivated the size-scaled limit): residual above the
+    base 1e-12 but within the scaled limit, no warning. Long test (about a minute, 4.1 million unknowns)."""
+    r = manuf_line(2, n=160, mgs=80, bcpairs="NN,NN,NN", backend="hypre", expect_warn=0)
+    if not r: return
+    chk, fl, lim = float(r["check"]), float(r["floor"]), float(r["limit"])
+    print(f"R6 HYPRE Neumann smooth N=160: check {chk:.3e} floor {fl:.3e} limit {lim:.3e} iterations {r['iters']} wall {r['wall_s']} s")
+    ok(r["status"] == "Ok" and r["nwarn"] == "0", "HYPRE N=160 Neumann: no warning")
+    ok(lim == max(1e-12, fl) and fl > 1e-12, f"limit {lim:.3e} = floor {fl:.3e} > residual_tol 1e-12 (the size-scaled regime)")
+    ok(chk <= lim, f"check {chk:.3e} <= limit {lim:.3e}; floor/check = {fl/chk:.1f}")
+
+
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "masked": masked}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "masked": masked, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
