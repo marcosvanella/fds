@@ -60,5 +60,4 @@ P3-B09 corner front distance (`corner_check`: bitwise outside n+1 cells for n st
 
 ## 4. Domain-edge ghost layers of fine boxes (E3b / E1)
 
-Role 1's fix (A-60) is not on the branch (no commit since the E3b analysis; only a working-tree change). `MASS_TOL` (5e-6) and `E1_ZZ_TOL` (1e-4) in `tests/run_e2e_driver.sh` are unchanged. When it lands: rebuild the driver,
-rerun `run_e2e_driver.sh` on 1 and 4 ranks, set `MASS_TOL` to `E3A_TOL` (1e-12) and `E1_ZZ_TOL` to 1e-12.
+Role 1's fix (A-60, driver S14.1 to S14.3) is on the branch. `MASS_TOL` and `E1_ZZ_TOL` in `tests/run_e2e_driver.sh` are now 1e-13 (round-off; observed E3b 6e-16 / 1.2e-16 on 1 / 4 ranks, E1 ZZ 3.3e-16), with negative controls that still trigger (commit e1541d216e).
