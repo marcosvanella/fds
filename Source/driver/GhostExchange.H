@@ -6,12 +6,14 @@
 //      exchange here moves all components of a registered field, so a passive scalar needs no special case.
 //  (b) Only uniform Cartesian metrics are used; R(I)/RRN(I) are dropped, CYLINDRICAL and TRN* meshes are rejected at level-0 assembly (IR-002).
 //
-// Exchange codes of MAIN_LOOP (main.f90 MESH_EXCHANGE, verified at S4; README "Ghost fill at the MESH_EXCHANGE positions"):
-//   1  after the predictor density update     RHOS, ZZS (+ MU, KRES, D, Q of the sender)
-//   4  after the corrector density update     RHO,  ZZ  (+ MU, KRES, DS, Q)
+// Exchange codes of MAIN_LOOP (main.f90 MESH_EXCHANGE; README "Ghost fill at the MESH_EXCHANGE positions"; notes/exchange-codes.md):
+//   1  after the predictor density update     RHOS, ZZS (+ MU, KRES, D, TMP, RSUM)
+//   4  after the corrector density update     RHO,  ZZ  (+ MU, KRES, DS, TMP, RSUM)
 //   3  after the predictor pressure solve     US, VS, WS, HS
-//   6  after the corrector                    U,  V,  W,  H
+//   6  after the corrector                    U,  V,  W,  H   (only these ghosts; FireX moved back-wall out of code 6)
 //   5  inside the pressure iteration          FVX, FVY, FVZ, H (predictor) or HS (corrector)
+// Back-wall (FireX): code 66 = full PACK_WALL once at set-up (INITIALIZE_BACK_WALL_EXCHANGE); code 67 = PACK_WALL_LITE every step
+// (after MESH_EXCHANGE(6) in MAIN_LOOP, and for HT3D). Kept on the FDS host path; never routed through the driver ghost fill.
 // The other codes (0, 2, 7-11, 14-20) are radiation, obstruction, HVAC, particle and level-set exchanges, outside M2a.
 //
 // Boundary-condition step (bc_step): FDS gets the values across a mesh boundary from OMESH(NOM) (init: main.f90 INITIALIZE_MESH_EXCHANGE_1) and the

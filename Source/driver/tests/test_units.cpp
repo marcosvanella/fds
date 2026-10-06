@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 #include <functional>
 #include <sstream>
 #include <string>
@@ -40,6 +41,7 @@
 #include "PressureBcMap.H"
 #include "tests/two_level_transport.H"
 #include "RegistryTransfer.H"
+#include "ExchangeFields.H"
 
 using namespace fdsamr;
 
@@ -1169,6 +1171,60 @@ long test_species_average(int nranks)
     return 0;
 }
 
+
+// ---------- FireX exchange-code mapping (code 6 = U/V/W/H only; 66/67 stay on the FDS host path) ----------
+long test_exchange_codes(int /*nranks*/)
+{
+    // Mapping table: code 6 fills only velocity/pressure ghosts (back-wall left code 6 after FireX).
+    {
+        const auto f6 = exchange_fields(6, false);
+        CHECK_MSG(f6.size() == 4 && f6[0] == "U" && f6[1] == "V" && f6[2] == "W" && f6[3] == "H",
+                  "code 6 must be exactly {U, V, W, H}");
+    }
+    // Codes 66 (PACK_WALL once at set-up) and 67 (PACK_WALL_LITE every step) must never go through the driver ghost fill:
+    // exchange_fields returns empty, so ghost_exchange / BcStep::exchange fill nothing; after_exchange returns for any
+    // code other than 1, 3, 4, 6 (GhostExchange.cpp).
+    for (int code : {66, 67, 0, 2, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20}) {
+        const auto f = exchange_fields(code, true);
+        CHECK_MSG(f.empty(), "code " + std::to_string(code) + " must not map to driver fields (host path)");
+    }
+    // TimeLoop must not call exchange/after for 66 or 67 (those stay in FDS MAIN_LOOP / INITIALIZE_BACK_WALL_EXCHANGE).
+    {
+        const char* path = "TimeLoop.cpp";
+        FILE* fp = std::fopen(path, "r");
+        if (!fp) {
+            // build tree: source sits next to the tests/ binary's compile unit path; try relative to this file's include root
+            fp = std::fopen("../TimeLoop.cpp", "r");
+        }
+        if (!fp) {
+            // when run from the build dir the source is under CMAKE_CURRENT_LIST_DIR; allow an env override
+            if (const char* e = std::getenv("FDSTL_SRC")) {
+                std::string p = std::string(e) + "/TimeLoop.cpp";
+                fp = std::fopen(p.c_str(), "r");
+            }
+        }
+        CHECK_MSG(fp != nullptr, "TimeLoop.cpp readable for the 66/67 call-site check (set FDSTL_SRC to Source/driver if needed)");
+        if (fp) {
+            std::string text; char buf[4096];
+            while (std::size_t n = std::fread(buf, 1, sizeof buf, fp)) text.append(buf, n);
+            std::fclose(fp);
+            const char* banned[] = {
+                "s_exchange(66", "s_exchange(67", "s_after(66", "s_after(67",
+                "exchange(66", "exchange(67", "after_exchange(66", "after_exchange(67",
+                "stage_exchange(", // checked below with code arg via digit scan of nearby calls is overkill; the literal forms above cover the time loop
+            };
+            for (const char* b : banned) {
+                if (std::strstr(b, "stage_exchange")) continue;  // stage_exchange takes a variable code; the literals above are enough
+                CHECK_MSG(text.find(b) == std::string::npos, std::string("TimeLoop must not call ") + b);
+            }
+            // Positive control: the driver does call code 6 (corrector end).
+            CHECK_MSG(text.find("s_exchange(6") != std::string::npos || text.find("exchange(6") != std::string::npos,
+                      "TimeLoop must still call exchange code 6");
+        }
+    }
+    return fdstest::report("exchange codes (6 = U/V/W/H only; 66/67 empty and not called from TimeLoop)");
+}
+
 int main(int argc, char** argv)
 {
     amrex::Initialize(argc, argv, false);
@@ -1199,6 +1255,7 @@ int main(int argc, char** argv)
             fails += test_species_average(nranks);
             fails += test_two_level_transport(nranks);
             fails += test_pressure_bc_map(nranks);
+            fails += test_exchange_codes(nranks);
             if (amrex::ParallelDescriptor::IOProcessor()) std::printf("%s: %ld failing checks\n", fails == 0 ? "ALL PASS" : "SOME FAILED", fails);
         }
     }
