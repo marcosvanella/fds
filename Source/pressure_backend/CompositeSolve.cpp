@@ -613,6 +613,21 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     // fixed-point scale per sum) is removed from phi on all levels; with rho = 1 and KRES = 0 this is the plain exact
     // volume-weighted mean. Then the covered coarse cells take the average-down of the fine solution. A component
     // that is not singular is not shifted.
+    // E2: the residual verdict is evaluated on the solver's own solution with the composite volume-weighted mean removed (before this gauge),
+    // so it and the round-off floor cannot depend on the gauge constant (see mean_removed_copy in CommonLayer.H).
+    LevelMFs phr;
+    if (ci.singular && o.check_residual && full) {
+        for (int l = 0; l < nlev; ++l) {
+            phr.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, phi[l]->nGrow()));
+            phr[l]->setVal(0.0);
+            MultiFab::Copy(*phr[l], *phi[l], 0, 0, 1, 0);
+        }
+        double sh = 0.0, rm = 0.0;
+        hierarchy_mean(W, phr, sh, rm, false);
+        for (int l = 0; l < nlev; ++l) { phr[l]->plus(Real(-sh), 0, 1, 0); }
+        average_down_all(W, phr);
+    }
+    LevelMFs& phv = phr.empty() ? phi : phr;     // the field the residual check sees
     if (ci.singular) {
         const bool has_w = (p.levels[0].gauge_weight != nullptr), has_g = (p.levels[0].gauge_offset != nullptr);
         double shift = 0.0;
@@ -654,16 +669,17 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
             res.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0)); res[l]->setVal(0.0);
             if (ext) {
                 resx.push_back(std::make_unique<MultiFab>(W.eba[l], W.dm[l], 1, 0)); resx[l]->setVal(0.0);
-                replicate_to_ext(W, *phi[l], *phix[l]);          // gauge-fixed phi, covered cells = average-down
+                replicate_to_ext(W, *phv[l], *phix[l]);          // mean-removed phi (E2), covered cells = average-down
             }
         }
         Vector<MultiFab*> pres = ptrs(ext ? resx : res);
-        mlmg.compResidual(pres, pphi, pb_);
+        Vector<MultiFab*> pphi_r = ptrs(ext ? phix : phv);
+        mlmg.compResidual(pres, pphi_r, pb_);
         if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *resx[l], *res[l]); } }
         ResidualSums S;
         S.singular = ci.singular; S.what = "composite ";
         {
-            LevelMFs rq = squares_of(W, res), bq = squares_of(W, b), pq = squares_of(W, phi);
+            LevelMFs rq = squares_of(W, res), bq = squares_of(W, b), pq = squares_of(W, phv);
             S.r2 = exact_sum_multi(terms_of(W, rq, true), 1).sum[0];
             S.b2 = exact_sum_multi(terms_of(W, bq, true), 1).sum[0];
             S.phi2 = exact_sum_multi(terms_of(W, pq, true), 1).sum[0];

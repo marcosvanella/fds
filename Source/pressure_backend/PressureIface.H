@@ -296,6 +296,14 @@ struct PressureResult {
     bool workspace_rebuilt = false;               // composite: the workspace passed in did not match and was rebuilt
     int nlevels = 1;                              // composite: number of levels solved
     amrex::Long ncells_uncovered = 0;             // composite: number of uncovered cells over all levels
+    // Masked single-level solve with a PressureWorkspace (D1): the component labels, singular flags and pins are cached in the workspace,
+    // keyed on the content of cell_class and the layout. mask_cache_hit = this solve used the cache; mask_label_rounds / mask_label_seconds =
+    // ghost-exchange rounds and wall time of the flood fill that built the cache entry (reported on a hit as well: the cost that was saved);
+    // mask_label_lookup_seconds = what this solve spent obtaining the labels (hash + copy on a hit, the flood fill on a miss).
+    bool mask_cache_hit = false;
+    int mask_label_rounds = 0;
+    double mask_label_seconds = 0.0;
+    double mask_label_lookup_seconds = 0.0;
 };
 
 // Selector: FFT only on a single level with no masked cells and a uniformly closed (Neumann/periodic) or
@@ -346,10 +354,14 @@ public:
     int fft_plan_reuses () const { return m_fft_reuses; }
     bool fft_plan_built () const;
     bool hypre_built () const;                    // a HYPRE set-up (matrix + BoomerAMG) is cached for the single-level path
+    // Masked single level: labels cache counters (flood fills done, solves served from the cache). Dropped with discard()/rebuild() (counters kept).
+    int mask_label_builds () const { return m_mask_builds; }
+    int mask_label_hits () const { return m_mask_hits; }
 
     // Internal (used by solve_pressure).
     void note_solve_done () { ++m_nsolves; m_regrid = false; }
     void note_fft (bool reused) { if (reused) { ++m_fft_reuses; } else { ++m_fft_builds; } }
+    void note_mask (bool hit) { if (hit) { ++m_mask_hits; } else { ++m_mask_builds; } }
     void mark_regrid () { m_regrid = true; }
     void discard ();                              // drop all set-up (counters are kept)
     struct Impl;
@@ -360,6 +372,7 @@ private:
     unsigned long m_nsolves = 0;
     bool m_regrid = false;
     int m_fft_builds = 0, m_fft_reuses = 0;
+    int m_mask_builds = 0, m_mask_hits = 0;
 };
 
 // Full solve: selector, components and pins, mean removal, backend, gauge, checks. Collective. On any

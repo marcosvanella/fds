@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 namespace pb {
@@ -116,6 +117,9 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
     const bool masked = has_nonzero(p.cell_class);
     if (masked && requested == BackendKind::FFT) { s.message = "masked cells (cell_class != 0) cannot go through FFT::Poisson (no mask in the transform); the masked branch is MLMG"; return s; }
     if (masked && requested == BackendKind::HYPRE) { s.message = "masked cells with the HYPRE backend are not built (the masked branch is single-level MLMG; frozen/masked-notes.md)"; return s; }
+    if (masked && p.geom.Domain().numPts() >= Long(std::numeric_limits<int>::max())) {
+        s.message = "masked problems with 2^31 or more cells are not built (the component labelling uses 32-bit global cell indices)"; return s;
+    }
     if (has_zero(p.uncovered)) { s.message = "covered cells (uncovered == 0) are not built"; return s; }
     // D-057: a Dirichlet face in a one-cell x or z direction keeps a non-zero operator term (-2 phi/dx^2) that neither
     // FFT::Poisson (factor 0 for a length-1 direction) nor the TWO_D convention reproduces: not built. In a one-cell y
@@ -207,9 +211,34 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     R.backend = be->name();
 
     const Real vol = p.geom.CellSize(0) * p.geom.CellSize(1) * p.geom.CellSize(2);
-    ComponentMap cm = label_components(p, full);
-
     const bool masked = is_masked(p);
+    ComponentMap cm;
+    if (masked && ws) {
+        // D1: component labels, singular flags and pins are cached in the workspace keyed on (mask content, layout).
+        const double t_lk = amrex::second();
+        PressureWorkspace::Impl& W = ws->ensure_impl();
+        auto& M = W.mask;
+        const std::uint64_t hsh = class_content_hash(p);
+        const bool hit = M.valid && M.hash == hsh && M.dom == p.geom.Domain() && M.bc == p.bc && M.ba == p.ba && M.dm == p.dm;
+        if (!hit) {
+            M.cm = label_components(p, true);
+            M.hash = hsh; M.dom = p.geom.Domain(); M.bc = p.bc; M.ba = p.ba; M.dm = p.dm; M.valid = true;
+        }
+        ws->note_mask(hit);
+        cm.label.define(p.ba, p.dm, 1, 0);
+        iMultiFab::Copy(cm.label, M.cm.label, 0, 0, 1, 0);
+        cm.comps = M.cm.comps; cm.rounds = M.cm.rounds; cm.seconds = M.cm.seconds;
+        R.mask_cache_hit = hit;
+        double lk = amrex::second() - t_lk; ParallelDescriptor::ReduceRealMax(lk);
+        R.mask_label_lookup_seconds = lk;
+    } else {
+        const double t_lk = amrex::second();
+        cm = label_components(p, full);
+        double lk = amrex::second() - t_lk; ParallelDescriptor::ReduceRealMax(lk);
+        R.mask_label_lookup_seconds = masked ? lk : 0.0;
+    }
+    R.mask_label_rounds = cm.rounds; R.mask_label_seconds = cm.seconds;
+
     if (masked && cm.comps.empty()) { return fail(Status::InvalidInput, "masked problem without a gas cell"); }
     MultiFab b(p.ba, p.dm, 1, 0);
     MultiFab::Copy(b, *p.rhs, 0, 0, 1, 0);
@@ -242,13 +271,19 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
         }
     }
 
+    // E2: the residual verdict (and the round-off floor) is evaluated on the solver's own solution with the mean removed per singular
+    // component, taken BEFORE the D-067 gauge: that is the system that was solved, and it cannot depend on the gauge constant (a large
+    // KRES offset adds u*|offset| of representation noise per cell to the returned H, which would inflate both the residual and the floor).
+    bool sing = !cm.comps.empty() && cm.comps[0].singular;
+    if (masked) { sing = false; for (auto const& c : cm.comps) { sing = sing || c.singular; } }
+    MultiFab work_mr;
+    const bool want_check = o.check_residual && full;
+    if (want_check && sing) { mean_removed_copy(work, cm, p.uncovered, vol, work_mr); }
     // Gauge, then the true residual of the problem the backend was given (mean-removed b).
     apply_gauge(work, cm, p.uncovered, vol, nullptr, p.gauge_weight, p.gauge_offset);
-    if (o.check_residual && full) {
-        bool sing = !cm.comps.empty() && cm.comps[0].singular;
-        if (masked) { sing = false; for (auto const& c : cm.comps) { sing = sing || c.singular; } }
+    if (want_check) {
         const IntVect pin = R.backend_status.pin_cell;
-        ResidualSums S = residual_sums(p, work, b, sing, R.backend_status.pin_applied ? &pin : nullptr);
+        ResidualSums S = residual_sums(p, sing ? work_mr : work, b, sing, R.backend_status.pin_applied ? &pin : nullptr);
         S.what = "";
         evaluate_residual(R, o, S);
         if (o.verbose >= 2 && R.backend_status.pin_applied) {

@@ -65,6 +65,8 @@ namespace {
 // Masked components: flood fill over gas-gas faces (frozen/masked-notes.md). Collective.
 ComponentMap label_components_masked (PressureProblem const& p)
 {
+    const double t_start = amrex::second();
+    int rounds = 0;
     const Box dom = p.geom.Domain();
     const Long nx = dom.length(0), ny = dom.length(1);
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dom.numPts() < Long(std::numeric_limits<int>::max()), "masked labelling needs fewer than 2^31 cells");
@@ -79,6 +81,7 @@ ComponentMap label_components_masked (PressureProblem const& p)
         amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (c(i,j,k) == CellGas) { l(i,j,k) = gidx(i,j,k); } });
     }
     for (;;) {
+        ++rounds;
         lab.FillBoundary(p.geom.periodicity());
         Long changed = 0;
         for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
@@ -172,8 +175,36 @@ ComponentMap label_components_masked (PressureProblem const& p)
         ci.pin = IntVect(AMREX_D_DECL(int(r % nx) + dom.smallEnd(0), int((r / nx) % ny) + dom.smallEnd(1), int(r / (nx*ny)) + dom.smallEnd(2)));
         cm.comps.push_back(ci);
     }
+    cm.rounds = rounds;
+    double secs = amrex::second() - t_start;
+    ParallelDescriptor::ReduceRealMax(secs);
+    cm.seconds = secs;
     return cm;
 }
+}
+
+std::uint64_t class_content_hash (PressureProblem const& p)
+{
+    if (!p.cell_class) { return 0; }
+    const int nb = static_cast<int>(p.cell_class->boxArray().size());
+    std::vector<Long> lo(nb, 0), hi(nb, 0);
+    for (MFIter mfi(*p.cell_class); mfi.isValid(); ++mfi) {
+        auto const& a = p.cell_class->const_array(mfi);
+        const Box vb = mfi.validbox();
+        std::uint64_t h = 1469598103934665603ULL;
+        auto mix = [&] (std::uint64_t v) { h ^= v; h *= 1099511628211ULL; h ^= h >> 29; };
+        for (int d = 0; d < 3; ++d) { mix(std::uint64_t(std::int64_t(vb.smallEnd(d)) + (1LL << 40))); mix(std::uint64_t(std::int64_t(vb.bigEnd(d)) + (1LL << 40))); }
+        amrex::LoopOnCpu(vb, [&] (int i, int j, int k) { mix(std::uint64_t(a(i,j,k) + 1)); });
+        lo[mfi.index()] = Long(h & 0x7fffffffULL);      // 31-bit halves: the rank sums below cannot overflow
+        hi[mfi.index()] = Long((h >> 33) & 0x7fffffffULL);
+    }
+    if (nb > 0) { ParallelDescriptor::ReduceLongSum(lo.data(), nb); ParallelDescriptor::ReduceLongSum(hi.data(), nb); }
+    std::uint64_t g = 1469598103934665603ULL;
+    for (int b = 0; b < nb; ++b) {
+        g ^= std::uint64_t(lo[b]); g *= 1099511628211ULL; g ^= g >> 29;
+        g ^= std::uint64_t(hi[b]); g *= 1099511628211ULL; g ^= g >> 29;
+    }
+    return g;
 }
 
 ComponentMap label_components (PressureProblem const& p, bool record_pin)
@@ -365,6 +396,18 @@ void apply_gauge (MultiFab& phi, ComponentMap& cm, iMultiFab const* uncovered, R
         }
     }
     subtract_per_component(phi, cm, uncovered, shift);
+}
+
+void mean_removed_copy (MultiFab const& phi, ComponentMap const& cm, iMultiFab const* uncovered, Real vol, MultiFab& out)
+{
+    out.define(phi.boxArray(), phi.DistributionMap(), 1, 1);
+    out.setVal(0.0);
+    MultiFab::Copy(out, phi, 0, 0, 1, 0);
+    MeanInfo m = exact_mean(phi, cm, uncovered, vol, false);
+    const int nc = static_cast<int>(cm.comps.size());
+    std::vector<double> shift(nc, 0.0);
+    for (int c = 0; c < nc; ++c) { if (cm.comps[c].singular) { shift[c] = m.mean[c]; } }
+    subtract_per_component(out, cm, uncovered, shift);
 }
 
 void apply_operator (PressureProblem const& p, MultiFab& phi, MultiFab& out)

@@ -10,11 +10,15 @@
 
 #include "PressureIface.H"
 
+#include <cstdint>
+
 namespace pb {
 
 struct ComponentMap {
     amrex::iMultiFab label;                       // component id per valid cell (>= 0)
     std::vector<ComponentInfo> comps;
+    int rounds = 0;                               // masked flood fill: ghost-exchange rounds (incl. the final no-change round); 0 = not a masked fill
+    double seconds = 0.0;                         // masked flood fill: wall time of the labelling (max over ranks)
 };
 
 // ---- Masked branch (frozen/masked-notes.md) ---------------------------------------------------------------------------------
@@ -24,6 +28,10 @@ bool is_masked (PressureProblem const& p);
 // CellSolid (class) and 0 (value). Collective. known_ghost is all zero when p.known_value is null.
 amrex::iMultiFab class_ghost (PressureProblem const& p);
 amrex::MultiFab known_ghost (PressureProblem const& p);
+
+// Content hash of p.cell_class (valid cells; 0 for a null cell_class). Collective. Built from per-box FNV-1a hashes of (box, data) that are
+// summed over ranks in exact integer arithmetic, so it does not depend on which rank owns a box. Key of the workspace's label cache.
+std::uint64_t class_content_hash (PressureProblem const& p);
 
 // M1: the whole box is one component (no masks); singular unless some face is Dirichlet. Records the pin
 // (lowest global index cell, x fastest) per component (skipped with record_pin = false: cheap path). With a masked problem
@@ -63,6 +71,13 @@ void remove_mean (amrex::MultiFab& rhs, ComponentMap& cm, amrex::iMultiFab const
 void apply_gauge (amrex::MultiFab& phi, ComponentMap& cm, amrex::iMultiFab const* uncovered,
                   amrex::Real cell_volume_uniform, amrex::MultiFab const* cell_volume = nullptr,
                   amrex::MultiFab const* gauge_weight = nullptr, amrex::MultiFab const* gauge_offset = nullptr);
+
+// E2 (docs/pressure/08 section 4.2): out := phi minus the volume-weighted mean (exact sum, uncovered cells) of each SINGULAR component;
+// non-singular components and cells with label < 0 are copied unchanged. Used on the solver's own solution (before the D-067 gauge) so the
+// residual verdict and the round-off floor are those of the system actually solved and cannot depend on the gauge constant.
+// `out` is (re)defined on phi's layout with one ghost layer. No side effect on cm.
+void mean_removed_copy (amrex::MultiFab const& phi, ComponentMap const& cm, amrex::iMultiFab const* uncovered, amrex::Real cell_volume_uniform,
+                        amrex::MultiFab& out);
 
 // out = L phi on valid cells (reference implementation). phi needs >= 1 ghost layer; its ghost cells are
 // overwritten. out has the same BoxArray and DistributionMapping.

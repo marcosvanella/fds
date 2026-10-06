@@ -5,6 +5,7 @@
 
 #include "PressureIface.H"
 #include "PressureBackend.H"
+#include "CommonLayer.H"
 #ifdef PB_WITH_HYPRE
 #include "HypreBackend.H"
 #endif
@@ -40,6 +41,17 @@ struct PressureWorkspace::Impl {
     std::unique_ptr<MLMG> mlmg;                       // refers to *mlp: declared after it, destroyed first
     // Single level: the FFT backend object, which owns the cached FFT::Poisson plan (null until needed).
     std::unique_ptr<PressureBackend> fft;
+    // Masked single level (D1): component labels, singular flags and pins, keyed on the mask content and the layout. The mask is static
+    // for a run and changes at a regrid; the flood fill is the expensive part of a masked solve, so it is done once per mask.
+    struct MaskCache {
+        bool valid = false;
+        std::uint64_t hash = 0;
+        amrex::Box dom;
+        std::array<BC,6> bc{};
+        amrex::BoxArray ba;
+        amrex::DistributionMapping dm;
+        ComponentMap cm;                              // pristine (no removed_mean / gauge_shift)
+    } mask;
     // HYPRE backend set-up (matrix + BoomerAMG hierarchy), built on the first HYPRE solve of this layout and dropped with the Impl
     // (rebuild() / discard()). Single level: the backend object (it owns the HypreSystem); composite: the system itself.
 #ifdef PB_WITH_HYPRE
