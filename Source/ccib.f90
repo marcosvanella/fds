@@ -18190,7 +18190,6 @@ ORIENTATION_LOOP: DO IS=1,3
       END SELECT IEC_SELECT
 
       ICF = FCVAR(IIF,JJF,KKF,CC_IDCF,FAXIS)
-      ! Cycle a cut face here when any piece has no link number.
       !IF ( CUT_FACE(ICF)%ALPHA_CF < 0.05_EB ) CYCLE ! Cycle if cut-face size is less than 0.001 cartesian face.
       IF ( CUT_FACE(ICF)%ALPHA_CF > CCVOL_LINK ) THEN ! Large cut-face.
          VEL_GAS     = UF
@@ -27292,6 +27291,10 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             IF (I<IRLO .OR. I>IRHI .OR. J<JRLO .OR. J>JRHI .OR. K<KRLO .OR. K>KRHI) CYCLE
             IREG=IREGMAP(I,J,K)
             IF (IREG<1) CYCLE
+            ! A thin barrier has one entry per side, the second right after the first: take this row's wall.
+            IF (M%FV%FACE%IWC(IFV)/=REGFACE_Z(IREG)%IWC .AND. IREG<M%CC_NREGFACE_Z(X1AXIS)) THEN
+               IF (ALL(REGFACE_Z(IREG+1)%IJK==REGFACE_Z(IREG)%IJK)) IREG=IREG+1
+            ENDIF
             M%FV%FACE%SRC_IREG(IFV) = IREG
             IF (REGFACE_Z(IREG)%FC==0) REGFACE_Z(IREG)%FC = IFV
          ENDDO
@@ -29240,7 +29243,7 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
   IF(ALLOCATED(M%UN_ULNK)) DEALLOCATE(M%UN_ULNK)
   ALLOCATE(M%UN_ULNK(COUNT)); M%UN_ULNK = 0._EB
   IF (N_NOROW>0) THEN
-     WRITE(LU_ERR,'(A,I0,A,I0)') 'ERROR: GET_LINKED_FACE_INDEXES_F: link numbers without a FACE row, NM=', &
+     WRITE(LU_ERR,'(A,I0,A,I0)') 'ERROR: GET_LINKED_FACE_INDEXES_F: faces without a FACE row, NM=', &
         NM,', faces=',N_NOROW
      STOP_STATUS=SETUP_STOP
   ENDIF
@@ -29972,14 +29975,15 @@ ENDIF
 END SUBROUTINE STORE_UNKF_RC
 
 SUBROUTINE STORE_UNKF_CF(ICF,JCF,IL)
-! Write a cut-face piece link number onto its FACE row. No row and IL>0 is an error.
+! Write a cut-face piece link number onto its FACE row. No row stops the linker, including
+! IL=0: an unlinked gas piece is 0, and the link loops index that number with no guard.
 INTEGER, INTENT(IN) :: ICF,JCF,IL
 INTEGER :: IF_
 IF_ = 0
 IF (ALLOCATED(M%CUT_FACE(ICF)%FC)) IF_ = M%CUT_FACE(ICF)%FC(JCF)
 IF (IF_>0) THEN
    FV%FACE%UNKF(IF_) = IL
-ELSEIF (IL>0) THEN
+ELSE
    N_NOROW = N_NOROW+1
 ENDIF
 END SUBROUTINE STORE_UNKF_CF
