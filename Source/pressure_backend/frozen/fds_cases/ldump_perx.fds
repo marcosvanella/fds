@@ -1,0 +1,13 @@
+&HEAD CHID='ldump_perx', TITLE='Pressure loop dump: periodic in x (FISHPAK_BC=0 in x gives LBC=0), fire, obstruction, open top' /
+&MESH IJK=12,8,10, XB=0.0,1.2,0.0,0.8,0.0,1.0 /
+&TIME T_END=0.2 /
+&PRES FISHPAK_BC=0,-1,-1 /
+&DUMP SIG_FIGS=17, DT_HRR=1000., DT_DEVC=1000., DT_SLCF=1000. /
+&REAC FUEL='PROPANE', SOOT_YIELD=0.01 /
+&SURF ID='BURN', HRRPUA=700. /
+&VENT XB=0.4,0.7,0.3,0.5,0.0,0.0, SURF_ID='BURN' /
+&OBST XB=0.0,0.3,0.0,0.2,0.0,0.4 /
+&VENT MB='XMIN', SURF_ID='PERIODIC' /
+&VENT MB='XMAX', SURF_ID='PERIODIC' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+&TAIL /

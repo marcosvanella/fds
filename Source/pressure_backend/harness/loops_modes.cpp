@@ -45,6 +45,7 @@ bool read_case (std::string const& fn, Case& c)
 }
 
 static bool g_debug = false;
+static bool g_eddy_off = false;   // negative control: ignore the synthetic-eddy values of the FDS file (N_EDDY set to 0)
 static bool g_uu_lb0 = false;   // negative control: read the FDS velocity arrays with lower bound 0 (they start at -1)
 struct Stat { long cases = 0, bad_cases = 0; long n = 0, nbad = 0; double max_abs = 0, max_rel = 0; };
 
@@ -145,6 +146,15 @@ void run_l1209 (Case& c, Stat& st, bool vb, std::string const& fn)
         for (int w = 0; w < nw; ++w) {
             PoissonVent& t = vents[w];
             t.pressure_ramp_index = c.at("WV_RAMP").i[w]; t.n_eddy = c.at("WV_NEDDY").i[w]; t.ior = c.at("WV_IOR").i[w]; t.dynamic_pressure = c.at("WV_DYNP").d[w];
+            if (g_eddy_off) t.n_eddy = 0;
+            if (c.count("WV_EDDYV") && t.n_eddy > 0) {
+                // The hook records the one synthetic-eddy value the loop reads for this wall (VT%U_EDDY(J,K), V_EDDY(I,K) or W_EDDY(I,J) by the VENT's IOR).
+                // Rebuild 1x1 views at the wall's own tangential indices, so the selection by the vent's IOR is the loop's.
+                double* slot = &c.at("WV_EDDYV").d[w];
+                const int wi = c.at("W_I").i[w], wj = c.at("W_J").i[w], wk = c.at("W_K").i[w];
+                auto one = [&](int l0, int l1) { F2 f; f.p = slot; f.lo[0] = l0; f.lo[1] = l1; f.n[0] = 1; f.n[1] = 1; return f; };
+                t.u_eddy = one(wj, wk); t.v_eddy = one(wi, wk); t.w_eddy = one(wi, wj);
+            }
         }
     }
     for (int w = 0; w < nw; ++w) {
@@ -198,6 +208,7 @@ int main (int argc, char** argv)
         std::string s = argv[a];
         if (s.rfind("dir=", 0) == 0) dir = s.substr(4);
         else if (s == "uu_lb0=1") g_uu_lb0 = true;
+        else if (s == "eddy_off=1") g_eddy_off = true;
         else if (s.rfind("verbose=", 0) == 0) { vb = s.substr(8) != "0"; g_debug = s.substr(8) == "2"; }
     }
     if (dir.empty()) { std::fprintf(stderr, "usage: pb_fds_loops dir=<case directory> [verbose=1]\n"); return 2; }

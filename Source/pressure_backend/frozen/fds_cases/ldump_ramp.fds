@@ -1,0 +1,13 @@
+&HEAD CHID='ldump_ramp', TITLE='Pressure loop dump: T_BEGIN /= 0; open vents with a pressure ramp (all cells with T_IGN = T_BEGIN, and a vent with SPREAD_RATE so that B1%T_IGN /= T_BEGIN), and an open vent without a ramp' /
+&MESH IJK=10,10,10, XB=0.0,1.0,0.0,1.0,0.0,1.0 /
+&TIME T_BEGIN=0.3, T_END=0.5 /
+&DUMP SIG_FIGS=17, DT_HRR=1000., DT_DEVC=1000., DT_SLCF=1000. /
+&REAC FUEL='PROPANE', SOOT_YIELD=0.01 /
+&SURF ID='BURN', HRRPUA=500. /
+&VENT XB=0.4,0.6,0.4,0.6,0.0,0.0, SURF_ID='BURN' /
+&VENT XB=0.0,1.0,0.0,1.0,1.0,1.0, SURF_ID='OPEN', DYNAMIC_PRESSURE=4.0, PRESSURE_RAMP='PR', XYZ=0.5,0.5,1.0, SPREAD_RATE=2.0 /
+&VENT MB='XMAX', SURF_ID='OPEN', DYNAMIC_PRESSURE=-2.0, PRESSURE_RAMP='PR' /
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&RAMP ID='PR', T=0.0, F=0.0 /
+&RAMP ID='PR', T=1.0, F=1.0 /
+&TAIL /

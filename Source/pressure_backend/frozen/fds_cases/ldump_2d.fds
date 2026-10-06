@@ -1,0 +1,11 @@
+&HEAD CHID='ldump_2d', TITLE='Pressure loop dump: TWO_D (JBAR=1), fire, obstruction, open top and an open side vent' /
+&MESH IJK=16,1,12, XB=0.0,1.6,0.0,0.1,0.0,1.2 /
+&TIME T_END=0.2 /
+&DUMP SIG_FIGS=17, DT_HRR=1000., DT_DEVC=1000., DT_SLCF=1000. /
+&REAC FUEL='PROPANE', SOOT_YIELD=0.01 /
+&SURF ID='BURN', HRRPUA=700. /
+&VENT XB=0.6,0.9,0.0,0.1,0.0,0.0, SURF_ID='BURN' /
+&OBST XB=1.2,1.6,0.0,0.1,0.0,0.4 /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&TAIL /

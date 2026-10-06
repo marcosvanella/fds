@@ -1,0 +1,14 @@
+&HEAD CHID='ldump_dirx', TITLE='Pressure loop dump: Dirichlet low-x face (code 2): partial open vent plus an obstruction and a burner vent on the same face, other faces closed or open top' /
+&MESH IJK=12,10,10, XB=0.0,1.2,0.0,1.0,0.0,1.0 /
+&TIME T_END=0.2 /
+&DUMP SIG_FIGS=17, DT_HRR=1000., DT_DEVC=1000., DT_SLCF=1000. /
+&PRES VELOCITY_TOLERANCE=1.E-9, MAX_PRESSURE_ITERATIONS=10 /
+&REAC FUEL='PROPANE', SOOT_YIELD=0.01 /
+&SURF ID='BURN', HRRPUA=700. /
+&SURF ID='BLOW', VEL=-0.3 /
+&VENT XB=0.5,0.8,0.4,0.6,0.0,0.0, SURF_ID='BURN' /
+&VENT XB=0.0,0.0,0.4,0.9,0.4,0.9, SURF_ID='OPEN' /
+&VENT XB=0.0,0.0,0.1,0.3,0.1,0.3, SURF_ID='BLOW' /
+&OBST XB=0.0,0.2,0.0,0.3,0.4,0.7 /
+&OBST XB=0.0,0.2,0.5,0.8,0.0,0.3 /
+&TAIL /
