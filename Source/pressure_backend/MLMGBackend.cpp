@@ -13,6 +13,13 @@ namespace pb {
 using namespace amrex;
 
 namespace {
+// E1 (docs/pressure/08 section 4.2): MLMG stops on a max-norm rule (|r|_inf / |b|_inf) while the common layer checks a 2-norm, and a
+// V-cycle count is discrete, so a solve that stops "just in time" can end up to ~1.3 times above tol_rel in the checked norm
+// (3 of 24 default solves in docs/pressure/07 section 15.2). Run MLMG to half the requested tolerance, as the HYPRE path runs its
+// Krylov solver to 0.1*tol_rel; `converged` is then judged against the stricter value, never the looser one.
+constexpr double kMlmgTolFactor = 0.5;
+constexpr int kMlmgPolish = 3;          // extra solves of the 2-norm polish (unmasked path)
+
 LinOpBCType lin_bc (BC b)
 {
     switch (b) {
@@ -113,7 +120,9 @@ BackendStatus solve_masked (PressureProblem const& p, PressureOptions const& o, 
     mlmg.setThrowException(true);
     BackendStatus st;
     // MLMG measures the residual against |s|_inf, which contains the Known-cell terms 2 g/dx^2; the common layer measures against |rhs|.
-    // Scale the relative tolerance so that both mean the same thing.
+    // Scale the relative tolerance so that both mean the same thing. E1's half-tol factor is for the unmasked path (max-norm vs 2-norm
+    // mismatch on smooth data); here the nr/ns retarget already maps the caller's tol_rel onto |s|, and stacking 0.5 on top can exhaust
+    // the default 200 V-cycles on multi-component Dirichlet-masked cases whose true residual is already inside the product limit.
     Real rel = Real(o.tol_rel);
     {
         const Real ns = s.norm0(), nr = rhs.norm0();
@@ -152,13 +161,34 @@ public:
         mlmg.setConvergenceNormType(MLMGNormType::bnorm);
         mlmg.setThrowException(true);
         BackendStatus s;
+        const Real tgt = Real(kMlmgTolFactor*o.tol_rel);
+        Real tol = tgt;
+        int iters = 0;
         try {
-            mlmg.solve({&phi}, {&rhs}, Real(o.tol_rel), Real(0.0));
+            mlmg.solve({&phi}, {&rhs}, tol, Real(0.0));
+            iters = mlmg.getNumIters();
             s.converged = true;
+            // 2-norm polish (E1 follow-up): the stopping rule above is a max-norm rule, the common-layer check a 2-norm one; for smooth
+            // periodic data the ratio of the two reaches ~5, so a solve can stop at 1.1e-12..1.4e-12 in the checked norm even at half the
+            // tolerance (periodic 32..96^3, measured). Measure ||b - L phi||_2/||b||_2 once and, if it is above the target, continue from
+            // the current iterate with the max-norm tolerance tightened by the measured ratio (at most kMlmgPolish extra solves).
+            const Real bn2 = rhs.norm2(0);
+            for (int pass = 0; pass < kMlmgPolish && bn2 > Real(0); ++pass) {
+                MultiFab res(p.ba, p.dm, 1, 0);
+                mlmg.compResidual({&res}, {&phi}, {&rhs});
+                const Real r2 = res.norm2(0) / bn2;
+                if (r2 <= tgt) { break; }
+                const Real rmax = res.norm0(0) / rhs.norm0(0);
+                const Real q = (rmax > Real(0)) ? r2 / rmax : Real(1);          // norm ratio, >= 1/sqrt(N) .. sqrt(N)
+                tol = Real(0.8) * tgt / std::max(q, Real(1.0e-3));
+                mlmg.solve({&phi}, {&rhs}, tol, Real(0.0));
+                iters += mlmg.getNumIters();
+            }
         } catch (std::exception const&) {
             s.converged = false;
+            iters += mlmg.getNumIters();
         }
-        s.iterations = mlmg.getNumIters();
+        s.iterations = iters;
         const Real b0 = mlmg.getInitRHS();
         s.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
         return s;
