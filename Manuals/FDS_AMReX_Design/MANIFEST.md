@@ -23,11 +23,11 @@ working area and are not in this repository.
 | `tools/device_runs.toml` | 4561 (4 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/k2_ci_check.py` | 34378 (34 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/kernel_lint.py` | 36341 (35 KiB) |  | not Markdown or CSV | not recorded |
-| `tools/kernel_registry.toml` | 12184 (12 KiB) |  | not Markdown or CSV | not recorded |
+| `tools/kernel_registry.toml` | 13453 (13 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/patches/cmake-fastmath-pin.patch` | 5850 (6 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/patches/ported-gsfv-proposed.toml` | 2945 (3 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/port_kernel_map.py` | 37591 (37 KiB) |  | not Markdown or CSV | not recorded |
-| `tools/ported.toml` | 6615 (6 KiB) |  | not Markdown or CSV | not recorded |
+| `tools/ported.toml` | 6805 (7 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/helpers.py` | 736 (1 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_ci_checks.py` | 8526 (8 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/tests/test_k2_ci_check.py` | 19964 (19 KiB) |  | not Markdown or CSV | not recorded |

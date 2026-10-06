@@ -2,6 +2,8 @@
 
 Owner: AMR Species & Combustion Lead · Status: review record (DRAFT until the owner accepts). Reviewed against FireX `36975d765f`.
 
+**Status note (D-082, D-083).** `UP-0003` is tabled as an upstream patch, see D-083: on the GPU the clip is a hand-written two-pass kernel (K2 style) that must match the unchanged CPU loop, so the requests below for the patch itself (persistent scratch, second patch for the density loop) are no longer queued. `UP-0001` and `UP-0002` are tabled and MP5 is out of scope, see D-082. The review record below is kept as it was written.
+
 ## Patch UP-0003 (`CHECK_MASS_DENSITY` species loop, two-pass split): ACCEPT
 Checked by reading the patch against `Source/mass.f90:868-937` and by a dry-run apply on the FireX tree (applies, hunks offset by 6 lines).
 1. **Scatter order.** Pass 2 visits cells K, J, I and applies the seven statements in the original order, so every `DELTA_RHO_ZZ` element receives its additions in the original order. Pass 1 reads only `RHO_ZZ` and `RHOP`, which neither the original nor the patched scatter modifies, so the stored amounts equal the ones the original computed inline.

@@ -401,6 +401,7 @@ Applies to both kernel styles and to the CPU shim path.
 - Multi-mesh FDS behaves the same way (the code is per mesh).
 
 **Decision: gather rewrite; no exemption or tolerance.** The byte-identical rule for explicit stages (T0 kernel parity, D-022; IR-007) stands.
+- Status note (D-083): on the GPU this is a hand-written two-pass kernel in the K2 style; the original CPU loop stays unchanged and there is no upstream change (`UP-0003` is tabled, see D-083). The kernel must match the CPU loop under the rules of this section.
 - Each cell gathers the contributions it would receive, in FDS's K,J,I scatter order: k-1, j-1, i-1, self, i+1, j+1, k+1. This reproduces the floating-point summation order of single-mesh FDS bitwise.
 - Ghost data: one pre-clip `FillBoundary` only; see "Ghost depth" below.
 - Pass order per stage and level (v0.3.3; p1-findings §13.3), with two host-side OR reductions (in AMReX 26.09 `ParallelAllReduce::Or` takes only a single value, so the packed flag vectors use `ParallelAllReduce::Max` over 0/1 integers):

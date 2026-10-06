@@ -21,6 +21,8 @@ Rules proposed:
 
 ## 2. The `Z_TEMP` pad of patches UP-0001 and UP-0002 under refinement
 
+Status note: `UP-0001` and `UP-0002` are tabled and MP5 is out of scope, see D-082. The text below is kept for the record; the coarse-fine ghost rule in it applies to every limiter.
+
 - The pad matters at **physical-wall faces only** (`mass.f90:147-179` and the `divg.f90` twins): the one-face calls fill three of the four `Z_TEMP` elements, and MP5 reads the fourth (`func.f90:1443-1448`; `Z_TEMP(3)` for A>0, `Z_TEMP(0)` for A<0, and the fifth stencil point is extrapolated from it). The patches pad with 0 so the result is defined.
 - **Do not reuse the wall path at coarse-fine interfaces.** An interface face of a fine box must use real ghost data from the `FillPatch` (coarse-to-fine interpolation), not a padded wall call. With the 4-element stencil `(I-1, I, I+1, I+2)` the box needs **2 ghost layers** for scalars where a limiter other than the default is used, and the same two layers are needed for the default limiter on the high side. Role 3 should confirm that the scalar `FillPatch` uses `ngrow ≥ 2`, and fail at input time if the chosen limiter needs more than the allocated ghost width.
 - Under the D-050 flux overwrite the coarse face flux is replaced by the area-sum of the fine face fluxes, so a pad error at a wall does not propagate across levels. It stays a local, bounded error at the wall, the same as in single-mesh FDS.
