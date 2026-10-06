@@ -308,6 +308,23 @@ int main(int argc, char** argv)
         CHECK(convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n&TRNY ID='T', CC=0.5, PC=0.4 /\n&TAIL /\n", c5, r5));   // no &AMR line: FDS-only input, untouched
     }
 
+    {   // TUNNEL_PRECONDITIONER in AMR mode (D-080 / pressure C2): refused when &AMR is present and TUNNEL_PRECONDITIONER=T; F/absent and no-&AMR accepted
+        Report r1;
+        ConvertResult c1;
+        CHECK(!convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n&PRES TUNNEL_PRECONDITIONER=T /\n&AMR MAX_LEVEL=1, REF_RATIO=2, BLOCKING_FACTOR=2, MAX_GRID_SIZE=32 /\n&TAIL /\n", c1, r1));
+        CHECK(r1.has_error_containing("TUNNEL_PRECONDITIONER=T is not allowed in AMR mode") && r1.has_error_containing("input line 2"));
+        if (!r1.errors.empty()) std::printf("  tunnel refusal text: %s\n", r1.errors[0].c_str());
+        Report r2;
+        ConvertResult c2;
+        CHECK(convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n&PRES TUNNEL_PRECONDITIONER=T /\n&TAIL /\n", c2, r2));   // no &AMR: accepted
+        Report r3;
+        ConvertResult c3;
+        CHECK(convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n&PRES TUNNEL_PRECONDITIONER=F /\n&AMR MAX_LEVEL=0 /\n&TAIL /\n", c3, r3));   // F with &AMR: accepted
+        Report r4;
+        ConvertResult c4;
+        CHECK(convert_input("&MESH IJK=8,8,8, XB=0,1,0,1,0,1 /\n&PRES SOLVER='FFT' /\n&AMR MAX_LEVEL=0 /\n&TAIL /\n", c4, r4));   // absent with &AMR: accepted
+    }
+
     std::printf("test_input_converter: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
