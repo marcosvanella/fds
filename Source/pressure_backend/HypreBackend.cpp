@@ -762,14 +762,17 @@ void HypreSystem::Impl::assemble_masked ()
                             if (edge && ebc[face_index(d, side)] == BC::Periodic) {
                                 look[d] = (side == 0) ? dom.bigEnd(d) : dom.smallEnd(d);
                             }
-                            // Prefer FillBoundary ghost (same-level Gas/Solid/Known).
-                            if (gbx.contains(look)) {
+                            // Same-level only when the wrapped neighbour lies on this level's BoxArray.
+                            // C/F halo ghosts are NOT filled by FillBoundary (no fine box there): trusting
+                            // class/row_id in that halo drops the C/F coupling (partial-fine bug).
+                            IntVect wlook = look;
+                            const bool look_on_level = wrap(l, wlook) && lev[l].ba.contains(wlook);
+                            if (gbx.contains(look) && look_on_level) {
                                 const int kc = cl(look[0], look[1], look[2]);
                                 if (kc == CellGas) {
                                     const long long nid = ida(look[0], look[1], look[2]);
                                     if (nid >= 0) { diag += kk; ent.push_back({nid, -kk}); continue; }
                                     // Covered coarse gas has no row: reflux. Remote uncovered gas: id_gas.
-                                    IntVect wlook = look; wrap(l, wlook);
                                     if (covered_wrapped(l, wlook)) {
                                         // fall through to reflux below (do not continue)
                                     } else {

@@ -103,7 +103,7 @@ Composite masked is built on assembled HYPRE (D3, D4, D6; Q1). MLMG composite ma
   flux is the average of the fine face fluxes, and a fine face with a `Solid` side contributes 0. (e) Average-down over a masked fine
   patch uses gas fine cells only (D5); a covered coarse cell with no gas fine cell is 0.
 * **Why.** Solid and Known cells hold dummy `phi = 0` (identity rows); any stencil reading them corrupts the gas flux next to a corner.
-* **Binds.** `HypreBackend.cpp` assembled composite (`avail`, `bdry_stencil`, C/F rows). MLMG composite with masks stays `NotBuilt`:
+* **Binds.** `HypreBackend.cpp` assembled composite (`avail_gas`, `bdry_stencil_gas`, C/F/reflux; same-level only on-level). MLMG composite with masks stays `NotBuilt`:
   MLMG's C/F interpolation cannot exclude cells per stencil (Q1).
 * **Test.** Two-level case whose patch boundary touches a solid corner and a solid edge: (1) dense numpy reference of the composite
   masked matrix built from the same rule, solution to 1e-9; (2) changing the dummy value in Solid cells (0 versus 1e30 in the input
@@ -154,6 +154,11 @@ Composite masked is built on assembled HYPRE (D3, D4, D6; Q1). MLMG composite ma
 * **Q6 (closed).** Driver pads Known/Solid halo for partial OPEN on a domain face; backend assumes that.
 * **Q7 (open, Architect).** Zone merge / `component_id` field name when an obstruction opens (CONNECTED_ZONES); Role 1 confirms.
 
-## Still open for Architect / Pressure Lead (composite masked)
+## Partial-fine C/F + mask (fixed)
 
-* Partial-fine (non-full) C/F + mask assembly: reflux/C/F with Solid-adjacent faces needs more soak tests beyond `pb_comp_masked` full-fine; corner Solid on an uncovered coarse corridor did not converge in v1 and is tracked as follow-up (full-fine + Q2 InvalidInput covered).
+* **Bug.** Fine C/F halo ghosts are not filled by `FillBoundary` (no fine box there). Trusting `cell_class`/`row_id` in that halo treated the neighbour as same-level and dropped the C/F coupling, so partial-fine masked HYPRE did not converge.
+* **Fix.** Same-level ghost path only when the wrapped neighbour lies on this level's `BoxArray`; otherwise C/F / reflux / physical (D3). Solid-adjacent faces stay coeff 0; Covered coarse gas still refluxes; Known-on-C/F remains InvalidInput (Q2).
+* **Evidence (`pb_comp_masked`, n=16, ratio=2, Dirichlet):**
+  * full-fine + one fine Solid: Ok, 19 iters, residual_check 4.0e-12 / limit 1e-8
+  * partial-fine corridor + Solid at uncovered coarse (1,1,1): Ok, 18 iters, residual_check 8.2e-12 / limit 1e-8
+* **Product.** Composite masked remains assembled-HYPRE only (Q1); MLMG composite+mask stays NotBuilt. Pressure Lead sign-off still required before treating partial-fine as the product default path.

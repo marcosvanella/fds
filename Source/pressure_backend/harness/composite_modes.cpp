@@ -1756,6 +1756,59 @@ void run_comp_masked (ParmParse& pp)
     ccheck(r.residual_checked && r.residual_ok, "comp_masked residual ok");
     ccheck(!r.components.empty(), "comp_masked has components");
     ccheck(r.components[0].singular == false, "Dirichlet outer component is nonsingular");
+    Print() << "  full-fine: iters=" << r.backend_status.iterations
+            << " residual_check=" << r.residual_check << " residual_limit=" << r.residual_limit << "\n";
+
+    // Partial-fine corridor + Solid on uncovered coarse (away from C/F): must converge (C/F soak).
+    {
+        Cfg cc; cc.n = n; cc.nlev = 2; cc.ratio = ratio; cc.mgs = mgs; cc.full = false; cc.set_bc(pb::BC::Dirichlet);
+        Hier hc = build_hier(cc, 0);
+        pb::PressureProblem pc = make_problem(cc, hc);
+        std::vector<std::unique_ptr<iMultiFab>> clsc(2);
+        for (int l = 0; l < 2; ++l) {
+            clsc[l] = std::make_unique<iMultiFab>(hc.ba[l], hc.dm[l], 1, 0);
+            clsc[l]->setVal(pb::CellGas);
+            pc.levels[l].cell_class = clsc[l].get();
+        }
+        // Solid at coarse (1,1,1): outside middle fine patch for n=16 (patch ~[4,11]).
+        IntVect sc(1, 1, 1);
+        for (MFIter mfi(*clsc[0]); mfi.isValid(); ++mfi) {
+            if (mfi.validbox().contains(sc)) { clsc[0]->array(mfi)(1,1,1) = pb::CellSolid; }
+        }
+        for (int l = 0; l < 2; ++l) {
+            hc.rhs[l]->setVal(0.0); hc.phi[l]->setVal(0.0);
+            auto const dx = hc.geom[l].CellSizeArray();
+            auto const plo = hc.geom[l].ProbLoArray();
+            for (MFIter mfi(*hc.rhs[l]); mfi.isValid(); ++mfi) {
+                auto const& rr = hc.rhs[l]->array(mfi);
+                auto const& cl = clsc[l]->const_array(mfi);
+                auto const& u = hc.unc[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (u(i,j,k) == 0 || cl(i,j,k) != pb::CellGas) { return; }
+                    const Real x = plo[0] + (i + Real(0.5))*dx[0];
+                    const Real y = plo[1] + (j + Real(0.5))*dx[1];
+                    const Real z = plo[2] + (k + Real(0.5))*dx[2];
+                    const Real pi = Real(3.14159265358979323846);
+                    const Real ph = std::sin(pi*x)*std::sin(pi*y)*std::sin(pi*z);
+                    rr(i,j,k) = Real(-3)*pi*pi*ph;
+                });
+            }
+        }
+        pb::PressureOptions oc = o; oc.backend = pb::BackendKind::HYPRE; oc.verbose = 0;
+        pb::PressureWorkspace wsc;
+        pb::PressureResult rc = pb::solve_pressure(pc, oc, &wsc);
+        Print() << std::setprecision(6) << "  CORRIDOR status=" << pb::to_string(rc.status)
+                << " iters=" << rc.backend_status.iterations
+                << " true_rel2=" << rc.residual_rel2
+                << " residual_check=" << rc.residual_check
+                << " residual_limit=" << rc.residual_limit
+                << " residual_ok=" << int(rc.residual_ok)
+                << " msg=\"" << rc.message << "\"\n";
+        ccheck(rc.status == pb::Status::Ok, "partial-fine corridor+Solid solve Ok");
+        ccheck(rc.residual_checked && rc.residual_ok, "partial-fine corridor+Solid residual ok");
+        ccheck(rc.backend_status.iterations < int(0.95 * oc.max_iter),
+               "partial-fine corridor iterations not near cap");
+    }
 
     // Q2: Known on a C/F face → InvalidInput (non-full fine patch so a C/F interface exists).
     {
