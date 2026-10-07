@@ -34,7 +34,7 @@ if (TARGET AMReX::amrex AND TARGET MPI::MPI_CXX)
     add_library(fds_rt_driver_objs STATIC ${DRV}/FdsAmr.cpp ${DRV}/Fields.cpp ${DRV}/SideData.cpp ${DRV}/ExactSum.cpp ${DRV}/LevelRegistry.cpp ${DRV}/GhostExchange.cpp)
     target_include_directories(fds_rt_driver_objs PUBLIC ${DRV})
     target_link_libraries(fds_rt_driver_objs PUBLIC AMReX::amrex MPI::MPI_CXX fds_regrid_transport_core)
-    add_library(fds_regrid_transport_amrex STATIC RegridAmrCore.cpp LevelOps.cpp FluxOverrideOps.cpp DriverAdapter.cpp FaceTransfer.cpp TagOps.cpp CellTransfer.cpp PostRegridProjection.cpp rt_tag_kernels.F90)
+    add_library(fds_regrid_transport_amrex STATIC RegridAmrCore.cpp LevelOps.cpp FluxOverrideOps.cpp DriverAdapter.cpp FaceTransfer.cpp TagOps.cpp CellTransfer.cpp PostRegridProjection.cpp IlGhost.cpp rt_tag_kernels.F90)
     set_source_files_properties(rt_tag_kernels.F90 PROPERTIES Fortran_PREPROCESS ON)   # tagging kernels: Fortran, K2 style (ADR-001); the macros of the directives need the preprocessor
     target_include_directories(fds_regrid_transport_amrex PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     # Build-time choice of the tagging kernels (same entry points either way): host loops (default) or the OpenMP target offload variant of rt_tag_kernels.F90.
@@ -169,6 +169,10 @@ if (BUILD_TESTING)
         target_include_directories(test_tag_buffer_large PRIVATE tests ${DRV}/tests)
         add_test(NAME regrid_transport_tag_buffer_large COMMAND test_tag_buffer_large)
         add_test(NAME regrid_transport_tag_buffer_large_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_tag_buffer_large>)
+        # L1251: radiation intensity ghost table (IlGhost.H) against an FDS IIO_R reimplementation, equal level and coarse/fine
+        add_executable(test_il_ghost tests/test_il_ghost.cpp)
+        target_link_libraries(test_il_ghost PRIVATE fds_regrid_transport_amrex)
+        add_test(NAME regrid_transport_il_ghost COMMAND test_il_ghost)
         add_test(NAME regrid_transport_regrid_core_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_regrid_core> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
         set_tests_properties(regrid_transport_regrid_core regrid_transport_regrid_core_np4 regrid_transport_regrid_core_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")   # one thread per rank: the test is small and oversubscribed threads only slow it
 
