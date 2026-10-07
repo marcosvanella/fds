@@ -61,3 +61,19 @@ Overall the split of work in the header fits the driver. What I would change or 
 **5. Who converts the RHS copy, `CommonLayer` loops and `ExactSum`; separate-prefix AMReX CUDA build.** (view)
 - RHS copy (call site in `TimeLoop::solve_poisson`, Fortran to host buffer to `MultiFab`): Role 1, as a `ParallelFor` on the device arena once the divergence arrays are device-resident (WP5 call-site part). `CommonLayer` loops (`apply_operator`, mean removal, residual, pins) and the FFT/MLMG call: Role 2 (they own `pressure_backend`); I will not edit them. `ExactSum` (driver file): Role 1. Suggestion: the fixed-point scheme (integers scaled by a global maximum, order-independent integer sums) is device friendly with 64-bit integer atomics, which would keep the sums bitwise equal between CPU and GPU, better than the fixed-order tree of ruling (c) [VERIFY: 128-bit accumulation needs two 64-bit limbs with carry handling].
 - A separate-prefix AMReX CUDA build with MPI and FFT is acceptable to me for the driver: the driver finds AMReX through `find_package`, so the CPU install stays untouched and the same source commit keeps results comparable. Conditions: the same MPI for AMReX and the FDS Fortran (the plan lists Intel MPI for the CUDA install; the FDS side and the Fortran `mpi` module must be built with that MPI, a separate driver build tree); `AMReX_FFT=ON` (cuFFT); host compile flags without FMA contraction (`-ffp-contract=off`) for the FDS and driver translation units, as the plan's NFR-051 line says; OpenMP is not needed by the driver (threads = 1 in all checks), so OpenMP off is fine [VERIFY: whether the FDS objects are built with `-fopenmp` while AMReX is not]. The exit code 139 at teardown seen in the harness should be understood before the driver is linked (RDC and the Fortran runtime are suspects).
+
+## Architect / Role 2 — masked A-71 Q5 and Q7 (Role 1)
+
+Answers for `pressure_backend/frozen/masked-branch-design.md` Q5 and Q7 (Architect ask 2026-10-06).
+
+### Q5 (D7 layout): omit all-Solid boxes from the pressure BoxArray?
+**Yes**, as a pressure-API extension only.
+- Driver field MultiFabs / LevelRegistry stay on a covering BoxArray (FDS meshes / AMR levels). The pressure problem may take a non-covering `ba`/`dm` that drops boxes with no Gas (and no Known) cell.
+- Contract: Role 1 builds that sparse layout and the covering↔sparse copy for `rhs`/`phi`/`cell_class`/`known_value`/`component_id` (zone ids). Never drop a box that holds any Gas or Known/OPEN cell. Domain-face OPEN still needs the Known pad (Q6) on any kept face.
+- Composite (D3/D4): same omit rule per level once built; covered-mask and C/F faces are defined only on kept boxes.
+
+### Q7 (D2): reuse `component_id` for driver zone ids?
+**Yes.**
+- Contract matches `PressureIface.H`: the field is the driver's FDS pressure-zone id per cell (not the backend's component label). Backend still flood-fills components from the mask; gauge key is (zone, component); a component spanning two zones is `InvalidInput`.
+- Driver merges zone ids when FDS merges zones (`CONNECTED_ZONES`) before each solve, then fills this MultiFab.
+- Prefer a rename to `zone_id` when the composite header is next touched; until then the documented meaning stands.
