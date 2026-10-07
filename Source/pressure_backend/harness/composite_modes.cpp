@@ -558,8 +558,14 @@ void run_comp (ParmParse& pp)
     };
     Err ee = hier_error(c, h, phis, exact_ref, remove_const);
     auto hv = hier_gather(h, c.nlev);
+    std::string nboxes;
+    for (int l = 0; l < c.nlev; ++l) {
+        if (l) { nboxes += ","; }
+        nboxes += std::to_string(h.ba[l].size());
+    }
     Print() << std::setprecision(6) << "COMP n=" << c.n << " nlev=" << c.nlev << " ratio=" << c.ratio << " full=" << full
             << " plane2d=" << plane << " bc=" << bcs << " nranks=" << ParallelDescriptor::NProcs() << " mgs=" << c.mgs
+            << " nboxes=" << nboxes
             << " ncells=" << ncells << " status=" << pb::to_string(r.status) << " iters=" << r.backend_status.iterations
             << " own_res=" << r.backend_status.own_residual << " true_rel2=" << r.residual_rel2
             << " true_relmax=" << r.residual_relmax << " residual_ok=" << (r.residual_ok ? 1 : 0)

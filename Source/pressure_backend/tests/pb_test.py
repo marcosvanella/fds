@@ -2,7 +2,7 @@
 """CTest driver for the pressure backend harness. Parses the harness RESULT/CMP/CHECK lines.
 Subcommands: selector, exactsum, fftmlmg, frozen, decomp, repeat, singular, ulmat, ulmatgauge, meankind,
 residual check: hypresid, rescheck, reslimit, hypresidcomp; masked (A-68: masked single-level MLMG vs a dense numpy reference);
-composite: compconv, compfull, compdecomp, comp3, compgrad, compshape, compmixed, compns2d, compsel, compws (composite two-/three-level
+composite: compconv, compfull, compdecomp, comp3, comp4r3, compgrad, compshape, compmixed, compns2d, compsel, compws (composite two-/three-level
 solves; manufactured solutions, see harness/composite_modes.cpp and frozen/composite-notes.md).
 Exit 0 = pass. ulmat/ulmatgauge/meankind compare against an independent numpy computation that follows FDS
 ULMAT (volume-scaled rows, arithmetic mean removal of F and of X, identity-pin reduced system, rho*volume gauge)."""
@@ -419,6 +419,24 @@ def comp3():
     c, u = comp_lines(out)
     ok(c["status"] == "Ok" and float(c["true_rel2"]) <= EPS_COMP, f"three levels: Ok, true residual {c['true_rel2']} <= eps_H")
     ok(float(u["comp_fine_err_l2"]) < float(u["uni_coarse_err_l2"]), "three levels: finest-level error below the uniform coarse error")
+
+
+def comp4r3():
+    # np=4, nlev=3, multi-box fine (n=32 ratio 2 mgs=8 → fine 32^3 → 64 boxes); decomp vs np=1.
+    base = dict(n=32, nlev=3, ratio=2, mgs=8, plane2d=A.plane, dmkind=2)
+    pre4, pre1 = os.path.join(A.work, "np4"), os.path.join(A.work, "np1")
+    out = comp_run(4, out=pre4, grad=1, **base)
+    c, u = comp_lines(out); print(lines(out, "COMP")[0]); print(lines(out, "UNIFORM")[0])
+    boxes = [int(x) for x in c["nboxes"].split(",")]
+    ok(c["status"] == "Ok" and float(c["true_rel2"]) <= EPS_COMP, f"np=4 nlev=3: Ok, true residual {c['true_rel2']}")
+    ok(boxes[-1] > 1, f"fine level multi-box nboxes={boxes}")
+    ok(float(u["comp_fine_err_l2"]) < float(u["uni_coarse_err_l2"]), "np=4 nlev=3: fine error below uniform coarse")
+    out1 = comp_run(1, out=pre1, uniform=0, **base)
+    c1, _ = comp_lines(out1); print(lines(out1, "COMP")[0])
+    ref, a = np.fromfile(pre1 + "_phi.bin"), np.fromfile(pre4 + "_phi.bin")
+    rel = np.linalg.norm(a - ref) / np.linalg.norm(ref)
+    print(f"DECOMP np=4 vs np=1: rel L2 {rel:.3e}")
+    ok(rel <= EPS_COMP, f"np=4 vs np=1 nlev=3: rel L2 {rel:.2e} <= eps_H")
 
 def compgrad():
     out = comp_run(2, n=32, nlev=2, ratio=A.ratio, mgs=16, plane2d=A.plane, grad=1, uniform=0)
@@ -965,7 +983,7 @@ def hypre160():
 
 {"selector": selector, "exactsum": exactsum, "fftmlmg": fftmlmg, "frozen": frozen, "decomp": decomp,
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
- "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
+ "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
  "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "masked": masked, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:

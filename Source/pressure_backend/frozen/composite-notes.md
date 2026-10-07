@@ -117,7 +117,9 @@ constants of the solve equal to 1e-16 absolute).
 
 Two-level centered patch with ratio 2 and 4 for Neumann/periodic/Dirichlet (order, residual); fine level over the whole
 domain equals the single-level fine solve (1e-14 to 1.5e-13) with coarse = average-down; decomposition independence (1, 2,
-3 ranks, box sizes 32/16/8, SFC/round-robin/knapsack) and bitwise repeatability; three levels; gradient checks (coarse =
+3 ranks, box sizes 32/16/8, SFC/round-robin/knapsack) and bitwise repeatability; three levels; four-rank three-level
+multi-box fine (`pb_comp_4rank_3level_<bc>`, Neumann and periodic: n=32, ratio 2, mgs=8 so the fine 32^3 splits into 64
+boxes, true residual and np=4 vs np=1 dump within eps_H); gradient checks (coarse =
 fine average at C/F faces, divergence consistency, negative control); corner/wrapping/two-patch layouts; mixed
 Neumann/periodic per direction; selector/NotBuilt messages; workspace reuse and rebuild; ns2d_16 hierarchy (16x1x16
 level 0, level 1 refines coarse cells 4..11 in x and z with ratio (2,1,2)).
