@@ -1,7 +1,7 @@
-// TwoLevelRun.H: `fds_amr <case.fds> --two-level-run`: the real two-level run (S14). Level 0 is the FDS case, level 1 a static refined patch made by Role 3's RegridAmrCore
-// (the hierarchy of the Hierarchy / AmrInput code, listener = LevelRegistry, data = RegistryTransfer), bound through TimeLoop::bind_level; the time loop runs the composite step
-// (composite pressure solve, interface flux overwrite, face average-down) and the post-regrid projection (D-063, Role 3's PostRegridProjection with the pressure_backend composite solver)
-// makes the initial two-level velocity satisfy div u = D.
+// TwoLevelRun.H: `fds_amr <case.fds> --two-level-run`: multi-level run (S14 / D-053). Level 0 is the FDS case; levels 1..max_level are static nested refined patches made by Role 3's
+// RegridAmrCore (Hierarchy / AmrInput, listener = LevelRegistry, data = RegistryTransfer), bound through TimeLoop::bind_level; the time loop runs the composite step (Role 2
+// PressureIface over all bound levels, interface flux overwrite, face average-down) and the post-regrid projection (D-063) makes the initial hierarchy velocity satisfy div u = D.
+// Default max_level = 1 (two levels, as before). With --levels 3 (max_level = 2) a nested inner patch (patch2) is tagged on level 1.
 #ifndef FDS_TWOLEVELRUN_H_
 #define FDS_TWOLEVELRUN_H_
 
@@ -14,9 +14,11 @@ namespace fdsamr {
 
 struct TwoLevelOptions {
     int steps = 20;
-    int ratio = 2;                   // refinement ratio in the directions with more than one cell
-    int patch[4] = {4, 11, 4, 11};   // coarse cells of the fine patch: x lo, x hi, z lo, z hi (y: the whole domain)
-    int maxsize = 16;                // MAX_GRID_SIZE of level 1 (fine cells)
+    int max_level = 1;               // finest level index (1 = two levels; 2 = three levels). Levels are bound 1..max_level.
+    int ratio = 2;                   // refinement ratio in the directions with more than one cell (same at every level)
+    int patch[4] = {4, 11, 4, 11};   // level-0 cells tagged to create level 1: x lo, x hi, z lo, z hi (y: the whole domain)
+    int patch2[4] = {6, 9, 6, 9};    // level-0 cells of the nested region tagged on levels >= 1 (must lie inside patch); used when max_level >= 2
+    int maxsize = 16;                // MAX_GRID_SIZE of fine levels (fine cells)
     int blocking = 4;                // BLOCKING_FACTOR
     std::string projection = "AUTO"; // POST_REGRID_PROJECTION of the initial projection: ON / AUTO / OFF
     bool overwrite = true;           // interface flux overwrite
@@ -24,9 +26,11 @@ struct TwoLevelOptions {
     std::string chid = "two_level";
     int log_every = 1;
     int boundary_test = 0;           // 1: call stage_boundary(1,3) and (1,6) on the bound fine level and check level 0 is untouched; 2: same with the pre-S14.1 level-0-only guard (must stop the run)
+    bool bind_only = false;          // true: build hierarchy, bind all levels, report layout, skip advance (registry/bind gate when a full step is not wanted)
 };
 
 // Returns the number of failed checks (0 = completed). Prints one line per step: composite mass, drift, max |div u - D| by level.
+// With o.max_level >= 2 the same path builds and binds three or more levels (D-053).
 int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLevelOptions& o);
 
 }  // namespace fdsamr

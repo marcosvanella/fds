@@ -764,9 +764,33 @@ long test_levels(int nranks)
         amrex::ParallelAllReduce::Sum(n, amrex::ParallelContext::CommunicatorSub());
         CHECK_MSG(n > 0 && bad == 0, "fill_initial_level: " + std::to_string(bad) + " of " + std::to_string(n) + " values differ from the direct evaluation at cell and face centres");
     }
-    reg.clear_level(1);
-    CHECK_MSG(reg.num_levels() == 1 && !reg.has_level(1) && reg.covered_mask(0) == nullptr && reg.n_clear == 2, "clear_level(1) removes the level and the covered mask below it");
-    return fdstest::report("levels (S9: registry make/remake/clear, covered mask, layout SideData, uncovered exact sums; ranks as launched)");
+    // D-053: a third level (level 2) on top of level 1 — registry stacks, covered masks of both parents, exact hierarchy sum
+    {
+        fdsrt::LevelLayout f2b = fine_layout(2);
+        reg.clear_level(1);
+        reg.make_level(f2b);
+        fdsrt::LevelLayout l2;
+        l2.level = 2; l2.ref_ratio_from_parent = rr;
+        amrex::Box fdom = amrex::refine(reg.level(1).geom.Domain(), rr);
+        amrex::RealBox rb(l0.geom.ProbLo(), l0.geom.ProbHi());
+        amrex::Array<int, 3> per{l0.dom.periodic[0], l0.dom.periodic[1], l0.dom.periodic[2]};
+        l2.geom.define(fdom, rb, 0, per);
+        // nested fine patch: fine cells of level 1's lower-left quarter, refined once more (ratio 2) → level-2 boxes covering that region
+        amrex::BoxList bl;
+        bl.push_back(amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(15, 7, 15)));
+        l2.ba.define(bl);
+        l2.dm.define(l2.ba);
+        reg.make_level(l2);
+        CHECK_MSG(reg.num_levels() == 3 && reg.has_level(2), "make_level(2): three levels in the registry");
+        CHECK_MSG(reg.covered_mask(0) != nullptr && reg.covered_mask(1) != nullptr && reg.covered_mask(2) == nullptr, "covered masks: L0 and L1 have them, finest has none");
+        CHECK_MSG(reg.level(2).ref_ratio_from_parent == rr && std::abs(reg.level(2).dx[0] - 0.25 * l0.dx[0]) < 1e-15, "level 2 cell size is 1/4 of level 0");
+        CHECK_MSG(reg.fields(2).has("RHO") && reg.fields(2).has("RSUM") && reg.fields(2).has("H"), "level 2 Fields carry the stage arrays");
+        reg.clear_level(2);
+        CHECK_MSG(reg.num_levels() == 2 && !reg.has_level(2) && reg.covered_mask(1) == nullptr, "clear_level(2) drops the finest and its parent's covered mask");
+        reg.clear_level(1);
+    }
+    CHECK_MSG(reg.num_levels() == 1 && !reg.has_level(1) && reg.covered_mask(0) == nullptr, "back to level 0 only");
+    return fdstest::report("levels (S9/D-053: registry make/remake/clear through level 2, covered mask, layout SideData, uncovered exact sums; ranks as launched)");
 }
 
 // S9 thin-direction check: FDS pressure codes -> pb::BC strings (PressureBcMap.H). amrex::FFT::Poisson ignores a one-cell direction, so a Dirichlet face there must not be passed on.

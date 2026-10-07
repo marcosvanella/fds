@@ -84,16 +84,25 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     probe("entry");
     const amrex::Box dom = l0.geom.Domain();
 
-    // ---- the hierarchy: &AMR and &AMR_REGION text -> AmrParams, the level-0 meshes -> Hierarchy -> RegridAmrCore; level 1 is made by the first regrid_dynamic (the tag function tags the patch)
+    // ---- the hierarchy: &AMR / &AMR_REGION -> AmrParams, level-0 meshes -> Hierarchy -> RegridAmrCore; levels 1..max_level by regrid_dynamic (nested tags)
+    if (o.max_level < 1 || o.max_level > 8) { amrex::Print() << "MULTI-LEVEL: max_level must be 1..8, got " << o.max_level << "\n"; return 1; }
+    const char* tag = (o.max_level == 1) ? "TWO-LEVEL" : "MULTI-LEVEL";
     amrex::IntVect rr(o.ratio, o.ratio, o.ratio);
     for (int d = 0; d < 3; ++d) if (dom.length(d) == 1) rr[d] = 1;
     const int plo[3] = {o.patch[0], dom.smallEnd(1), o.patch[2]}, phi_[3] = {o.patch[1], dom.bigEnd(1), o.patch[3]};
     amrex::Box patch(amrex::IntVect(plo[0], plo[1], plo[2]), amrex::IntVect(phi_[0], phi_[1], phi_[2]));
+    const int p2lo[3] = {o.patch2[0], dom.smallEnd(1), o.patch2[2]}, p2hi[3] = {o.patch2[1], dom.bigEnd(1), o.patch2[3]};
+    amrex::Box patch2(amrex::IntVect(p2lo[0], p2lo[1], p2lo[2]), amrex::IntVect(p2hi[0], p2hi[1], p2hi[2]));
+    if (o.max_level >= 2 && !patch.contains(patch2)) {
+        amrex::Print() << tag << ": patch2 must lie inside patch (level-0 cells)\n";
+        return 1;
+    }
     std::ostringstream amr;
-    amr << "&AMR MAX_LEVEL=1, REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=0, POST_REGRID_PROJECTION='" << o.projection << "' /\n";
+    amr << "&AMR MAX_LEVEL=" << o.max_level << ", REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize
+        << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=0, POST_REGRID_PROJECTION='" << o.projection << "' /\n";
     amr << std::setprecision(17) << "&AMR_REGION XB=";
     for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
-    amr << ", LEVEL=1 /\n";
+    amr << ", LEVEL=" << o.max_level << " /\n";
     fdsrt::Report rep;
     fdsrt::AmrParams ap = fdsrt::parse_amr_params(amr.str(), rep);
     std::vector<fdsrt::MeshInput> meshes;
@@ -107,14 +116,13 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     std::array<bool, 3> per{l0.dom.periodic[0] != 0, l0.dom.periodic[1] != 0, l0.dom.periodic[2] != 0};
     fdsrt::Hierarchy h;
     if (!rep.ok() || !fdsrt::build_hierarchy_from_meshes(meshes, ap, per, h, rep) || !rep.ok()) {
-        for (const auto& e : rep.errors) amrex::Print() << "TWO-LEVEL hierarchy error: " << e << "\n";
+        for (const auto& e : rep.errors) amrex::Print() << tag << " hierarchy error: " << e << "\n";
         return 1;
     }
-    for (const auto& w : rep.warnings) amrex::Print() << "TWO-LEVEL hierarchy warning: " << w << "\n";
+    for (const auto& w : rep.warnings) amrex::Print() << tag << " hierarchy warning: " << w << "\n";
     fdsrt::RegridAmrCore core(h, ap);
     RegistryTransfer tr(reg, l0.dom.n_tracked);
-    // The stage arrays a regrid does not transfer (D, DS, RSUM, MU, KRES, H, HS) of a new fine level: the parent cell value (piecewise constant). D is the projection target of the first regrid; RSUM, MU,
-    // KRES are the equation-of-state and transport terms the first DIVERGENCE_PART_1 reads before the density update (which does not run in the first cycle, ICYC<=1) rebuilds them.
+    // Stage arrays a regrid does not transfer (D, DS, RSUM, MU, KRES, H, HS) of a new fine level: parent cell value (piecewise constant), any level >= 1 (D-053).
     tr.derive = [&](int level) {
         if (level < 1) return;
         const Level& lf = reg.level(level);
@@ -133,18 +141,24 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
     };
     core.set_data_transfer(&tr);
+    // Nested tags: level 0 tags `patch` (creates level 1); levels 1..max_level-1 tag the refined image of `patch2` (creates levels 2..max_level).
     core.set_tag_function([&](int lev, amrex::TagBoxArray& tags, amrex::Real) {
-        if (lev != 0) return;
+        if (lev >= o.max_level) return;
+        amrex::IntVect cum(1, 1, 1);
+        for (int l = 0; l < lev; ++l) for (int d = 0; d < 3; ++d) cum[d] *= rr[d];
+        const amrex::Box src = (lev == 0) ? patch : patch2;
+        amrex::Box tagbox(amrex::IntVect(src.smallEnd(0) * cum[0], src.smallEnd(1) * cum[1], src.smallEnd(2) * cum[2]),
+                          amrex::IntVect(src.bigEnd(0) * cum[0] + cum[0] - 1, src.bigEnd(1) * cum[1] + cum[1] - 1, src.bigEnd(2) * cum[2] + cum[2] - 1));
         for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
             auto a = tags.array(mfi);
-            const amrex::Box b = mfi.validbox() & patch;
+            const amrex::Box b = mfi.validbox() & tagbox;
             if (b.ok()) amrex::LoopOnCpu(b, [&](int i, int j, int k) { a(i, j, k) = amrex::TagBox::SET; });
         }
     });
     core.init_static(reg, false, fdsrt::RegridAmrCore::DmFn(), &l0.dm);
     probe("after init_static");
 
-    // ---- level 0 alone: one corrector-form pass for the D of the initial state (the target of the projection and the parent value of the new level's D)
+    // ---- level 0 alone: one corrector-form pass for the D of the initial state (projection target and parent value of new levels' D)
     loop.set_state(0.0, dt_setup, 0);
     probe("before first prime");
     loop.prime_levels();
@@ -155,22 +169,37 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     pst.D = [&](int l) { return &reg.fields(l)["D"]; };
     pst.options.accept_abs = 1.0e-9;
     fdsrt::install_post_regrid_projection(core, reg, pst);   // D-063: the hook of RegridAmrCore::regrid_dynamic
-    core.regrid_dynamic(0.0);
+    // One AmrCore::regrid grows at most one new fine level; repeat until max_level (or stuck).
+    for (int pass = 0; pass < o.max_level; ++pass) {
+        core.regrid_dynamic(0.0);
+        if (core.finestLevel() >= o.max_level) break;
+        if (pass > 0 && !core.last_outcome().changed) break;
+    }
     probe("after regrid_dynamic");
     const int finest = core.finestLevel();
-    if (finest != 1) { amrex::Print() << "TWO-LEVEL: expected one fine level, got finest level " << finest << "\n"; return 1; }
-    amrex::Print() << "TWO-LEVEL regrid_dynamic: changed " << core.last_outcome().changed << ", new cells " << core.last_outcome().new_cells << ", retained " << core.last_outcome().retained_cells
+    if (finest != o.max_level) {
+        amrex::Print() << tag << ": expected finest level " << o.max_level << ", got " << finest << " (tagging / blocking / region)\n";
+        return 1;
+    }
+    amrex::Print() << tag << " regrid_dynamic: changed " << core.last_outcome().changed << ", new cells " << core.last_outcome().new_cells << ", retained " << core.last_outcome().retained_cells
                    << ", post-regrid hook calls " << pst.calls;
     if (pst.calls > 0) amrex::Print() << " (max|div u - D| before " << pst.last.div_before << ", after " << pst.last.div_after << ", accepted " << pst.last.accepted << ")";
     amrex::Print() << "\n";
-    for (int l = 1; l <= finest; ++l) loop.bind_level(l);
+    for (int l = 1; l <= finest; ++l) loop.bind_level(l);   // mesh offset + derive of parent stage arrays already done by RegistryTransfer::derive at make_level
     fdsrt::CfHookStats cfs;
     fdsrt::install_cf_ghost_hooks(loop, finest, fdsrt::ThermoProvider(), &cfs);
     loop.set_flux_overwrite(o.overwrite);
     probe("after bind/hooks");
-    amrex::Print() << "TWO-LEVEL: level 1 = " << reg.level(1).ba.size() << " box(es), " << reg.level(1).ba.numPts() << " cells, ratio (" << rr[0] << "," << rr[1] << "," << rr[2] << "), blocking factor "
-                   << o.blocking << ", flux overwrite " << (o.overwrite ? "on" : "off") << ", projection " << o.projection << "\n";
+    for (int l = 1; l <= finest; ++l)
+        amrex::Print() << tag << ": level " << l << " = " << reg.level(l).ba.size() << " box(es), " << reg.level(l).ba.numPts() << " cells, ratio from parent ("
+                       << reg.level(l).ref_ratio_from_parent[0] << "," << reg.level(l).ref_ratio_from_parent[1] << "," << reg.level(l).ref_ratio_from_parent[2] << ")\n";
+    amrex::Print() << tag << ": levels 0.." << finest << ", blocking " << o.blocking << ", flux overwrite " << (o.overwrite ? "on" : "off") << ", projection " << o.projection
+                   << ", bind_only " << (o.bind_only ? "yes" : "no") << "\n";
     const int nl = finest + 1;
+    if (o.bind_only) {
+        amrex::Print() << tag << " BIND-ONLY PASS: registry has " << reg.num_levels() << " level(s), TimeLoop bound " << loop.num_levels() << "\n";
+        return (reg.num_levels() == nl && loop.num_levels() == nl) ? 0 : 1;
+    }
     if (o.boundary_test != 0) {
         // stage_boundary(1,3) and (1,6): the boundary routines FDS runs after the exchanges of the predictor and the corrector, on the bound fine level (fds_p_save_uvw on a fine box number, and with
         // FDSTL_SKIPAFT=0 also fill_omesh / VELOCITY_BC). Test 2 restores the pre-S14.1 guard (level-0 numbers only): the call must then stop the run. Fine-level calls must leave level 0 alone.
@@ -212,7 +241,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         fdsrt::ProjectionOptions po = pst.options;
         po.enabled = (o.projection != "OFF");
         const fdsrt::ProjectionReport pr = fdsrt::project_after_regrid(lv, &solver, po);
-        amrex::Print() << "TWO-LEVEL initial projection (" << o.projection << "): ran " << pr.ran << " solved " << pr.solved << " max|div u - D| before " << pr.div_before << " after " << pr.div_after
+        amrex::Print() << tag << " initial projection (" << o.projection << "): ran " << pr.ran << " solved " << pr.solved << " max|div u - D| before " << pr.div_before << " after " << pr.div_after
                        << " (level 0 " << (pr.div_after_level.empty() ? 0.0 : pr.div_after_level[0]) << ", level 1 " << (pr.div_after_level.size() > 1 ? pr.div_after_level[1] : 0.0) << "), accepted " << pr.accepted
                        << ", rhs mean/|rhs| " << pr.rhs_sum_rel << ", solver " << pr.solver << "\n";
         if (po.enabled && pr.ran && pr.solved) {
@@ -223,18 +252,18 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             }
             loop.prime_levels();   // ghost faces of the projected velocity, D of the projected state
         }
-        if (po.enabled && pr.ran && !pr.accepted) { ++fails; amrex::Print() << "TWO-LEVEL: the initial projection was not accepted\n"; }
+        if (po.enabled && pr.ran && !pr.accepted) { ++fails; amrex::Print() << tag << ": the initial projection was not accepted\n"; }
     }
 
     // ---- the run
     const std::vector<double> m0 = composite_mass(reg, nl, ns);
-    std::string logname = o.outdir + "/" + o.chid + "_two_level.csv";
+    std::string logname = o.outdir + "/" + o.chid + "_multi_level.csv";
     std::FILE* lf = amrex::ParallelDescriptor::IOProcessor() ? std::fopen(logname.c_str(), "w") : nullptr;
-    if (lf) std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax,div_l0,div_l1,removed_rel\n");
+    if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel\n"); }
     double worst_mass = 0.0, worst_div = 0.0;
     std::vector<double> bylev;
     for (int s = 1; s <= o.steps; ++s) {
-        if (!loop.advance()) { amrex::Print() << "TWO-LEVEL: STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
+        if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         const std::vector<double> m = composite_mass(reg, nl, ns);
         const double dm = (m[0] - m0[0]) / m0[0];
         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl);
@@ -242,21 +271,28 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         worst_mass = std::max(worst_mass, std::abs(dm));
         worst_div = std::max(worst_div, dv);
         const double dts = loop.steps().empty() ? 0.0 : loop.steps().back().dt;
-        if (lf) std::fprintf(lf, "%d,%.9g,%.9g,%.17g,%.6e,%.6e,%.6e,%.6e,%.3e\n", s, loop.time(), dts, m[0], dm, dv, bylev[0], bylev.size() > 1 ? bylev[1] : 0.0, loop.composite_report().removed_rel);
-        if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps))
-            amrex::Print() << "TWO-LEVEL step " << s << " t " << loop.time() << " dt " << dts << " composite mass change " << dm << " max|div u - D| " << dv << " (L0 " << bylev[0] << ", L1 " << (bylev.size() > 1 ? bylev[1] : 0.0) << ")\n";
+        if (lf) {
+            std::fprintf(lf, "%d,%.9g,%.9g,%.17g,%.6e,%.6e", s, loop.time(), dts, m[0], dm, dv);
+            for (int l = 0; l < nl; ++l) std::fprintf(lf, ",%.6e", l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
+            std::fprintf(lf, ",%.3e\n", loop.composite_report().removed_rel);
+        }
+        if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps)) {
+            amrex::Print() << tag << " step " << s << " t " << loop.time() << " dt " << dts << " composite mass change " << dm << " max|div u - D| " << dv;
+            for (int l = 0; l < nl; ++l) amrex::Print() << " L" << l << " " << (l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
+            amrex::Print() << "\n";
+        }
     }
     if (lf) std::fclose(lf);
     const std::vector<double> m1 = composite_mass(reg, nl, ns);
     const fdsamr::TimeLoop::CompositeReport& cr = loop.composite_report();
-    amrex::Print() << "TWO-LEVEL RESULT steps " << loop.steps().size() << " composite mass " << m0[0] << " -> " << m1[0] << " relative change " << (m1[0] - m0[0]) / m0[0] << " (worst over steps " << worst_mass << ")\n";
+    amrex::Print() << tag << " RESULT steps " << loop.steps().size() << " composite mass " << m0[0] << " -> " << m1[0] << " relative change " << (m1[0] - m0[0]) / m0[0] << " (worst over steps " << worst_mass << ")\n";
     for (int n = 0; n < ns; ++n)
-        if (std::abs(m0[1 + n]) > 0.0) amrex::Print() << "TWO-LEVEL RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " relative change " << (m1[1 + n] - m0[1 + n]) / m0[1 + n] << "\n";
-    amrex::Print() << "TWO-LEVEL RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";
-    amrex::Print() << "TWO-LEVEL RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
+        if (std::abs(m0[1 + n]) > 0.0) amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " relative change " << (m1[1 + n] - m0[1 + n]) / m0[1 + n] << "\n";
+    amrex::Print() << tag << " RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";
+    amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
                    << ", fine H ghost cells set " << cr.h_ghost_cells << "\n";
-    if (cr.res_checked > 0) amrex::Print() << "TWO-LEVEL RESULT pressure residual check: " << cr.res_checked << " solves checked, largest residual " << cr.res_check_max << ", largest limit " << cr.res_limit_max << " (round-off floor " << cr.res_floor_max << "), " << cr.res_failed << " above the limit\n";
-    amrex::Print() << "TWO-LEVEL RESULT cf scalar ghost hook: calls " << cfs.calls << ", fine ghost cells " << cfs.fine_ghost_cells << ", covered cells " << cfs.covered_cells << ", conflicts " << cfs.conflicts << "\n";
+    if (cr.res_checked > 0) amrex::Print() << tag << " RESULT pressure residual check: " << cr.res_checked << " solves checked, largest residual " << cr.res_check_max << ", largest limit " << cr.res_limit_max << " (round-off floor " << cr.res_floor_max << "), " << cr.res_failed << " above the limit\n";
+    amrex::Print() << tag << " RESULT cf scalar ghost hook: calls " << cfs.calls << ", fine ghost cells " << cfs.fine_ghost_cells << ", covered cells " << cfs.covered_cells << ", conflicts " << cfs.conflicts << "\n";
     return fails;
 }
 

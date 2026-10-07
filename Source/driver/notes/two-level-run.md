@@ -69,3 +69,7 @@ max|div u - D| over uncovered cells: the worst-over-steps value is 1.436 in all 
 `PRESSURE_ITERATIONS` is not iterated; the single-level driver run of `blob_32` shows the same large error, so it is not a two-level effect) and does not depend on the
 overwrite. The last step is the comparison that matters: np 1 0.633 (two-level) vs 0.623 (REF), np 4 0.664 vs 0.709. The overwrite changes conservation
 (round-off versus 1e-3 to 6e-2) and not the divergence error, so the two numbers are reported together.
+
+## Three or more levels
+See `notes/three-level-run.md` (D-053): `--two-level-run --levels 3` builds and binds a nested hierarchy; composite solve uses all bound levels.
+
