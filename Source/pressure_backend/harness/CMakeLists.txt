@@ -29,7 +29,7 @@ endif()
 set(PB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_library(pressure_backend STATIC
   ${PB_DIR}/CommonLayer.cpp ${PB_DIR}/PressureIface.cpp ${PB_DIR}/FFTBackend.cpp ${PB_DIR}/MLMGBackend.cpp
-  ${PB_DIR}/CompositeSolve.cpp ${PB_DIR}/HypreBackend.cpp ${PB_DIR}/FdsPressureLoops.cpp)
+  ${PB_DIR}/CompositeSolve.cpp ${PB_DIR}/CompositeMask.cpp ${PB_DIR}/HypreBackend.cpp ${PB_DIR}/FdsPressureLoops.cpp)
 # host translations of FDS pressure-area loops: bitwise against FDS, so no FMA contraction in that file
 set_source_files_properties(${PB_DIR}/FdsPressureLoops.cpp PROPERTIES COMPILE_OPTIONS -ffp-contract=off)
 target_include_directories(pressure_backend PUBLIC ${PB_DIR})
@@ -52,7 +52,7 @@ include(${PB_DIR}/tests/m5_fds_loops.cmake)   # pb_fds_loops, mutants and pb_fds
 # but does not define the macro, so it must compile to an empty object. No PB_WITH_HYPRE here on purpose (not linked to the pressure_backend target).
 add_library(pb_nohypre_obj OBJECT
   ${PB_DIR}/CommonLayer.cpp ${PB_DIR}/PressureIface.cpp ${PB_DIR}/FFTBackend.cpp ${PB_DIR}/MLMGBackend.cpp ${PB_DIR}/CompositeSolve.cpp
-  ${PB_DIR}/HypreBackend.cpp)
+  ${PB_DIR}/CompositeMask.cpp ${PB_DIR}/HypreBackend.cpp)
 target_include_directories(pb_nohypre_obj PUBLIC ${PB_DIR})
 target_link_libraries(pb_nohypre_obj PUBLIC AMReX::amrex)
 add_executable(pb_nohypre_check nohypre_check.cpp $<TARGET_OBJECTS:pb_nohypre_obj>)

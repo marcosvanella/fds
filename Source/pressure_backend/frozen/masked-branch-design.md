@@ -2,8 +2,7 @@
 
 Companion to `masked-notes.md` (operator, classes, MLMG and assembled-HYPRE realisation). For each request of the review: what is decided, why, which
 code it binds, which test proves it, and its status. Single level + MLMG is built (D1, D2, D5, D7, D8). Single-level assembled HYPRE masked is built (D6).
-Composite masked is not built: D3 and D4 are the rules for that path (Q1: assembled HYPRE only). Open questions for the Architect / Pressure Lead are listed
-at the end (Q1 to Q7).
+Composite masked is built on assembled HYPRE (D3, D4, D6; Q1). MLMG composite masked stays NotBuilt. Closed decisions Q1–Q6 are recorded below; Q7 remains for the Architect.
 
 ## D1. Component labels are cached in the workspace (built: a2a4906647, copy-free A-71)
 
@@ -93,7 +92,7 @@ at the end (Q1 to Q7).
   end-to-end chain (flip the normal velocity, `g` switches between `KRES` and `H0`, `H` changes) is a driver integration test (Role 1).
   UGLMAT face placement stays `[VERIFY]` (Q3). Partial OPEN vents on a bounding-box face: Q6.
 
-## D3. Composite masked: Solid and Known cells never enter a C/F interpolation stencil (design; single-level face coeff 0 built in D6)
+## D3. Composite masked: Solid and Known cells never enter a C/F interpolation stencil (built)
 
 * **Rule.** (a) A coarse cell is usable in a C/F interpolation stencil only if it is uncovered `Gas`. The sliding-parabola stencil
   (`HypreBackend.cpp` `bdry_stencil`, the AMReX `interpbndrydata_o3` form) already drops to a one-sided or constant form when a tangential
@@ -110,7 +109,7 @@ at the end (Q1 to Q7).
   masked matrix built from the same rule, solution to 1e-9; (2) changing the dummy value in Solid cells (0 versus 1e30 in the input
   `phi`) changes nothing bitwise; (3) true composite residual inside the limit.
 
-## D4. Composite components (design for A-68)
+## D4. Composite components (built)
 
 * **Rule.** A component is a set of uncovered gas cells of all levels connected by same-level faces with coefficient /= 0 and by C/F
   faces between an uncovered coarse gas cell and an uncovered fine gas cell (fine side Gas and coarse side Gas, D3 b). Covered cells are
@@ -142,26 +141,19 @@ at the end (Q1 to Q7).
 * **Binds.** `HypreBackend.cpp` (`MaskedHypre`: gas-only assembly, pin rows), `PressureIface.H` `BackendStatus::pins`, `CommonLayer.cpp`
   `residual_sums` / `evaluate_residual`, `CompositeSolve.cpp` residual.
 * **Tests.** `pb_masked` HYPRE rows on the six small cases vs MLMG; sealed2: two pins reported, residual excludes both; `max_pins=1` warns (singular).
-* **Status.** Built for single level. Composite masked not in this commit (Q1).
+* **Status.** Built for single level and composite (multi-pin constructor on `HypreSystem`).
 * **D-091.** Masked single-level `Auto` → HYPRE (Architect accept; A-56). Explicit MLMG override kept.
 
-## Open questions (Architect / Pressure Lead)
+## Closed decisions (Q1–Q6) and remaining open
 
-* **Q1 (D3, Pressure Lead).** MLMG composite with masks cannot keep Solid coarse cells out of its C/F interpolation per stencil; the
-  only public knob (`setInterpBndryHalfWidth`) lowers the order everywhere. Proposal: composite masked goes through the assembled HYPRE
-  system only; MLMG composite masked stays `NotBuilt`. Accept?
-* **Q2 (D3).** Known (OPEN vent) cells at a C/F interface are refused in the first composite version (regrid keeps vents inside one
-  level). Acceptable, or must vents straddle levels?
-* **Q3 (D8).** Doc 04 `[VERIFY]`: does UGLMAT put the OPEN value on the face (linear ghost)? The backend does. Needs the Pressure Lead's
-  reading of the UGLMAT source.
-* **Q4 (D7).** Stairwell product solve (18.76 M covering cells, plus about 12 GMRES vectors) not run: the shared box has about 5 GB free
-  under load ~40. Needs a larger quiet machine, or Q5.
-* **Q5 (D7, layout).** The study's fast rows dropped boxes with no gas cell (hallD: 84 boxes). The product API requires a covering
-  BoxArray; allowing a non-covering `ba` (cells outside are `Solid`) would cut the stairwell from 18.8 M cells of storage and work toward
-  its 1.64 M gas cells. Accept as an API extension (Role 1 reviews the interface)?
-* **Q6 (D8, Architect).** A partial OPEN vent on a bounding-box face (rest of the face a wall) cannot be expressed: a domain face has one
-  BC type. Options: the driver pads that face with one Known/Solid layer (as `masked_geo case=stairwell` does), or a per-cell face type.
-  Which one?
-* **Q7 (D2, Architect).** FDS merges zones when an obstruction opens (CONNECTED_ZONES); D2 makes a component spanning two zones an
-  error. The driver must merge zone ids before the solve. `component_id` was repurposed as the zone id; Role 1 to confirm the field
-  name and meaning.
+* **Q1 (closed).** Composite masked → assembled HYPRE only; MLMG composite masked stays `NotBuilt` (clear selector error).
+* **Q2 (closed).** Known (OPEN) on a C/F face is `InvalidInput` in v1 (vents stay inside one level).
+* **Q3 (closed, doc).** UGLMAT OPEN face-linear β=2; backend Known handling already matches. Lead reading recorded as accept.
+* **Q4.** Stairwell product solve still not run on the shared box (memory); not blocking this path after D-091 HYPRE default.
+* **Q5 (open, Role 1).** Covering↔sparse BoxArray API; do not block backend. Sparse ba/dm OK later.
+* **Q6 (closed).** Driver pads Known/Solid halo for partial OPEN on a domain face; backend assumes that.
+* **Q7 (open, Architect).** Zone merge / `component_id` field name when an obstruction opens (CONNECTED_ZONES); Role 1 confirms.
+
+## Still open for Architect / Pressure Lead (composite masked)
+
+* Partial-fine (non-full) C/F + mask assembly: reflux/C/F with Solid-adjacent faces needs more soak tests beyond `pb_comp_masked` full-fine; corner Solid on an uncovered coarse corridor did not converge in v1 and is tracked as follow-up (full-fine + Q2 InvalidInput covered).

@@ -72,6 +72,9 @@ set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_C
 if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeSolve.cpp)
     target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeSolve.cpp)
 endif()
+if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeMask.cpp)
+    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeMask.cpp)
+endif()
 # Role 2's HYPRE backend is behind PB_WITH_HYPRE (pressure_backend/README.md, "Build options"). The driver does not define it and does not compile HypreBackend.cpp: no HYPRE symbol is referenced, no link stub is needed.
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
 # Role 3 driver-level end-to-end modes (regrid_transport/DriverSources.cmake): `fds_amr <case> --rt-e2e <test>`

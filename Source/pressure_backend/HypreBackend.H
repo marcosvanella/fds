@@ -39,14 +39,21 @@ struct HypreLayoutLevel {
     amrex::DistributionMapping dm;
     amrex::Geometry geom;
     amrex::IntVect ratio{1};                      // to the next coarser level (ignored on level 0)
+    amrex::iMultiFab const* cell_class = nullptr; // masked composite (D3/D6): Gas/Solid/Known; null = unmasked
+    amrex::MultiFab const* known_value = nullptr;
 };
 
 class HypreSystem {
 public:
     // `ebc` are the effective boundary types (effective_bc()). pin_singular = false builds the bare operator (tests).
     // Collective. ok() is false with message() set when the layout cannot be built (e.g. more rows than HYPRE's integer range).
+    // Unmasked: one pin when singular. Masked (any level has cell_class): gas-only rows, pins = sealed component pins
+    // (empty pin list → derive one pin per sealed region from the matrix singularity flag alone is not used; pass pins).
     HypreSystem (std::vector<HypreLayoutLevel> const& levels, std::array<BC,6> const& ebc, HypreOptions const& opt,
                  bool singular, bool pin_singular = true);
+    // Masked composite / multi-pin: `pins` are (level, cell) for each sealed component (D4/D6).
+    HypreSystem (std::vector<HypreLayoutLevel> const& levels, std::array<BC,6> const& ebc, HypreOptions const& opt,
+                 std::vector<std::pair<int, amrex::IntVect>> const& pins);
     ~HypreSystem ();
     HypreSystem (HypreSystem const&) = delete;
     HypreSystem& operator= (HypreSystem const&) = delete;
@@ -54,6 +61,8 @@ public:
     bool ok () const;
     std::string const& message () const;
     bool matches (std::vector<HypreLayoutLevel> const& levels, std::array<BC,6> const& ebc, HypreOptions const& opt, bool singular) const;
+    bool matches_masked (std::vector<HypreLayoutLevel> const& levels, std::array<BC,6> const& ebc, HypreOptions const& opt,
+                         std::vector<std::pair<int, amrex::IntVect>> const& pins) const;
 
     // Solve L phi = b for the unit-operator right-hand sides b (valid cells; covered cells ignored). phi: valid cells, initial guess
     // if use_guess, solution on return (covered cells untouched; the pinned unknown is 0 before the common layer's gauge).
@@ -67,6 +76,8 @@ public:
     double setup_seconds () const;
     amrex::IntVect pin_cell () const;             // level, not used for pins on level 0: (i,j,k) and pin_level()
     int pin_level () const;
+    std::vector<std::pair<int, amrex::IntVect>> const& pins () const;
+    bool masked () const;
     std::string method () const;
 
     struct Impl;

@@ -127,3 +127,7 @@ level 0, level 1 refines coarse cells 4..11 in x and z with ratio (2,1,2)).
 Convergence (L2 error vs the manufactured solution, coarse n to 2n): ratio 2 Neumann 1.045e-3 to 2.608e-4 (order 2.00),
 periodic 4.18e-3 to 1.038e-3 (2.01), Dirichlet 9.65e-4 to 2.417e-4 (2.00). Ratio 4 (16 to 32): 2.01, 2.03, 2.00. Difference
 against a uniform-fine solve on the fine region converges at 1.9 to 2.1.
+
+## Masked composite
+
+Assembled HYPRE only (Q1; see masked-branch-design.md D3/D4/D6). MLMG composite with masks is NotBuilt. Known on C/F is InvalidInput (Q2).

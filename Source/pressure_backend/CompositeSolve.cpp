@@ -139,6 +139,12 @@ void build_impl (PressureWorkspace::Impl& W, PressureProblem const& p)
         }
         ebc[face_index(d,0)] = BC::Periodic; ebc[face_index(d,1)] = BC::Periodic;     // the hidden direction's term is 0 whatever its BC (D-057)
     }
+    // Q1: masked composite is assembled HYPRE only — no MLMG hierarchy (C/F interp cannot exclude Solid/Known).
+    if (composite_is_masked(p)) {
+        W.mlmg.reset();
+        W.mlp.reset();
+        return;
+    }
     LPInfo info;
     Vector<Geometry> geoms(W.egeom.begin(), W.egeom.end());
     Vector<BoxArray> bas(W.eba.begin(), W.eba.end());
@@ -185,7 +191,7 @@ Status PressureWorkspace::rebuild (PressureProblem const& p, std::string* messag
     m_impl.reset();
     mark_regrid();
     auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
-    Selection sel = select_composite(p, BackendKind::MLMG);
+    Selection sel = select_composite(p, BackendKind::Auto);
     if (!sel.ok) { return fail(Status::NotBuilt, sel.message); }
     std::string bad = validate_composite(p);
     if (!bad.empty()) { return fail(Status::InvalidInput, bad); }
@@ -225,8 +231,20 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
         s.message = "variable coefficients (masked or non-unit operator) are not built"; return s;
     }
     if (p.component_id) { s.message = "composite with driver-supplied component ids is not built (masked branch)"; return s; }
-    if (has_nonzero_mask(p.cell_class)) { s.message = "composite with masked cells (cell_class != 0) is not built (masked branch)"; return s; }
+    if (p.cell_class || p.known_value) {
+        s.message = "PressureProblem::cell_class/known_value are single-level fields; with `levels` set use PressureLevel::cell_class/known_value"; return s;
+    }
     if (has_zero_mask(p.uncovered)) { s.message = "composite with a caller-supplied covered-cell mask is not built: covered cells are derived from the level BoxArrays"; return s; }
+    const bool masked = composite_is_masked(p);
+    if (masked && requested == BackendKind::MLMG) {
+        s.message = "composite with masked cells is not built on MLMG (C/F interpolation cannot exclude Solid/Known per stencil; Q1: use assembled HYPRE)"; return s;
+    }
+    if (masked && requested == BackendKind::FFT) {
+        s.message = "composite with masked cells cannot go through FFT"; return s;
+    }
+#ifndef PB_WITH_HYPRE
+    if (masked) { s.message = kHypreNotBuilt; return s; }
+#endif
     if (p.gauge_weight || p.gauge_offset) {
         s.message = "PressureProblem::gauge_weight/gauge_offset are single-level fields; with `levels` set use PressureLevel::gauge_weight/gauge_offset"; return s;
     }
@@ -255,7 +273,9 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
         if (rr != 2 && rr != 4) { s.message = "composite refinement ratios other than 2 and 4 are not built"; return s; }
     }
     s.ok = true;
-    s.kind = (requested == BackendKind::HYPRE) ? BackendKind::HYPRE : BackendKind::MLMG;
+    if (requested == BackendKind::HYPRE) { s.kind = BackendKind::HYPRE; }
+    else if (requested == BackendKind::Auto && composite_is_masked(p)) { s.kind = BackendKind::HYPRE; }
+    else { s.kind = BackendKind::MLMG; }
     return s;
 }
 
@@ -273,9 +293,17 @@ std::string validate_composite (PressureProblem const& p, bool structural)
         if (L.rhs->nComp() < 1 || L.phi->nComp() < 1) { return tag + "rhs/phi need at least one component"; }
         if ((L.gauge_weight != nullptr) != (p.levels[0].gauge_weight != nullptr)) { return tag + "gauge_weight must be given on every level or on none"; }
         if ((L.gauge_offset != nullptr) != (p.levels[0].gauge_offset != nullptr)) { return tag + "gauge_offset must be given on every level or on none"; }
-        for (MultiFab const* g : {L.gauge_weight, L.gauge_offset}) {
+        for (MultiFab const* g : {L.gauge_weight, L.gauge_offset, L.known_value}) {
             if (g && (!(g->boxArray() == L.ba) || !(g->DistributionMap() == L.dm) || g->nComp() < 1)) {
-                return tag + "gauge_weight/gauge_offset BoxArray/DistributionMapping differ from the level or they have no component";
+                return tag + "gauge_weight/gauge_offset/known_value BoxArray/DistributionMapping differ from the level or they have no component";
+            }
+        }
+        if (L.cell_class) {
+            if (L.cell_class->boxArray() != L.ba || !(L.cell_class->DistributionMap() == L.dm) || L.cell_class->nComp() < 1) {
+                return tag + "cell_class BoxArray/DistributionMapping differ from the level or it has no component";
+            }
+            if (L.cell_class->min(0) < CellGas || L.cell_class->max(0) > CellKnown) {
+                return tag + "cell_class has a code other than 0 (gas), 1 (solid) or 2 (known value)";
             }
         }
         if (structural) {
@@ -440,13 +468,59 @@ template <class V> Vector<MultiFab*> ptrs (V const& v)
 } // anonymous
 
 // ---------------------------------------------------------------------------------------------------------------
-// Solve
+// Masked composite solve (Q1: assembled HYPRE; D3/D4/D6)
 // ---------------------------------------------------------------------------------------------------------------
-PressureResult solve_composite (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws, bool full)
+namespace {
+
+void average_down_gas (PressureWorkspace::Impl const& W, PressureProblem const& p, LevelMFs& f)
 {
+    for (int l = W.nlev - 1; l >= 1; --l) {
+        // Gas-only average-down (D3e): covered coarse = mean of fine gas cells under it; else 0.
+        MultiFab fine_gas(W.ba[l], W.dm[l], 1, 0);
+        MultiFab fine_cnt(W.ba[l], W.dm[l], 1, 0);
+        fine_gas.setVal(0.0); fine_cnt.setVal(0.0);
+        iMultiFab const* cls = p.levels[l].cell_class;
+        if (!cls) {
+            MultiFab::Copy(fine_gas, *f[l], 0, 0, 1, 0);
+            fine_cnt.setVal(1.0);
+        } else {
+            for (MFIter mfi(fine_gas); mfi.isValid(); ++mfi) {
+                auto const& o = fine_gas.array(mfi);
+                auto const& c = fine_cnt.array(mfi);
+                auto const& a = f[l]->const_array(mfi);
+                auto const& cl = cls->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (cl(i,j,k) == CellGas) { o(i,j,k) = a(i,j,k); c(i,j,k) = Real(1); }
+                });
+            }
+        }
+        MultiFab crse_sum(W.ba[l-1], W.dm[l-1], 1, 0);
+        MultiFab crse_cnt(W.ba[l-1], W.dm[l-1], 1, 0);
+        crse_sum.setVal(0.0); crse_cnt.setVal(0.0);
+        amrex::average_down(fine_gas, crse_sum, 0, 1, W.ratio[l]);
+        amrex::average_down(fine_cnt, crse_cnt, 0, 1, W.ratio[l]);
+        for (MFIter mfi(*f[l-1]); mfi.isValid(); ++mfi) {
+            auto const& dest = f[l-1]->array(mfi);
+            auto const& s = crse_sum.const_array(mfi);
+            auto const& c = crse_cnt.const_array(mfi);
+            auto const& u = W.unc[l-1]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (u(i,j,k) != 0) { return; }
+                if (c(i,j,k) > Real(0)) { dest(i,j,k) = s(i,j,k) / c(i,j,k); }
+                else { dest(i,j,k) = Real(0); }
+            });
+        }
+    }
+}
+
+PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws, bool full)
+{
+    MFIter::allowMultipleMFIters(true);
     PressureResult R;
-    const bool use_hypre = (o.backend == BackendKind::HYPRE);
-    R.backend = use_hypre ? "HYPRE" : "MLMG";
+    R.backend = "HYPRE";
+#ifndef PB_WITH_HYPRE
+    R.status = Status::NotBuilt; R.message = kHypreNotBuilt; R.backend = ""; return R;
+#else
     PressureWorkspace local;
     if (!ws) { ws = &local; }
     if (!ws->matches(p)) {
@@ -458,6 +532,362 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     PressureWorkspace::Impl& W = *ws->impl();
     const int nlev = W.nlev;
     R.nlevels = nlev;
+
+    // Label (D4); Q2 Known-on-C/F → InvalidInput.
+    CompositeComponentMap cm;
+    std::string lab_err = label_components_composite_masked(p, W.unc, W.geom, W.ratio, cm);
+    if (!lab_err.empty()) {
+        R.status = Status::InvalidInput; R.message = lab_err; R.backend = ""; return R;
+    }
+    R.mask_label_rounds = cm.rounds;
+    R.mask_label_seconds = cm.seconds;
+    if (cm.comps.empty()) {
+        R.status = Status::InvalidInput; R.message = "masked composite without an uncovered gas cell"; R.backend = ""; return R;
+    }
+
+    Long nunc_gas = 0;
+    for (auto const& c : cm.comps) { nunc_gas += c.ncells; }
+    R.ncells_uncovered = nunc_gas;
+
+    LevelMFs b, phi;
+    const int ngp = 1;
+    for (int l = 0; l < nlev; ++l) {
+        b.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+        MultiFab::Copy(*b[l], *p.levels[l].rhs, 0, 0, 1, 0);
+        // Zero covered / Solid / Known RHS (not part of the gas problem).
+        for (MFIter mfi(*b[l]); mfi.isValid(); ++mfi) {
+            auto const& a = b[l]->array(mfi);
+            auto const& lab = cm.label[l]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (lab(i,j,k) < 0) { a(i,j,k) = Real(0); } });
+        }
+        phi.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, ngp));
+        phi[l]->setVal(0.0);
+        if (o.use_initial_guess) { MultiFab::Copy(*phi[l], *p.levels[l].phi, 0, 0, 1, 0); }
+    }
+
+    // Per-component mean removal (D4): level-volume weights, one mean per singular multi-level component.
+    if (o.remove_mean) {
+        const int nc = int(cm.comps.size());
+        std::vector<double> sum_vb(nc, 0.0), sum_v(nc, 0.0), sum_vb2(nc, 0.0);
+        for (int l = 0; l < nlev; ++l) {
+            const double v = double(W.vol[l]);
+            for (MFIter mfi(*b[l]); mfi.isValid(); ++mfi) {
+                auto const& a = b[l]->const_array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    const int id = lab(i,j,k);
+                    if (id < 0) { return; }
+                    const double x = double(a(i,j,k));
+                    if (p.mean_kind == MeanKind::Volume) {
+                        sum_vb[id] += v * x; sum_v[id] += v; sum_vb2[id] += v * x * x;
+                    } else {
+                        sum_vb[id] += v * x; sum_v[id] += 1.0; sum_vb2[id] += (v*x)*(v*x);
+                    }
+                });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(sum_vb.data(), nc);
+        ParallelDescriptor::ReduceRealSum(sum_v.data(), nc);
+        if (full) { ParallelDescriptor::ReduceRealSum(sum_vb2.data(), nc); }
+        std::vector<double> shift(nc, 0.0);
+        for (int q = 0; q < nc; ++q) {
+            if (!cm.comps[q].singular || sum_v[q] == 0.0) { continue; }
+            double mean = 0.0, removed = 0.0, rms = 0.0;
+            if (p.mean_kind == MeanKind::Volume) {
+                mean = sum_vb[q] / sum_v[q];
+                rms = (full && sum_v[q] > 0) ? std::sqrt(sum_vb2[q] / sum_v[q]) : 0.0;
+                const double floor_ = std::ldexp(std::abs(mean) + rms, -52);
+                if (std::abs(mean) > floor_) { removed = mean; shift[q] = mean; }
+            } else {
+                mean = sum_vb[q] / sum_v[q]; // arithmetic mean of F=v*b over cells (sum_v = ncells)
+                rms = (full && sum_v[q] > 0) ? std::sqrt(sum_vb2[q] / sum_v[q]) : 0.0;
+                const double floor_ = std::ldexp(std::abs(mean) + rms, -52);
+                if (std::abs(mean) > floor_) { removed = mean; /* b -= mean/v per level below */ }
+            }
+            cm.comps[q].removed_mean = removed;
+            cm.comps[q].removed_rel = (full && rms > 0.0) ? std::abs(mean) / rms : 0.0;
+            if (p.mean_kind != MeanKind::Volume && std::abs(removed) > 0.0) {
+                // store mean of F; shift applied as mean/v_l
+                shift[q] = removed; // flag: ScaledArithmetic uses shift as mean(F)
+            }
+        }
+        for (int l = 0; l < nlev; ++l) {
+            const double v = double(W.vol[l]);
+            for (MFIter mfi(*b[l]); mfi.isValid(); ++mfi) {
+                auto const& a = b[l]->array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    const int id = lab(i,j,k);
+                    if (id < 0 || shift[id] == 0.0) { return; }
+                    if (p.mean_kind == MeanKind::Volume) { a(i,j,k) -= shift[id]; }
+                    else { a(i,j,k) -= shift[id] / v; }
+                });
+            }
+        }
+    }
+
+    // HYPRE system with sealed pins.
+    std::vector<HypreLayoutLevel> hl;
+    for (int l = 0; l < nlev; ++l) {
+        HypreLayoutLevel L;
+        L.ba = W.ba[l]; L.dm = W.dm[l]; L.geom = W.geom[l]; L.ratio = W.ratio[l];
+        L.cell_class = p.levels[l].cell_class;
+        L.known_value = p.levels[l].known_value;
+        hl.push_back(L);
+    }
+    std::array<BC,6> const ebc = effective_bc(p.bc, p.levels[0].geom.Domain());
+    std::vector<std::pair<int, IntVect>> pins;
+    for (auto const& cp : cm.pins) { pins.push_back({cp.level, cp.cell}); }
+    const bool reused = W.hsys && W.hsys->ok() && W.hsys->masked() && W.hsys->matches_masked(hl, ebc, o.hypre, pins);
+    if (!reused) { W.hsys = std::make_unique<HypreSystem>(hl, ebc, o.hypre, pins); }
+    if (!W.hsys->ok()) {
+        R.status = Status::NotBuilt; R.message = W.hsys->message(); R.backend = "";
+        W.hsys.reset();
+        return R;
+    }
+    std::vector<MultiFab*> ph; std::vector<MultiFab const*> bb;
+    for (int l = 0; l < nlev; ++l) { ph.push_back(phi[l].get()); bb.push_back(b[l].get()); }
+    BackendStatus bs = W.hsys->solve(ph, bb, o.tol_rel, o.max_iter, o.use_initial_guess);
+    bs.plan_reused = reused;
+    bs.hypre_setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
+    R.backend_status = bs;
+
+    // Fill Solid=0, Known=g on every level.
+    for (int l = 0; l < nlev; ++l) {
+        if (!p.levels[l].cell_class) { continue; }
+        for (MFIter mfi(*phi[l]); mfi.isValid(); ++mfi) {
+            auto const& f = phi[l]->array(mfi);
+            auto const& cl = p.levels[l].cell_class->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (cl(i,j,k) == CellSolid) { f(i,j,k) = Real(0); }
+                else if (cl(i,j,k) == CellKnown) {
+                    f(i,j,k) = p.levels[l].known_value ? p.levels[l].known_value->const_array(mfi)(i,j,k) : Real(0);
+                }
+            });
+        }
+    }
+
+    // Per-component gauge (D4): volume-weighted mean of phi over the component's uncovered gas cells.
+    bool any_sing = false;
+    for (auto const& c : cm.comps) { any_sing = any_sing || c.singular; }
+    LevelMFs phr;
+    if (any_sing && o.check_residual && full) {
+        for (int l = 0; l < nlev; ++l) {
+            phr.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, phi[l]->nGrow()));
+            MultiFab::Copy(*phr[l], *phi[l], 0, 0, 1, 0);
+        }
+        // mean-remove per singular component on the copy
+        const int nc = int(cm.comps.size());
+        std::vector<double> sum_vp(nc, 0.0), sum_v(nc, 0.0);
+        for (int l = 0; l < nlev; ++l) {
+            const double v = double(W.vol[l]);
+            for (MFIter mfi(*phr[l]); mfi.isValid(); ++mfi) {
+                auto const& a = phr[l]->const_array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    const int id = lab(i,j,k);
+                    if (id < 0 || !cm.comps[id].singular) { return; }
+                    sum_vp[id] += v * double(a(i,j,k)); sum_v[id] += v;
+                });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(sum_vp.data(), nc);
+        ParallelDescriptor::ReduceRealSum(sum_v.data(), nc);
+        for (int l = 0; l < nlev; ++l) {
+            for (MFIter mfi(*phr[l]); mfi.isValid(); ++mfi) {
+                auto const& a = phr[l]->array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    const int id = lab(i,j,k);
+                    if (id < 0 || !cm.comps[id].singular || sum_v[id] == 0.0) { return; }
+                    a(i,j,k) -= sum_vp[id] / sum_v[id];
+                });
+            }
+        }
+        average_down_gas(W, p, phr);
+    }
+    // Gauge on the returned solution.
+    {
+        const int nc = int(cm.comps.size());
+        std::vector<double> sum_num(nc, 0.0), sum_den(nc, 0.0);
+        const bool has_w = (p.levels[0].gauge_weight != nullptr);
+        const bool has_g = (p.levels[0].gauge_offset != nullptr);
+        for (int l = 0; l < nlev; ++l) {
+            const double v = double(W.vol[l]);
+            for (MFIter mfi(*phi[l]); mfi.isValid(); ++mfi) {
+                auto const& a = phi[l]->const_array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    const int id = lab(i,j,k);
+                    if (id < 0 || !cm.comps[id].singular) { return; }
+                    double rho = 1.0, g0 = 0.0;
+                    if (has_w) { rho = double(p.levels[l].gauge_weight->const_array(mfi)(i,j,k)); }
+                    if (has_g) { g0 = double(p.levels[l].gauge_offset->const_array(mfi)(i,j,k)); }
+                    sum_num[id] += v * rho * (double(a(i,j,k)) - g0);
+                    sum_den[id] += v * rho;
+                });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(sum_num.data(), nc);
+        ParallelDescriptor::ReduceRealSum(sum_den.data(), nc);
+        for (int q = 0; q < nc; ++q) {
+            if (!cm.comps[q].singular || sum_den[q] == 0.0) { continue; }
+            cm.comps[q].gauge_shift = sum_num[q] / sum_den[q];
+        }
+        for (int l = 0; l < nlev; ++l) {
+            for (MFIter mfi(*phi[l]); mfi.isValid(); ++mfi) {
+                auto const& a = phi[l]->array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    const int id = lab(i,j,k);
+                    if (id < 0 || !cm.comps[id].singular) { return; }
+                    a(i,j,k) -= cm.comps[id].gauge_shift;
+                });
+            }
+        }
+    }
+    average_down_gas(W, p, phi);
+
+    // Residual via HYPRE apply: A = -V L ⇒ L phi = -A phi / V; res = b - L phi = b + Aphi/V (Known already in A/RHS).
+    if (o.check_residual && full) {
+        LevelMFs& phv = phr.empty() ? phi : phr;
+        LevelMFs Ax;
+        for (int l = 0; l < nlev; ++l) {
+            Ax.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+            Ax[l]->setVal(0.0);
+        }
+        std::vector<MultiFab const*> px; std::vector<MultiFab*> py;
+        for (int l = 0; l < nlev; ++l) { px.push_back(phv[l].get()); py.push_back(Ax[l].get()); }
+        W.hsys->apply(px, py);
+        LevelMFs res;
+        for (int l = 0; l < nlev; ++l) {
+            res.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+            const double v = double(W.vol[l]);
+            for (MFIter mfi(*res[l]); mfi.isValid(); ++mfi) {
+                auto const& r = res[l]->array(mfi);
+                auto const& bb = b[l]->const_array(mfi);
+                auto const& ax = Ax[l]->const_array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (lab(i,j,k) < 0) { r(i,j,k) = Real(0); return; }
+                    r(i,j,k) = Real(double(bb(i,j,k)) + double(ax(i,j,k)) / v);
+                });
+            }
+        }
+        ResidualSums S;
+        S.singular = any_sing; S.what = "masked composite ";
+        {
+            LevelMFs rq = squares_of(W, res), bq = squares_of(W, b), pq = squares_of(W, phv);
+            // Restrict sums to gas labels: zero non-gas in copies used for sums? terms_of uses unc; also zero Solid via label.
+            // Zero residual on pin cells for nopin path below; for r2 use gas uncovered via unc (Solid covered by label zeroing already in res).
+            S.r2 = exact_sum_multi(terms_of(W, rq, true), 1).sum[0];
+            S.b2 = exact_sum_multi(terms_of(W, bq, true), 1).sum[0];
+            S.phi2 = exact_sum_multi(terms_of(W, pq, true), 1).sum[0];
+            S.sumr = exact_sum_multi(terms_of(W, res, true), 1).sum[0];
+            S.sumw = 0.0;
+            for (auto const& c : cm.comps) { S.sumw += double(c.ncells); } // cell count; volumes differ — use volume sum:
+            S.sumw = 0.0;
+            for (int l = 0; l < nlev; ++l) {
+                Long ng = 0;
+                for (MFIter mfi(*cm.label[l]); mfi.isValid(); ++mfi) {
+                    auto const& lab = cm.label[l]->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (lab(i,j,k) >= 0) { ++ng; } });
+                }
+                ParallelDescriptor::ReduceLongSum(ng);
+                S.sumw += double(W.vol[l]) * double(ng);
+            }
+            S.rmax = max_abs_uncovered(W, res); S.bmax = max_abs_uncovered(W, b);
+            std::vector<SumTerm> ta; ta.reserve(nlev);
+            double A_finest = 0.0;
+            for (int l = 0; l < nlev; ++l) {
+                const double al = operator_anorm(W.geom[l].CellSizeArray(), W.geom[l].Domain());
+                A_finest = al;
+                SumTerm t; t.mf = pq[l].get(); t.comp = 0; t.weight = double(W.vol[l])*al*al; t.uncovered = W.unc[l].get();
+                ta.push_back(t);
+            }
+            const double a2phi2 = exact_sum_multi(ta, 1).sum[0];
+            const double anorm_eff = (S.phi2 > 0.0) ? std::sqrt(a2phi2 / S.phi2) : 0.0;
+            S.anorm = std::min(2.0 * anorm_eff, A_finest);
+        }
+        S.r2_nopin = S.r2; S.rmax_nopin = S.rmax;
+        if (bs.pin_applied && !bs.pins.empty()) {
+            double pin2 = 0.0, pin_abs = 0.0;
+            for (auto const& pr : bs.pins) {
+                const int pl = pr.first; const IntVect pc = pr.second;
+                double rp = 0.0;
+                for (MFIter mfi(*res[pl]); mfi.isValid(); ++mfi) {
+                    if (mfi.validbox().contains(pc)) {
+                        auto const& a = res[pl]->array(mfi);
+                        rp += double(a(pc[0], pc[1], pc[2]));
+                        a(pc[0], pc[1], pc[2]) = Real(0);
+                    }
+                }
+                ParallelDescriptor::ReduceRealSum(rp);
+                pin2 += double(W.vol[pl]) * rp * rp;
+                pin_abs = std::max(pin_abs, std::abs(rp));
+            }
+            S.pin2 = pin2; S.pin_abs = pin_abs;
+            LevelMFs rq2 = squares_of(W, res);
+            S.r2_nopin = exact_sum_multi(terms_of(W, rq2, true), 1).sum[0];
+            S.rmax_nopin = max_abs_uncovered(W, res);
+            S.pin_excluded = true;
+        }
+        evaluate_residual(R, o, S);
+    }
+
+    if (full) {
+        for (auto const& c : cm.comps) {
+            if (c.singular && c.removed_rel > o.removed_mean_warn) {
+                std::ostringstream m;
+                m << "removed mean of component " << c.id << " is " << c.removed_rel << " of rms(b), above " << o.removed_mean_warn;
+                R.warnings.push_back(m.str());
+            }
+        }
+    }
+    if (o.verbose > 0) { for (auto const& w : R.warnings) { Print() << "PRESSURE WARNING: " << w << "\n"; } }
+    R.components = cm.comps;
+    if (!bs.converged) {
+        R.status = Status::NotConverged; R.message = "backend did not converge";
+        if (o.verbose > 0) { Print() << "PRESSURE WARNING: backend did not converge\n"; }
+    }
+    for (int l = 0; l < nlev; ++l) { MultiFab::Copy(*p.levels[l].phi, *phi[l], 0, 0, 1, 0); }
+    return R;
+#endif
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------------------------------------------
+// Solve
+// ---------------------------------------------------------------------------------------------------------------
+PressureResult solve_composite (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws, bool full)
+{
+    PressureResult R;
+    const bool masked = composite_is_masked(p);
+    Selection const sel0 = select_composite(p, o.backend);
+    const bool use_hypre = (sel0.kind == BackendKind::HYPRE) || (o.backend == BackendKind::HYPRE);
+    R.backend = use_hypre ? "HYPRE" : "MLMG";
+    if (masked && !use_hypre) {
+        R.status = Status::NotBuilt;
+        R.message = "composite with masked cells is not built on MLMG (C/F interpolation cannot exclude Solid/Known per stencil; Q1: use assembled HYPRE)";
+        R.backend = "";
+        return R;
+    }
+    PressureWorkspace local;
+    if (!ws) { ws = &local; }
+    if (!ws->matches(p)) {
+        R.workspace_rebuilt = ws->num_levels() > 0;
+        std::string msg;
+        Status st = ws->rebuild(p, &msg);
+        if (st != Status::Ok) { R.status = st; R.message = msg; return R; }
+    }
+    PressureWorkspace::Impl& W = *ws->impl();
+    const int nlev = W.nlev;
+    R.nlevels = nlev;
+
+    if (masked) {
+        return solve_composite_masked(p, o, ws, full);
+    }
 
     bool open = false;
     {
@@ -757,7 +1187,7 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
     R.backend = "MLMG";
     auto fail = [&] (Status st, std::string const& msg) { R.status = st; R.message = msg; return R; };
     if (p.levels.empty()) { return fail(Status::InvalidInput, "face_gradient_composite needs a problem with levels"); }
-    Selection sel = select_composite(p, BackendKind::MLMG);
+    Selection sel = select_composite(p, BackendKind::Auto);
     if (!sel.ok) { return fail(Status::NotBuilt, sel.message); }
     std::string bad = validate_composite(p);
     if (!bad.empty()) { return fail(Status::InvalidInput, bad); }
@@ -772,6 +1202,9 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
                 return fail(Status::InvalidInput, "grad_out BoxArray/DistributionMapping differ from the face-centred level layout");
             }
         }
+    }
+    if (composite_is_masked(p)) {
+        return fail(Status::NotBuilt, "face_gradient_composite with masked cells is not built");
     }
     PressureWorkspace::Impl W;
     build_impl(W, p);

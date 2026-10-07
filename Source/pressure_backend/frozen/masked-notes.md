@@ -1,7 +1,7 @@
 # Masked branch of the common layer (A-68, FR-037 masked branch): design and status
 
 Scope of this version: **single level, MLMG and assembled HYPRE** (built and tested; see the measured results and the D6 HYPRE rows below). The FFT backend cannot take masks (the selector says so); the composite
-path still returns `NotBuilt` for masks (status table at the end; Q1: composite masked will be assembled HYPRE only). Design decisions D1 to D8 of the review (docs/pressure/08 section 3.2),
+path: composite masked is assembled HYPRE only (Q1; MLMG composite masked stays NotBuilt). Design decisions D1 to D8 of the review (docs/pressure/08 section 3.2),
 including the rules for the composite masked branch: `masked-branch-design.md`.
 
 ## Why it is needed
@@ -112,7 +112,7 @@ Single-level only. Unknowns are gas cells: row numbering is a per-box prefix cou
 | Single level, MLMG (GMRES + V-cycle), Gas/Solid/Known classes, computed components, per-component mean removal and gauge, residual check | built and tested (`pb_masked`, `pb_masked_hallways`) |
 | FFT with masks | `NotBuilt` by design (no mask in `FFT::Poisson`); `Auto` picks HYPRE for a masked single level (D-091); explicit MLMG remains available |
 | HYPRE assembled backend with masks (single level) | built and tested (`pb_masked` HYPRE rows; D6: gas-only numbering, one pin per sealed component, residual excludes pins, sealed2) |
-| Composite (two or more levels) with masks | NotBuilt (design: masked-branch-design.md D3 and D4; Q1: assembled HYPRE only) |
+| Composite (two or more levels) with masks | built for assembled HYPRE (Q1; D3/D4/D6); MLMG composite masked stays NotBuilt; Known on C/F → InvalidInput (Q2); `pb_comp_masked` |
 | Driver zone ids (`component_id`) | single level: built and tested (D2); composite: NotBuilt |
 | Pinned class, covered cells on the single-level API | NotBuilt |
 | Component labelling cost | cached in the workspace (D1); stairwell 18.8 M cells: 10 to 18 rounds, 1.0 to 1.8 s on a miss |

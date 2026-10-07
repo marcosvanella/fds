@@ -11,6 +11,7 @@
 #include "PressureIface.H"
 
 #include <cstdint>
+#include <memory>
 
 namespace pb {
 
@@ -39,6 +40,23 @@ std::uint64_t class_content_hash (PressureProblem const& p);
 // cells and -1 on Solid and Known cells; ids are ordered by the lowest global index of the component, which is its pin cell; a
 // component is singular unless a gas cell of it touches a domain Dirichlet face or a Known cell. The pin is always recorded.
 ComponentMap label_components (PressureProblem const& p, bool record_pin = true);
+// Composite masked components (D4).
+struct CompositePin { int level = 0; amrex::IntVect cell{0}; };
+struct CompositeComponentMap {
+    std::vector<std::unique_ptr<amrex::iMultiFab>> label;
+    std::vector<ComponentInfo> comps;
+    std::vector<CompositePin> pins;   // one per singular component, ComponentInfo::pin mirrored on comps
+    int rounds = 0;
+    double seconds = 0.0;
+};
+bool composite_is_masked (PressureProblem const& p);
+// W_unc[l] = uncovered mask (1 = uncovered). Collective. Non-empty return = InvalidInput message (e.g. Known on C/F).
+std::string label_components_composite_masked (PressureProblem const& p,
+    std::vector<std::unique_ptr<amrex::iMultiFab>> const& W_unc,
+    std::vector<amrex::Geometry> const& geom,
+    std::vector<amrex::IntVect> const& ratio,
+    CompositeComponentMap& cm);
+
 // D2: zone id (PressureProblem::component_id) of every component; a component whose gas cells carry two zone ids is an error (returned
 // message; empty = ok). Sets ComponentInfo::zone. Collective.
 std::string assign_zones (amrex::iMultiFab const& zone, ComponentMap& cm);

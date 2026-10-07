@@ -1002,6 +1002,16 @@ def masked():
     ok(m and (kv(m[0])["nwarn"] != "0" or kv(m[0])["residual_ok"] == "0" or "status=NotConverged" in m[0]),
        f"masked HYPRE sealed2 max_pins=1 remove_mean=0: singular leftover warns or fails [{m[0] if m else out[-300:]}]")
 
+def compmasked():
+    """Composite masked (Q1 HYPRE, Q2 Known-on-C/F InvalidInput, unmasked regression)."""
+    for beq in ("hypre", "auto", "mlmg"):
+        rc, out = run(1, mode="comp_masked", n=16, mgs=8, backend=beq)
+        print(out)
+        assert rc == 0, out
+    rc, out = run(2, mode="comp_masked", n=16, mgs=8, backend="hypre")
+    print(out)
+    assert rc == 0, out
+
 def maskedgeo():
     """D1/D7 at scale: the doc 06 hallways (Known OPEN slab) through the product masked path at two max_grid_size; iterations not within
     5% of the cap, labels cached on the second solve (checks in the harness). Long."""
@@ -1063,7 +1073,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compmasked": compmasked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

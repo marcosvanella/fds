@@ -148,6 +148,8 @@ pb_add_test(pb_resid_limit reslimit --ns "48 96")
 #     faces, periodic wrap; labels/ncells/singular/removed_mean/solution/gauge against an independent dense numpy reference on 1/2/3 ranks;
 #     negative control warns; FFT with a mask is NotBuilt.
 pb_add_test(pb_masked masked)
+# A-68 composite masked (Q1 assembled HYPRE, Q2 Known-on-C/F InvalidInput, unmasked regression).
+pb_add_test(pb_comp_masked compmasked)
 # A-71 D1/D7: hallways (doc 06 section 8) through the product masked path at max_grid_size 32 and 64 (long).
 pb_add_test(pb_masked_hallways maskedgeo)
 set_tests_properties(pb_masked_hallways PROPERTIES LABELS long TIMEOUT 900)

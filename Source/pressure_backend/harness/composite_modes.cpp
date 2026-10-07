@@ -889,8 +889,25 @@ void run_comp_sel (ParmParse& pp)
     expect("non-uniform widths not built", c, S::NotBuilt, [] (pb::PressureProblem& p) { for (int d = 0; d < 3; ++d) { p.cell_width[d].assign(16, Real(1./16)); } p.cell_width[2][3] = Real(0.1); }, AU, "non-uniform");
     {
         iMultiFab cls;
-        expect("masked cells not built", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
-            cls.define(p.levels[0].ba, p.levels[0].dm, 1, 0); cls.setVal(1); p.cell_class = &cls; }, AU, "masked");
+        expect("top-level cell_class with levels not built (use PressureLevel)", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
+            cls.define(p.levels[0].ba, p.levels[0].dm, 1, 0); cls.setVal(1); p.cell_class = &cls; }, AU, "PressureLevel");
+    }
+    {
+        // Q1: MLMG composite masked is NotBuilt; Auto/HYPRE take the assembled path.
+        std::vector<std::unique_ptr<iMultiFab>> cls;
+        expect("per-level mask + MLMG NotBuilt (Q1)", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
+            for (int l = 0; l < 2; ++l) {
+                cls.push_back(std::make_unique<iMultiFab>(p.levels[l].ba, p.levels[l].dm, 1, 0));
+                cls.back()->setVal(pb::CellGas);
+                // one solid cell away from C/F
+                for (MFIter mfi(*cls.back()); mfi.isValid(); ++mfi) {
+                    auto const& a = cls.back()->array(mfi);
+                    Box const& bx = mfi.validbox();
+                    if (bx.contains(IntVect(1,1,1))) { a(1,1,1) = pb::CellSolid; }
+                }
+                p.levels[l].cell_class = cls[l].get();
+            }
+        }, K::MLMG, "MLMG");
     }
     {
         MultiFab a;
@@ -1665,12 +1682,144 @@ void run_err_map (ParmParse& pp)
     }
 }
 
+
+// mode=comp_masked: two-level Neumann corridor with a solid slab; assembled HYPRE (Q1). Also Known-on-C/F InvalidInput (Q2).
+// --------------------------------------------------------------------------------------------------------------
+void run_comp_masked (ParmParse& pp)
+{
+    int n = 16; pp.query("n", n);
+    int mgs = 8; pp.query("mgs", mgs);
+    int ratio = 2; pp.query("ratio", ratio);
+    double tol_rel = 1e-10; pp.query("tol_rel", tol_rel);
+    std::string beq = "hypre"; pp.query("backend", beq);
+
+    // Dirichlet outer (nonsingular corridor) + a sealed solid pocket fully inside the fine patch (D4).
+    Cfg c; c.n = n; c.nlev = 2; c.ratio = ratio; c.mgs = mgs; c.full = true; c.set_bc(pb::BC::Dirichlet);
+    Hier h = build_hier(c, 0);
+    pb::PressureProblem p = make_problem(c, h);
+
+    std::vector<std::unique_ptr<iMultiFab>> cls(2);
+    for (int l = 0; l < 2; ++l) {
+        cls[l] = std::make_unique<iMultiFab>(h.ba[l], h.dm[l], 1, 0);
+        cls[l]->setVal(pb::CellGas);
+        p.levels[l].cell_class = cls[l].get();
+    }
+    // Full fine level: all coarse cells covered. One Solid on the fine level (mask active; no uncovered C/F).
+    {
+        IntVect sc(2, 2, 2);
+        for (MFIter mfi(*cls[1]); mfi.isValid(); ++mfi) {
+            if (mfi.validbox().contains(sc)) { cls[1]->array(mfi)(sc[0], sc[1], sc[2]) = pb::CellSolid; }
+        }
+        // Coarse class all Gas (covered; no rows). Fine carries the mask.
+    }
+    // Manufactured RHS: L of a smooth Dirichlet-compatible field on gas cells; 0 on solid.
+    for (int l = 0; l < 2; ++l) {
+        h.rhs[l]->setVal(0.0);
+        h.phi[l]->setVal(0.0);
+        auto const dx = h.geom[l].CellSizeArray();
+        auto const plo = h.geom[l].ProbLoArray();
+        for (MFIter mfi(*h.rhs[l]); mfi.isValid(); ++mfi) {
+            auto const& r = h.rhs[l]->array(mfi);
+            auto const& cl = cls[l]->const_array(mfi);
+            auto const& u = h.unc[l]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (u(i,j,k) == 0 || cl(i,j,k) != pb::CellGas) { return; }
+                const Real x = plo[0] + (i + Real(0.5))*dx[0];
+                const Real y = plo[1] + (j + Real(0.5))*dx[1];
+                const Real z = plo[2] + (k + Real(0.5))*dx[2];
+                // phi = sin(pi x) sin(pi y) sin(pi z) → L phi = -3 pi^2 phi
+                const Real pi = Real(3.14159265358979323846);
+                const Real ph = std::sin(pi*x)*std::sin(pi*y)*std::sin(pi*z);
+                r(i,j,k) = Real(-3)*pi*pi*ph;
+            });
+        }
+    }
+
+    pb::PressureOptions o;
+    o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.residual_tol = 1e-8; o.verbose = 1;
+    o.backend = (beq == "mlmg") ? pb::BackendKind::MLMG : (beq == "hypre") ? pb::BackendKind::HYPRE : pb::BackendKind::Auto;
+    apply_backend_opts(pp, o);
+    pb::PressureWorkspace ws;
+    pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+    Print() << std::setprecision(6) << "COMP_MASKED n=" << n << " status=" << pb::to_string(r.status)
+            << " backend=" << r.backend << " msg=\"" << r.message << "\" ncomp=" << r.components.size()
+            << " npins=" << r.backend_status.pins.size()
+            << " true_rel2=" << r.residual_rel2 << " residual_ok=" << (r.residual_ok ? 1 : 0)
+            << " iters=" << r.backend_status.iterations << "\n";
+    if (o.backend == pb::BackendKind::MLMG) {
+        ccheck(r.status == pb::Status::NotBuilt && r.message.find("MLMG") != std::string::npos,
+               "comp_masked MLMG is NotBuilt");
+        return;
+    }
+    ccheck(r.status == pb::Status::Ok, "comp_masked solve Ok");
+    ccheck(r.backend == "HYPRE", "comp_masked backend HYPRE");
+    ccheck(r.residual_checked && r.residual_ok, "comp_masked residual ok");
+    ccheck(!r.components.empty(), "comp_masked has components");
+    ccheck(r.components[0].singular == false, "Dirichlet outer component is nonsingular");
+
+    // Q2: Known on a C/F face → InvalidInput (non-full fine patch so a C/F interface exists).
+    {
+        Cfg c2; c2.n = n; c2.nlev = 2; c2.ratio = ratio; c2.mgs = mgs; c2.full = false; c2.set_bc(pb::BC::Dirichlet);
+        Hier h2 = build_hier(c2, 0);
+        pb::PressureProblem p2 = make_problem(c2, h2);
+        std::vector<std::unique_ptr<iMultiFab>> cls2(2);
+        std::vector<std::unique_ptr<MultiFab>> kn2(2);
+        for (int l = 0; l < 2; ++l) {
+            cls2[l] = std::make_unique<iMultiFab>(h2.ba[l], h2.dm[l], 1, 0);
+            cls2[l]->setVal(pb::CellGas);
+            kn2[l] = std::make_unique<MultiFab>(h2.ba[l], h2.dm[l], 1, 0);
+            kn2[l]->setVal(0.0);
+            p2.levels[l].cell_class = cls2[l].get();
+            p2.levels[l].known_value = kn2[l].get();
+        }
+        // Mark a fine cell on the coarse/fine interface as Known: take a fine cell whose neighbour is outside the fine BA.
+        BoxArray const& fba = h2.ba[1];
+        bool set = false;
+        for (int b = 0; b < static_cast<int>(fba.size()) && !set; ++b) {
+            Box const& bx = fba[b];
+            for (int k = bx.smallEnd(2); k <= bx.bigEnd(2) && !set; ++k)
+            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1) && !set; ++j)
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0) && !set; ++i) {
+                for (int d = 0; d < 3 && !set; ++d) for (int s = 0; s < 2 && !set; ++s) {
+                    IntVect n(i,j,k); n[d] += s ? 1 : -1;
+                    if (!fba.contains(n)) {
+                        for (MFIter mfi(*cls2[1]); mfi.isValid(); ++mfi) {
+                            if (mfi.validbox().contains(IntVect(i,j,k))) {
+                                cls2[1]->array(mfi)(i,j,k) = pb::CellKnown;
+                                kn2[1]->array(mfi)(i,j,k) = Real(1.0);
+                                set = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ccheck(set, "comp_masked placed a Known cell on a C/F face");
+        pb::PressureOptions o2 = o; o2.backend = pb::BackendKind::HYPRE; o2.verbose = 0;
+        pb::PressureResult r2 = pb::solve_pressure(p2, o2);
+        Print() << "  Known-on-C/F: status=" << pb::to_string(r2.status) << " msg=\"" << r2.message << "\"\n";
+        ccheck(r2.status == pb::Status::InvalidInput && r2.message.find("Known") != std::string::npos,
+               "Known on C/F is InvalidInput (Q2)");
+    }
+
+    // Unmasked composite regression (same layout, no mask) still Ok on HYPRE.
+    {
+        Cfg c3 = c;
+        Hier h3 = build_hier(c3, 0);
+        pb::PressureProblem p3 = make_problem(c3, h3);
+        pb::PressureOptions o3 = o; o3.backend = pb::BackendKind::HYPRE; o3.verbose = 0;
+        pb::PressureResult r3 = pb::solve_pressure(p3, o3);
+        ccheck(r3.status == pb::Status::Ok, "unmasked composite HYPRE still Ok");
+    }
+}
+
 } // anonymous namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp)
 {
     if (mode == "comp") { run_comp(pp); }
     else if (mode == "comp_ns2d") { run_comp_ns2d(pp); }
+    else if (mode == "comp_masked") { run_comp_masked(pp); }
     else if (mode == "comp_sel") { run_comp_sel(pp); }
     else if (mode == "comp_ws") { run_comp_ws(pp); }
     else if (mode == "comp_gauge") { run_comp_gauge(pp); }
