@@ -81,7 +81,8 @@ direction keeps the term -2 phi/dx^2 and is NotBuilt (single level and composite
 `fold_boundary_data(p, BoundaryData, rhs)` (PressureIface.H, implemented in CommonLayer.cpp) adds the known ghost-cell terms
 of non-zero wall data to the right-hand side of the homogeneous problem the backends solve. Call it once on the rhs
 before `solve_pressure`; the solver's mean removal then acts on the folded right-hand side (for a pure-Neumann problem with
-compatible data the folded rhs sums to zero).
+compatible data the folded rhs sums to zero). Composite: per-level overload `fold_boundary_data(p, bd_levels, rhs_levels)`
+(S6; `frozen/s6-open-inhomogeneous.md`); `pb_comp_bcdata`.
 
 Sign convention (FDS pres.f90: header comment lines 57-58, boundary application 452-454, ULMAT F_H terms 1620-1679):
 

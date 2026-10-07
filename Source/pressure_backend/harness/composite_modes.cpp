@@ -1866,6 +1866,96 @@ void run_comp_masked (ParmParse& pp)
     }
 }
 
+
+// mode=comp_bcdata: S6 OPEN cold-flow — floor INERT (Neumann z-lo) + five OPEN (Dirichlet),
+// constant H_b folded per level, full-fine two-level composite. Expected: phi ≈ H_b.
+void run_comp_bcdata (ParmParse& pp)
+{
+    Cfg c;
+    c.n = 16; c.nlev = 2; c.ratio = 2; c.full = true; c.mgs = 8;
+    pp.query("n", c.n); pp.query("nlev", c.nlev); pp.query("ratio", c.ratio); pp.query("mgs", c.mgs);
+    int full = 1; pp.query("full", full); c.full = full != 0;
+    // DD,DD,ND: five OPEN + floor INERT (Neumann at z-lo)
+    std::string bf = "DD,DD,ND";
+    pp.query("bcfaces", bf);
+    {
+        std::vector<std::string> tok; std::string cur;
+        for (char ch : bf + ",") { if (ch == ',') { tok.push_back(cur); cur.clear(); } else { cur += ch; } }
+        AMREX_ALWAYS_ASSERT(tok.size() == 3);
+        auto L = [] (char ch) { return ch == 'N' ? pb::BC::Neumann : ch == 'D' ? pb::BC::Dirichlet : pb::BC::Periodic; };
+        for (int d = 0; d < 3; ++d) { AMREX_ALWAYS_ASSERT(tok[d].size() == 2); c.bcd[d] = L(tok[d][0]); c.bchi[d] = L(tok[d][1]); }
+        c.bc = pb::BC::Neumann; c.mixed_faces = true;
+    }
+    Real Hb = Real(1.25); pp.query("Hb", Hb);
+    double tol_rel = 1e-12; pp.query("tol_rel", tol_rel);
+    double eps = 1e-8; pp.query("eps_H", eps);
+    int dmkind = 0; pp.query("dmkind", dmkind);
+
+    Hier h = build_hier(c, dmkind);
+    // Zero interior rhs; fold supplies the Dirichlet lift. Constant phi = Hb is then exact.
+    for (auto& r : h.rhs) { r->setVal(Real(0)); }
+    for (auto& q : h.phi) { q->setVal(Real(0)); }
+
+    pb::PressureProblem p = make_problem(c, h);
+    pb::BoundaryData bd;
+    for (int f = 0; f < 6; ++f) {
+        if (p.bc[f] == pb::BC::Dirichlet) { bd.constant[f] = Hb; }
+    }
+    std::vector<pb::BoundaryData> bds{bd};
+    std::vector<MultiFab*> rhs_ptr;
+    for (auto& r : h.rhs) { rhs_ptr.push_back(r.get()); }
+    std::string msg;
+    pb::Status fs = pb::fold_boundary_data(p, bds, rhs_ptr, &msg);
+    ccheck(fs == pb::Status::Ok, std::string("composite fold_boundary_data Ok: ") + msg);
+
+    pb::PressureOptions o;
+    o.tol_rel = tol_rel; o.residual_tol = eps; o.verbose = 0;
+    apply_backend_opts(pp, o);
+    pb::PressureWorkspace ws;
+    pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+    Print() << "COMP_BCDATA n=" << c.n << " nlev=" << c.nlev << " bcfaces=" << bf
+            << " Hb=" << Hb << " status=" << pb::to_string(r.status) << " backend=" << r.backend
+            << " iters=" << r.backend_status.iterations << " true_rel2=" << r.residual_rel2
+            << " residual_ok=" << (r.residual_ok ? 1 : 0) << " msg=" << r.message << "\n";
+    ccheck(r.status == pb::Status::Ok, "composite OPEN cold-flow solve Ok");
+    ccheck(r.residual_ok, "composite OPEN cold-flow residual_ok");
+
+    double err = 0.0, mx = 0.0;
+    for (int l = 0; l < c.nlev; ++l) {
+        for (MFIter mfi(*h.phi[l]); mfi.isValid(); ++mfi) {
+            auto const& a = h.phi[l]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const double e = std::abs(double(a(i,j,k)) - double(Hb));
+                err = std::max(err, e);
+                mx = std::max(mx, std::abs(double(Hb)));
+            });
+        }
+    }
+    ParallelDescriptor::ReduceRealMax(err);
+    ParallelDescriptor::ReduceRealMax(mx);
+    Print() << "COMP_BCDATA max|phi-Hb|=" << err << " Hb=" << Hb << "\n";
+    ccheck(err <= 1e-8 * std::max(1.0, mx), "phi matches constant Hb after fold (max err " + std::to_string(err) + ")");
+
+    // Negative control: without fold, constant solution is not recovered
+    for (auto& rr : h.rhs) { rr->setVal(Real(0)); }
+    for (auto& q : h.phi) { q->setVal(Real(0)); }
+    pb::PressureProblem p2 = make_problem(c, h);
+    pb::PressureResult r2 = pb::solve_pressure(p2, o, &ws);
+    double err2 = 0.0;
+    for (int l = 0; l < c.nlev; ++l) {
+        for (MFIter mfi(*h.phi[l]); mfi.isValid(); ++mfi) {
+            auto const& a = h.phi[l]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                err2 = std::max(err2, std::abs(double(a(i,j,k)) - double(Hb)));
+            });
+        }
+    }
+    ParallelDescriptor::ReduceRealMax(err2);
+    Print() << "COMP_BCDATA neg_control max|phi-Hb| without fold=" << err2 << "\n";
+    ccheck(r2.status == pb::Status::Ok && err2 > 1e-3 * std::max(1.0, mx),
+           "negative control: without fold error is large (" + std::to_string(err2) + ")");
+}
+
 } // anonymous namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp)
@@ -1873,6 +1963,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     if (mode == "comp") { run_comp(pp); }
     else if (mode == "comp_ns2d") { run_comp_ns2d(pp); }
     else if (mode == "comp_masked") { run_comp_masked(pp); }
+    else if (mode == "comp_bcdata") { run_comp_bcdata(pp); }
     else if (mode == "comp_sel") { run_comp_sel(pp); }
     else if (mode == "comp_ws") { run_comp_ws(pp); }
     else if (mode == "comp_gauge") { run_comp_gauge(pp); }

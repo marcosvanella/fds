@@ -150,6 +150,7 @@ pb_add_test(pb_resid_limit reslimit --ns "48 96")
 pb_add_test(pb_masked masked)
 # A-68 composite masked (Q1 assembled HYPRE, Q2 Known-on-C/F InvalidInput, unmasked regression).
 pb_add_test(pb_comp_masked compmasked)
+pb_add_test(pb_comp_bcdata           compbcdata)
 # A-71 D1/D7: hallways (doc 06 section 8) through the product masked path at max_grid_size 32 and 64 (long).
 pb_add_test(pb_masked_hallways maskedgeo)
 set_tests_properties(pb_masked_hallways PROPERTIES LABELS long TIMEOUT 900)

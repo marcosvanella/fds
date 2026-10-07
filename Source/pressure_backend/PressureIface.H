@@ -431,9 +431,17 @@ struct BoundaryData {
     std::array<amrex::MultiFab const*,6> value{};     // index face_index(dir, side)
     std::array<amrex::Real,6> constant{};
 };
-// Adds the fold terms to `rhs` (BoxArray / DistributionMapping of p.ba / p.dm, valid cells). Collective. Single-level problems only.
-// InvalidInput: data on a periodic face, rhs layout different from the problem, bad data MultiFab. rhs untouched on error.
+// Adds the fold terms to `rhs` (BoxArray / DistributionMapping of p.ba / p.dm, valid cells). Collective. Single-level only
+// (`levels` empty). InvalidInput: data on a periodic face, rhs layout different from the problem, bad data MultiFab.
+// rhs untouched on error (single-level). See frozen/s6-open-inhomogeneous.md and frozen/m2-notes.md.
 Status fold_boundary_data (PressureProblem const& p, BoundaryData const& bd, amrex::MultiFab& rhs, std::string* message = nullptr);
+// Composite (S6): fold into each level's rhs using that level's cell widths and Domain. `rhs_levels.size()` == `levels.size()`.
+// `bd_levels.size()` is `levels.size()` (per-level MultiFab data) or 1 (same constants / ParallelCopy source on every level).
+// Covered cells may still receive the fold; backends ignore covered rhs. Collective.
+Status fold_boundary_data (PressureProblem const& p,
+                           std::vector<BoundaryData> const& bd_levels,
+                           std::vector<amrex::MultiFab*>& rhs_levels,
+                           std::string* message = nullptr);
 
 const char* to_string (Status s);
 const char* to_string (BC b);

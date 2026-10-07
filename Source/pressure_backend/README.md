@@ -81,7 +81,7 @@ The HYPRE backend is optional at compile time. Everything that names HYPRE is be
 - `PressureOptions::trigger` / `full_checks_on` (FR-039): full checks versus the cheap path.
 - `PressureWorkspace` caches the FFT plan (keyed by ba/dm/geom/bc); `PbWorkspaceImpl.H` is private. The class layout changed: recompile dependants.
 - Harness modes `trigger1`, `comp_trigger`, `fftcache`; ctests `pb_trigger_single_*`, `pb_comp_trigger`, `pb_fftcache_*`.
-- `fold_boundary_data` / `BoundaryData`: inhomogeneous Dirichlet/Neumann wall data folded into the rhs (sign convention in the header and frozen/m2-notes.md).
+- `fold_boundary_data` / `BoundaryData`: inhomogeneous Dirichlet/Neumann wall data folded into the rhs (single-level and composite; sign convention in the header, frozen/m2-notes.md, frozen/s6-open-inhomogeneous.md).
 - Mixed open/closed faces (any per-direction NN/DD/ND/DN/PP) on FFT, MLMG and composite; `effective_bc()` for a one-cell y.
 
 ## HYPRE backend (see frozen/hypre-notes.md)

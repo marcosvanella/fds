@@ -10,6 +10,7 @@
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <vector>
 
 namespace pb {
 
@@ -501,34 +502,40 @@ void apply_operator (PressureProblem const& p, MultiFab& phi, MultiFab& out)
     }
 }
 
-Status fold_boundary_data (PressureProblem const& p, BoundaryData const& bd, MultiFab& rhs, std::string* message)
+// Fold into one level's rhs (shared by single-level and composite overloads). Uses that level's h and Domain.
+static Status fold_one_level (std::array<BC,6> const& bc, Geometry const& geom,
+                              BoxArray const& ba, DistributionMapping const& dm,
+                              BoundaryData const& bd, MultiFab& rhs, std::string* message)
 {
     auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
-    if (!p.levels.empty() || p.nlevels != 1) { return fail(Status::NotBuilt, "fold_boundary_data is built for single-level problems"); }
-    if (rhs.boxArray() != p.ba || !(rhs.DistributionMap() == p.dm)) { return fail(Status::InvalidInput, "rhs BoxArray/DistributionMapping differ from the problem"); }
-    const Box dom = p.geom.Domain();
+    if (rhs.boxArray() != ba || !(rhs.DistributionMap() == dm)) {
+        return fail(Status::InvalidInput, "rhs BoxArray/DistributionMapping differ from the level");
+    }
+    const Box dom = geom.Domain();
     for (int d = 0; d < 3; ++d) {
         for (int side = 0; side < 2; ++side) {
             const int f = face_index(d, side);
             const bool has = (bd.value[f] != nullptr) || (bd.constant[f] != Real(0));
-            if (p.bc[f] == BC::Periodic && has) { return fail(Status::InvalidInput, "boundary data given on a periodic face"); }
+            if (bc[f] == BC::Periodic && has) { return fail(Status::InvalidInput, "boundary data given on a periodic face"); }
             if (bd.value[f] && bd.value[f]->nComp() < 1) { return fail(Status::InvalidInput, "boundary data MultiFab has no component"); }
-            if (p.bc[f] == BC::Dirichlet && dom.length(d) == 1 && d != 1) { return fail(Status::NotBuilt, "a Dirichlet face in a one-cell x or z direction is not built"); }
+            if (bc[f] == BC::Dirichlet && dom.length(d) == 1 && d != 1) {
+                return fail(Status::NotBuilt, "a Dirichlet face in a one-cell x or z direction is not built");
+            }
         }
     }
     for (int d = 0; d < 3; ++d) {
         if (d == 1 && dom.length(1) == 1) { continue; }               // TWO_D: the y term does not exist
-        const Real h = p.geom.CellSize(d);
+        const Real h = geom.CellSize(d);
         for (int side = 0; side < 2; ++side) {
             const int f = face_index(d, side);
-            if (p.bc[f] == BC::Periodic) { continue; }
+            if (bc[f] == BC::Periodic) { continue; }
             if (!bd.value[f] && bd.constant[f] == Real(0)) { continue; }
-            Real coef;                                                 // factor applied to the data value
-            if (p.bc[f] == BC::Neumann) { coef = (side == 0 ? Real(1) : Real(-1)) / h; }
+            Real coef;
+            if (bc[f] == BC::Neumann) { coef = (side == 0 ? Real(1) : Real(-1)) / h; }
             else { coef = Real(-2) / (h*h); }
             Box layer = dom;
             if (side == 0) { layer.setBig(d, dom.smallEnd(d)); } else { layer.setSmall(d, dom.bigEnd(d)); }
-            MultiFab tmp(p.ba, p.dm, 1, 0);
+            MultiFab tmp(ba, dm, 1, 0);
             tmp.setVal(Real(0));
             if (bd.value[f]) { tmp.ParallelCopy(*bd.value[f], 0, 0, 1); }
             for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
@@ -541,6 +548,43 @@ Status fold_boundary_data (PressureProblem const& p, BoundaryData const& bd, Mul
                 amrex::LoopOnCpu(b, [&] (int i, int j, int k) { r(i,j,k) += coef * (use_arr ? t(i,j,k) : cst); });
             }
         }
+    }
+    if (message) { message->clear(); }
+    return Status::Ok;
+}
+
+Status fold_boundary_data (PressureProblem const& p, BoundaryData const& bd, MultiFab& rhs, std::string* message)
+{
+    auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
+    if (!p.levels.empty() || p.nlevels != 1) {
+        return fail(Status::NotBuilt,
+            "fold_boundary_data(single MultiFab): use the per-level overload when PressureProblem::levels is set");
+    }
+    return fold_one_level(p.bc, p.geom, p.ba, p.dm, bd, rhs, message);
+}
+
+Status fold_boundary_data (PressureProblem const& p,
+                           std::vector<BoundaryData> const& bd_levels,
+                           std::vector<MultiFab*>& rhs_levels,
+                           std::string* message)
+{
+    auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
+    if (p.levels.empty()) {
+        return fail(Status::InvalidInput, "fold_boundary_data(per-level): PressureProblem::levels is empty; use the single-level overload");
+    }
+    const std::size_t nl = p.levels.size();
+    if (rhs_levels.size() != nl) {
+        return fail(Status::InvalidInput, "fold_boundary_data(per-level): rhs_levels size must equal levels.size()");
+    }
+    // One BoundaryData applies to every level (constants / same index-space MultiFab ParallelCopy per level).
+    if (!(bd_levels.size() == nl || bd_levels.size() == 1)) {
+        return fail(Status::InvalidInput, "fold_boundary_data(per-level): bd_levels size must be 1 or levels.size()");
+    }
+    for (std::size_t l = 0; l < nl; ++l) {
+        if (!rhs_levels[l]) { return fail(Status::InvalidInput, "fold_boundary_data(per-level): null rhs"); }
+        BoundaryData const& bd = bd_levels.size() == 1 ? bd_levels[0] : bd_levels[l];
+        Status st = fold_one_level(p.bc, p.levels[l].geom, p.levels[l].ba, p.levels[l].dm, bd, *rhs_levels[l], message);
+        if (st != Status::Ok) { return st; }
     }
     if (message) { message->clear(); }
     return Status::Ok;

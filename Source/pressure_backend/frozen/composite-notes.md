@@ -15,8 +15,8 @@ the caller passes no mask. RHS values in covered cells are ignored (zeroed in th
 
 ## Boundary conditions
 
-Domain faces (coarse domain): Dirichlet (homogeneous), Neumann, periodic, per problem; a per-direction mix of Neumann and
-periodic is accepted (all closed faces). Mixing open and closed faces is NotBuilt. C/F interface: AMReX MLMG, `maxorder 2`,
+Domain faces (coarse domain): Dirichlet (homogeneous in the operator; non-zero wall data via `fold_boundary_data`), Neumann,
+periodic, per problem; mixed open/closed faces are Built (m2-notes.md). C/F interface: AMReX MLMG, `maxorder 2`,
 fine ghost cells interpolated from the coarse level (coarse-fine BC from the coarse level, `setLevelBC(l, nullptr)` on every
 level). The C/F interpolation is first order at the interface, so the fine-side gradient at C/F faces is less accurate than
 elsewhere (up to about 12 % for ratio 4 in the corner-patch tests); the solution itself converges at second order.
@@ -129,5 +129,7 @@ periodic 4.18e-3 to 1.038e-3 (2.01), Dirichlet 9.65e-4 to 2.417e-4 (2.00). Ratio
 against a uniform-fine solve on the fine region converges at 1.9 to 2.1.
 
 ## Masked composite
+
+Inhomogeneous OPEN (S6): composite `fold_boundary_data` + `pb_comp_bcdata` — see `s6-open-inhomogeneous.md`.
 
 **Built** product path (D-092): Auto → assembled HYPRE (Q1; see masked-branch-design.md D3/D4/D6). MLMG composite with masks is NotBuilt. Known on C/F is InvalidInput (Q2). `face_gradient_composite`+mask is NotBuilt.
