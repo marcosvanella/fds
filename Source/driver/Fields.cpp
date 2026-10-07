@@ -122,9 +122,7 @@ const amrex::MultiFab& Fields::operator[](const std::string& name) const
 
 const FieldSpec& Fields::spec(const std::string& name) const { return *find_field(name); }
 
-// Wall seconds of the ghost-layer machinery, summed per kind (diagnostic: written to <chid>_driver_profile.txt when FDSTL_PROFILE is set; no effect on results).
-// 0 Fields::fill_ghosts (FillBoundary), 1 BcStep::fill_omesh (OMESH broadcast + copy), 2 BcStep::match_periodic_faces, 3 FDS boundary routines called from after_exchange
-double g_prof[4] = {0, 0, 0, 0};
+double g_prof[7] = {0, 0, 0, 0, 0, 0, 0};   // Fields.H
 
 void Fields::fill_ghosts(const std::string& name) const
 {

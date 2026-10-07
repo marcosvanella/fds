@@ -123,8 +123,6 @@ int fds_p_stop_status();
 
 namespace fdsamr {
 
-extern double g_prof[4];   // wall seconds of the ghost-layer machinery (Fields.cpp), written by write_perf when FDSTL_PROFILE is set
-
 namespace {
 inline bool is_local(const Level0& l0, int i) { return l0.dm[i] == amrex::ParallelDescriptor::MyProc(); }
 template <class T> void all_max(T& v) { amrex::ParallelAllReduce::Max(v, amrex::ParallelContext::CommunicatorSub()); }
@@ -1050,7 +1048,7 @@ struct TimeLoop::Impl {
         wrap_check("composite after match");
         for_levels([&](int) { each_local([&](int nm) { fds_p_noflux(dt, nm, 1); }); });
         wrap_check("composite after noflux");
-        composite_average_down_flux(reg, nl);
+        { ProfScope prof_ad(4); composite_average_down_flux(reg, nl); }
         wrap_check("composite after avg-down");
         select(0);
         each_local([&](int nm) { fds_p_rhs(t, dt, nm); });
@@ -1066,8 +1064,11 @@ struct TimeLoop::Impl {
         ensure_comp();
         FluxStages fs(L);
         const int nl = static_cast<int>(lc.size());
-        for (int l = 0; l < nl; ++l) fs.compute_stage_fluxes(l, pred);
-        runner->set_overrides(fs, fdsrt::FluxKind::Adv);
+        {
+            ProfScope prof_ow(6);
+            for (int l = 0; l < nl; ++l) fs.compute_stage_fluxes(l, pred);
+            runner->set_overrides(fs, fdsrt::FluxKind::Adv);
+        }
         for (int l = nl - 1; l >= 0; --l) fs.apply_flux_divergence(l, pred);
     }
     // DIVERGENCE_PART_1 over all levels; with the flux overwrite: the DIF read-out of every level, the override lists, then the re-run where a list was set
@@ -1077,13 +1078,17 @@ struct TimeLoop::Impl {
         ensure_comp();
         FluxStages fs(L);
         const int nl = static_cast<int>(lc.size());
-        for (int l = 0; l < nl; ++l) fs.readout_dif(l);
-        runner->set_overrides(fs, fdsrt::FluxKind::Dif);
+        {
+            ProfScope prof_ow(6);
+            for (int l = 0; l < nl; ++l) fs.readout_dif(l);
+            runner->set_overrides(fs, fdsrt::FluxKind::Dif);
+        }
         for (int l = nl - 1; l >= 0; --l) fs.run_divergence_part1(l);
     }
     void avg_down_vel(bool pred)
     {
         if (!multi()) return;
+        ProfScope prof_ad(4);
         if (pred) composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"US", "VS", "WS"});
         else composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"U", "V", "W"});
     }
@@ -1329,6 +1334,7 @@ struct TimeLoop::Impl {
         c->bc->exchange(code, pred);
         const int l = static_cast<int>(c - lc.data());
         if (l > 0 && (code == 3 || code == 6)) {
+            ProfScope prof_cf(5);
             if (code == 3) composite_fill_fine_face_ghosts(*L.m_reg, l, {"US", "VS", "WS"});
             else composite_fill_fine_face_ghosts(*L.m_reg, l, {"U", "V", "W"});
         }
@@ -1685,8 +1691,9 @@ struct TimeLoop::Impl {
     {
         double mx[4] = {t_loop, t_pres, t_solve, t_out};
         amrex::ParallelAllReduce::Max(mx, 4, amrex::ParallelContext::CommunicatorSub());
-        double pr[4] = {g_prof[0], g_prof[1], g_prof[2], g_prof[3]};
-        amrex::ParallelAllReduce::Max(pr, 4, amrex::ParallelContext::CommunicatorSub());
+        double pr[7];
+        std::copy(g_prof, g_prof + 7, pr);
+        amrex::ParallelAllReduce::Max(pr, 7, amrex::ParallelContext::CommunicatorSub());
         double mem[3] = {proc_status_kb("VmHWM"), proc_status_kb("VmRSS"), static_cast<double>(L.m_F->bytes())};
         amrex::ParallelAllReduce::Sum(mem, 3, amrex::ParallelContext::CommunicatorSub());
         double hwm_max = proc_status_kb("VmHWM");
@@ -1702,8 +1709,9 @@ struct TimeLoop::Impl {
         if (std::getenv("FDSTL_PROFILE")) {   // diagnostic: where the ghost-layer wall time goes (max over ranks)
             std::FILE* pf = std::fopen((dir + "/" + L.m_o.chid + "_driver_profile.txt").c_str(), "w");
             if (pf) {
-                std::fprintf(pf, "t_loop %.6f\nt_pressure %.6f\nt_poisson_solve %.6f\nt_fds_outputs %.6f\nghost_fill_boundary %.6f\nfill_omesh %.6f\nmatch_periodic_faces %.6f\nfds_bc_routines %.6f\n",
-                             mx[0], mx[1], mx[2], mx[3], pr[0], pr[1], pr[2], pr[3]);
+                std::fprintf(pf, "t_loop %.6f\nt_pressure %.6f\nt_poisson_solve %.6f\nt_fds_outputs %.6f\nghost_fill_boundary %.6f\nfill_omesh %.6f\nmatch_periodic_faces %.6f\nfds_bc_routines %.6f\n"
+                                 "avg_down %.6f\ncf_ghost_fill %.6f\nflux_overwrite %.6f\n",
+                             mx[0], mx[1], mx[2], mx[3], pr[0], pr[1], pr[2], pr[3], pr[4], pr[5], pr[6]);
                 std::fclose(pf);
             }
         }
@@ -1879,6 +1887,7 @@ void TimeLoop::set_cf_ghost_hook(int lev, CfGhostHook h)
 const TimeLoop::CompositeReport& TimeLoop::composite_report() const { return m->crep; }
 void TimeLoop::prime_levels() { m->prime_levels(); }
 void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
+void TimeLoop::write_perf() { m->write_perf(); }
 
 bool TimeLoop::advance() { const double t0 = amrex::second(); const bool ok = m->advance(); m->t_loop += amrex::second() - t0; return ok; }
 

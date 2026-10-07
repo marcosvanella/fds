@@ -126,6 +126,7 @@ public:
     const CompositeReport& composite_report() const;
     void prime_levels();
     void set_flux_overwrite(bool on);
+    void write_perf();   // <chid>_driver_perf.csv (and _driver_profile.txt with FDSTL_PROFILE) for a driver that steps with advance(); run() writes it at the end
     double time() const { return m_t; }
     double dt() const { return m_dt; }
     int icyc() const { return m_icyc; }

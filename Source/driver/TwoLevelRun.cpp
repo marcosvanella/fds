@@ -283,6 +283,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
     }
     if (lf) std::fclose(lf);
+    loop.write_perf();
     const std::vector<double> m1 = composite_mass(reg, nl, ns);
     const fdsamr::TimeLoop::CompositeReport& cr = loop.composite_report();
     amrex::Print() << tag << " RESULT steps " << loop.steps().size() << " composite mass " << m0[0] << " -> " << m1[0] << " relative change " << (m1[0] - m0[0]) / m0[0] << " (worst over steps " << worst_mass << ")\n";

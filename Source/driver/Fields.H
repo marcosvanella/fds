@@ -34,6 +34,12 @@
 
 namespace fdsamr {
 
+// Wall seconds by kind (diagnostic, written to <chid>_driver_profile.txt when FDSTL_PROFILE is set; no effect on results): 0 Fields::fill_ghosts (FillBoundary),
+// 1 BcStep::fill_omesh, 2 BcStep::match_periodic_faces, 3 FDS boundary routines of after_exchange, 4 composite average-down (faces and fluxes), 5 coarse-fine ghost fill
+// (cf scalar hook and fine face ghosts), 6 flux overwrite (interface flux read-out and override lists)
+extern double g_prof[7];
+struct ProfScope { int k; double t0; explicit ProfScope(int kk) : k(kk), t0(amrex::second()) {} ~ProfScope() { g_prof[k] += amrex::second() - t0; } };
+
 enum class Stag : int { Cell = 0, FaceX = 1, FaceY = 2, FaceZ = 3 };
 
 struct FieldSpec {

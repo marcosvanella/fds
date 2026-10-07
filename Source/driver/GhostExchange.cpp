@@ -79,10 +79,6 @@ BcStep::BcStep(const Level0& l0, Fields& F) : m_l0(l0), m_mesh_offset(l0.fds_mes
 
 bool BcStep::local(int i) const { return m_l0.dm[i] == amrex::ParallelDescriptor::MyProc(); }
 
-extern double g_prof[4];   // Fields.cpp
-namespace {
-struct ProfScope { int k; double t0; explicit ProfScope(int kk) : k(kk), t0(amrex::second()) {} ~ProfScope() { g_prof[k] += amrex::second() - t0; } };
-}
 
 namespace {
 // OMESH array index of FDS_G_FILL_OM
@@ -122,6 +118,7 @@ void BcStep::exchange(int code, bool predictor)
     if (m_l0.level > 0 && !ext_ghost) amrex::Abort("BcStep: a level > 0 has coarse-fine faces and needs EXTERNAL_GHOSTS_FILLED (ext_ghost, patches 0003/0004); the OMESH route is same-level only");
     ghost_exchange(m_F, code, predictor);
     if (cf_ghost_hook) {
+        ProfScope prof_cf(5);
         CfGhostRequest r{m_l0.level, code, predictor, {}};
         for (const auto& n : exchange_fields(code, predictor)) if (m_F.has(n)) r.fields.push_back(n);
         cf_ghost_hook(r);
