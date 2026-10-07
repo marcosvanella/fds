@@ -185,5 +185,8 @@ if (BUILD_TESTING)
         if (RT_FR016_DUMP)
             add_test(NAME regrid_transport_fr016_ghosts COMMAND fr016_ghost_check ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases ${RT_FR016_DUMP})
         endif()
+        if (RT_FR016A_DUMP)   # separate step-1 dump (FDSREF_STEPS=1), not the kernelcheck dumps
+            add_test(NAME regrid_transport_fr016a_ghosts_step1 COMMAND fr016_ghost_check ${CMAKE_CURRENT_SOURCE_DIR}/tests/cases ${RT_FR016A_DUMP} 1)
+        endif()
     endif()
 endif()

@@ -8,7 +8,8 @@
 #   E1 full-domain level 1 equals the uniform-fine run (RHO and both ZZ, field by field), 1 and 4 ranks
 #   E2 uniform state stays uniform across the interface (patch of level 1, a few steps), 1 and 4 ranks
 #   E3 static two-level layout of ns2d_16_int_1to2_refinement (patch = coarse cells 4..11): composite mass and species conserved to round-off with the overwrite ON; OFF drifts (negative control)
-#   E4 FR-016(a) ghost check through a real TimeLoop stage, steps 2 and 3, incl. D and DS (needs the reference dumps: RT_FR016_DUMP=<prefix>; skipped with a note otherwise)
+#   E4 FR-016(a) ghost check through a real TimeLoop stage, incl. D and DS: steps 2 and 3 with RT_FR016_DUMP=<prefix> (FDSREF_STEPS=2,3), step 1 with RT_FR016A_DUMP=<prefix> (a separate
+#      FDSREF_STEPS=1 dump, never used for kernelcheck); skipped with a note when neither is set
 #   E5 D-059: shared ghost cell count printed; corner blobs (blobs astride the patch corners) with the overwrite ON
 # Tolerances (set from the real runs, see notes/flux-stage-wiring.md):
 #   E1 RHO difference <= 1e-12; ZZ difference <= E1_ZZ_TOL (default 1e-13, observed 3e-16 on 1 and 4 ranks). Negative control (np=1): a run with a different initial smoothing of the tracer blob must NOT pass the same comparison.
@@ -110,14 +111,18 @@ for np in 1 4; do
   [ $RC = 0 ] && echo "$LAST" | grep -q "E5 D-059 shared ghost cells" && pass "E5 np=$np corner blobs ran; D-059 count printed" || fail "E5 np=$np corner blobs"
 done
 # ---- E4 (1 rank, ns2d_16_l0 geometry)
-if [ -n "${RT_FR016_DUMP:-}" ] && [ -e "${RT_FR016_DUMP}" ]; then
+E4=""   # prefix:step pairs; RHO ZZ TMP RSUM RHOS ZZS MU KRES D DS
+[ -n "${RT_FR016_DUMP:-}" ] && [ -e "$RT_FR016_DUMP" ] && for st in ${RT_FR016_STEPS:-2 3}; do E4="$E4 $RT_FR016_DUMP:$st"; done
+[ -n "${RT_FR016A_DUMP:-}" ] && [ -e "$RT_FR016A_DUMP" ] && E4="$E4 $RT_FR016A_DUMP:1"
+if [ -n "$E4" ]; then
   cp "$HERE/../../driver/tests/cases/ns2d_16_l0.fds" .
-  for st in ${RT_FR016_STEPS:-2 3}; do   # the dumps hold steps 2 and 3 (step 1 is the initial pass the ghost fill does not reproduce); RHO ZZ TMP RSUM MU KRES D DS
-    run 1 ns2d_16_l0 ghost --dumps "$RT_FR016_DUMP" --step $st --label E4s$st
+  for ds in $E4; do
+    st=${ds##*:}
+    run 1 ns2d_16_l0 ghost --dumps "${ds%:*}" --step $st --label E4s$st
     echo "$LAST" | grep -E "RTE2E ghost|RTE2E E4" | sed 's/^/  /'
     [ $RC = 0 ] && echo "$LAST" | grep -q "RTE2E ghost .*covered cells written" && pass "E4 step $st: ghost cells written by a real stage_exchange agree with the FDS dumps (RHO ZZ TMP RSUM RHOS ZZS MU KRES D DS; non-conflict cells; the D-059 hole-corner cells are listed above)" || fail "E4 step $st FR-016 ghost check through a stage"
   done
-else echo "SKIP E4 FR-016 ghost check through a stage: set RT_FR016_DUMP=<prefix of the reference dumps of ns2d_16_int_1to2_refinement> (instrumented FDS, FDSREF_FILE=<prefix> mpirun -np 13)"; fi
+else echo "SKIP E4 FR-016 ghost check through a stage: set RT_FR016_DUMP and/or RT_FR016A_DUMP=<prefix of the reference dumps of ns2d_16_int_1to2_refinement> (instrumented FDS, FDSREF_FILE=<prefix> FDSREF_STEPS=2,3 or 1, mpirun -np 13)"; fi
 # ---- E6 converter input race_test_1_r4: the unconverted input has five 4:1 level-0 faces and must be refused. Patch 0010 (ERROR 9001 in FDS_SETUP) is the guard; it is not committed or validated yet,
 # so without it the check is PENDING (the driver still aborts at FdsAmr.cpp, not a pass for the guard). The converter side (equal-level-0 output) is regrid_transport_input_converter.
 cp "$CASES/race_test_1_r4_full.fds" . && run 1 race_test_1_r4_full list
