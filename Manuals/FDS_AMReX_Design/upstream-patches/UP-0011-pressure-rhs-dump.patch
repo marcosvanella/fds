@@ -1,0 +1,269 @@
+From: mnv-grokbot <mnv-grokbot@fds-amrex.invalid>
+Subject: [PATCH UP-0011] pres/main: opt-in write-only dump of the pressure right-hand side and solved H
+
+Adds PRESSURE_SOLVER_DUMP (module PRES, Source/pres.f90) and two calls in the pressure iteration of Source/main.f90, one right after
+the PRESSURE_SOLVER_COMPUTE_RHS loop (before the Poisson solve) and one right after the solve (before the residual check).
+
+Off by default. It is switched on only by the environment variable FDS_PDUMP_STEPS (comma-separated list of time-step counts ICYC, for
+example FDS_PDUMP_STEPS=1,10, or ALL). With the variable unset the routine reads the environment once, sets a SAVEd flag and returns
+at the first statement of every later call; it touches no FDS variable, does no MPI communication and writes no file.
+
+When enabled it writes, per mesh NM, stage (P = predictor, C = corrector) and selected step, in the run directory:
+  <CHID>_pdump_n<ICYC:6>_<P|C>_m<NM:3>_meta.txt  text: format fds-pdump-1, mesh extents, IBAR/JBAR/KBAR, cell faces, LBC/MBC/NBC,
+                                                  face types, PRES_FLAG, IPS, FISHPAK_BC, T, DT, max |BXS..BZF|, pressure-zone count
+  ..._rhs.bin   PRHS before the solve (double, valid cells, I fastest; the FFT layout transposition IPS=2,3,5,6 is undone)
+  ..._phi.bin   H (predictor) or HS (corrector) after the solve, valid cells
+  ..._rho.bin   RHO (predictor) or RHOS (corrector), valid cells      ..._kres.bin  KRES
+  ..._zone.bin  PRESSURE_ZONE as double                              ..._bc.bin    BXS,BXF,BYS,BYF,BZS,BZF (1:n each), double
+With the pressure iteration repeated within a step (ITERATE_PRESSURE) the files of the last iteration remain.
+
+Why: the AMR pressure backend (FFT, MLMG, HYPRE behind one interface) is checked on FDS's own right-hand side and FDS's own H, which
+needs the data of one solve of an unmodified FDS. See the rationale and check in UP-0011-pressure-rhs-dump.signoff.md.
+What it does not change: no FDS array, no control flow, no output of a default run. Target: FireX (tested on 36975d765f; applies to
+master ce1f659cd4 and to the merged tip bee11f0329).
+---
+--- a/Source/main.f90
++++ b/Source/main.f90
+@@ -1650,6 +1650,12 @@
+       CALL PRESSURE_SOLVER_COMPUTE_RHS(T,DT,NM)
+    ENDDO
+ 
++   ! Optional write-only dump of PRHS before the solve (environment variable FDS_PDUMP_STEPS; off by default)
++
++   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
++      CALL PRESSURE_SOLVER_DUMP(NM,T,DT,.FALSE.)
++   ENDDO
++
+    ! Solve the Poission equation using either FFT or ULMAT, GLMAT, or UGLMAT
+ 
+    SELECT CASE(PRES_FLAG)
+@@ -1669,6 +1675,12 @@
+          ENDDO
+    END SELECT
+ 
++   ! Optional write-only dump of the solved H or HS (environment variable FDS_PDUMP_STEPS; off by default)
++
++   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
++      CALL PRESSURE_SOLVER_DUMP(NM,T,DT,.TRUE.)
++   ENDDO
++
+    ! Check the residuals of the Poisson solution
+ 
+    DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+--- a/Source/pres.f90
++++ b/Source/pres.f90
+@@ -9,7 +9,7 @@
+ PRIVATE
+ 
+ PUBLIC PRESSURE_SOLVER_COMPUTE_RHS,PRESSURE_SOLVER_FFT,TUNNEL_POISSON_SOLVER,PRESSURE_SOLVER_CHECK_RESIDUALS, &
+-       COMPUTE_VELOCITY_ERROR
++       COMPUTE_VELOCITY_ERROR,PRESSURE_SOLVER_DUMP
+ 
+ CONTAINS
+ 
+@@ -1076,6 +1076,205 @@
+ END SUBROUTINE COMPUTE_VELOCITY_ERROR
+ 
+ 
++
++!> \brief Write-only dump of the pressure right-hand side and the solved H of one mesh (opt-in, off by default).
++!> \details Enabled only if the environment variable FDS_PDUMP_STEPS is set to a comma-separated list of time-step counts
++!> (ICYC values), for example FDS_PDUMP_STEPS=1,10, or to ALL. The routine only reads FDS arrays and writes files;
++!> it changes no FDS variable and does no MPI communication. See upstream-patches/UP-0011-pressure-rhs-dump.signoff.md.
++!> \param NM Mesh number
++!> \param T Time (s)
++!> \param DT Time step (s)
++!> \param POST .FALSE. before the Poisson solve (writes PRHS, RHO/RHOS, KRES, boundary data, zones, metadata);
++!>             .TRUE. after the solve (writes H or HS)
++
++SUBROUTINE PRESSURE_SOLVER_DUMP(NM,T,DT,POST)
++
++USE COMP_FUNCTIONS, ONLY: GET_FILE_NUMBER
++USE GLOBAL_CONSTANTS, ONLY: PREDICTOR,ICYC,CHID,PRES_FLAG,TWO_D,CYLINDRICAL,TUNNEL_PRECONDITIONER,SOLID_PHASE_ONLY,FREEZE_VELOCITY,&
++                            FISHPAK_BC,NMESHES
++INTEGER, INTENT(IN) :: NM
++REAL(EB), INTENT(IN) :: T,DT
++LOGICAL, INTENT(IN) :: POST
++INTEGER, PARAMETER :: MAX_STEPS=256
++INTEGER, SAVE :: PD_STEPS(MAX_STEPS)=0,PD_N=0
++LOGICAL, SAVE :: PD_INIT=.FALSE.,PD_ALL=.FALSE.
++CHARACTER(512) :: ENVSTR
++CHARACTER(256) :: BASE
++CHARACTER(1) :: ST
++INTEGER :: I,J,K,LU,IOS,L,IP,IE,NV,ENVLEN,ENVSTAT,NB
++LOGICAL :: DO_IT
++REAL(EB), ALLOCATABLE, DIMENSION(:,:,:) :: A
++REAL(EB), ALLOCATABLE, DIMENSION(:) :: BCBUF
++REAL(EB), POINTER, DIMENSION(:,:,:) :: HP,RHOP
++
++IF (.NOT.PD_INIT) THEN
++   PD_INIT = .TRUE.
++   ENVSTR = ' '
++   CALL GET_ENVIRONMENT_VARIABLE('FDS_PDUMP_STEPS',ENVSTR,ENVLEN,ENVSTAT)
++   IF (ENVSTAT==0 .AND. ENVLEN>0) THEN
++      IF (ENVSTR(1:3)=='ALL') THEN
++         PD_ALL = .TRUE.
++      ELSE
++         IP = 1
++         DO WHILE (IP<=LEN_TRIM(ENVSTR) .AND. PD_N<MAX_STEPS)
++            IE = INDEX(ENVSTR(IP:),',')
++            IF (IE==0) THEN
++               IE = LEN_TRIM(ENVSTR)
++            ELSE
++               IE = IP+IE-2
++            ENDIF
++            IF (IE>=IP) THEN
++               READ(ENVSTR(IP:IE),*,IOSTAT=IOS) NV
++               IF (IOS==0) THEN
++                  PD_N = PD_N+1
++                  PD_STEPS(PD_N) = NV
++               ENDIF
++            ENDIF
++            IP = IE+2
++         ENDDO
++      ENDIF
++   ENDIF
++ENDIF
++
++IF (PD_N==0 .AND. .NOT.PD_ALL) RETURN
++IF (SOLID_PHASE_ONLY .OR. FREEZE_VELOCITY) RETURN
++DO_IT = PD_ALL
++DO L=1,PD_N
++   IF (PD_STEPS(L)==ICYC) DO_IT = .TRUE.
++ENDDO
++IF (.NOT.DO_IT) RETURN
++
++CALL POINT_TO_MESH(NM)
++
++IF (PREDICTOR) THEN
++   ST = 'P'
++   HP => H
++   RHOP => RHO
++ELSE
++   ST = 'C'
++   HP => HS
++   RHOP => RHOS
++ENDIF
++WRITE(BASE,'(A,A,I6.6,A,A,A,I3.3,A)') TRIM(CHID),'_pdump_n',ICYC,'_',ST,'_m',NM,'_'
++
++ALLOCATE(A(IBAR,JBAR,KBAR))
++
++IF (.NOT.POST) THEN
++
++   ! Metadata (text, key = values, written once per stage and mesh)
++
++   LU = GET_FILE_NUMBER()
++   OPEN(LU,FILE=TRIM(BASE)//'meta.txt',FORM='FORMATTED',STATUS='REPLACE')
++   WRITE(LU,'(A)')       'format = fds-pdump-1'
++   WRITE(LU,'(A,A)')     'chid = ',TRIM(CHID)
++   WRITE(LU,'(A,I0)')    'mesh = ',NM
++   WRITE(LU,'(A,I0)')    'nmeshes = ',NMESHES
++   WRITE(LU,'(A,I0)')    'step = ',ICYC
++   WRITE(LU,'(A,A)')     'stage = ',ST
++   WRITE(LU,'(A,ES25.17E3)') 'time = ',T
++   WRITE(LU,'(A,ES25.17E3)') 'dt = ',DT
++   WRITE(LU,'(A,3(1X,I0))') 'ijk =',IBAR,JBAR,KBAR
++   WRITE(LU,'(A,6(1X,ES25.17E3))') 'xb =',XS,XF,YS,YF,ZS,ZF
++   WRITE(LU,'(A,3(1X,ES25.17E3))') 'dx0 =',DX(1),DY(1),DZ(1)
++   WRITE(LU,'(A,I0)')    'pres_flag = ',PRES_FLAG
++   WRITE(LU,'(A,I0)')    'ips = ',IPS
++   WRITE(LU,'(A,3(1X,I0))') 'lbc_mbc_nbc =',LBC,MBC,NBC
++   WRITE(LU,'(A,3(1X,I0))') 'fishpak_bc_input =',FISHPAK_BC(1:3)
++   WRITE(LU,'(A,L1)')    'two_d = ',TWO_D
++   WRITE(LU,'(A,L1)')    'cylindrical = ',CYLINDRICAL
++   WRITE(LU,'(A,L1)')    'tunnel_preconditioner = ',TUNNEL_PRECONDITIONER
++   WRITE(LU,'(A,6(1X,A))') 'face_bc_xmin_xmax_ymin_ymax_zmin_zmax =',POISSON_FACE_TYPE(LBC,.TRUE.),POISSON_FACE_TYPE(LBC,.FALSE.),&
++                           POISSON_FACE_TYPE(MBC,.TRUE.),POISSON_FACE_TYPE(MBC,.FALSE.),&
++                           POISSON_FACE_TYPE(NBC,.TRUE.),POISSON_FACE_TYPE(NBC,.FALSE.)
++   WRITE(LU,'(A,6(1X,ES25.17E3))') 'bc_data_maxabs_xs_xf_ys_yf_zs_zf =',&
++        MAXVAL(ABS(BXS(1:JBAR,1:KBAR))),MAXVAL(ABS(BXF(1:JBAR,1:KBAR))),MAXVAL(ABS(BYS(1:IBAR,1:KBAR))),&
++        MAXVAL(ABS(BYF(1:IBAR,1:KBAR))),MAXVAL(ABS(BZS(1:IBAR,1:JBAR))),MAXVAL(ABS(BZF(1:IBAR,1:JBAR)))
++   WRITE(LU,'(A,I0)')    'n_pressure_zones = ',MAXVAL(PRESSURE_ZONE(1:IBAR,1:JBAR,1:KBAR))
++   WRITE(LU,'(A)')       'x_faces (0:ibar), then y_faces (0:jbar), then z_faces (0:kbar):'
++   WRITE(LU,'(A,*(1X,ES25.17E3))') 'x =',(X(I),I=0,IBAR)
++   WRITE(LU,'(A,*(1X,ES25.17E3))') 'y =',(Y(J),J=0,JBAR)
++   WRITE(LU,'(A,*(1X,ES25.17E3))') 'z =',(Z(K),K=0,KBAR)
++   CLOSE(LU)
++
++   ! PRHS in cell order I fastest (undo the transposition of the FFT layout IPS)
++
++   SELECT CASE(IPS)
++      CASE(:1,4,7) ; A(1:IBAR,1:JBAR,1:KBAR) = PRHS(1:IBAR,1:JBAR,1:KBAR)
++      CASE(2)      ; DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR ; A(I,J,K) = PRHS(J,I,K) ; ENDDO ; ENDDO ; ENDDO
++      CASE(3,6)    ; DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR ; A(I,J,K) = PRHS(K,J,I) ; ENDDO ; ENDDO ; ENDDO
++      CASE(5)      ; DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR ; A(I,J,K) = PRHS(I,K,J) ; ENDDO ; ENDDO ; ENDDO
++   END SELECT
++   CALL PDUMP_WRITE('rhs.bin')
++
++   A(1:IBAR,1:JBAR,1:KBAR) = RHOP(1:IBAR,1:JBAR,1:KBAR)
++   CALL PDUMP_WRITE('rho.bin')
++
++   A(1:IBAR,1:JBAR,1:KBAR) = KRES(1:IBAR,1:JBAR,1:KBAR)
++   CALL PDUMP_WRITE('kres.bin')
++
++   A(1:IBAR,1:JBAR,1:KBAR) = REAL(PRESSURE_ZONE(1:IBAR,1:JBAR,1:KBAR),EB)
++   CALL PDUMP_WRITE('zone.bin')
++
++   ! Poisson boundary data BXS,BXF (J fastest, then K), BYS,BYF (I,K), BZS,BZF (I,J), each 1:JBAR x 1:KBAR etc.
++
++   LU = GET_FILE_NUMBER()
++   OPEN(LU,FILE=TRIM(BASE)//'bc.bin',FORM='UNFORMATTED',ACCESS='STREAM',STATUS='REPLACE')
++   ! The six sections are not contiguous in the mesh arrays: copy them to one contiguous buffer (same byte order as before)
++   ALLOCATE(BCBUF(2*(JBAR*KBAR+IBAR*KBAR+IBAR*JBAR)))
++   NB = 0
++   DO K=1,KBAR ; DO J=1,JBAR ; NB=NB+1 ; BCBUF(NB) = BXS(J,K) ; ENDDO ; ENDDO
++   DO K=1,KBAR ; DO J=1,JBAR ; NB=NB+1 ; BCBUF(NB) = BXF(J,K) ; ENDDO ; ENDDO
++   DO K=1,KBAR ; DO I=1,IBAR ; NB=NB+1 ; BCBUF(NB) = BYS(I,K) ; ENDDO ; ENDDO
++   DO K=1,KBAR ; DO I=1,IBAR ; NB=NB+1 ; BCBUF(NB) = BYF(I,K) ; ENDDO ; ENDDO
++   DO J=1,JBAR ; DO I=1,IBAR ; NB=NB+1 ; BCBUF(NB) = BZS(I,J) ; ENDDO ; ENDDO
++   DO J=1,JBAR ; DO I=1,IBAR ; NB=NB+1 ; BCBUF(NB) = BZF(I,J) ; ENDDO ; ENDDO
++   WRITE(LU) BCBUF
++   DEALLOCATE(BCBUF)
++   CLOSE(LU)
++
++ELSE
++
++   A(1:IBAR,1:JBAR,1:KBAR) = HP(1:IBAR,1:JBAR,1:KBAR)
++   CALL PDUMP_WRITE('phi.bin')
++
++ENDIF
++
++DEALLOCATE(A)
++
++CONTAINS
++
++SUBROUTINE PDUMP_WRITE(SUFFIX)
++CHARACTER(*), INTENT(IN) :: SUFFIX
++INTEGER :: LUW
++LUW = GET_FILE_NUMBER()
++OPEN(LUW,FILE=TRIM(BASE)//SUFFIX,FORM='UNFORMATTED',ACCESS='STREAM',STATUS='REPLACE')
++WRITE(LUW) A
++CLOSE(LUW)
++END SUBROUTINE PDUMP_WRITE
++
++END SUBROUTINE PRESSURE_SOLVER_DUMP
++
++
++!> \brief Text name of the Poisson boundary type at the lower (LOWER) or upper end of a direction, from the Crayfishpak code
++!> \param CODE LBC, MBC or NBC
++!> \param LOWER .TRUE. for the face at the lower coordinate
++
++CHARACTER(10) FUNCTION POISSON_FACE_TYPE(CODE,LOWER)
++INTEGER, INTENT(IN) :: CODE
++LOGICAL, INTENT(IN) :: LOWER
++SELECT CASE(CODE)
++   CASE(0)   ; POISSON_FACE_TYPE = 'periodic'
++   CASE(1)   ; POISSON_FACE_TYPE = 'dirichlet'
++   CASE(2)   ; IF (LOWER) THEN ; POISSON_FACE_TYPE = 'dirichlet' ; ELSE ; POISSON_FACE_TYPE = 'neumann' ; ENDIF
++   CASE(3)   ; POISSON_FACE_TYPE = 'neumann'
++   CASE(4)   ; IF (LOWER) THEN ; POISSON_FACE_TYPE = 'neumann' ; ELSE ; POISSON_FACE_TYPE = 'dirichlet' ; ENDIF
++   CASE(5)   ; IF (LOWER) THEN ; POISSON_FACE_TYPE = 'axis' ; ELSE ; POISSON_FACE_TYPE = 'dirichlet' ; ENDIF
++   CASE(6)   ; IF (LOWER) THEN ; POISSON_FACE_TYPE = 'axis' ; ELSE ; POISSON_FACE_TYPE = 'neumann' ; ENDIF
++   CASE DEFAULT ; POISSON_FACE_TYPE = 'unknown'
++END SELECT
++END FUNCTION POISSON_FACE_TYPE
++
++
+ END MODULE PRES
+ 
+ 

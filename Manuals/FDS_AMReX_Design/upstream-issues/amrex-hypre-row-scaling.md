@@ -1,8 +1,10 @@
 # Draft upstream issue for AMReX: HYPRE interface row-scales `A` to `D⁻¹A`, breaking PCG when diagonals vary
 
-**State: draft for the project owner to review. Not sent, not filed, nothing posted anywhere.** The text below is written so it can be pasted into a GitHub issue on AMReX-Codes/amrex as it stands. No patch file is attached yet; per project decision D-075 (4), a candidate patch is delivered to the owner only after AMReX tests, and the AMReX tree is not edited from this project.
+**State: DRAFT ONLY — ready for the project owner to paste into a GitHub issue. Not sent, not filed, nothing posted anywhere.** Do not open an AMReX-Codes/amrex issue from this tree. No patch file is attached yet; per project decision **D-075 (4)**, a candidate patch is delivered to the owner only after AMReX tests, and the AMReX tree is not edited from this project.
 
-Evidence measured against AMReX 26.09 at commit 99ddfda (`SpMatrix: 32-bit row offsets in the split blocks (#5968)`), HYPRE v2.32.0-24, CPU and GPU harnesses on an NVIDIA test machine (see `docs/pressure/07-a56-backend-comparison-plan.md` section 8). Numbers below are distilled from that section; do not treat them as a new measurement.
+Evidence measured against AMReX 26.09 at commit 99ddfda (`SpMatrix: 32-bit row offsets in the split blocks (#5968)`), HYPRE v2.32.0-24, CPU and GPU harnesses on an NVIDIA test machine (see `docs/pressure/07-a56-backend-comparison-plan.md` §8, especially §8.2–§8.4). Numbers below are distilled from that section; do not treat them as a new measurement.
+
+**Project context (not for the AMReX issue body):** FDS-AMReX Role 2’s assembled HYPRE backend builds its own IJ matrix (does not call `habec_ijmat`); the product workaround for Mf + HYPRE bottom on stretched grids is `hypre_solver=BiCGSTAB` with bottom tolerance 1e-11. This draft targets **AMReX’s** HypreABecLap / Habec path so PCG remains valid when diagonals vary.
 
 ---
 
@@ -124,14 +126,8 @@ Caveats: (A) and (B) have **not** been exercised as a runtime option in upstream
 
 ## Draft status
 
-- **Draft only.** Not sent, not filed, nothing posted to GitHub or elsewhere.
-- Written for the project owner to review and, if desired, paste into an AMReX-Codes/amrex issue.
+- **DRAFT ONLY.** Not sent, not filed, nothing posted to GitHub or elsewhere. Ready for owner paste.
+- Written for the project owner to review and, if desired, paste into an AMReX-Codes/amrex issue (title + body from **Title** / sections above; omit the “Project context” paragraph if filing upstream).
 - No patch attached yet. Candidate change (~5 lines in `habec_ijmat`, or symmetric scaling with vector matching) to be delivered as a **patch file for the owner** after AMReX tests; this project does not edit the AMReX tree for this item.
-- Evidence source of record: `docs/pressure/07-a56-backend-comparison-plan.md` §8 (R=64 cause); decision: docs README D-075 (4); requirements HYPRE backend paragraph (workaround BiCGSTAB + bottom tolerance 1e-11).
-- AMReX citation style matches the existing singular-mean draft: 26.09 / 99ddfda.
-
-## Notes for the reviewer (not part of the issue text)
-
-* Why it matters for the FDS-to-AMReX work: MLMG with HYPRE as bottom solver is used with FDS’s PCG + BoomerAMG options; stretched levels hit the row-scaling / PCG failure. The product workaround (BiCGSTAB + 1e-11) is already recorded; an upstream option would let PCG remain valid on non-uniform diagonals.
-* The local `diaginv=1` build used for the Mf confirmation is a scratch copy at 99ddfda with one compile flag; it is not committed and the AMReX install tree used by the project was not modified for this draft.
-* Related draft in this folder: `amrex-poissonhybrid-singular-mean.md` (FFT singular mean; separate issue).
+- Evidence source: `docs/pressure/07-a56-backend-comparison-plan.md` §8 (D-075 (4)). Refresh date: 2026-10-06 (Role 2 tip after R4/R5 ACCEPT).
+- Checklist before filing (owner): (1) confirm AMReX tip still uses the same `habec_ijmat` row-scale; (2) optionally attach a minimal unit-test sketch; (3) still **no** untested patch in the first issue unless AMReX tests already exist.

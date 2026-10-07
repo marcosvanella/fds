@@ -101,3 +101,17 @@ No new Source/ drift between `8ad685f435` and tip for `mass.f90`, `radi.f90`, `s
 ### Headline
 
 **Mostly clean.** Known survey→tip shifts unchanged from the 8ad685 impact note; only new tip note is L1356 at 265-288 and MAIN_LOOP/UP-0011 call-site drift to ~1740. No inventory pin rewrite.
+
+## Re-verify dry-run (2026-10-06, Role 2)
+
+Method: `git archive 1fb5c300fa Source/main.f90 Source/pres.f90` into a scratch tree; `patch -p1 --dry-run` with
+`UP-0011-pressure-rhs-dump.patch`. FireX tip object `1fb5c300fae0bcf7dd2c2dade6f06a0eab14f527` (in this repo).
+
+| File | Result |
+|---|---|
+| `Source/main.f90` hunk 1 | succeeded at **1653** (offset **+3**) |
+| `Source/main.f90` hunk 2 | succeeded at **1678** (offset **+3**) |
+| `Source/pres.f90` hunk 1 | succeeded at **9** (clean / no offset) |
+| `Source/pres.f90` hunk 2 | succeeded at **1076** (clean / no offset) |
+
+Exit code 0. Confirms prior note: UP-0011 on FireX `1fb5c300fa` alone applies with **+3** on `main.f90`; `pres.f90` clean.
