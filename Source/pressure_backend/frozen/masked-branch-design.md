@@ -163,4 +163,5 @@ Composite masked is built on assembled HYPRE (D3, D4, D6; Q1). MLMG composite ma
   * full-fine + one fine Solid: Ok, 19 iters, residual_check 4.0e-12 / limit 1e-8
   * partial-fine corridor + Solid at uncovered coarse (1,1,1): Ok, 18 iters, residual_check 8.2e-12 / limit 1e-8
 * **Product (D-092).** Composite masked is **Built** (Auto → assembled HYPRE). MLMG composite+mask stays NotBuilt; Known-on-C/F InvalidInput; `face_gradient_composite`+mask NotBuilt.
-* **Item 5.** 4-rank / 3-level product coverage is **full-fine nest only** (`pb_comp_masked_4rank_3level`). Three-level **partial-fine** masked is a design fork (not invented; ping Pressure Lead before coding).
+* **Item 5.** 4-rank / 3-level product coverage is **full-fine nest only** (`pb_comp_masked_4rank_3level`) plus prior 2-level partial-fine corridor.
+* **3-level partial-fine masked (PL DEFER).** NotBuilt/backlog (like `face_gradient_composite`+mask): intermediate-level C/F mix with masks is deferred — do not invent a converging path.

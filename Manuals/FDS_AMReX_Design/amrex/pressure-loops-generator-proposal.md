@@ -50,6 +50,10 @@ is periodic), JTRN is 1 when JBAR=1, so the strides and the index origin differ 
 What the generator owners need to add: extent symbols of an `exact` allocation (here ITRN, JTRN, KTRN) become integer arguments for
 cell-loop kernels too, and PRHS gets an index origin of 1.
 
+**Role 2 contract (frozen):** `Source/pressure_backend/frozen/fds-loops-notes.md` §“L1211 layout contract” is the normative
+checklist (ITRN/JTRN/KTRN args, origin 1, periodic ITRN=IBAR). Do not invent generator code from Role 2; Role 2 host reference
+already covers FDS-shaped PRHS. L1210 / L1212–L1214 stay RETIRED (pressure/09).
+
 ## What the CPU reference already covers
 
 L1211 (IPS 1/4/7, non-cylindrical) with ITRN either IBAR+1 or IBAR; L1207. L1210 and L1212–L1214 are RETIRED (pressure/09); see

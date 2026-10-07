@@ -132,3 +132,38 @@ action `r4r5`) is the explicit coverage gate:
 Bitwise equality of `HBC_*` (R4) and `L1209_*` (R5) on those sets is `pb_fdsloops_fds_sets` (`check-fds-sets`).
 `pb_fdsloops_r4r5` only requires those CENSUS keys to pass (FIXTURES_REQUIRED on the bitwise sets test); it does not re-derive loose
 subset predicates.
+
+### Re-verify (tip after item 5 / D-092 / S6)
+
+On current tree against `frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz` and `fds_loops_cases.tar`:
+
+| CTest | Result |
+|---|---|
+| `pb_fdsloops_census` | PASS — 9/9 set predicates (2d, dirx, dirxhi, eddy, openyz, perx, peryz, ramp, ylow) |
+| `pb_fdsloops_r4r5` | PASS — 0 fail of 8 named R4/R5 CENSUS keys |
+| `pb_fdsloops_fds_sets` | PASS — each set `bitwise_different_elements=0` (96 case files across sets) |
+| `pb_fdsloops_fds_sets_uu_lb0` | PASS (expect-fail control) |
+| `pb_fdsloops_fds` | PASS — original archive 23 files, `bitwise_different_elements=0` (L1211/L1207/HBC/L1209) |
+
+No strengthen: pressure/08 R4/R5 and the Architect CHANGE (thinned `r4r5` gate) are already met. pressure/07 §11.4
+(FDS H dump with nonzero wall data for fold sign-off) remains a separate open and is **not** an R4/R5 gap.
+
+## L1211 layout contract (`layout = "exact"`, for Generator)
+
+CPU reference: `pres_compute_rhs_div` already accepts FDS-shaped `PRHS(ITRN,JTRN,KTRN)` via explicit leading dimensions
+(see traps §1). Generator sidecar entry is still pending — Role 2 does **not** edit `src-s5gen`.
+
+**Contract Generator must implement** (narrowed after pressure/09: L1210 and L1212–L1214 RETIRED; only IPS 1/4/7 natural layout):
+
+1. For cell-loop kernels with `layout = "exact"`, allocation extent symbols used as array dimensions (`ITRN`, `JTRN`, `KTRN` for
+   `PRHS`) become **integer scalar arguments** of the generated routine (same as today’s rank-2 wall-kernel / CONNECTED_ZONES path).
+2. `PRHS` index origin is **1** (FDS), not 0.
+3. Values: `ITRN = IBP1` normally, **`ITRN = IBAR` when x is periodic** (`LBC=0`); `JTRN = 1` when `JBAR=1`; `KTRN` likewise for z.
+4. Default (non-exact) ghosted layout `PRHS(0:IBAR+1,…)` remains correct for the AMR route; exact layout is required to compare a
+   generated kernel **on the FDS array** against `L1211_*` dumps in `fds_loops_cases*.tar*`.
+
+Acceptance hook (after Generator lands the feature): add the L1211 `[[kernel]]` from
+`docs/amrex/pressure-loops-generator-proposal.md` and bitwise-compare generated output to `pb_fds_loops` / the real-FDS archive
+(same cases as `pb_fdsloops_bitwise` L1211 and `pb_fdsloops_fds`). Until then, the host reference is the product path.
+
+See also `docs/amrex/pressure-loops-generator-proposal.md` and `docs/amrex/pressure-loops-r2-status.md`.

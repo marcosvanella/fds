@@ -43,9 +43,9 @@ archive test `pb_fdsloops_fds`.
 
 ## Generator owners
 
-See `pressure-loops-generator-proposal.md`: the L1207 entry is accepted as written; L1211 needs the extents of an `exact` allocation (ITRN,
-JTRN, KTRN) to become integer arguments for cell-loop kernels (today only the rank-2 wall-kernel path does that). Same "layout contract" as
-L1212-L1214. Neither entry was added to a sidecar by this work.
+See `pressure-loops-generator-proposal.md` and `Source/pressure_backend/frozen/fds-loops-notes.md` §L1211 layout contract: the L1207 entry
+is accepted as written; L1211 still needs Generator to pass `ITRN/JTRN/KTRN` as exact-layout integer args (Role 2 checklist frozen; no
+src-s5gen edits from Role 2). L1212–L1214 RETIRED — the exact-layout need is L1211-only now. Neither entry was added to a sidecar by this work.
 
 ## L1209 on OPEN walls: closed
 
