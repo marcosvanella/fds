@@ -702,19 +702,26 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         }
         S.r2_nopin = S.r2; S.rmax_nopin = S.rmax;
         if (bs.pin_applied) {
-            // The pin row is an identity row, not an equation of the operator: take its residual out (it is the sum of the
-            // other rows' residuals, see PressureResult::residual_check). The pin cell is an uncovered cell of level pin_level.
-            const int pl = bs.pin_level;
-            double rp = 0.0;
-            for (MFIter mfi(*res[pl]); mfi.isValid(); ++mfi) {
-                if (mfi.validbox().contains(bs.pin_cell)) {
-                    auto const& a = res[pl]->array(mfi);
-                    rp += double(a(bs.pin_cell[0], bs.pin_cell[1], bs.pin_cell[2]));
-                    a(bs.pin_cell[0], bs.pin_cell[1], bs.pin_cell[2]) = Real(0);
+            // Pin rows are identity, not equations of L: exclude every listed pin (D6); fall back to the single pin_cell.
+            auto const& plist = bs.pins;
+            const int npin = plist.empty() ? 1 : int(plist.size());
+            double pin2 = 0.0, pin_abs = 0.0;
+            for (int q = 0; q < npin; ++q) {
+                const int pl = plist.empty() ? bs.pin_level : plist[q].first;
+                const IntVect pc = plist.empty() ? bs.pin_cell : plist[q].second;
+                double rp = 0.0;
+                for (MFIter mfi(*res[pl]); mfi.isValid(); ++mfi) {
+                    if (mfi.validbox().contains(pc)) {
+                        auto const& a = res[pl]->array(mfi);
+                        rp += double(a(pc[0], pc[1], pc[2]));
+                        a(pc[0], pc[1], pc[2]) = Real(0);
+                    }
                 }
+                ParallelDescriptor::ReduceRealSum(rp);
+                pin2 += double(W.vol[pl]) * rp * rp;
+                pin_abs = std::max(pin_abs, std::abs(rp));
             }
-            ParallelDescriptor::ReduceRealSum(rp);
-            S.pin2 = double(W.vol[pl]) * rp * rp; S.pin_abs = std::abs(rp);
+            S.pin2 = pin2; S.pin_abs = pin_abs;
             LevelMFs rq2 = squares_of(W, res);
             S.r2_nopin = exact_sum_multi(terms_of(W, rq2, true), 1).sum[0];
             S.rmax_nopin = max_abs_uncovered(W, res);

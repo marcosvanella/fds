@@ -1,8 +1,8 @@
 # Masked branch of the common layer (A-68, FR-037 masked branch): design and status
 
-Scope of this version: **single level, MLMG backend** (built and tested, see the measured results below). The FFT backend cannot take masks (the selector says so), HYPRE and the composite
-paths still return `NotBuilt` for masks (status table at the end). Design decisions D1 to D8 of the review (docs/pressure/08 section 3.2),
-including the rules for the composite and HYPRE masked branches: `masked-branch-design.md`.
+Scope of this version: **single level, MLMG and assembled HYPRE** (built and tested; see the measured results and the D6 HYPRE rows below). The FFT backend cannot take masks (the selector says so); the composite
+path still returns `NotBuilt` for masks (status table at the end; Q1: composite masked will be assembled HYPRE only). Design decisions D1 to D8 of the review (docs/pressure/08 section 3.2),
+including the rules for the composite masked branch: `masked-branch-design.md`.
 
 ## Why it is needed
 
@@ -101,14 +101,18 @@ sweeps, smoother bottom) as preconditioner: 7 to 12 iterations on these cases an
 residual decides. Isolated sealed cells (no gas neighbour, no Dirichlet face) get an identity row and `H = 0` before the gauge.
 `pb_masked` fails when a run uses more than 95 % of the cap; `pb_masked_hallways` (label `long`) runs hallways (masked-branch-design.md D7).
 
+## Assembled HYPRE masked (D6)
+
+Single-level only. Unknowns are gas cells: row numbering is a per-box prefix count over gas cells; Solid and Known cells have no row; a face that touches a Solid or Known cell has coefficient 0; Known neighbours contribute `2 g / dx^2` to the right-hand side (same system as MLMG). Each sealed component gets one pin identity row at `ComponentInfo::pin`; `BackendStatus::pins` lists them; `residual_sums` excludes every pin row. `pb_masked` runs the six small cases with `backend=hypre` against the MLMG answer (gauge-free relative L2 < 1e-9) and checks sealed2 reports two pins; `max_pins=1` on sealed2 is the singular negative control.
+
 ## Status (what is built and what is not)
 
 | Item | Status |
 |---|---|
 | Single level, MLMG (GMRES + V-cycle), Gas/Solid/Known classes, computed components, per-component mean removal and gauge, residual check | built and tested (`pb_masked`, `pb_masked_hallways`) |
 | FFT with masks | `NotBuilt` by design (no mask in `FFT::Poisson`); `Auto` picks MLMG for a masked single level |
-| HYPRE assembled backend with masks | NotBuilt (design: masked-branch-design.md D6, gas-cell rows only and one pin per sealed component) |
-| Composite (two or more levels) with masks | NotBuilt (design: masked-branch-design.md D3 and D4) |
+| HYPRE assembled backend with masks (single level) | built and tested (`pb_masked` HYPRE rows; D6: gas-only numbering, one pin per sealed component, residual excludes pins, sealed2) |
+| Composite (two or more levels) with masks | NotBuilt (design: masked-branch-design.md D3 and D4; Q1: assembled HYPRE only) |
 | Driver zone ids (`component_id`) | single level: built and tested (D2); composite: NotBuilt |
 | Pinned class, covered cells on the single-level API | NotBuilt |
 | Component labelling cost | cached in the workspace (D1); stairwell 18.8 M cells: 10 to 18 rounds, 1.0 to 1.8 s on a miss |

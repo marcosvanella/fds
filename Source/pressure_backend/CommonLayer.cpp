@@ -573,7 +573,8 @@ static double take_cell (MultiFab& mf, IntVect const& iv, bool zero)
     return v;
 }
 
-ResidualSums residual_sums (PressureProblem const& p, MultiFab& phi, MultiFab const& rhs, bool singular, IntVect const* pin)
+ResidualSums residual_sums (PressureProblem const& p, MultiFab& phi, MultiFab const& rhs, bool singular,
+                            std::vector<IntVect> const& pins)
 {
     ResidualSums S;
     S.singular = singular;
@@ -585,9 +586,14 @@ ResidualSums residual_sums (PressureProblem const& p, MultiFab& phi, MultiFab co
     S.rmax = r.norm0(0);
     S.sumr = exact_sum(r, 0, 1.0, 1, nullptr, nullptr).sum[0];
     S.sumw = double(p.ba.numPts());
-    if (pin) {
-        const double rp = take_cell(r, *pin, true);
-        S.pin2 = rp*rp; S.pin_abs = std::abs(rp);
+    if (!pins.empty()) {
+        double pin2 = 0.0, pin_abs = 0.0;
+        for (auto const& iv : pins) {
+            const double rp = take_cell(r, iv, true);
+            pin2 += rp*rp;
+            pin_abs = std::max(pin_abs, std::abs(rp));
+        }
+        S.pin2 = pin2; S.pin_abs = pin_abs;
         const double rn2 = r.norm2(0);
         S.r2_nopin = rn2*rn2;
         S.rmax_nopin = r.norm0(0);

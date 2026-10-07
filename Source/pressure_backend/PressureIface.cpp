@@ -12,6 +12,7 @@
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <vector>
 
 namespace pb {
 
@@ -114,8 +115,7 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
         s.message = "variable coefficients (masked or non-unit operator) are not built"; return s;
     }
     const bool masked = has_nonzero(p.cell_class);
-    if (masked && requested == BackendKind::FFT) { s.message = "masked cells (cell_class != 0) cannot go through FFT::Poisson (no mask in the transform); the masked branch is MLMG"; return s; }
-    if (masked && requested == BackendKind::HYPRE) { s.message = "masked cells with the HYPRE backend are not built (the masked branch is single-level MLMG; frozen/masked-notes.md)"; return s; }
+    if (masked && requested == BackendKind::FFT) { s.message = "masked cells (cell_class != 0) cannot go through FFT::Poisson (no mask in the transform); the masked branch is MLMG or HYPRE"; return s; }
     if (masked && p.geom.Domain().numPts() >= Long(std::numeric_limits<int>::max())) {
         s.message = "masked problems with 2^31 or more cells are not built (the component labelling uses 32-bit global cell indices)"; return s;
     }
@@ -287,13 +287,15 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // Gauge, then the true residual of the problem the backend was given (mean-removed b).
     apply_gauge(work, cm, p.uncovered, vol, nullptr, p.gauge_weight, p.gauge_offset);
     if (want_check) {
-        const IntVect pin = R.backend_status.pin_cell;
-        ResidualSums S = residual_sums(p, sing ? work_mr : work, b, sing, R.backend_status.pin_applied ? &pin : nullptr);
+        std::vector<IntVect> pins;
+        pins.reserve(R.backend_status.pins.size());
+        for (auto const& pr : R.backend_status.pins) { pins.push_back(pr.second); }
+        ResidualSums S = residual_sums(p, sing ? work_mr : work, b, sing, pins);
         S.what = "";
         evaluate_residual(R, o, S);
         if (o.verbose >= 2 && R.backend_status.pin_applied) {
-            Print() << "PRESSURE INFO: residual full " << R.residual_rel2 << " (max " << R.residual_relmax << "), pin cell excluded " << R.residual_rel2_nopin
-                    << " (max " << R.residual_relmax_nopin << "), pin row " << R.residual_pin_rel << "\n";
+            Print() << "PRESSURE INFO: residual full " << R.residual_rel2 << " (max " << R.residual_relmax << "), pin cells excluded " << R.residual_rel2_nopin
+                    << " (max " << R.residual_relmax_nopin << "), pin rows " << R.residual_pin_rel << "\n";
         }
     }
     if (full) {

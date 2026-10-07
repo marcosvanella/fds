@@ -1,8 +1,8 @@
 # Masked branch: design decisions D1 to D8 (A-71; review docs/pressure/08 section 3.2)
 
-Companion to `masked-notes.md` (operator, classes, MLMG realisation). For each request of the review: what is decided, why, which
-code it binds, which test proves it, and its status. Single level + MLMG is built (D1, D2, D5, D7, D8). The composite and assembled-HYPRE
-masked branches are not built: D3, D4 and D6 are the rules A-68 will implement. Open questions for the Architect / Pressure Lead are listed
+Companion to `masked-notes.md` (operator, classes, MLMG and assembled-HYPRE realisation). For each request of the review: what is decided, why, which
+code it binds, which test proves it, and its status. Single level + MLMG is built (D1, D2, D5, D7, D8). Single-level assembled HYPRE masked is built (D6).
+Composite masked is not built: D3 and D4 are the rules for that path (Q1: assembled HYPRE only). Open questions for the Architect / Pressure Lead are listed
 at the end (Q1 to Q7).
 
 ## D1. Component labels are cached in the workspace (built: a2a4906647, copy-free A-71)
@@ -93,7 +93,7 @@ at the end (Q1 to Q7).
   end-to-end chain (flip the normal velocity, `g` switches between `KRES` and `H0`, `H` changes) is a driver integration test (Role 1).
   UGLMAT face placement stays `[VERIFY]` (Q3). Partial OPEN vents on a bounding-box face: Q6.
 
-## D3. Composite masked: Solid and Known cells never enter a C/F interpolation stencil (design for A-68)
+## D3. Composite masked: Solid and Known cells never enter a C/F interpolation stencil (design; single-level face coeff 0 built in D6)
 
 * **Rule.** (a) A coarse cell is usable in a C/F interpolation stencil only if it is uncovered `Gas`. The sliding-parabola stencil
   (`HypreBackend.cpp` `bdry_stencil`, the AMReX `interpbndrydata_o3` form) already drops to a one-sided or constant form when a tangential
@@ -130,7 +130,7 @@ at the end (Q1 to Q7).
   `sum rho V (KRES - H) = 0` over the composite set to 1e-12. (2) Sealed pocket inside a fine patch: its own component, own pin, own
   mean. (3) Labels identical on 1 and 3 ranks and over `max_grid_size`.
 
-## D6. Assembled HYPRE masked: one pin row per sealed component (design for A-68)
+## D6. Assembled HYPRE masked: one pin row per sealed component (built)
 
 * **Rule.** (a) The assembled system has unknowns on gas cells only: Solid and Known cells get no row (row numbering is a per-box prefix
   count over gas cells, one pass), Known neighbours go to the right-hand side as `2 g / dx^2` (the same system as MLMG). This replaces the identity rows of `masked-notes.md` (fewer rows and
@@ -139,10 +139,10 @@ at the end (Q1 to Q7).
   pin cells (level, cell); `residual_sums` and `evaluate_residual` (single level and composite) exclude every pin row.
 * **Why.** A sealed component of an assembled system is singular; BoomerAMG needs it fixed. A single pin cell cannot handle two sealed
   components.
-* **Binds.** `HypreBackend.cpp` (assembly, pin rows), `PressureIface.H` `BackendStatus` (pin list), `CommonLayer.cpp`
+* **Binds.** `HypreBackend.cpp` (`MaskedHypre`: gas-only assembly, pin rows), `PressureIface.H` `BackendStatus::pins`, `CommonLayer.cpp`
   `residual_sums` / `evaluate_residual`, `CompositeSolve.cpp` residual.
-* **Tests.** Two sealed components (the `sealed2` case): two pins reported, the residual excludes both rows, HYPRE matches masked MLMG
-  to the solution tolerance after the gauge; negative control with one pin removed warns (singular).
+* **Tests.** `pb_masked` HYPRE rows on the six small cases vs MLMG; sealed2: two pins reported, residual excludes both; `max_pins=1` warns (singular).
+* **Status.** Built for single level. Composite masked not in this commit (Q1).
 
 ## Open questions (Architect / Pressure Lead)
 

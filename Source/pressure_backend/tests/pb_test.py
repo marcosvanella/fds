@@ -7,6 +7,7 @@ solves; manufactured solutions, see harness/composite_modes.cpp and frozen/compo
 Exit 0 = pass. ulmat/ulmatgauge/meankind compare against an independent numpy computation that follows FDS
 ULMAT (volume-scaled rows, arithmetic mean removal of F and of X, identity-pin reduced system, rho*volume gauge)."""
 import argparse, math, os, re, subprocess, sys
+from pathlib import Path
 import numpy as np
 
 ap = argparse.ArgumentParser()
@@ -962,6 +963,44 @@ def masked():
     z = [kv(c)["zone"] for c in lines(out, "MASKEDCOMP")]; ok(rc == 0 and z == ["0", "1"], f"masked zones along the slab: components carry zones {z}")
     rc, out = run(2, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,NN", slab=3, solid_frac=0.0, seed=1, mgs=6, zones=2)
     m = lines(out, "MASKED"); ok(m and "status=InvalidInput" in m[0] and "spans zones" in m[0], f"masked zone boundary through a component: InvalidInput [{m[0] if m else out[-200:]}]")
+    # D6: assembled HYPRE masked — gas-only rows, one pin per sealed component, residual excludes pins; sealed2 + small cases vs MLMG.
+    for tag, bcs, slab, sf, kf, seed, gr in cases:
+        pre_h = f"{A.work}/mkh_{tag}"
+        rc, out = run(2, mode="masked", n_cell=" ".join(map(str, n)), bcpairs=bcs, slab=slab, solid_frac=sf, known_frac=kf, seed=seed,
+                      gauge_rho=gr, mgs=6, backend="hypre", out=pre_h)
+        m = lines(out, "MASKED"); print(out[-400:] if not m else m[0])
+        ok(rc == 0 and m and "status=Ok" in m[0] and kv(m[0])["backend"] == "HYPRE", f"masked HYPRE {tag}: status Ok [{m[0] if m else out[-300:]}]")
+        if not m: continue
+        kvm = kv(m[0])
+        ok(kvm["residual_ok"] == "1" and kvm["nwarn"] == "0", f"masked HYPRE {tag}: residual ok (nopin={kvm.get('nopin')}, pin_rel={kvm.get('pin_rel')}, rows={kvm.get('hypre_rows')})")
+        # vs MLMG from the earlier np=1 run
+        pre_m = f"{A.work}/mk_{tag}_1"
+        if Path(pre_m + "_phi.bin").exists() and Path(pre_h + "_phi.bin").exists():
+            ph = read_field(pre_h + "_phi.bin", " ".join(map(str, n)))
+            pm = read_field(pre_m + "_phi.bin", " ".join(map(str, n)))
+            cls = read_field(pre_h + "_class.bin", " ".join(map(str, n))).astype(int)
+            # compare on gas cells after removing per-component constant on singular comps (gauge)
+            lab = read_field(pre_h + "_label.bin", " ".join(map(str, n))).astype(int)
+            worst = 0.0
+            for cid in sorted(set(lab.ravel())):
+                if cid < 0: continue
+                mask = (lab == cid) & (cls == 0)
+                if not mask.any(): continue
+                a = ph[mask].ravel(); b = pm[mask].ravel()
+                a = a - a.mean(); b = b - b.mean()
+                denom = max(np.linalg.norm(b), 1e-300)
+                worst = max(worst, float(np.linalg.norm(a - b) / denom))
+            ok(worst < 1e-9, f"masked HYPRE {tag}: vs MLMG worst relative L2 (gauge-free) {worst:.2e}")
+    # sealed2: two pins reported; residual excludes both; max_pins=1 negative control warns
+    rc, out = run(2, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,NN", slab=3, solid_frac=0.0, seed=1, mgs=6, backend="hypre")
+    m = lines(out, "MASKED"); pins = lines(out, "MASKEDPIN")
+    ok(m and kv(m[0]).get("npin") == "2" and len(pins) == 2, f"masked HYPRE sealed2: two pins reported (npin={kv(m[0]).get('npin') if m else None}, lines={len(pins)})")
+    ok(m and float(kv(m[0])["nopin"]) <= float(kv(m[0])["limit"]), f"masked HYPRE sealed2: nopin residual within limit")
+    # Without mean removal a missing pin leaves a singular inconsistent system: residual or convergence fails.
+    rc, out = run(2, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,NN", slab=3, solid_frac=0.0, seed=1, mgs=6, backend="hypre", max_pins=1, remove_mean=0)
+    m = lines(out, "MASKED")
+    ok(m and (kv(m[0])["nwarn"] != "0" or kv(m[0])["residual_ok"] == "0" or "status=NotConverged" in m[0]),
+       f"masked HYPRE sealed2 max_pins=1 remove_mean=0: singular leftover warns or fails [{m[0] if m else out[-300:]}]")
 
 def maskedgeo():
     """D1/D7 at scale: the doc 06 hallways (Known OPEN slab) through the product masked path at two max_grid_size; iterations not within

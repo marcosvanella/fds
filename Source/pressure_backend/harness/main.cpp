@@ -404,7 +404,7 @@ void run_selector ()
         iMultiFab cls(p.ba, p.dm, 1, 0); cls.setVal(0);
         for (MFIter mfi(cls); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); cls[mfi].setVal<RunOn::Host>(1, Box(sm, sm)); } }
         p.cell_class = &cls;
-        expect("masked cell with explicit HYPRE not built", p, pb::Status::NotBuilt, K::Auto, K::HYPRE);
+        expect("masked cell with explicit HYPRE", p, pb::Status::Ok, K::HYPRE, K::HYPRE);
         p = make(false, pb::BC::Neumann);
         iMultiFab unc(p.ba, p.dm, 1, 0); unc.setVal(1);
         for (MFIter mfi(unc); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); unc[mfi].setVal<RunOn::Host>(0, Box(sm, sm)); } }
@@ -590,7 +590,9 @@ void run_rescheck (ParmParse& pp)
             });
         }
         pb::PressureResult pr;
-        pb::ResidualSums S = pb::residual_sums(p, ph, b, sing, applied ? &pin : nullptr);
+        std::vector<amrex::IntVect> pins;
+        if (applied) { pins.push_back(pin); }
+        pb::ResidualSums S = pb::residual_sums(p, ph, b, sing, pins);
         pb::evaluate_residual(pr, o, S);
         Print() << std::setprecision(6) << "RESCHECK " << pt.name << " raw=" << pr.residual_rel2 << " nopin=" << pr.residual_rel2_nopin
                 << " floor=" << pr.residual_floor << " check=" << pr.residual_check << " limit=" << pr.residual_limit

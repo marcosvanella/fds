@@ -17,8 +17,8 @@
 // BackendKind::HYPRE`, never selected by Auto). HYPRE assembles the same discrete operator as MLMG (including the
 // coarse/fine interface treatment) into an IJ matrix, see HypreBackend.H and frozen/hypre-notes.md.
 //
-// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on any path but the single-level MLMG (the masked
-// branch, see PressureProblem::cell_class and frozen/masked-notes.md), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
+// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on FFT or composite (the masked branch is
+// single-level MLMG or assembled HYPRE; see PressureProblem::cell_class and frozen/masked-notes.md), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
 // (cylindrical, RZ) geometry, variable coefficients, a Dirichlet face in a one-cell x or z direction, anisotropic refinement ratios (except ratio 1 in a one-cell direction), ratios other than 2 and 4,
 // composite on the FFT backend, and a multi-level request through the single-level fields (`nlevels` > 1 with an
 // empty `levels`).
@@ -135,8 +135,8 @@ struct PressureProblem {
     // Masks (same BoxArray/DistributionMapping as `ba`; frozen/masked-notes.md). cell_class codes (CellClass): 0 Gas (unknown), 1 Solid
     // (OBST or gap cell: excluded, no flux through any of its faces), 2 Known (known-value cell behind a face-Dirichlet condition: not an
     // unknown, holds the face value `known_value`; the gas neighbour gets the flux 2 (g - phi)/dx^2). Null or all zero: unmasked problem
-    // (unchanged code). Masked single-level problems are built for MLMG only (the selector picks MLMG for Auto; FFT, HYPRE and the
-    // composite paths: NotBuilt). Any other code: InvalidInput. uncovered: zero = covered by a finer level, NotBuilt.
+    // (unchanged code). Masked single-level: MLMG or assembled HYPRE (D6; Auto picks MLMG); FFT and composite stay NotBuilt. Any other
+    // code: InvalidInput. uncovered: zero = covered by a finer level, NotBuilt.
     amrex::iMultiFab const* cell_class = nullptr;
     amrex::iMultiFab const* uncovered = nullptr;
     // Known values g of the Known cells (same BoxArray/DistributionMapping as `ba`, one component; read on Known cells only; null = 0).
@@ -204,10 +204,14 @@ struct HypreOptions {
     int interp_type = -1;
     int agg_levels = 0;
     int gmres_kdim = 30;
+    // Masked HYPRE (D6): how many sealed-component pin rows to apply (-1 = all, in component-id order). Test hook: a smaller count
+    // leaves a singular component unpinned so the residual check warns.
+    int max_pins = -1;
     bool operator== (HypreOptions const& o) const
     {
         return krylov == o.krylov && coarsen_type == o.coarsen_type && relax_type == o.relax_type && num_sweeps == o.num_sweeps &&
-               strong_threshold == o.strong_threshold && interp_type == o.interp_type && agg_levels == o.agg_levels && gmres_kdim == o.gmres_kdim;
+               strong_threshold == o.strong_threshold && interp_type == o.interp_type && agg_levels == o.agg_levels &&
+               gmres_kdim == o.gmres_kdim && max_pins == o.max_pins;
     }
 };
 
@@ -250,11 +254,13 @@ struct BackendStatus {
     long long hypre_rows = 0, hypre_nnz = 0;
     double hypre_setup_seconds = 0.0, hypre_solve_seconds = 0.0;
     std::string hypre_method;
-    // The solve pinned one unknown by an identity row (HYPRE on a singular problem): level and cell. Used by the common layer's
-    // residual check (the pin row is not an independent equation, see PressureResult::residual_check).
+    // HYPRE on a singular problem pins one unknown per sealed component by an identity row (D6). pins lists every (level, cell);
+    // pin_applied / pin_level / pin_cell mirror the first entry for callers that still expect a single pin. The common layer's
+    // residual check excludes every pin row (PressureResult::residual_check).
     bool pin_applied = false;
     int pin_level = 0;
     amrex::IntVect pin_cell{0};
+    std::vector<std::pair<int, amrex::IntVect>> pins;
 };
 
 struct PressureResult {

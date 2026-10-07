@@ -2,6 +2,7 @@
 // the numbers. The matrix is built cell by cell from the layout (BoxArrays, DistributionMappings, geometries, ratios, boundary types)
 // with a formula-based global numbering, so no communication is needed to assemble it.
 #include "HypreBackend.H"
+#include "CommonLayer.H"
 
 // The whole file is compiled only with PB_WITH_HYPRE (README.md, "Build options"); without it the object is empty and no HYPRE symbol is
 // referenced anywhere in the pressure backend.
@@ -21,6 +22,8 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <memory>
+#include <vector>
 #include <sstream>
 
 namespace pb {
@@ -551,6 +554,7 @@ BackendStatus HypreSystem::solve (std::vector<MultiFab*> const& phi, std::vector
     s.hypre_rows = I.nglobal; s.hypre_nnz = nonzeros();
     s.hypre_method = method();
     s.pin_applied = I.has_pin; s.pin_level = I.has_pin ? I.pin_lev : 0; s.pin_cell = I.pin_iv;
+    if (I.has_pin) { s.pins.push_back({I.pin_lev, I.pin_iv}); }
     std::vector<double> fscale(I.nlev);
     for (int l = 0; l < I.nlev; ++l) { fscale[l] = -I.vol[l]; }
     put_vector(I, I.bvec, b, fscale, true, true);
@@ -625,20 +629,487 @@ void HypreSystem::apply (std::vector<MultiFab const*> const& x, std::vector<Mult
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Single-level PressureBackend adaptor (set-up cached for a repeated layout, as the FFT plan).
+// Masked single-level HYPRE (D6): gas-only rows (per-box prefix count over gas cells), Known neighbours to the RHS as
+// 2 g / dx^2, face coefficient 0 on every Solid/Known face, one pin identity row per sealed component. A temporary
+// iMultiFab of row ids (FillBoundary) supplies neighbour numbering without an allgather. Composite masked: NotBuilt (Q1).
 namespace {
+
+struct MaskedHypre {
+    Geometry geom;
+    BoxArray ba;
+    DistributionMapping dm;
+    std::array<BC,6> ebc{};
+    HypreOptions opt;
+    std::uint64_t mask_hash = 0;
+    bool ok = true;
+    std::string message;
+    double setup_s = 0.0;
+    long long ilower = 0, iupper = -1, nglobal = 0, nnz_global = 0;
+    double vol = 1.0, dscale = 1.0;
+    std::array<double,3> dx{{1,1,1}};
+    std::array<bool,3> active{{true,true,true}};
+    std::vector<IntVect> pins;
+    std::vector<long long> pin_ids;
+    int kind = 0;
+    int rank = 0;
+    HYPRE_IJMatrix A = nullptr;
+    HYPRE_ParCSRMatrix parA = nullptr;
+    HYPRE_IJVector bvec = nullptr, xvec = nullptr;
+    HYPRE_ParVector parb = nullptr, parx = nullptr;
+    HYPRE_Solver solver = nullptr, precond = nullptr;
+    // Kept for solve: class / known / row ids with one ghost.
+    std::unique_ptr<iMultiFab> row_id;
+    std::unique_ptr<iMultiFab> cls_g;
+    std::unique_ptr<MultiFab> known_g;
+    double last_F_norm2 = 0.0, last_b_norm2 = 0.0;  // gas cells: ||F||_2^2 and ||V*rhs||_2^2 for tol retarget
+
+    ~MaskedHypre ()
+    {
+        if (solver) {
+            if (kind == 0) { HYPRE_ParCSRPCGDestroy(solver); }
+            else if (kind == 1) { HYPRE_ParCSRGMRESDestroy(solver); }
+            else { HYPRE_ParCSRBiCGSTABDestroy(solver); }
+        }
+        if (precond) { HYPRE_BoomerAMGDestroy(precond); }
+        if (bvec) { HYPRE_IJVectorDestroy(bvec); }
+        if (xvec) { HYPRE_IJVectorDestroy(xvec); }
+        if (A) { HYPRE_IJMatrixDestroy(A); }
+    }
+
+    bool is_pin (long long id) const
+    {
+        for (long long p : pin_ids) { if (p == id) { return true; } }
+        return false;
+    }
+
+    bool matches (PressureProblem const& p, HypreOptions const& o) const
+    {
+        return ok && opt == o && mask_hash == class_content_hash(p) && ba == p.ba && dm == p.dm &&
+               same_geometry(geom, p.geom) && ebc == effective_bc(p.bc, p.geom.Domain());
+    }
+
+    void build (PressureProblem const& p, HypreOptions const& o, ComponentMap const& cm)
+    {
+        const double t0 = amrex::second();
+        opt = o; geom = p.geom; ba = p.ba; dm = p.dm;
+        ebc = effective_bc(p.bc, p.geom.Domain());
+        mask_hash = class_content_hash(p);
+        rank = ParallelDescriptor::MyProc();
+        const int nprocs = ParallelDescriptor::NProcs();
+        Box const& dom = geom.Domain();
+        auto const cs = geom.CellSizeArray();
+        for (int d = 0; d < 3; ++d) { dx[d] = cs[d]; active[d] = (dom.length(d) > 1); }
+        vol = dx[0]*dx[1]*dx[2];
+        double ds = 0.0; for (int d = 0; d < 3; ++d) { if (active[d]) { ds += 2.0*vol/(dx[d]*dx[d]); } }
+        dscale = ds > 0.0 ? ds : 1.0;
+
+        cls_g = std::make_unique<iMultiFab>(class_ghost(p));
+        known_g = std::make_unique<MultiFab>(known_ghost(p));
+        row_id = std::make_unique<iMultiFab>(ba, dm, 1, 1);
+        row_id->setVal(-1);
+
+        // Per-box gas counts, then rank-major prefix (same layout spirit as the unmasked HypreSystem).
+        std::vector<Long> box_ngas(ba.size(), 0);
+        for (MFIter mfi(*cls_g); mfi.isValid(); ++mfi) {
+            auto const& cl = cls_g->const_array(mfi);
+            Long ng = 0;
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (cl(i,j,k) == CellGas) { ++ng; } });
+            box_ngas[mfi.index()] = ng;
+        }
+        ParallelDescriptor::ReduceLongSum(box_ngas.data(), static_cast<int>(box_ngas.size()));
+        std::vector<Long> count(nprocs, 0);
+        for (int b = 0; b < static_cast<int>(ba.size()); ++b) { count[dm[b]] += box_ngas[b]; }
+        std::vector<Long> start(nprocs + 1, 0);
+        for (int r = 0; r < nprocs; ++r) { start[r+1] = start[r] + count[r]; }
+        nglobal = start[nprocs];
+        if (nglobal <= 0) { ok = false; message = "HYPRE masked: no gas cells"; return; }
+        if (nglobal >= (long long)std::numeric_limits<HYPRE_Int>::max() / 2) {
+            ok = false; message = "HYPRE masked: more rows than the HYPRE integer type holds"; return;
+        }
+        ilower = start[rank]; iupper = start[rank+1] - 1;
+        std::vector<Long> cur(start.begin(), start.end() - 1);
+        std::vector<Long> base(ba.size());
+        for (int b = 0; b < static_cast<int>(ba.size()); ++b) { base[b] = cur[dm[b]]; cur[dm[b]] += box_ngas[b]; }
+
+        for (MFIter mfi(*row_id); mfi.isValid(); ++mfi) {
+            auto const& cl = cls_g->const_array(mfi);
+            auto const& id = row_id->array(mfi);
+            Long next = base[mfi.index()];
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (cl(i,j,k) == CellGas) { id(i,j,k) = int(next++); } // HYPRE ids fit in int for our sizes; stored in iMultiFab
+            });
+            if (next - base[mfi.index()] != box_ngas[mfi.index()]) {
+                ok = false; message = "HYPRE masked: gas count mismatch"; return;
+            }
+        }
+        // iMultiFab stores int: refuse if a row id exceeds INT_MAX
+        if (nglobal > (long long)std::numeric_limits<int>::max()) {
+            ok = false; message = "HYPRE masked: row ids exceed 32-bit iMultiFab storage"; return;
+        }
+        row_id->FillBoundary(geom.periodicity());
+
+        // Pins from ComponentInfo (sealed only), optionally capped.
+        pins.clear(); pin_ids.clear();
+        int napply = 0;
+        for (auto const& c : cm.comps) {
+            if (!c.singular) { continue; }
+            if (opt.max_pins >= 0 && napply >= opt.max_pins) { break; }
+            pins.push_back(c.pin);
+            ++napply;
+        }
+        // Resolve pin row ids (any rank that owns the cell).
+        pin_ids.assign(pins.size(), -1);
+        for (std::size_t q = 0; q < pins.size(); ++q) {
+            Long pid = -1;
+            for (MFIter mfi(*row_id); mfi.isValid(); ++mfi) {
+                if (mfi.validbox().contains(pins[q])) {
+                    pid = Long(row_id->const_array(mfi)(pins[q][0], pins[q][1], pins[q][2]));
+                }
+            }
+            ParallelDescriptor::ReduceLongMax(pid);
+            pin_ids[q] = pid;
+            if (pid < 0) { ok = false; message = "HYPRE masked: sealed pin is not a gas cell"; return; }
+        }
+
+        assemble();
+        if (!ok) { return; }
+        make_solver();
+        setup_s = amrex::second() - t0;
+    }
+
+    void assemble ()
+    {
+        struct Ent { long long col; double val; };
+        std::vector<HYPRE_Int> ncols;
+        std::vector<HYPRE_BigInt> rowids, cols;
+        std::vector<double> vals;
+        std::vector<Ent> ent;
+        const long long nloc = iupper - ilower + 1;
+        ncols.reserve(std::max<long long>(nloc, 0)); rowids.reserve(std::max<long long>(nloc, 0));
+        cols.reserve(std::max<long long>(nloc, 0)*7); vals.reserve(std::max<long long>(nloc, 0)*7);
+        Box const& dom = geom.Domain();
+
+        for (MFIter mfi(*row_id); mfi.isValid(); ++mfi) {
+            auto const& cl = cls_g->const_array(mfi);
+            auto const& ida = row_id->const_array(mfi);
+            Box const& bx = mfi.validbox();
+            for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k)
+            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j)
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if (cl(i,j,k) != CellGas) { continue; }
+                const long long myid = ida(i,j,k);
+                ent.clear();
+                double diag = 0.0;
+                if (is_pin(myid)) {
+                    diag = dscale;
+                } else {
+                    const int iv[3] = {i, j, k};
+                    for (int d = 0; d < 3; ++d) {
+                        if (!active[d]) { continue; }
+                        const double h = dx[d];
+                        const double kk = vol/(h*h);
+                        for (int side = 0; side < 2; ++side) {
+                            int nb[3] = {i, j, k};
+                            nb[d] += side ? 1 : -1;
+                            const bool edge = (side == 0) ? (iv[d] == dom.smallEnd(d)) : (iv[d] == dom.bigEnd(d));
+                            if (edge && ebc[face_index(d, side)] != BC::Periodic) {
+                                if (ebc[face_index(d, side)] == BC::Dirichlet) { diag += 2.0*kk; }
+                                continue;
+                            }
+                            // Ghost layer holds the periodic image or the neighbouring box's class / row id.
+                            const int kc = cl(nb[0], nb[1], nb[2]);
+                            if (kc == CellGas) {
+                                const long long nid = ida(nb[0], nb[1], nb[2]);
+                                if (nid < 0) { ok = false; message = "HYPRE masked: gas neighbour without a row id"; return; }
+                                diag += kk; ent.push_back({nid, -kk});
+                            } else if (kc == CellKnown) {
+                                diag += 2.0*kk;   // Known value goes to the RHS in put_rhs
+                            }
+                            // Solid (and any other): coefficient 0
+                        }
+                    }
+                }
+                std::stable_sort(ent.begin(), ent.end(), [] (Ent const& a, Ent const& b2) { return a.col < b2.col; });
+                std::vector<Ent> row;
+                bool diag_done = false;
+                auto push = [&] (long long col, double v) {
+                    if (is_pin(col) && !is_pin(myid)) { return; }   // drop pinned columns from other rows
+                    row.push_back({col, v});
+                };
+                for (std::size_t m = 0; m < ent.size();) {
+                    std::size_t m2 = m; double s = 0.0;
+                    while (m2 < ent.size() && ent[m2].col == ent[m].col) { s += ent[m2].val; ++m2; }
+                    if (ent[m].col == myid) { s += diag; diag_done = true; }
+                    push(ent[m].col, s);
+                    m = m2;
+                }
+                if (!diag_done) {
+                    Ent e{myid, diag};
+                    auto it = std::lower_bound(row.begin(), row.end(), e, [] (Ent const& a, Ent const& b2) { return a.col < b2.col; });
+                    row.insert(it, e);
+                }
+                rowids.push_back(HYPRE_BigInt(myid));
+                ncols.push_back(HYPRE_Int(row.size()));
+                for (auto const& e : row) { cols.push_back(HYPRE_BigInt(e.col)); vals.push_back(e.val); }
+            }
+        }
+        nnz_global = static_cast<long long>(vals.size());
+        { Long n = nnz_global; ParallelDescriptor::ReduceLongSum(n); nnz_global = n; }
+        if (!ok) { return; }
+        MPI_Comm comm = ParallelDescriptor::Communicator();
+        int ierr = 0;
+        auto hcheck = [&] (int e, const char* what) {
+            if (e != 0 && ok) { ok = false; message = std::string("HYPRE masked: ") + what; }
+        };
+        ierr = HYPRE_IJMatrixCreate(comm, HYPRE_BigInt(ilower), HYPRE_BigInt(iupper), HYPRE_BigInt(ilower), HYPRE_BigInt(iupper), &A); hcheck(ierr, "IJMatrixCreate");
+        ierr = HYPRE_IJMatrixSetObjectType(A, HYPRE_PARCSR); hcheck(ierr, "IJMatrixSetObjectType");
+        ierr = HYPRE_IJMatrixSetRowSizes(A, ncols.empty() ? nullptr : ncols.data()); hcheck(ierr, "IJMatrixSetRowSizes");
+        ierr = HYPRE_IJMatrixInitialize(A); hcheck(ierr, "IJMatrixInitialize");
+        if (!rowids.empty()) {
+            ierr = HYPRE_IJMatrixSetValues(A, HYPRE_Int(rowids.size()), ncols.data(), rowids.data(), cols.data(), vals.data());
+            hcheck(ierr, "IJMatrixSetValues");
+        }
+        ierr = HYPRE_IJMatrixAssemble(A); hcheck(ierr, "IJMatrixAssemble");
+        ierr = HYPRE_IJMatrixGetObject(A, (void**)&parA); hcheck(ierr, "IJMatrixGetObject");
+        for (HYPRE_IJVector* v : {&bvec, &xvec}) {
+            ierr = HYPRE_IJVectorCreate(comm, HYPRE_BigInt(ilower), HYPRE_BigInt(iupper), v); hcheck(ierr, "IJVectorCreate");
+            ierr = HYPRE_IJVectorSetObjectType(*v, HYPRE_PARCSR); hcheck(ierr, "IJVectorSetObjectType");
+            ierr = HYPRE_IJVectorInitialize(*v); hcheck(ierr, "IJVectorInitialize");
+            ierr = HYPRE_IJVectorAssemble(*v); hcheck(ierr, "IJVectorAssemble");
+        }
+        ierr = HYPRE_IJVectorGetObject(bvec, (void**)&parb); hcheck(ierr, "IJVectorGetObject");
+        ierr = HYPRE_IJVectorGetObject(xvec, (void**)&parx); hcheck(ierr, "IJVectorGetObject");
+    }
+
+    void make_solver ()
+    {
+        if (!ok) { return; }
+        MPI_Comm comm = ParallelDescriptor::Communicator();
+        HypreKrylov k = opt.krylov;
+        if (k == HypreKrylov::Auto) { k = HypreKrylov::PCG; }
+        kind = (k == HypreKrylov::PCG) ? 0 : (k == HypreKrylov::GMRES) ? 1 : 2;
+        int ierr = 0;
+        auto hcheck = [&] (int e, const char* what) {
+            if (e != 0 && ok) { ok = false; message = std::string("HYPRE masked: ") + what; }
+        };
+        ierr = HYPRE_BoomerAMGCreate(&precond); hcheck(ierr, "BoomerAMGCreate");
+        HYPRE_BoomerAMGSetPrintLevel(precond, 0);
+        HYPRE_BoomerAMGSetCoarsenType(precond, opt.coarsen_type);
+        HYPRE_BoomerAMGSetRelaxType(precond, opt.relax_type);
+        HYPRE_BoomerAMGSetNumSweeps(precond, opt.num_sweeps);
+        HYPRE_BoomerAMGSetTol(precond, 0.0);
+        HYPRE_BoomerAMGSetMaxIter(precond, 1);
+        if (opt.strong_threshold >= 0.0) { HYPRE_BoomerAMGSetStrongThreshold(precond, opt.strong_threshold); }
+        if (opt.interp_type >= 0) { HYPRE_BoomerAMGSetInterpType(precond, opt.interp_type); }
+        if (opt.agg_levels > 0) { HYPRE_BoomerAMGSetAggNumLevels(precond, opt.agg_levels); }
+        if (kind == 0) {
+            ierr = HYPRE_ParCSRPCGCreate(comm, &solver); hcheck(ierr, "PCGCreate");
+            HYPRE_ParCSRPCGSetMaxIter(solver, 1000);
+            HYPRE_ParCSRPCGSetTol(solver, 1.0e-12);
+            HYPRE_ParCSRPCGSetTwoNorm(solver, 1);
+            HYPRE_ParCSRPCGSetPrintLevel(solver, 0);
+            HYPRE_ParCSRPCGSetLogging(solver, 1);
+            HYPRE_ParCSRPCGSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
+            ierr = HYPRE_ParCSRPCGSetup(solver, parA, parb, parx); hcheck(ierr, "PCGSetup");
+        } else if (kind == 1) {
+            ierr = HYPRE_ParCSRGMRESCreate(comm, &solver); hcheck(ierr, "GMRESCreate");
+            HYPRE_ParCSRGMRESSetKDim(solver, opt.gmres_kdim);
+            HYPRE_ParCSRGMRESSetMaxIter(solver, 1000);
+            HYPRE_ParCSRGMRESSetTol(solver, 1.0e-12);
+            HYPRE_ParCSRGMRESSetPrintLevel(solver, 0);
+            HYPRE_ParCSRGMRESSetLogging(solver, 1);
+            HYPRE_ParCSRGMRESSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
+            ierr = HYPRE_ParCSRGMRESSetup(solver, parA, parb, parx); hcheck(ierr, "GMRESSetup");
+        } else {
+            ierr = HYPRE_ParCSRBiCGSTABCreate(comm, &solver); hcheck(ierr, "BiCGSTABCreate");
+            HYPRE_ParCSRBiCGSTABSetMaxIter(solver, 1000);
+            HYPRE_ParCSRBiCGSTABSetTol(solver, 1.0e-12);
+            HYPRE_ParCSRBiCGSTABSetPrintLevel(solver, 0);
+            HYPRE_ParCSRBiCGSTABSetLogging(solver, 1);
+            HYPRE_ParCSRBiCGSTABSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
+            ierr = HYPRE_ParCSRBiCGSTABSetup(solver, parA, parb, parx); hcheck(ierr, "BiCGSTABSetup");
+        }
+    }
+
+    void put_rhs (MultiFab const& rhs)
+    {
+        Box const& dom = geom.Domain();
+        std::vector<HYPRE_BigInt> idx;
+        std::vector<double> val;
+        double f2 = 0.0, b2 = 0.0;
+        for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+            auto const& r = rhs.const_array(mfi);
+            auto const& cl = cls_g->const_array(mfi);
+            auto const& g = known_g->const_array(mfi);
+            auto const& ida = row_id->const_array(mfi);
+            Box const& bx = mfi.validbox();
+            for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k)
+            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j)
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if (cl(i,j,k) != CellGas) { continue; }
+                const long long myid = ida(i,j,k);
+                double x = 0.0;
+                const double vb = vol * double(r(i,j,k));
+                b2 += vb * vb;
+                if (!is_pin(myid)) {
+                    // F = -V * rhs + V * sum_known 2 g / h^2
+                    x = -vb;
+                    const int iv[3] = {i, j, k};
+                    for (int d = 0; d < 3; ++d) {
+                        if (!active[d]) { continue; }
+                        const double kk = vol/(dx[d]*dx[d]);
+                        for (int side = 0; side < 2; ++side) {
+                            int nb[3] = {i, j, k};
+                            nb[d] += side ? 1 : -1;
+                            const bool edge = (side == 0) ? (iv[d] == dom.smallEnd(d)) : (iv[d] == dom.bigEnd(d));
+                            if (edge && ebc[face_index(d, side)] != BC::Periodic) { continue; }
+                            if (cl(nb[0], nb[1], nb[2]) == CellKnown) {
+                                x += 2.0 * kk * double(g(nb[0], nb[1], nb[2]));
+                            }
+                        }
+                    }
+                }
+                f2 += x * x;
+                idx.push_back(HYPRE_BigInt(myid)); val.push_back(x);
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(f2);
+        ParallelDescriptor::ReduceRealSum(b2);
+        last_F_norm2 = f2; last_b_norm2 = b2;
+        if (!idx.empty()) { HYPRE_IJVectorSetValues(bvec, HYPRE_Int(idx.size()), idx.data(), val.data()); }
+        HYPRE_IJVectorAssemble(bvec);
+    }
+
+    void put_x (MultiFab const& phi, bool use_guess)
+    {
+        std::vector<HYPRE_BigInt> idx;
+        std::vector<double> val;
+        if (!use_guess) {
+            for (long long r = ilower; r <= iupper; ++r) { idx.push_back(HYPRE_BigInt(r)); val.push_back(0.0); }
+        } else {
+            for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+                auto const& a = phi.const_array(mfi);
+                auto const& cl = cls_g->const_array(mfi);
+                auto const& ida = row_id->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (cl(i,j,k) != CellGas) { return; }
+                    const long long myid = ida(i,j,k);
+                    double x = is_pin(myid) ? 0.0 : double(a(i,j,k));
+                    idx.push_back(HYPRE_BigInt(myid)); val.push_back(x);
+                });
+            }
+        }
+        if (!idx.empty()) { HYPRE_IJVectorSetValues(xvec, HYPRE_Int(idx.size()), idx.data(), val.data()); }
+        HYPRE_IJVectorAssemble(xvec);
+    }
+
+    void get_x (MultiFab& phi) const
+    {
+        for (MFIter mfi(phi); mfi.isValid(); ++mfi) {
+            auto const& a = phi.array(mfi);
+            auto const& cl = cls_g->const_array(mfi);
+            auto const& ida = row_id->const_array(mfi);
+            Box const& bx = mfi.validbox();
+            std::vector<HYPRE_BigInt> idx;
+            std::vector<double> val;
+            std::vector<IntVect> cells;
+            for (int k = bx.smallEnd(2); k <= bx.bigEnd(2); ++k)
+            for (int j = bx.smallEnd(1); j <= bx.bigEnd(1); ++j)
+            for (int i = bx.smallEnd(0); i <= bx.bigEnd(0); ++i) {
+                if (cl(i,j,k) != CellGas) { a(i,j,k) = Real(0); continue; }
+                idx.push_back(HYPRE_BigInt(ida(i,j,k)));
+                cells.push_back(IntVect(i,j,k));
+            }
+            val.resize(idx.size());
+            if (!idx.empty()) { HYPRE_IJVectorGetValues(xvec, HYPRE_Int(idx.size()), idx.data(), val.data()); }
+            for (std::size_t q = 0; q < cells.size(); ++q) {
+                a(cells[q][0], cells[q][1], cells[q][2]) = Real(val[q]);
+            }
+        }
+    }
+
+    BackendStatus solve (MultiFab& phi, MultiFab const& rhs, double tol_rel, int max_iter, bool use_guess)
+    {
+        BackendStatus s;
+        s.hypre_rows = nglobal; s.hypre_nnz = nnz_global;
+        s.hypre_method = kind == 0 ? "PCG" : kind == 1 ? "GMRES" : "BiCGSTAB";
+        s.pin_applied = !pins.empty();
+        if (!pins.empty()) {
+            s.pin_level = 0; s.pin_cell = pins[0];
+            for (auto const& iv : pins) { s.pins.push_back({0, iv}); }
+        }
+        put_rhs(rhs);
+        put_x(phi, use_guess);
+        const double t0 = amrex::second();
+        int ierr = 0;
+        HYPRE_Int nit = 0;
+        double rel = -1.0;
+        // Map common-layer tol on ||b||_2 to HYPRE's ||F||_2 (Known terms can dominate F), then ask for a tenth (same as unmasked).
+        const double nb = std::sqrt(last_b_norm2), nf = std::sqrt(last_F_norm2);
+        const double tol_map = (nf > 0.0 && nb > 0.0 && nb < nf) ? tol_rel * nb / nf : tol_rel;
+        const double tol_int = 0.1*tol_map;
+        if (kind == 0) {
+            HYPRE_ParCSRPCGSetTol(solver, tol_int); HYPRE_ParCSRPCGSetMaxIter(solver, max_iter);
+            ierr = HYPRE_ParCSRPCGSolve(solver, parA, parb, parx);
+            HYPRE_ParCSRPCGGetNumIterations(solver, &nit); HYPRE_ParCSRPCGGetFinalRelativeResidualNorm(solver, &rel);
+        } else if (kind == 1) {
+            HYPRE_ParCSRGMRESSetTol(solver, tol_int); HYPRE_ParCSRGMRESSetMaxIter(solver, max_iter);
+            ierr = HYPRE_ParCSRGMRESSolve(solver, parA, parb, parx);
+            HYPRE_ParCSRGMRESGetNumIterations(solver, &nit); HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(solver, &rel);
+        } else {
+            HYPRE_ParCSRBiCGSTABSetTol(solver, tol_int); HYPRE_ParCSRBiCGSTABSetMaxIter(solver, max_iter);
+            ierr = HYPRE_ParCSRBiCGSTABSolve(solver, parA, parb, parx);
+            HYPRE_ParCSRBiCGSTABGetNumIterations(solver, &nit); HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver, &rel);
+        }
+        s.hypre_solve_seconds = amrex::second() - t0;
+        if (ierr != 0) { HYPRE_ClearAllErrors(); }
+        s.iterations = int(nit);
+        s.own_residual = rel;
+        s.converged = (rel >= 0.0 && rel <= tol_map*(1.0 + 1.0e-9)) || (ierr == 0 && rel < 0.0);
+        get_x(phi);
+        return s;
+    }
+};
+
+// Single-level PressureBackend adaptor (set-up cached for a repeated layout, as the FFT plan).
 class HypreBackend final : public PressureBackend {
 public:
     const char* name () const override { return "HYPRE"; }
     bool plan_matches (PressureProblem const& p) const override
     {
+        if (is_masked(p)) { return m_masked && m_masked->matches(p, m_opt); }
         if (!m_sys || !m_sys->ok()) { return false; }
         return m_sys->matches(layout(p), effective_bc(p.bc, p.geom.Domain()), m_opt, is_singular(p));
     }
-    void prepare (PressureProblem const& p) override { build(p, m_opt); }
+    void prepare (PressureProblem const& p) override
+    {
+        if (is_masked(p)) {
+            ComponentMap cm = label_components(p, true);
+            build_masked(p, m_opt, cm);
+        } else {
+            build(p, m_opt);
+        }
+    }
     void set_options (HypreOptions const& o) { m_opt = o; }
     BackendStatus solve (PressureProblem const& p, PressureOptions const& o, MultiFab& phi, MultiFab const& rhs) override
     {
+        if (is_masked(p)) {
+            BackendStatus s;
+            const bool reused = m_masked && m_masked->ok && m_masked->matches(p, o.hypre);
+            if (!reused) {
+                ComponentMap cm = label_components(p, true);
+                build_masked(p, o.hypre, cm);
+            }
+            if (!m_masked || !m_masked->ok) {
+                s.converged = false;
+                s.hypre_method = m_masked ? m_masked->message : "HYPRE masked: not built";
+                return s;
+            }
+            s = m_masked->solve(phi, rhs, o.tol_rel, o.max_iter, o.use_initial_guess);
+            s.plan_reused = reused;
+            s.hypre_setup_seconds = reused ? 0.0 : m_setup;
+            return s;
+        }
         BackendStatus s;
         const bool reused = m_sys && m_sys->ok() && m_sys->matches(layout(p), effective_bc(p.bc, p.geom.Domain()), o.hypre, is_singular(p));
         if (!reused) { build(p, o.hypre); }
@@ -666,11 +1137,21 @@ private:
     void build (PressureProblem const& p, HypreOptions const& opt)
     {
         m_opt = opt;
+        m_masked.reset();
         m_sys.reset();
         m_sys = std::make_unique<HypreSystem>(layout(p), effective_bc(p.bc, p.geom.Domain()), opt, is_singular(p));
         m_setup = m_sys->setup_seconds();
     }
+    void build_masked (PressureProblem const& p, HypreOptions const& opt, ComponentMap const& cm)
+    {
+        m_opt = opt;
+        m_sys.reset();
+        m_masked = std::make_unique<MaskedHypre>();
+        m_masked->build(p, opt, cm);
+        m_setup = m_masked->setup_s;
+    }
     std::unique_ptr<HypreSystem> m_sys;
+    std::unique_ptr<MaskedHypre> m_masked;
     HypreOptions m_opt;
     double m_setup = 0.0;
 };

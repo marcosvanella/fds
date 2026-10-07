@@ -718,6 +718,8 @@ void run_masked (ParmParse& pp)
     int max_iter = 200; pp.query("max_iter", max_iter);
     int zones = 0; pp.query("zones", zones);      // D2: 1 zone id = (k > slab) (follows the slab), 2 zone id = (2i >= nx) (cuts components)
     int cache = 0; pp.query("cache", cache);      // D1/D8: repeat the solve in the same workspace (same, new known values, changed mask)
+    int max_pins = -1; pp.query("max_pins", max_pins);  // D6 negative control: cap sealed pin rows
+    int remove_mean = 1; pp.query("remove_mean", remove_mean);
     S1 s = make_s1(n, bcs, mgs);
     iMultiFab cls(s.ba, s.dm, 1, 0), zid(s.ba, s.dm, 1, 0);
     MultiFab kv(s.ba, s.dm, 1, 0), rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1), rho(s.ba, s.dm, 1, 0), kres(s.ba, s.dm, 1, 0);
@@ -757,13 +759,19 @@ void run_masked (ParmParse& pp)
     }
     pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9;   // the rhs is deliberately incompatible
     o.backend = (be == "fft") ? pb::BackendKind::FFT : (be == "hypre") ? pb::BackendKind::HYPRE : (be == "mlmg") ? pb::BackendKind::MLMG : pb::BackendKind::Auto;
-    o.tol_rel = tol; o.max_iter = max_iter;
-    pb::ComponentMap cm = pb::label_components(p);
+        o.tol_rel = tol; o.max_iter = max_iter;
+    o.hypre.max_pins = max_pins;
+    o.remove_mean = bool(remove_mean); pb::ComponentMap cm = pb::label_components(p);
     pb::PressureWorkspace ws;
     pb::PressureResult r = pb::solve_pressure(p, o, &ws);
     Print() << std::setprecision(8) << "MASKED status=" << pb::to_string(r.status) << " backend=" << (r.backend.empty() ? std::string("none") : r.backend)
             << " iters=" << r.backend_status.iterations << " ncomp=" << r.components.size() << " residual_ok=" << int(r.residual_ok) << " nwarn=" << r.warnings.size()
-            << " true_rel2=" << r.residual_rel2 << " limit=" << r.residual_limit << " msg=[" << r.message << "]\n";
+            << " true_rel2=" << r.residual_rel2 << " nopin=" << r.residual_rel2_nopin << " pin_rel=" << r.residual_pin_rel
+            << " npin=" << r.backend_status.pins.size() << " hypre_rows=" << r.backend_status.hypre_rows
+            << " limit=" << r.residual_limit << " msg=[" << r.message << "]\n";
+    for (auto const& pr : r.backend_status.pins) {
+        Print() << "MASKEDPIN level=" << pr.first << " cell=" << pr.second[0] << "," << pr.second[1] << "," << pr.second[2] << "\n";
+    }
     for (auto const& c : r.components) {
         Print() << std::setprecision(17) << "MASKEDCOMP id=" << c.id << " singular=" << int(c.singular) << " ncells=" << c.ncells << " pin=" << c.pin[0] << "," << c.pin[1] << "," << c.pin[2] << " zone=" << c.zone
                 << " removed_mean=" << c.removed_mean << " gauge_shift=" << c.gauge_shift << "\n";
