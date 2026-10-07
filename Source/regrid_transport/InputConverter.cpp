@@ -311,8 +311,7 @@ bool convert_input(const std::string& text, ConvertResult& out, Report& rep)
             const NamelistGroup g = parse_span(text, s);
             auto it = g.values.find("TUNNEL_PRECONDITIONER");
             if (it == g.values.end() || it->second.empty()) continue;
-            std::string v = it->second[0];
-            for (char& c : v) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            const std::string v = up(it->second[0]);
             if (v == ".TRUE." || v == "T" || v == ".T." || v == "TRUE") {
                 rep.error(where(s) + ": TUNNEL_PRECONDITIONER=T is not allowed in AMR mode (an &AMR line is present): the tunnel preconditioner assumes a single 1-D line of level-0 meshes and is not supported with AMR; set TUNNEL_PRECONDITIONER=F or remove the &AMR line.");
                 return false;

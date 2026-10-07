@@ -51,8 +51,8 @@ long clip_tags_to_boxes(amrex::TagBoxArray& tags, const std::vector<amrex::Box>&
 long count_tags(const amrex::TagBoxArray& tags);
 
 // Grow every TagBox::SET cell by `nbuf` cells (Chebyshev, all directions including edges and corners) into TagBox::BUF.
-// Uses a temporary TagBoxArray with `nbuf` ghost cells, FillBoundary with `geom` periodicity, then dilation; writes back into
-// the valid cells of `tags`. With nbuf <= 0 this is a no-op. Matches the single-box behaviour of AMReX TagBoxArray::buffer and
+// Uses a temporary TagBoxArray with `nbuf` ghost cells (FillBoundary with `geom` periodicity) and marks the CLEAR valid cells of
+// `tags` that have a SET within `nbuf`; nbuf >= 0 (0: no-op). Matches the single-box behaviour of AMReX TagBoxArray::buffer and
 // also covers cells across box and rank boundaries (D-080 / D-053).
 void buffer_tags(amrex::TagBoxArray& tags, int nbuf, const amrex::Geometry& geom);
 

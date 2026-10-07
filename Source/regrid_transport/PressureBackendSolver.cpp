@@ -17,8 +17,6 @@ struct PressureBackendSolver::Impl {
     std::vector<amrex::MultiFab> phi;       // owned solution storage, valid cells + one ghost layer
     std::vector<amrex::MultiFab> rhs0;      // zero right-hand sides: layout carriers for rebuild
     std::array<pb::BC, 6> bc;
-    double residual_rel2 = 0.0;
-    int rebuilds = 0;
 
     pb::PressureProblem problem(const std::vector<const amrex::MultiFab*>* rhs)
     {
@@ -37,8 +35,6 @@ struct PressureBackendSolver::Impl {
 
 PressureBackendSolver::PressureBackendSolver() : impl_(std::make_unique<Impl>()) {}
 PressureBackendSolver::~PressureBackendSolver() = default;
-double PressureBackendSolver::last_residual_rel2() const { return impl_->residual_rel2; }
-int PressureBackendSolver::workspace_rebuilds() const { return impl_->rebuilds; }
 
 void PressureBackendSolver::rebuild(const std::vector<ProjectionLevel>& levels)
 {
@@ -61,7 +57,6 @@ void PressureBackendSolver::rebuild(const std::vector<ProjectionLevel>& levels)
         m.bc[pb::face_index(d, 0)] = b;
         m.bc[pb::face_index(d, 1)] = b;
     }
-    ++m.rebuilds;
     std::string msg;
     const pb::Status st = m.ws.rebuild(m.problem(nullptr), &msg);
     if (st != pb::Status::Ok) amrex::Print() << "PressureBackendSolver::rebuild: " << pb::to_string(st) << ": " << msg << "\n";   // solve() reports the same reason
@@ -81,15 +76,13 @@ SolveReport PressureBackendSolver::solve(const std::vector<const amrex::MultiFab
     o.verbose = 0;
     const pb::PressureResult res = pb::solve_pressure(p, o, &m.ws);
     r.iterations = res.backend_status.iterations;
-    m.residual_rel2 = res.residual_rel2;
     r.residual = res.backend_status.own_residual;
     if (res.status != pb::Status::Ok) {
         r.ok = false;
         r.message = std::string(pb::to_string(res.status)) + ": " + res.message;
         return r;
     }
-    std::vector<std::array<amrex::MultiFab*, 3>> g = grad;
-    const pb::PressureResult gr = pb::face_gradient_composite(p, g);
+    const pb::PressureResult gr = pb::face_gradient_composite(p, grad);
     if (gr.status != pb::Status::Ok) {
         r.ok = false;
         r.message = std::string("face_gradient_composite ") + pb::to_string(gr.status) + ": " + gr.message;

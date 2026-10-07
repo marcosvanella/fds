@@ -18,6 +18,7 @@ Lay bounds(const A& a)
 {
     return Lay{{a.begin[0], a.begin[1], a.begin[2]}, {a.end[0] - 1, a.end[1] - 1, a.end[2] - 1}};
 }
+Lay lay(const amrex::Box& b) { return Lay{{b.smallEnd(0), b.smallEnd(1), b.smallEnd(2)}, {b.bigEnd(0), b.bigEnd(1), b.bigEnd(2)}}; }
 }  // namespace
 
 extern "C" {
@@ -60,7 +61,7 @@ void tag_cells(amrex::TagBoxArray& tags, const amrex::MultiFab& q, const amrex::
     const int dirs[3] = {c.dirs[0], c.dirs[1], c.dirs[2]};
     for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
         const amrex::Box vb = mfi.validbox();
-        const int lo[3] = {vb.smallEnd(0), vb.smallEnd(1), vb.smallEnd(2)}, hi[3] = {vb.bigEnd(0), vb.bigEnd(1), vb.bigEnd(2)};
+        const Lay v = lay(vb);
         Lay tl;
         signed char* tp = tag_ptr(tags, mfi, tl);
         auto qa = q.const_array(mfi, c.comp);
@@ -74,18 +75,15 @@ void tag_cells(amrex::TagBoxArray& tags, const amrex::MultiFab& q, const amrex::
                                              "tag_cells: den needs the same ghost width as q");
             dp = da.p;
         }
-        Lay cl = tl;
-        const int* cp = nullptr;
+        static const int dummy = 0;
+        Lay cl = v;   // dummy and v are never read when use_cov = 0
+        const int* cp = &dummy;
         if (covered) {
             auto ca = covered->const_array(mfi);
             cl = bounds(ca);
             cp = ca.p;
-        } else {
-            static const int dummy = 0;
-            cp = &dummy;
-            cl = Lay{{lo[0], lo[1], lo[2]}, {lo[0], lo[1], lo[2]}};   // never read (use_cov = 0)
         }
-        rt_tag_cells(lo, hi, qa.p, ql.lo, ql.hi, dp, &use_den, cp, cl.lo, cl.hi, &use_cov, tp, tl.lo, tl.hi, &mode, c.thr, c.base, c.keepfac, &rel, dirs);
+        rt_tag_cells(v.lo, v.hi, qa.p, ql.lo, ql.hi, dp, &use_den, cp, cl.lo, cl.hi, &use_cov, tp, tl.lo, tl.hi, &mode, c.thr, c.base, c.keepfac, &rel, dirs);
     }
 }
 
@@ -93,13 +91,13 @@ void tag_boxes(amrex::TagBoxArray& tags, const std::vector<amrex::Box>& boxes)
 {
     for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
         const amrex::Box vb = mfi.validbox();
-        const int lo[3] = {vb.smallEnd(0), vb.smallEnd(1), vb.smallEnd(2)}, hi[3] = {vb.bigEnd(0), vb.bigEnd(1), vb.bigEnd(2)};
+        const Lay v = lay(vb);
         Lay tl;
         signed char* tp = tag_ptr(tags, mfi, tl);
         for (const amrex::Box& b : boxes) {
             if (!b.intersects(vb)) continue;
-            const int blo[3] = {b.smallEnd(0), b.smallEnd(1), b.smallEnd(2)}, bhi[3] = {b.bigEnd(0), b.bigEnd(1), b.bigEnd(2)};
-            rt_tag_box(lo, hi, tp, tl.lo, tl.hi, blo, bhi);
+            const Lay bl = lay(b);
+            rt_tag_box(v.lo, v.hi, tp, tl.lo, tl.hi, bl.lo, bl.hi);
         }
     }
 }
@@ -109,11 +107,11 @@ long count_tags(const amrex::TagBoxArray& tags)
     long total = 0;
     for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
         const amrex::Box vb = mfi.validbox();
-        const int lo[3] = {vb.smallEnd(0), vb.smallEnd(1), vb.smallEnd(2)}, hi[3] = {vb.bigEnd(0), vb.bigEnd(1), vb.bigEnd(2)};
+        const Lay v = lay(vb);
         auto a = tags.const_array(mfi);
         const Lay tl = bounds(a);
         long n = 0;
-        rt_tag_count(lo, hi, reinterpret_cast<const signed char*>(a.p), tl.lo, tl.hi, &n);
+        rt_tag_count(v.lo, v.hi, reinterpret_cast<const signed char*>(a.p), tl.lo, tl.hi, &n);
         total += n;
     }
     amrex::ParallelAllReduce::Sum(total, amrex::ParallelContext::CommunicatorSub());
@@ -125,7 +123,7 @@ long clip_tags_to_boxes(amrex::TagBoxArray& tags, const std::vector<amrex::Box>&
     const long before = count_tags(tags);
     for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
         const amrex::Box vb = mfi.validbox();
-        const int lo[3] = {vb.smallEnd(0), vb.smallEnd(1), vb.smallEnd(2)}, hi[3] = {vb.bigEnd(0), vb.bigEnd(1), vb.bigEnd(2)};
+        const Lay v = lay(vb);
         auto a = tags.array(mfi);
         const Lay tl = bounds(a);
         signed char* tp = reinterpret_cast<signed char*>(a.p);
@@ -137,49 +135,28 @@ long clip_tags_to_boxes(amrex::TagBoxArray& tags, const std::vector<amrex::Box>&
         tags[mfi].setVal<amrex::RunOn::Host>(amrex::TagBox::CLEAR);
         for (const amrex::Box& b : allowed) {
             if (!b.intersects(vb)) continue;
-            const int blo[3] = {b.smallEnd(0), b.smallEnd(1), b.smallEnd(2)}, bhi[3] = {b.bigEnd(0), b.bigEnd(1), b.bigEnd(2)};
-            rt_tag_copy_box(lo, hi, reinterpret_cast<const signed char*>(sa.p), sl.lo, sl.hi, tp, tl.lo, tl.hi, blo, bhi);
+            const Lay bl = lay(b);
+            rt_tag_copy_box(v.lo, v.hi, reinterpret_cast<const signed char*>(sa.p), sl.lo, sl.hi, tp, tl.lo, tl.hi, bl.lo, bl.hi);
         }
     }
     return before - count_tags(tags);
 }
 
-
 void buffer_tags(amrex::TagBoxArray& tags, int nbuf, const amrex::Geometry& geom)
 {
-    if (nbuf <= 0) return;
-    const amrex::IntVect ng(nbuf);
-    amrex::TagBoxArray tmp(tags.boxArray(), tags.DistributionMap(), ng);  // ctor fills CLEAR
-    for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
-        tmp[mfi].copy<amrex::RunOn::Host>(tags[mfi], mfi.validbox());
-    }
+    // tmp: the tags with nbuf ghost layers (neighbour and periodic SET cells); a CLEAR valid cell with a SET within nbuf becomes BUF
+    amrex::TagBoxArray tmp(tags.boxArray(), tags.DistributionMap(), nbuf);  // ctor fills CLEAR
+    for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) tmp[mfi].copy<amrex::RunOn::Host>(tags[mfi], mfi.validbox());
     tmp.FillBoundary(geom.periodicity());
-    for (amrex::MFIter mfi(tmp); mfi.isValid(); ++mfi) {
-        const amrex::Box vb = mfi.validbox();
+    for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
         auto const a = tmp.const_array(mfi);
-        auto dest = tags.array(mfi);
-        // Grow from every SET in the fab (valid + ghosts after FillBoundary) into the valid box as BUF; keep SET as SET.
-        amrex::BaseFab<char> grown(vb, 1);
-        grown.setVal<amrex::RunOn::Host>(amrex::TagBox::CLEAR);
-        auto g = grown.array();
-        amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
-            if (a(i, j, k) == amrex::TagBox::SET) g(i, j, k) = amrex::TagBox::SET;
-        });
-        const amrex::Box fab = mfi.fabbox();
-        amrex::LoopOnCpu(fab, [&](int i, int j, int k) {
-            if (a(i, j, k) != amrex::TagBox::SET) return;
-            for (int kk = k - nbuf; kk <= k + nbuf; ++kk) {
-                for (int jj = j - nbuf; jj <= j + nbuf; ++jj) {
-                    for (int ii = i - nbuf; ii <= i + nbuf; ++ii) {
-                        if (!vb.contains(amrex::IntVect(ii, jj, kk))) continue;
-                        if (g(ii, jj, kk) == amrex::TagBox::CLEAR) g(ii, jj, kk) = amrex::TagBox::BUF;
-                    }
-                }
-            }
-        });
-        amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
-            if (g(i, j, k) == amrex::TagBox::SET) dest(i, j, k) = amrex::TagBox::SET;
-            else if (g(i, j, k) == amrex::TagBox::BUF) dest(i, j, k) = amrex::TagBox::BUF;
+        auto t = tags.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            if (t(i, j, k) != amrex::TagBox::CLEAR) return;
+            for (int kk = k - nbuf; kk <= k + nbuf; ++kk)
+                for (int jj = j - nbuf; jj <= j + nbuf; ++jj)
+                    for (int ii = i - nbuf; ii <= i + nbuf; ++ii)
+                        if (a(ii, jj, kk) == amrex::TagBox::SET) { t(i, j, k) = amrex::TagBox::BUF; return; }
         });
     }
 }

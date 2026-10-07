@@ -25,9 +25,6 @@ public:
     const char* name() const override { return "pressure_backend composite MLMG"; }
     void rebuild(const std::vector<ProjectionLevel>& levels) override;
     SolveReport solve(const std::vector<const amrex::MultiFab*>& rhs, std::vector<std::array<amrex::MultiFab*, 3>>& grad, double tol_rel, double tol_abs, int max_iter) override;
-    // Diagnostics of the last solve (backend's own composite true residual, relative L2).
-    double last_residual_rel2() const;
-    int workspace_rebuilds() const;      // number of rebuild() calls
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
