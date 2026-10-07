@@ -1,29 +1,95 @@
 # S6: OPEN / inhomogeneous Poisson (Role 2)
 
-Architect order after D-092/S6 ACCEPT. Item 5 (4-rank/3-level composite-masked) resumed separately.
+Signatures match tip `bf0ba2d523` and current HEAD (`fold_boundary_data` single-level + composite overloads in `PressureIface.H` / `CommonLayer.cpp`).
+
+## Role 1 wire recipe (URGENT — die lift)
+
+**Rule: call `fold_boundary_data` whenever any of `BXS..BZF` is nonzero on a solved physical face — not only for OPEN.**
+
+| Face kind (FDS → `pb::BC`) | Data in `BXS..BZF` | Fold?
+|---|---|---|
+| OPEN → `Dirichlet` | wall value `H_b` | **yes** if ≠ 0 (and still fold zeros are no-ops) |
+| MIRROR / INERT impermeable / WALL Neumann → `Neumann` | `g = dH/dx_d` (increasing coord) | **yes** if ≠ 0 — **MIRROR top with nonzero BZS/BZF dies without fold** |
+| PERIODIC → `Periodic` | none | never (data on periodic → `InvalidInput`) |
+
+Homogeneous Neumann (`g = 0` on all Neumann faces) and homogeneous Dirichlet (`H_b = 0`) need no fold terms (constants stay 0 / null MultFabs). The TimeLoop die fires on `max|BXS..BZF| > 0` on solved faces — that is exactly when fold is mandatory.
+
+### Call order (composite — vortex / two-level)
+
+```cpp
+// After PRHS is in each level rhs; BEFORE solve_pressure. Do not lift die until this runs.
+pb::BoundaryData bd{};  // value[f]=nullptr, constant[f]=0 by default
+for (int f = 0; f < 6; ++f) {
+    if (p.bc[f] == pb::BC::Periodic) continue;
+    // Map FDS face array → bd.constant[f] or bd.value[f] (FISHPAK signs below).
+    // Neumann (MIRROR/INERT): g from BXS/BXF/BYS/BYF/BZS/BZF
+    // Dirichlet (OPEN):       H_b from the same arrays
+}
+std::string msg;
+std::vector<pb::BoundaryData> bds{bd};              // or one BoundaryData per level
+std::vector<amrex::MultiFab*> rhs_levels = {/* writable MultiFab* per level, same BA/DM as levels[l] */};
+pb::Status fs = pb::fold_boundary_data(p, bds, rhs_levels, &msg);
+if (fs != pb::Status::Ok) { /* abort with msg */ }
+
+pb::PressureResult r = pb::solve_pressure(p, o, ws);
+```
+
+Single-level:
+
+```cpp
+pb::Status fs = pb::fold_boundary_data(p, bd, *rhs_mf, &msg);  // rhs BA/DM == p.ba/p.dm
+pb::PressureResult r = pb::solve_pressure(p, o);
+```
+
+**Signatures (unchanged since `bf0ba2d523`):**
+
+```cpp
+Status fold_boundary_data(PressureProblem const& p, BoundaryData const& bd,
+                          amrex::MultiFab& rhs, std::string* message = nullptr);
+Status fold_boundary_data(PressureProblem const& p,
+                          std::vector<BoundaryData> const& bd_levels,
+                          std::vector<amrex::MultiFab*>& rhs_levels,
+                          std::string* message = nullptr);
+```
+
+`BoundaryData`: `std::array<MultiFab const*,6> value{}`, `std::array<Real,6> constant{}` — index `face_index(dir, side)`.
+
+### Vortex_ring MIRROR top (smoke)
+
+`PBZ=L MIRROR` → Neumann on z-hi. If FDS fills `BZF ≠ 0` (or any other face array ≠ 0), the S5 die fires until Role 1 folds that `g` into the rhs. Mapping MIRROR→`pb::BC::Neumann` alone is not enough.
+
+### Fail without fold
+
+Skip fold with nonzero Dirichlet/Neumann data → wrong φ (harness neg control: constant Hb, max|phi−Hb| ≈ |Hb|). Do not use `status==Ok` alone.
+
+### Acceptance template
+
+Fill-in checklist: `frozen/s6-open-coldflow-RESULT.md`. Backend golden: `ctest -R 'pb_comp_bcdata$'` (floor INERT + five OPEN, φ≈Hb).
+
+---
 
 ## Already built (single-level)
 
 | Piece | Status | Evidence |
 |---|---|---|
-| `fold_boundary_data(p, BoundaryData, rhs)` | Built | `CommonLayer.cpp`; signs in `PressureIface.H` and `m2-notes.md` §4 (FDS FISHPAK / `pres.f90`) |
+| `fold_boundary_data(p, BoundaryData, rhs)` | Built | `CommonLayer.cpp`; signs in `PressureIface.H` and `m2-notes.md` §4 |
 | Mixed open/closed faces (N/D/P per face) | Built | FFT / MLMG / HYPRE; `pb_mixed_faces_sweep`, `pb_hypre_mixed_faces_sweep` |
 | Fold + mixed exact / MMS | Built | `pb_bcdata_exact`, `pb_bcdata_mms`, `pb_hypre_bcdata_exact` |
 
-## Composite fold (this tip)
+## Composite fold
 
 `fold_boundary_data(p, bd_levels, rhs_levels)` folds into each level using that level's `h` and `Domain`.
 `bd_levels.size()` is `1` (broadcast) or `levels.size()`. Covered cells may receive the fold; backends ignore covered rhs.
 
-Cold-flow: floor INERT (Neumann z-lo) + five OPEN (Dirichlet), constant `H_b`, full-fine two-level → `phi ≈ H_b`.
+Cold-flow golden: floor INERT (Neumann z-lo) + five OPEN (Dirichlet), constant `H_b`, full-fine two-level → `phi ≈ H_b`.
 Harness `mode=comp_bcdata` / ctest `pb_comp_bcdata` (MLMG and HYPRE).
 
 ## FDS sign convention (do not invent)
 
 From FDS `pres.f90` (header ~57–58, application ~452–454, ULMAT ~1620–1679), confirmed A-56 fold sign check:
 
-- Neumann `g = dH/dx_d` along the **increasing** coordinate at both low and high faces.
-- Dirichlet `H_b` = wall value of `H` (not the ghost).
+- Neumann data `g` is `dH/dx_d` along the **increasing** coordinate at both the low and the high face.
+- Dirichlet data is `H` at the wall (not the ghost).
 - Fold into unit-operator rhs `b` (no volume factor):
 
 | face | rhs change |
@@ -34,36 +100,15 @@ From FDS `pres.f90` (header ~57–58, application ~452–454, ULMAT ~1620–1679
 
 Periodic faces take no data (`InvalidInput`). One-cell y drops its term (D-057).
 
-Role 1 maps `BXS..BZF` → `BoundaryData` (`value[f]` MultFab or `constant[f]`) with this convention, then calls fold **before** `solve_pressure`.
+## Role 1 coordination (die)
 
-## Role 1 coordination (do not edit TimeLoop here)
+`TimeLoop.cpp` historically `die`s on `BXS..BZF /= 0`. **Role 2 does not edit TimeLoop.** Lift the die only after fold is wired for **all** nonzero face data (OPEN and MIRROR/Neumann).
 
-`TimeLoop.cpp` still `die`s on `BXS..BZF /= 0` (S5 guard). **Role 2 does not remove that die.**
-
-To clear floor INERT + five OPEN on two-level vortex without abort, Role 1 must:
-
-1. Set `p.bc[]` to the mixed open/closed map (OPEN → Dirichlet, INERT/WALL impermeable → Neumann, PERIODIC → Periodic).
-2. Build `BoundaryData` from `BXS..BZF` (per level for composite MultFab data, or constants when uniform).
-3. Call `fold_boundary_data` on each level's rhs (composite overload), then `solve_pressure`.
-4. Only then drop the inhomogeneous `die`.
-
-Partial-face OPEN / Known pad remains the masked path (Q2/Q6); domain-face OPEN is this fold path.
-
-
-## Role 1: fold call site (pattern)
-
-Copy the cold-flow harness (`mode=comp_bcdata` / `pb_comp_bcdata` in `harness/composite_modes.cpp`):
-
-1. Fill `p.bc[face_index(d,side)]` (OPEN→`Dirichlet`, INERT impermeable→`Neumann`, PERIODIC→`Periodic`). Floor INERT + five OPEN is `bcfaces=DD,DD,ND`.
-2. Put FDS `BXS..BZF` into `pb::BoundaryData` (`constant[f]` or `value[f]` MultFab). Signs: header comment on `fold_boundary_data` / table above.
-3. Single-level: `fold_boundary_data(p, bd, *rhs_mf, &msg)` then `solve_pressure(p, o)`.
-4. Composite: `std::vector<BoundaryData> bds{bd};` (or one entry per level), `std::vector<MultiFab*> rhs_levels` pointing at each level rhs, then `fold_boundary_data(p, bds, rhs_levels, &msg)` then `solve_pressure(p, o, ws)`.
-5. Drop the TimeLoop inhomogeneous `die` only after (3)/(4) are wired.
-
-Do not edit TimeLoop from Role 2; this note is the hand-off.
+Partial-face OPEN / Known pad remains the masked path (Q2/Q6); domain-face OPEN and domain-face inhomogeneous Neumann are this fold path.
 
 ## Out of scope here
 
 - `face_gradient_composite`+mask (later).
-- Changing Role 1 TimeLoop `die` (report only).
-- Item 5 resumed under Architect order after this ACCEPT (separate tip).
+- Editing TimeLoop from Role 2.
+- 3-level partial-fine masked (PL DEFER; masked-branch-design.md).
+- §11.4 true FDS H with nonzero walls: `frozen/s6-fold-fds-h-dump-gap.md` (do not block die lift).
