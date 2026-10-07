@@ -63,7 +63,7 @@ working area and are not in this repository.
 | `upstream-patches/UP-0011-pressure-rhs-dump.patch` | 11444 (11 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/inputs/0010-neg-control-converter-pass.fds` | 1786 (2 KiB) |  | not Markdown or CSV | not recorded |
 | `upstream-patches/inputs/0010-neg-control-race_test_1.fds` | 1148 (1 KiB) |  | not Markdown or CSV | not recorded |
-| `.git/COMMIT_EDITMSG` | 284 (0 KiB) |  | hidden file | not recorded |
+| `.git/COMMIT_EDITMSG` | 76 (0 KiB) |  | hidden file | not recorded |
 | `.git/HEAD` | 23 (0 KiB) |  | hidden file | not recorded; candidate scripts mentioning it: loop_work_list.py mesh_fields.py rw_matrix.py rw_velocity_interface.py  |
 | `.git/ORIG_HEAD` | 41 (0 KiB) |  | hidden file | not recorded |
 | `.git/config` | 158 (0 KiB) |  | hidden file | not recorded |
@@ -84,8 +84,8 @@ working area and are not in this repository.
 | `.git/hooks/update.sample` | 3650 (4 KiB) |  | hidden file | not recorded |
 | `.git/index` | 27897 (27 KiB) |  | hidden file | not recorded; candidate scripts mentioning it: alloc_scan.py cross_mesh.py fcommon.py field_access.py fortran_lex.py fortran_scope.py global_reductions.py globals_scan.py gpu_callgraph_survey.py gpu_churn.py gpu_generator_coverage.py interface_sites.py kernel_footprint.py lbound_extent_scan.py loop_work_list.py mesh_fields.py mesh_id_deps.py mesh_ratio_cases.py obst_wall_cface_indexing.py port_maps.py routine_index.py rw_matrix.py rw_velocity_interface.py uniform_grid_scan.py  |
 | `.git/info/exclude` | 240 (0 KiB) |  | hidden file | not recorded; candidate scripts mentioning it: global_reductions_csv.py globals_scan.py gpu_callgraph_survey.py gpu_churn.py mesh_ratio_cases.py port_maps.py rw_matrix.py  |
-| `.git/logs/HEAD` | 65379 (64 KiB) |  | hidden file | not recorded; candidate scripts mentioning it: loop_work_list.py mesh_fields.py rw_matrix.py rw_velocity_interface.py  |
-| `.git/logs/refs/heads/master` | 65379 (64 KiB) |  | hidden file | not recorded; candidate scripts mentioning it: global_reductions_csv.py uniform_grid_scan.py  |
+| `.git/logs/HEAD` | 65606 (64 KiB) |  | hidden file | not recorded; candidate scripts mentioning it: loop_work_list.py mesh_fields.py rw_matrix.py rw_velocity_interface.py  |
+| `.git/logs/refs/heads/master` | 65606 (64 KiB) |  | hidden file | not recorded; candidate scripts mentioning it: global_reductions_csv.py uniform_grid_scan.py  |
 | `.git/objects/00/47d54d33c31149a60a290ffddc1899f2786aaa` | 329 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/00/4cc0a76472b652b948c2431afe911b6fd5fec1` | 1111 (1 KiB) |  | hidden file | not recorded |
 | `.git/objects/00/8f04a8c3bc188699055990fbf4cc590b8aa7d3` | 2062 (2 KiB) |  | hidden file | not recorded |
@@ -260,6 +260,7 @@ working area and are not in this repository.
 | `.git/objects/1c/0016abcc1430e92bead72981a57de8b2d2dfb2` | 924 (1 KiB) |  | hidden file | not recorded |
 | `.git/objects/1c/0da27214263d57e73bdea756956c569b6bf8cd` | 923 (1 KiB) |  | hidden file | not recorded |
 | `.git/objects/1c/4ae7b56794b042e88d41d8a46a7a57063abbde` | 828 (1 KiB) |  | hidden file | not recorded |
+| `.git/objects/1c/a66ceb0a24bbc51e65e7f2486463ff3a91709a` | 214 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/1c/b312025bd70a165badd83c0a535d8bb6e95f3c` | 924 (1 KiB) |  | hidden file | not recorded |
 | `.git/objects/1c/c2c3eead1f1c09ad9d641fbbb86b64ef04e521` | 5149 (5 KiB) |  | hidden file | not recorded |
 | `.git/objects/1c/fccb9444951ee6101f09ee5bf48699f690609c` | 1205 (1 KiB) |  | hidden file | not recorded |
@@ -315,6 +316,7 @@ working area and are not in this repository.
 | `.git/objects/24/707336eaf636d6328b8eb7a10a3025d9a007af` | 379 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/24/707e999676bcb7fe618b57766deb07d72530eb` | 379 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/24/b194a0a4f9165986f05b69106d15c3f6825a86` | 1283 (1 KiB) |  | hidden file | not recorded |
+| `.git/objects/24/f3e411e633b75f6f12ad0e75422e5337b24f73` | 959 (1 KiB) |  | hidden file | not recorded |
 | `.git/objects/25/1f5af6a23e103cc5af28be6318891549e49521` | 266 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/25/2386a9913e1ca0982edf17d06e45a08221b23b` | 15899 (16 KiB) |  | hidden file | not recorded |
 | `.git/objects/25/836d4c7dd5ae7533e0f928a227b70663e84c08` | 199 (0 KiB) |  | hidden file | not recorded |
@@ -1561,6 +1563,7 @@ working area and are not in this repository.
 | `.git/objects/e9/4778e55f3fac156de7433508be67927cdc7b55` | 309 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/e9/6763d470a9d3dbfcb46a7e071fbb51421b82dc` | 114705 (112 KiB) |  | hidden file | not recorded |
 | `.git/objects/e9/87b2b84174c63cb64cc24760c144c2dc726a49` | 8117 (8 KiB) |  | hidden file | not recorded |
+| `.git/objects/e9/aa8664a5af6e8d000fd0de7943fd8e3d7cf024` | 4588 (4 KiB) |  | hidden file | not recorded |
 | `.git/objects/e9/c4336c0fedc736e09188905b4a54c490520b5c` | 254 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/e9/da4ebe5ea693af287fb311ed28a62ad497073b` | 21560 (21 KiB) |  | hidden file | not recorded |
 | `.git/objects/e9/e90cdf73b2350def5f5ee5a287bc09672afec6` | 170 (0 KiB) |  | hidden file | not recorded |
@@ -1633,6 +1636,7 @@ working area and are not in this repository.
 | `.git/objects/f3/89cc1535593d04afc6e060d4a6666ae4ea491e` | 2881 (3 KiB) |  | hidden file | not recorded |
 | `.git/objects/f3/a11f1a2759769fcd09fca6b9dcb2ac1072cc4c` | 492 (0 KiB) |  | hidden file | not recorded |
 | `.git/objects/f3/b5e31ac418a52a49d42202f17526f3b0850615` | 378 (0 KiB) |  | hidden file | not recorded |
+| `.git/objects/f3/c1ed43a26d45d9c38603c251774a6d249492f1` | 14290 (14 KiB) |  | hidden file | not recorded |
 | `.git/objects/f3/d1af239c86018cf9d3f43ca4215e951d1eec3a` | 1449 (1 KiB) |  | hidden file | not recorded |
 | `.git/objects/f3/de032893f80537d7be74fc4f8bd64578a6e182` | 1309 (1 KiB) |  | hidden file | not recorded |
 | `.git/objects/f4/061a2f3ff47ba659e5fcaefd07065c57f40622` | 957 (1 KiB) |  | hidden file | not recorded |
