@@ -256,6 +256,10 @@ Inside `CASE (INTERPOLATED_BC)` of `SURFACE_HEAT_TRANSFER`, in the branch for a 
 - If the Architect says `NIC>1` can occur in the supported inputs: T4 plan with `EW_NIC/EW_NCELL/EW_OFF`, ordered K,J,I sums (bitwise because the order is fixed), ramp and viscosity callees. 4-5 days (WE tables, SL test design). Q1.
 - Test if kept: bitwise against the verbatim loop on random overlap geometries with `ARO` below and at 1, 1-4 species, LES on/off; mutants: loop order changed, `MAXLOC` correction dropped.
 
+### 9.4 Retirement status (merged)
+
+L1485 is **retired** in the AMR route. No device kernel. The route relies on the host abort guard (driver patch 0010). A-65 is green: GNU host validation of patch 0010 on tip `047adca89bc6` (P-3 / N-5 / N-5b / N-5c) in `vv-runs/a65-0010-host/RESULT.md`; Intel half already validated (D-078 (d)). Claims and tracker record the loop as `not planned (retired)`. The FDS-only / non-AMR path keeps the upstream `NIC>1` body at wall.f90:888-947. The input-set condition of D-065 Q1 is enforced by the guard and the converter (D-076 / D-079 (c)).
+
 ## 10. Test design shared by all passes
 
 - **Reference:** verbatim survey text (line ranges cited, compiled from the pinned commit), upstream `!$OMP` lines removed, run serially. For callees the verbatim routine is compiled into the harness with mock module state.

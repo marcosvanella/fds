@@ -139,7 +139,10 @@ the rounded result of one serial chain per zone: the cells of a mesh in K,J,I as
 `PSUM(IPZ) = PSUM(IPZ) + ...`), then the walls in ascending `IW` (`USUM(IPZ) = USUM(IPZ) + U_NORMAL*AREA`), then the cut faces; the meshes of
 a process one after the other; then `MPI_ALLREDUCE(MPI_SUM)`. Addition of floating-point numbers is not associative, so any other order
 (a tree, a reordered loop, atomics, an unordered `reduction(+)`) gives other last bits. The D-053 default keeps the adds serial and lets the
-device compute only the elementwise terms. The optional exact fixed-point sum is not bitwise equal to FDS and is not checked here.
+device compute only the elementwise terms. The optional exact fixed-point sum (`-DS5_FIXEDSUM` in
+`red_fixedsum.F90`) is not bitwise equal to FDS: the k2 check accepts that library's two modes as NOTES
+(ZS-07 default serial add, ZS-08 fixed-point integer limbs) and a term-log line `result-fixed zone value`
+is checked against the exact fixed-point oracle (ZS-13).
 
 | Rule | Fails when |
 |---|---|
@@ -149,13 +152,17 @@ device compute only the elementwise terms. The optional exact fixed-point sum is
 | ZS-04 | an accumulation sits inside `omp parallel`, `target`, `simd`, `do concurrent` or under `atomic`/`critical` |
 | ZS-06 | (note) the update sits in a per-cell wall list loop (`DO IWP = W_CSR_GAS_PTR(ICELL), W_CSR_GAS_PTR(ICELL+1)-1`, one thread per gas cell, walls in list order); accepted as a note, with no waiver, by the wall-list design review in `docs/solid/07-sp2-sp3-kernel-review.md` (D-072), relying on the list builder and its tests; a test asserts the message names that file |
 | ZS-05 | (`k2`) a target region writes a zone-sum array, adds into an array element whose subscript holds no loop index, or has `reduction(+)` or `atomic` |
+| ZS-07 | (`k2`, note) `red_fixedsum.F90` default mode: serial `ACC(z) = ACC(z) + t` in a single-thread target region (FDS order; D-053) |
+| ZS-08 | (`k2`, note) `red_fixedsum.F90` with `-DS5_FIXEDSUM`: integer-limb atomics / once-per-zone conversion (order-independent; D-053 option) |
 | ZS-10 | (`log`) the terms of a zone are not applied in the FDS order |
 | ZS-11 | (`log`) the reported `result` is not, bit for bit, the serial chain of the logged terms (only a warning with several ranks) |
 | ZS-12 | (`log`) a log line cannot be read |
+| ZS-13 | (`log`) the reported `result-fixed` is not, bit for bit, the exact fixed-point oracle of the logged terms |
 
 Term log format (one term per line in the order a program applied it; `#` starts a comment; values as C99 hex floats are exact):
 `rank zone mesh kind index value`, with kind `C` and index `i,j,k` (cell), `W` and `iw` (wall) or `F` and `icf` (cut face); an optional line
-`result zone value` is compared bit for bit with the chain. The existing tests do not write such a log yet; a test that wants this check
+`result zone value` is compared bit for bit with the FDS-order chain; an optional line `result-fixed zone value` is compared bit for
+bit with the exact fixed-point oracle of the same terms (D-053 option). The existing tests do not write such a log yet; a test that wants this check
 writes its terms in this format. The cross-process combine is chosen by the MPI library, so with more than one rank the tool adds the rank
 sums in ascending rank order and reports a difference only as a warning.
 
@@ -188,10 +195,10 @@ Self-check (exit 1 on a failure):
 | PM-03 | the same kernel name appears in two marker files with a different file, routine or lines |
 | PM-04 | a golden kernel has no kernel text (neither in `generated/s5gen_k2.F90` nor in a `test/*.golden`) |
 | PM-05 | (warning) a golden kernel is missing from the argument manifest or the header; the gate registry disagrees with the map. `--strict` makes warnings fail |
-| PM-07 | a `[[libm]]` registry entry names a kernel that is not mapped |
+| PM-07 | a `[[libm]]` registry entry names a kernel that is not mapped (NOTE if `awaiting_land`) |
 | PM-09 | (A-57 interface note) a `[[caller_bound]]` registry entry names a kernel that is not mapped, an array the kernel does not have, or `kernel_dims` that differ from the declaration in the argument manifest |
-| PM-08 | (D-072) a `ported.toml` entry names a kernel that is not mapped, lacks `reviewed_by` or `set_by`, names a kernel with no device run on record, or names a libm kernel without `ulp_gate_passed = true` |
-| PM-06 | `device_runs.toml` names a kernel that is not mapped, names one twice, has a state other than `on-record` / `on-record-open-note`, or an open-note entry without a note |
+| PM-08 | (D-072) a `ported.toml` entry names a kernel that is not mapped, lacks `reviewed_by` or `set_by`, names a kernel with no device run on record, or names a libm kernel without `ulp_gate_passed = true` (NOTE if `awaiting_land`) |
+| PM-06 | `device_runs.toml` names a kernel that is not mapped, names one twice, has a state other than `on-record` / `on-record-open-note`, or an open-note entry without a note (NOTE if `awaiting_land`) |
 
 "Device run on record" repeats what `check_device_logs.py` lists for the kernel set; it is a registry note, not a check of log files.
 

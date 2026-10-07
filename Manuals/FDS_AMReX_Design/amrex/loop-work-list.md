@@ -80,7 +80,7 @@ Interpretation used for the registers: where a routine is owned as a whole (DIVE
 | GPU Wall Loops Engineer | The CSR family itself, **L1402**, **L1359**, **L0375**, **L1358**, **L0394**, **L0405**. |
 | Legacy Mapper | The S2 package (**L0880**, **L0401**, **L0882**, **L0403**, **L0398**) and **L0876** and **L0877**. |
 
-L1488, L1489, L1486, L1487 (WALL_BC) and L1485 (SURFACE_HEAT_TRANSFER) are not translated; they depend on the SP4 reference and on callee flattening (T3) or the neighbour-mesh data (T4). L1489 is the lateral thin-wall 1-D solve (wall.f90:192-194); `CALC_DEPOSITION` and `CALC_HVAC_BC` are called in L1488 (wall.f90:173, 178). L0823 and L0822 (`REASSIGN_WALL_CELLS`) are host-side.
+L1488, L1489, L1486, L1487 (WALL_BC) are not translated; they depend on the SP4 reference and on callee flattening (T3). L1485 (`SURFACE_HEAT_TRANSFER` NIC>1) is **not planned (retired)** in the AMR route (host abort guard, patch 0010; D-065 Q1 / A-65). L1489 is the lateral thin-wall 1-D solve (wall.f90:192-194); `CALC_DEPOSITION` and `CALC_HVAC_BC` are called in L1488 (wall.f90:173, 178). L0823 and L0822 (`REASSIGN_WALL_CELLS`) are host-side.
 
 ### Work that is not a loop
 
@@ -140,13 +140,13 @@ The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr
 
 | Status | Loops | Modelled share (% of total time) |
 |---|---|---|
-| claimed | 33 | 18.774 |
+| claimed | 32 | 16.942 |
 | in progress | 11 | 10.508 |
 | not planned (host) | 11 | 2.957 |
-| not planned (retired) | 8 | 0.006 |
+| not planned (retired) | 9 | 1.838 |
 | not planned (test-only) | 9 | 1.836 |
-| open | 60 | 2.701 |
-| translated | 98 | 12.394 |
+| open | 54 | 2.308 |
+| translated | 104 | 12.787 |
 | translated on a branch (merge pending) | 1 | 0.001 |
 
 ### Counts by work class
@@ -156,10 +156,10 @@ The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr
 | blocked | 14 | 0.049 |
 | claimed | 76 | 31.495 |
 | host-side | 3 | 2.039 |
-| needs-feature | 29 | 1.301 |
+| needs-feature | 24 | 0.971 |
 | test-only | 9 | 1.836 |
-| translatable-now | 2 | 0.063 |
-| translated | 98 | 12.394 |
+| translatable-now | 1 | 0.000 |
+| translated | 104 | 12.787 |
 
 ### Counts by domain (not-yet-translated loops only)
 
@@ -168,7 +168,7 @@ The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr
 | other | 20 | 12.611 | 15 |
 | wall/BC | 8 | 7.517 | 8 |
 | solid phase | 14 | 4.851 | 10 |
-| velocity | 43 | 4.278 | 13 |
+| velocity | 37 | 3.885 | 13 |
 | species/combustion | 4 | 3.524 | 4 |
 | mass | 4 | 2.908 | 2 |
 | pressure | 38 | 1.091 | 26 |
@@ -176,9 +176,9 @@ The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr
 
 ### Coverage figure
 - Eligible denominator: 231 loops, 49.177 % of total modelled time (451 non-geometry loops, 69.444 %, minus 207 retired or replaced and 13 host-side). Geometry-deferred loops (378, 23.854 %) are outside every denominator.
-- Inventory CSV status `translated+tested`: 46 loops, 2.553 %. Added by the sidecar at the generator ref (whole-loop kernels the CSV does not yet show: PATCH_VELOCITY_FLUX L1390 and the six GET_SCALAR_FACE_VALUE field kernels L0652-L0657): 52 loops, 9.841 %.
-- **Translated at the generator ref: 98 loops, 12.394 % of total time (25.2 % of the eligible time).**
-- The four finished mass-flux wall nests (spec_wall_zz, spec_wall_rmw, mass_wall_zz, mass_wall_rmw) complete L0880 (4.832 %, now partly translated through its cell nest) and L0882 (0.302 %, not translatable today). Counting them adds **5.134 points**, giving **17.528 % of total time (35.6 % of the eligible time)**, 100 loops. They are finished but not committed to s5-gen, so the committed figure above does not include them.
+- Inventory CSV status `translated+tested`: 46 loops, 2.553 %. Added by the sidecar at the generator ref (whole-loop kernels the CSV does not yet show: PATCH_VELOCITY_FLUX L1390 and the six GET_SCALAR_FACE_VALUE field kernels L0652-L0657): 58 loops, 10.234 %.
+- **Translated at the generator ref: 104 loops, 12.787 % of total time (26.0 % of the eligible time).**
+- The four finished mass-flux wall nests (spec_wall_zz, spec_wall_rmw, mass_wall_zz, mass_wall_rmw) complete L0880 (4.832 %, now partly translated through its cell nest) and L0882 (0.302 %, not translatable today). Counting them adds **5.134 points**, giving **17.921 % of total time (36.4 % of the eligible time)**, 106 loops. They are finished but not committed to s5-gen, so the committed figure above does not include them.
 - The shares are inventory-model estimates; a loop's whole share is credited when a kernel covers its nests, so inner-nest time is an upper bound.
 
 ### Top 10 loops that are open and unclaimed (available)
@@ -187,23 +187,22 @@ The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr
 |---|---|---|---|---|---|---|---|---|
 | 16 | L1305 | turb.f90:1796-1861 | SYNTHETIC_TURBULENCE | 0.572 | velocity | needs-feature | table needed | - |
 | 28 | L1317 | turb.f90:1027-1043 | TEST_FILTER | 0.284 | velocity | needs-feature | generator gap | - |
-| 37 | L1309 | turb.f90:1323-1345 | TENSOR_DIFFUSIVITY_MODEL | 0.068 | velocity | needs-feature | generator gap | - |
-| 38 | L1310 | turb.f90:1347-1369 | TENSOR_DIFFUSIVITY_MODEL | 0.068 | velocity | needs-feature | generator gap | - |
-| 39 | L1311 | turb.f90:1371-1393 | TENSOR_DIFFUSIVITY_MODEL | 0.068 | velocity | needs-feature | generator gap | - |
-| 40 | L1312 | turb.f90:1414-1434 | TENSOR_DIFFUSIVITY_MODEL | 0.063 | velocity | needs-feature | generator gap | - |
-| 41 | L1313 | turb.f90:1436-1456 | TENSOR_DIFFUSIVITY_MODEL | 0.063 | velocity | needs-feature | generator gap | - |
-| 42 | L1314 | turb.f90:1458-1479 | TENSOR_DIFFUSIVITY_MODEL | 0.063 | velocity | translatable-now | none | - |
-| 48 | L1275 | turb.f90:819-831 | CALC_VARDEN_LEONARD_TERM | 0.037 | velocity | needs-feature | generator gap | - |
-| 49 | L1323 | turb.f90:633-645 | VARDEN_DYNSMAG | 0.037 | velocity | needs-feature | generator gap | - |
+| 42 | L1275 | turb.f90:819-831 | CALC_VARDEN_LEONARD_TERM | 0.037 | velocity | needs-feature | generator gap | - |
+| 43 | L1323 | turb.f90:633-645 | VARDEN_DYNSMAG | 0.037 | velocity | needs-feature | generator gap | - |
+| 48 | L1325 | turb.f90:690-710 | VARDEN_DYNSMAG | 0.021 | velocity | needs-feature | generator gap | - |
+| 51 | L0677 | func.f90:5183-5201 | PACK_CELL | 0.016 | other | blocked | neighbour mesh (T4) | - |
+| 55 | L0911 | part.f90:4643-4763 | PARTICLE_MOMENTUM_TRANSFER | 0.015 | other | blocked | neighbour mesh (T4) | - |
+| 62 | L1324 | turb.f90:666-678 | VARDEN_DYNSMAG | 0.011 | velocity | needs-feature | generator gap | - |
+| 66 | L0890 | part.f90:605-607 | INSERT_VENT_PARTICLES | 0.008 | other | blocked | callee flatten (T3) | - |
+| 69 | L1322 | turb.f90:570-581 | VARDEN_DYNSMAG | 0.005 | velocity | needs-feature | generator gap | - |
 
 ### Top 10 translatable now (front end accepts; the missing piece is the bitwise test)
 
 | # | Loop | file:lines | Routine | Share % | Domain | What | Proposed owner |
 |---|---|---|---|---|---|---|---|
-| 42 | L1314 | turb.f90:1458-1479 | TENSOR_DIFFUSIVITY_MODEL | 0.063 | velocity | cell loop | - |
-| 98 | L0884 | part.f90:4606-4617 | CLIP_PARTICLE_DRAG | 0.000 | other | cell loop | - |
+| 92 | L0884 | part.f90:4606-4617 | CLIP_PARTICLE_DRAG | 0.000 | other | cell loop | - |
 
-### Ranked list: 133 not-yet-translated loops
+### Ranked list: 127 not-yet-translated loops
 
 Columns: `Loop` is the survey id (sidecar and marker id) with `file:first-last` at FireX 36975d7; share is the inventory model, not a measurement; `Evid.` is `R` when the loop text was read for this list and `I` when the features come from the inventory CSV only.
 
@@ -214,7 +213,7 @@ Columns: `Loop` is the survey id (sidecar and marker id) with `file:first-last` 
 | 3 | L1488 | wall.f90:144-185 | WALL_BC | 2.688 | wall/BC | wall gather; function callees (SURFACE_HEAT_TRANSFER, CALCULATE_ZZ_F, ...); ragged per-wall table (BOUNDARY_ONE_D); scratch-sum reference (OBSTRUCTION%MASS, D_SOURCE) | callee flatten (T3) | claimed | claimed | AMR Solid Phase Lead | - | I |
 | 4 | L0369 | divg.f90:287-421 | DIVERGENCE_PART_1 | 2.399 | other | species loop N outermost; cell loop nests | generator gap | in progress | claimed | GPU Generator Engineer | - | R |
 | 5 | L0877 | mass.f90:868-939 | CHECK_MASS_DENSITY | 1.967 | mass | species loop N outermost; scatter into 7 cells (two-pass gather in source order); CYCLE; integer max-reduction CLIP_RHO_ZZ(N) | race-uniqueness | claimed | claimed | GPU Mesh Data Loops Engineer | - | I |
-| 6 | L1485 | wall.f90:888-947 | SURFACE_HEAT_TRANSFER | 1.832 | solid phase | wall gather; neighbour-mesh (OMESH copies through EWC%IIO_MIN..KKO_MAX); ragged per-wall table | neighbour mesh (T4) | claimed | claimed | AMR Solid Phase Lead | - | I |
+| 6 | L1485 | wall.f90:888-947 | SURFACE_HEAT_TRANSFER | 1.832 | solid phase | wall gather; neighbour-mesh (OMESH copies through EWC%IIO_MIN..KKO_MAX); ragged per-wall table | neighbour mesh (T4) | not planned (retired) | claimed | AMR Solid Phase Lead | - | I |
 | 7 | L0823 | init.f90:4940-5054 | REASSIGN_WALL_CELLS | 1.727 | solid phase | host-side event code (burn-away, control-driven creation or removal); allocation and derived-type copies | host-side event code | claimed | host-side | AMR Solid Phase Lead | - | I |
 | 8 | L0381 | divg.f90:640-660 | DIVERGENCE_PART_1 | 1.491 | other | species loop N outermost; function callees (SPECIES_ADVECTION_PART_2, GET_SENSIBLE_ENTHALPY_Z); guarded call SET_EXIMRHOZZLIM_3D | generator gap | claimed | claimed | GPU Generator Engineer | - | R |
 | 9 | L1355 | velo.f90:204-252 | COMPUTE_VISCOSITY | 1.467 | velocity | cell loop; private local arrays A_IJ(3,3), B_IJ(3,3) with inner 3x3 loops; live-out scalars (PRIVATE list); module scalar C_VREMAN as argument | generator gap | claimed | claimed | Legacy Mapper | - | R |
@@ -245,103 +244,97 @@ Columns: `Loop` is the survey id (sidecar and marker id) with `file:first-last` 
 | 34 | L0364 | divg.f90:93-95 | DIVERGENCE_PART_1 | 0.099 | other | wall loop; wall gather; function callees; module scalar as argument | callee flatten (T3) | claimed | claimed | GPU Generator Engineer | - | I |
 | 35 | L1121 | pres.f90:4012-4026 | CHECK_UNSUPPORTED_MESH | 0.086 | pressure | mesh/rank loop; MY_RANK test | blocked | open | claimed | AMR Pressure Solver Lead | - | R |
 | 36 | L0371 | divg.f90:463-471 | DIVERGENCE_PART_1 | 0.068 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
-| 37 | L1309 | turb.f90:1323-1345 | TENSOR_DIFFUSIVITY_MODEL | 0.068 | velocity | cell/face loop; live-out scalars (PRIVATE list); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 38 | L1310 | turb.f90:1347-1369 | TENSOR_DIFFUSIVITY_MODEL | 0.068 | velocity | cell/face loop; live-out scalars (PRIVATE list); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 39 | L1311 | turb.f90:1371-1393 | TENSOR_DIFFUSIVITY_MODEL | 0.068 | velocity | cell/face loop; live-out scalars (PRIVATE list); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 40 | L1312 | turb.f90:1414-1434 | TENSOR_DIFFUSIVITY_MODEL | 0.063 | velocity | cell/face loop; live-out scalars (PRIVATE list) | generator gap | open | needs-feature | open — available | - | I |
-| 41 | L1313 | turb.f90:1436-1456 | TENSOR_DIFFUSIVITY_MODEL | 0.063 | velocity | cell/face loop; live-out scalars (PRIVATE list) | generator gap | open | needs-feature | open — available | - | I |
-| 42 | L1314 | turb.f90:1458-1479 | TENSOR_DIFFUSIVITY_MODEL | 0.063 | velocity | cell/face loop | none | open | translatable-now | open — available | - | I |
-| 43 | L1372 | velo.f90:1770-1778 | VELOCITY_CORRECTOR | 0.049 | pressure | cell loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
-| 44 | L1373 | velo.f90:1779-1787 | VELOCITY_CORRECTOR | 0.049 | pressure | face loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
-| 45 | L1397 | velo.f90:1648-1656 | VELOCITY_PREDICTOR | 0.049 | pressure | cell loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
-| 46 | L1398 | velo.f90:1657-1665 | VELOCITY_PREDICTOR | 0.049 | pressure | face loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
-| 47 | L0379 | divg.f90:608-616 | DIVERGENCE_PART_1 | 0.037 | other | cell/face loop; rank/subscript contract | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
-| 48 | L1275 | turb.f90:819-831 | CALC_VARDEN_LEONARD_TERM | 0.037 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
-| 49 | L1323 | turb.f90:633-645 | VARDEN_DYNSMAG | 0.037 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
-| 50 | L1391 | velo.f90:1243-1253 | VELOCITY_FLUX_CYLINDRICAL | 0.026 | velocity | cell loop; pointer aliases to WORK2, WORK5 | none | open | claimed | AMR Pressure Solver Lead | - | R |
-| 51 | L0377 | divg.f90:573-582 | DIVERGENCE_PART_1 | 0.025 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
-| 52 | L0380 | divg.f90:622-629 | DIVERGENCE_PART_1 | 0.025 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
-| 53 | L0386 | divg.f90:757-767 | DIVERGENCE_PART_1 | 0.022 | other | wall loop; wall gather; live-out scalars (PRIVATE list); zone table | table needed | claimed | claimed | GPU Generator Engineer | - | I |
-| 54 | L1325 | turb.f90:690-710 | VARDEN_DYNSMAG | 0.021 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
-| 55 | L0630 | func.f90:5509-5524 | BLOCK_CELL | 0.020 | other | cell/face loop; wall gather; derived-type designator table | neighbour mesh (T4) | not planned (host) | claimed | GPU Mesh Data Loops Engineer | - | I |
-| 56 | L0817 | init.f90:4878-4889 | CREATE_OR_REMOVE_OBST | 0.017 | solid phase | cell/face loop; derived-type designator table | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
-| 57 | L0677 | func.f90:5183-5201 | PACK_CELL | 0.016 | other | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | blocked | open — available | - | I |
-| 58 | L1381 | velo.f90:992-1000 | CORIOLIS_FORCE | 0.016 | velocity | cell loop; constant-subscript rank-1 array OVEC(n) as by-value scalars | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
-| 59 | L1382 | velo.f90:1006-1014 | CORIOLIS_FORCE | 0.016 | velocity | cell loop; constant-subscript rank-1 array OVEC(n) | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
-| 60 | L1383 | velo.f90:1020-1028 | CORIOLIS_FORCE | 0.016 | velocity | face loop; constant-subscript rank-1 array OVEC(n) | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
-| 61 | L0911 | part.f90:4643-4763 | PARTICLE_MOMENTUM_TRANSFER | 0.015 | other | wall loop; wall gather; neighbour-mesh; pointer alias | neighbour mesh (T4) | open | blocked | open — available | - | I |
-| 62 | L1392 | velo.f90:1270-1302 | VELOCITY_FLUX_CYLINDRICAL | 0.014 | velocity | edge tables; K,I nest with J fixed | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
-| 63 | L1393 | velo.f90:1306-1337 | VELOCITY_FLUX_CYLINDRICAL | 0.014 | velocity | edge tables; K,I nest with J fixed | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
-| 64 | L0373 | divg.f90:499-505 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
-| 65 | L0378 | divg.f90:591-597 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
-| 66 | L0382 | divg.f90:668-674 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
-| 67 | L0383 | divg.f90:681-687 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop; rank/subscript contract | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
-| 68 | L1324 | turb.f90:666-678 | VARDEN_DYNSMAG | 0.011 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
-| 69 | L1385 | velo.f90:896-903 | DIRECT_FORCE | 0.011 | velocity | face loop; constant-subscript rank-1 array FVEC(n) as by-value scalar; ramp factor computed on the host | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
-| 70 | L1386 | velo.f90:917-924 | DIRECT_FORCE | 0.011 | velocity | face loop; FVEC(2) as scalar | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
-| 71 | L1387 | velo.f90:938-945 | DIRECT_FORCE | 0.011 | velocity | face loop; FVEC(3) as scalar | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
-| 72 | L0890 | part.f90:605-607 | INSERT_VENT_PARTICLES | 0.008 | other | wall loop; wall gather; function callees; module scalar as argument | callee flatten (T3) | open | blocked | open — available | - | I |
-| 73 | L1209 | pres.f90:65-228 | PRESSURE_SOLVER_COMPUTE_RHS | 0.008 | pressure | wall gather; neighbour-mesh (MESHES(NOM)%DX); function callees (EVALUATE_RAMP); vent table (VENTS(WC%VENT_INDEX)); wall-keyed 2-D outputs | neighbour mesh (T4) | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
-| 74 | L1224 | pres.f90:544-567 | TUNNEL_POISSON_SOLVER | 0.007 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
-| 75 | L1322 | turb.f90:570-581 | VARDEN_DYNSMAG | 0.005 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
-| 76 | L1204 | pres.f90:1931-1994 | ULMAT_SOLVE_ZONE | 0.003 | pressure | wall loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
-| 77 | L0596 | fire.f90:1902-1918 | COMBUSTION_BC | 0.002 | species/combustion | wall loop; wall gather; neighbour-mesh; derived-type designator table | neighbour mesh (T4) | not planned (host) | claimed | AMR Species & Combustion Lead | - | I |
-| 78 | L1198 | pres.f90:1837-1846 | ULMAT_SOLVE_ZONE | 0.002 | pressure | cell/face loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
-| 79 | L1211 | pres.f90:250-260 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop | none | in progress | claimed | AMR Pressure Backend Implementer | - | R |
-| 80 | L1212 | pres.f90:267-277 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop; transposed output subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 81 | L1213 | pres.f90:282-292 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop; transposed output subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 82 | L1214 | pres.f90:297-307 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop; transposed output subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 83 | L1245 | radi.f90:5044-5059 | RADIATION_FVM | 0.002 | radiation | file output | host (I/O) | not planned (host) | host-side | AMR Radiation Lead | - | I |
-| 84 | L1273 | soot.f90:412-472 | SOOT_SURFACE_OXIDATION | 0.002 | species/combustion | wall loop; wall gather; pointer alias | neighbour mesh (T4) | open | claimed | AMR Species & Combustion Lead | - | I |
-| 85 | L0680 | func.f90:2845-2847 | COMPUTE_WIND_COMPONENTS | 0.001 | other | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | - | I |
-| 86 | L1130 | pres.f90:5580-5601 | GET_H_REGFACES | 0.001 | pressure | wall gather; rank-4 LOGICAL table | table needed | open | claimed | AMR Pressure Solver Lead | - | R |
-| 87 | L1154 | pres.f90:2031-2047 | ULMAT_GET_H_REGFACES | 0.001 | pressure | wall gather; rank-4 LOGICAL table | table needed | open | needs-feature | open — available | AMR Pressure Solver Lead | I |
-| 88 | L1190 | pres.f90:1686-1694 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
-| 89 | L1192 | pres.f90:1713-1720 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
-| 90 | L1194 | pres.f90:1782-1790 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
-| 91 | L1196 | pres.f90:1808-1815 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
-| 92 | L1206 | pres.f90:729-742 | PRESSURE_SOLVER_CHECK_RESIDUALS | 0.001 | pressure | cell loop; bounds (WORK8 view, policy.arrays) | generator gap | open | claimed | AMR Pressure Solver Lead | - | R |
-| 93 | L1208 | pres.f90:768-787 | PRESSURE_SOLVER_CHECK_RESIDUALS | 0.001 | pressure | cell loop; bounds (WORK8 view); reduction by the caller (MAXVAL, MAXLOC) | generator gap | open | claimed | AMR Pressure Solver Lead | - | R |
-| 94 | L1248 | radi.f90:3651-3662 | INTERPOLATE_IL | 0.001 | radiation | wall loop; ragged per-wall table BR_ILW(NRA,bands,wall); ILW_OLD copy kept (ping-pong table or per-thread scratch); I_INTP accumulation ascending and serial per angle | table needed | translated on a branch (merge pending) | claimed | AMR Radiation Lead | - | I |
-| 95 | L1318 | turb.f90:1054-1059 | TEST_FILTER | 0.001 | velocity | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | - | I |
-| 96 | L1319 | turb.f90:1063-1068 | TEST_FILTER | 0.001 | velocity | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | - | I |
-| 97 | L1320 | turb.f90:1072-1077 | TEST_FILTER | 0.001 | velocity | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | - | I |
-| 98 | L0884 | part.f90:4606-4617 | CLIP_PARTICLE_DRAG | 0.000 | other | cell/face loop | none | open | translatable-now | open — available | - | I |
-| 99 | L1203 | pres.f90:1923-1925 | ULMAT_SOLVE_ZONE | 0.000 | pressure | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | AMR Pressure Solver Lead | I |
-| 100 | L1207 | pres.f90:758-764 | PRESSURE_SOLVER_CHECK_RESIDUALS | 0.000 | pressure | cell loop | none | in progress | claimed | AMR Pressure Backend Implementer | - | R |
-| 101 | L1210 | pres.f90:238-245 | PRESSURE_SOLVER_COMPUTE_RHS | 0.000 | pressure | cell loop (K,I with J=1); non-perfect nest | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 102 | L1215 | pres.f90:394-400 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop | none | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 103 | L1216 | pres.f90:404-410 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop; transposed input subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 104 | L1217 | pres.f90:414-420 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop; transposed input subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 105 | L1218 | pres.f90:424-430 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop; transposed input subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
-| 106 | L1219 | pres.f90:438-440 | PRESSURE_SOLVER_FFT | 0.000 | pressure | non-perfect nest (section assignment); 1-D table H_BAR(I_OFFSET+I) | generator gap | open | claimed | AMR Pressure Solver Lead | - | R |
-| 107 | L1220 | pres.f90:450-462 | PRESSURE_SOLVER_FFT | 0.000 | pressure | K,J-only nest; integer BC-code scalars as arguments; reads BXS/BXF | generator gap | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
-| 108 | L1221 | pres.f90:466-477 | PRESSURE_SOLVER_FFT | 0.000 | pressure | K,I-only nest; integer BC-code scalars as arguments | generator gap | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
-| 109 | L1222 | pres.f90:481-492 | PRESSURE_SOLVER_FFT | 0.000 | pressure | J,I-only nest; integer BC-code scalars as arguments | generator gap | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
-| 110 | L1223 | pres.f90:531-537 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
-| 111 | L1225 | pres.f90:576-582 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
-| 112 | L1226 | pres.f90:583-589 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
-| 113 | L1227 | pres.f90:591-596 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
-| 114 | L1289 | turb.f90:882-884 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 115 | L1290 | turb.f90:887-889 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 116 | L1291 | turb.f90:892-894 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 117 | L1292 | turb.f90:897-899 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 118 | L1293 | turb.f90:904-906 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 119 | L1294 | turb.f90:909-911 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 120 | L1295 | turb.f90:914-916 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 121 | L1296 | turb.f90:919-921 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 122 | L1297 | turb.f90:926-928 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 123 | L1298 | turb.f90:931-933 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 124 | L1299 | turb.f90:936-938 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 125 | L1300 | turb.f90:941-943 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
-| 126 | L1330 | vege.f90:618-623 | GET_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | AMR Solid Phase Lead | I |
-| 127 | L1331 | vege.f90:624-629 | GET_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | AMR Solid Phase Lead | I |
-| 128 | L1332 | vege.f90:630-639 | GET_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | AMR Solid Phase Lead | I |
-| 129 | L1333 | vege.f90:678-699 | FILL_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; neighbour-mesh; non-perfect nest (outer loop) | neighbour mesh (T4) | open | blocked | open — available | AMR Solid Phase Lead | I |
-| 130 | L1334 | vege.f90:885-894 | LEVEL_SET_ADVECT_FLUX | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
-| 131 | L1335 | vege.f90:896-905 | LEVEL_SET_ADVECT_FLUX | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
-| 132 | L1336 | vege.f90:907-914 | LEVEL_SET_ADVECT_FLUX | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
-| 133 | L1340 | vege.f90:763-857 | LEVEL_SET_SPREAD_RATE | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
+| 37 | L1372 | velo.f90:1770-1778 | VELOCITY_CORRECTOR | 0.049 | pressure | cell loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
+| 38 | L1373 | velo.f90:1779-1787 | VELOCITY_CORRECTOR | 0.049 | pressure | face loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
+| 39 | L1397 | velo.f90:1648-1656 | VELOCITY_PREDICTOR | 0.049 | pressure | cell loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
+| 40 | L1398 | velo.f90:1657-1665 | VELOCITY_PREDICTOR | 0.049 | pressure | face loop; source function | test-only | not planned (test-only) | test-only | open — available | - | R |
+| 41 | L0379 | divg.f90:608-616 | DIVERGENCE_PART_1 | 0.037 | other | cell/face loop; rank/subscript contract | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
+| 42 | L1275 | turb.f90:819-831 | CALC_VARDEN_LEONARD_TERM | 0.037 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
+| 43 | L1323 | turb.f90:633-645 | VARDEN_DYNSMAG | 0.037 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
+| 44 | L1391 | velo.f90:1243-1253 | VELOCITY_FLUX_CYLINDRICAL | 0.026 | velocity | cell loop; pointer aliases to WORK2, WORK5 | none | open | claimed | AMR Pressure Solver Lead | - | R |
+| 45 | L0377 | divg.f90:573-582 | DIVERGENCE_PART_1 | 0.025 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
+| 46 | L0380 | divg.f90:622-629 | DIVERGENCE_PART_1 | 0.025 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
+| 47 | L0386 | divg.f90:757-767 | DIVERGENCE_PART_1 | 0.022 | other | wall loop; wall gather; live-out scalars (PRIVATE list); zone table | table needed | claimed | claimed | GPU Generator Engineer | - | I |
+| 48 | L1325 | turb.f90:690-710 | VARDEN_DYNSMAG | 0.021 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
+| 49 | L0630 | func.f90:5509-5524 | BLOCK_CELL | 0.020 | other | cell/face loop; wall gather; derived-type designator table | neighbour mesh (T4) | not planned (host) | claimed | GPU Mesh Data Loops Engineer | - | I |
+| 50 | L0817 | init.f90:4878-4889 | CREATE_OR_REMOVE_OBST | 0.017 | solid phase | cell/face loop; derived-type designator table | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
+| 51 | L0677 | func.f90:5183-5201 | PACK_CELL | 0.016 | other | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | blocked | open — available | - | I |
+| 52 | L1381 | velo.f90:992-1000 | CORIOLIS_FORCE | 0.016 | velocity | cell loop; constant-subscript rank-1 array OVEC(n) as by-value scalars | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
+| 53 | L1382 | velo.f90:1006-1014 | CORIOLIS_FORCE | 0.016 | velocity | cell loop; constant-subscript rank-1 array OVEC(n) | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
+| 54 | L1383 | velo.f90:1020-1028 | CORIOLIS_FORCE | 0.016 | velocity | face loop; constant-subscript rank-1 array OVEC(n) | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
+| 55 | L0911 | part.f90:4643-4763 | PARTICLE_MOMENTUM_TRANSFER | 0.015 | other | wall loop; wall gather; neighbour-mesh; pointer alias | neighbour mesh (T4) | open | blocked | open — available | - | I |
+| 56 | L1392 | velo.f90:1270-1302 | VELOCITY_FLUX_CYLINDRICAL | 0.014 | velocity | edge tables; K,I nest with J fixed | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
+| 57 | L1393 | velo.f90:1306-1337 | VELOCITY_FLUX_CYLINDRICAL | 0.014 | velocity | edge tables; K,I nest with J fixed | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
+| 58 | L0373 | divg.f90:499-505 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
+| 59 | L0378 | divg.f90:591-597 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
+| 60 | L0382 | divg.f90:668-674 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop | none | claimed | claimed | GPU Generator Engineer | - | I |
+| 61 | L0383 | divg.f90:681-687 | DIVERGENCE_PART_1 | 0.012 | other | cell/face loop; rank/subscript contract | generator gap | claimed | claimed | GPU Generator Engineer | - | I |
+| 62 | L1324 | turb.f90:666-678 | VARDEN_DYNSMAG | 0.011 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
+| 63 | L1385 | velo.f90:896-903 | DIRECT_FORCE | 0.011 | velocity | face loop; constant-subscript rank-1 array FVEC(n) as by-value scalar; ramp factor computed on the host | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
+| 64 | L1386 | velo.f90:917-924 | DIRECT_FORCE | 0.011 | velocity | face loop; FVEC(2) as scalar | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
+| 65 | L1387 | velo.f90:938-945 | DIRECT_FORCE | 0.011 | velocity | face loop; FVEC(3) as scalar | generator gap | in progress | claimed | AMR Pressure Solver Lead | - | R |
+| 66 | L0890 | part.f90:605-607 | INSERT_VENT_PARTICLES | 0.008 | other | wall loop; wall gather; function callees; module scalar as argument | callee flatten (T3) | open | blocked | open — available | - | I |
+| 67 | L1209 | pres.f90:65-228 | PRESSURE_SOLVER_COMPUTE_RHS | 0.008 | pressure | wall gather; neighbour-mesh (MESHES(NOM)%DX); function callees (EVALUATE_RAMP); vent table (VENTS(WC%VENT_INDEX)); wall-keyed 2-D outputs | neighbour mesh (T4) | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
+| 68 | L1224 | pres.f90:544-567 | TUNNEL_POISSON_SOLVER | 0.007 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
+| 69 | L1322 | turb.f90:570-581 | VARDEN_DYNSMAG | 0.005 | velocity | cell/face loop; bounds: policy.arrays line | generator gap | open | needs-feature | open — available | - | I |
+| 70 | L1204 | pres.f90:1931-1994 | ULMAT_SOLVE_ZONE | 0.003 | pressure | wall loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
+| 71 | L0596 | fire.f90:1902-1918 | COMBUSTION_BC | 0.002 | species/combustion | wall loop; wall gather; neighbour-mesh; derived-type designator table | neighbour mesh (T4) | not planned (host) | claimed | AMR Species & Combustion Lead | - | I |
+| 72 | L1198 | pres.f90:1837-1846 | ULMAT_SOLVE_ZONE | 0.002 | pressure | cell/face loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
+| 73 | L1211 | pres.f90:250-260 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop | none | in progress | claimed | AMR Pressure Backend Implementer | - | R |
+| 74 | L1212 | pres.f90:267-277 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop; transposed output subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 75 | L1213 | pres.f90:282-292 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop; transposed output subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 76 | L1214 | pres.f90:297-307 | PRESSURE_SOLVER_COMPUTE_RHS | 0.002 | pressure | cell loop; transposed output subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 77 | L1245 | radi.f90:5044-5059 | RADIATION_FVM | 0.002 | radiation | file output | host (I/O) | not planned (host) | host-side | AMR Radiation Lead | - | I |
+| 78 | L1273 | soot.f90:412-472 | SOOT_SURFACE_OXIDATION | 0.002 | species/combustion | wall loop; wall gather; pointer alias | neighbour mesh (T4) | open | claimed | AMR Species & Combustion Lead | - | I |
+| 79 | L0680 | func.f90:2845-2847 | COMPUTE_WIND_COMPONENTS | 0.001 | other | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | - | I |
+| 80 | L1130 | pres.f90:5580-5601 | GET_H_REGFACES | 0.001 | pressure | wall gather; rank-4 LOGICAL table | table needed | open | claimed | AMR Pressure Solver Lead | - | R |
+| 81 | L1154 | pres.f90:2031-2047 | ULMAT_GET_H_REGFACES | 0.001 | pressure | wall gather; rank-4 LOGICAL table | table needed | open | needs-feature | open — available | AMR Pressure Solver Lead | I |
+| 82 | L1190 | pres.f90:1686-1694 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
+| 83 | L1192 | pres.f90:1713-1720 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
+| 84 | L1194 | pres.f90:1782-1790 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; derived-type designator table; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
+| 85 | L1196 | pres.f90:1808-1815 | ULMAT_SOLVE_ZONE | 0.001 | pressure | cell/face loop; wall gather; zone table | neighbour mesh (T4) | open | blocked | open — available | AMR Pressure Solver Lead | I |
+| 86 | L1206 | pres.f90:729-742 | PRESSURE_SOLVER_CHECK_RESIDUALS | 0.001 | pressure | cell loop; bounds (WORK8 view, policy.arrays) | generator gap | open | claimed | AMR Pressure Solver Lead | - | R |
+| 87 | L1208 | pres.f90:768-787 | PRESSURE_SOLVER_CHECK_RESIDUALS | 0.001 | pressure | cell loop; bounds (WORK8 view); reduction by the caller (MAXVAL, MAXLOC) | generator gap | open | claimed | AMR Pressure Solver Lead | - | R |
+| 88 | L1248 | radi.f90:3651-3662 | INTERPOLATE_IL | 0.001 | radiation | wall loop; ragged per-wall table BR_ILW(NRA,bands,wall); ILW_OLD copy kept (ping-pong table or per-thread scratch); I_INTP accumulation ascending and serial per angle | table needed | translated on a branch (merge pending) | claimed | AMR Radiation Lead | - | I |
+| 89 | L1318 | turb.f90:1054-1059 | TEST_FILTER | 0.001 | velocity | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | - | I |
+| 90 | L1319 | turb.f90:1063-1068 | TEST_FILTER | 0.001 | velocity | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | - | I |
+| 91 | L1320 | turb.f90:1072-1077 | TEST_FILTER | 0.001 | velocity | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | - | I |
+| 92 | L0884 | part.f90:4606-4617 | CLIP_PARTICLE_DRAG | 0.000 | other | cell/face loop | none | open | translatable-now | open — available | - | I |
+| 93 | L1203 | pres.f90:1923-1925 | ULMAT_SOLVE_ZONE | 0.000 | pressure | cell/face loop; non-perfect nest (outer loop) | generator gap | open | needs-feature | open — available | AMR Pressure Solver Lead | I |
+| 94 | L1207 | pres.f90:758-764 | PRESSURE_SOLVER_CHECK_RESIDUALS | 0.000 | pressure | cell loop | none | in progress | claimed | AMR Pressure Backend Implementer | - | R |
+| 95 | L1210 | pres.f90:238-245 | PRESSURE_SOLVER_COMPUTE_RHS | 0.000 | pressure | cell loop (K,I with J=1); non-perfect nest | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 96 | L1215 | pres.f90:394-400 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop | none | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 97 | L1216 | pres.f90:404-410 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop; transposed input subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 98 | L1217 | pres.f90:414-420 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop; transposed input subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 99 | L1218 | pres.f90:424-430 | PRESSURE_SOLVER_FFT | 0.000 | pressure | cell loop; transposed input subscripts | generator gap | not planned (retired) | claimed | AMR Pressure Backend Implementer | - | R |
+| 100 | L1219 | pres.f90:438-440 | PRESSURE_SOLVER_FFT | 0.000 | pressure | non-perfect nest (section assignment); 1-D table H_BAR(I_OFFSET+I) | generator gap | open | claimed | AMR Pressure Solver Lead | - | R |
+| 101 | L1220 | pres.f90:450-462 | PRESSURE_SOLVER_FFT | 0.000 | pressure | K,J-only nest; integer BC-code scalars as arguments; reads BXS/BXF | generator gap | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
+| 102 | L1221 | pres.f90:466-477 | PRESSURE_SOLVER_FFT | 0.000 | pressure | K,I-only nest; integer BC-code scalars as arguments | generator gap | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
+| 103 | L1222 | pres.f90:481-492 | PRESSURE_SOLVER_FFT | 0.000 | pressure | J,I-only nest; integer BC-code scalars as arguments | generator gap | not planned (host) | claimed | AMR Pressure Backend Implementer | - | R |
+| 104 | L1223 | pres.f90:531-537 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
+| 105 | L1225 | pres.f90:576-582 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
+| 106 | L1226 | pres.f90:583-589 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
+| 107 | L1227 | pres.f90:591-596 | TUNNEL_POISSON_SOLVER | 0.000 | pressure | cell/face loop; wall gather; non-perfect nest (outer loop) | neighbour mesh (T4) | open | claimed | AMR Pressure Solver Lead | - | I |
+| 108 | L1289 | turb.f90:882-884 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 109 | L1290 | turb.f90:887-889 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 110 | L1291 | turb.f90:892-894 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 111 | L1292 | turb.f90:897-899 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 112 | L1293 | turb.f90:904-906 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 113 | L1294 | turb.f90:909-911 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 114 | L1295 | turb.f90:914-916 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 115 | L1296 | turb.f90:919-921 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 116 | L1297 | turb.f90:926-928 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 117 | L1298 | turb.f90:931-933 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 118 | L1299 | turb.f90:936-938 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 119 | L1300 | turb.f90:941-943 | FILL_EDGES | 0.000 | velocity | cell/face loop; non-perfect nest (outer loop); reductions/CYCLE | generator gap | open | needs-feature | open — available | - | I |
+| 120 | L1330 | vege.f90:618-623 | GET_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | AMR Solid Phase Lead | I |
+| 121 | L1331 | vege.f90:624-629 | GET_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | AMR Solid Phase Lead | I |
+| 122 | L1332 | vege.f90:630-639 | GET_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; function callees; non-perfect nest (outer loop) | callee flatten (T3) | open | blocked | open — available | AMR Solid Phase Lead | I |
+| 123 | L1333 | vege.f90:678-699 | FILL_BOUNDARY_VALUES | 0.000 | solid phase | cell/face loop; wall gather; neighbour-mesh; non-perfect nest (outer loop) | neighbour mesh (T4) | open | blocked | open — available | AMR Solid Phase Lead | I |
+| 124 | L1334 | vege.f90:885-894 | LEVEL_SET_ADVECT_FLUX | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
+| 125 | L1335 | vege.f90:896-905 | LEVEL_SET_ADVECT_FLUX | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
+| 126 | L1336 | vege.f90:907-914 | LEVEL_SET_ADVECT_FLUX | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
+| 127 | L1340 | vege.f90:763-857 | LEVEL_SET_SPREAD_RATE | 0.000 | solid phase | cell/face loop; non-perfect nest (outer loop) | generator gap | claimed | claimed | AMR Solid Phase Lead | - | I |
 <!-- GENERATED-END:worklist -->
 
 ## 6. Species & Combustion

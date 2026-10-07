@@ -1,7 +1,9 @@
 # Run-level class tolerance for `dt_coupled` kernels (D-070, D-078 a, D-080)
 
-Owner: V&V Lead. Status: **v0.2 (Architect-ratified, D-080; provisional pending device-versus-host evidence)**. Measurement date: 2026-10-04. Ratification: 2026-10-06.
+Owner: V&V Lead. Status: **v0.3 (Architect-ratified D-080; device RUNCMP on record for wall kernels)**. Measurement date: 2026-10-04. Ratification: 2026-10-06. Device evidence: 2026-10-06.
 Subject: the number that `check_device_logs.py` compares with `X` of the `RUNCMP` line (gate commit 38e94ae), `X = max over steps of |dt_dev - dt_host| / |dt_host|`, for kernels of class `dt_coupled` (today `cfl_wall_max`; `wall_visc_les` when registered). Gates the step sequence only; the 2-ulp per-value rule stays with the `ULP` line.
+
+**Change log v0.3 (2026-10-06).** Device-versus-host `RUNCMP` evidence for the three wall / dt-coupled kernels now on the gate (Wall reports; `check_wall_runcmp.out` PASS). Numbers below; class `1e-11` and D-088 pure-shear `1e-10` unchanged. Closes the "provisional pending device-versus-host evidence" note of v0.2 for these three kernels only — do not invent PASS for other kernels. v0.2 archived at `docs/vv/archive/dt_class_tolerance_v0.2.md`.
 
 **Change log v0.2 (2026-10-06).** Architect ratification **D-080**: `run_class_tolerance = 1e-11` (relative) for compared runs up to 1,000 steps. Set in `vv-runs/gpu_gate/kernel_categories.json`. Provisional because the measurement is CPU-to-CPU (Intel vs GNU) only; a device-versus-host run should be appended to this document when one exists. The `1e-14×N` form beyond 1,000 steps waits for longer-run measurement. v0.1 (proposal) is archived at `docs/vv/archive/dt_class_tolerance_v0.1.md`.
 
@@ -16,6 +18,18 @@ Basis (sections 3 to 5):
 - No baseline case lies between 4.3e-13 and 2.6e-4. The cases whose step path diverges start at 2.6e-4 (smallest first deviation seen). Any value between 1e-12 and 1e-4 gives the same verdict on every case on record; 1e-11 is 1.4 orders of magnitude above the largest agreeing case and 7.4 orders below the smallest deviation of a diverging case (2.6e-4).
 - The tolerance already used for cross-compiler runs is the T1 rule, 1e-10 of the column inf-norm (`requirements.md` T1; `intel_vs_gnu.py` class ROUNDOFF). That is a field-and-column rule, not a time-step rule, but it is the nearest existing number. Every agreeing case also satisfies 1e-10 (by a factor of 230 or more), so adopting 1e-10 instead would change no verdict on the data; it is 10 times looser than the measurement supports. If the owner prefers to keep one number across both rules, 1e-10 is acceptable; I propose 1e-11 because it is the number the step-sequence data themselves support.
 - Linear model: 1e-14 per step is 3 times the largest per-step rate seen in any agreeing case (3.5e-15 per step, set by the last step) and about 10 times the typical rate (1e-15 per step, section 4). At 1,000 steps it gives 1e-11.
+
+## 1a. Device-versus-host RUNCMP on record (wall kernels; D-080 / D-088 close for these three)
+
+Gate judge: `vv-runs/gpu_gate/device_logs/check_wall_runcmp.out` (**PASS** for the three logs below). RUNCMP for `wall_visc_les` landed at gate/driver commit `86cdf4122e`. D-088 pure-shear exception encoded at gate commit `3e2b4e0`.
+
+| Kernel | Quantity | Class / named limit | Observed maxrel | Log | Verdict |
+|---|---|---|---|---|---|
+| `cfl_wall_max` | DT | D-080 `1e-11` | **1.94e-16** | `device_logs/stage1_cflw_runcmp/` (+ ULP in `stage1_cflw/`) | **PASS** |
+| `wall_visc_les` | MU | D-080 `1e-11` | **0** | `device_logs/stage1_wall/` | **PASS** |
+| `visc_wale` | MU | D-080 `1e-11`; pure-shear `_s5_` D-088 `1e-10` | peak **≤ 9.3e-12** on `_s5_` (under 1e-10) | `device_logs/stage1_vw/` | **PASS** |
+
+No other kernel is claimed PASS by this update.
 
 ## 2. What was measured
 

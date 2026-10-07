@@ -1,6 +1,6 @@
 # FDS-AMR risk register
 
-Owner: Spec & Program Lead · Status: draft v0.4.43 (2026-10-06; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037) · Development base: `FDS-AMReX` `8ad685f435` (local merge of FireX `1fb5c300fa`, 2026-10-06; citations stay at `36975d765f` until re-checked, see README)
+Owner: Spec & Program Lead · Status: draft v0.4.44 (2026-10-06; changelog in README.md) · Source pin: FireX 36975d765f on branch `FDS-AMReX` (this repository; renamed from `AMReX`, D-037) · Development base: `FDS-AMReX` `8ad685f435` (local merge of FireX `1fb5c300fa`, 2026-10-06; citations stay at `36975d765f` until re-checked, see README)
 
 L = likelihood, S = severity (L/M/H). Status: open unless noted. Reviewed at every milestone. Code references were re-checked at FireX `36975d765f` in v0.2. AMReX references are to the local checkout `(local AMReX checkout)`.
 

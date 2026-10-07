@@ -6,6 +6,7 @@ Subject: a named, measured exception to D-080 `run_class_tolerance = 1e-11` for 
 Source measurement (Wall Loops, test machine, nvfortran 26.9, host ref `-Mnofma -Mnovect -Kieee`; measurement logs archived): device-versus-host `RUNCMP` on MU over coupled steps. Host bitwise already on record (19/19 PASS across 7 flag/thread × 36 cases; 5 mutants caught). L1351 / L1354 already host+device bitwise. Registry entry D-086 (`visc_wale`, `run_compare = class`) notes the pure-shear growth and asks not to silently widen.
 
 **Change log.**
+- v0.2 (2026-10-06): Architect **D-088** ratified; status **RATIFIED**; gate commit `3e2b4e0` encodes `run_case_tolerances` for `_s5_` MU = 1e-10. Device RUNCMP on record (`device_logs/stage1_vw/`, peak `_s5_` maxrel 9.3e-12). v0.1 (PROPOSED) archived at `docs/vv/archive/visc_wale_tolerance_v0.1.md`.
 - v0.1 (2026-10-06): V&V proposal **(B)** — pure-shear named relative exception `1e-10` on `RUNCMP` maxrel for MU; class `1e-11` unchanged for all other scenarios. Status PROPOSED pending Architect.
 
 ## 1. Ratified limit (D-088)

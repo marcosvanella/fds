@@ -25,3 +25,14 @@ Re-run stock `ompi_gnu_linux_db` on master (or FireX) with the current patch fil
 ## Related
 
 Dry-run on tip `8ad685f435`: applies (main.f90 offset +76; `pres.f90` clean). See `line-check-firex-1fb5c300.md` and `vv-runs/firex-merge-8ad685f435/logs/dry_apply_0010_up0011.log`.
+
+## Re-run (stock `ompi_gnu_linux_db`) — CLOSED
+
+Tree: master `ce1f659cd4` archive under `build/scratch-up0011-dbg`, patch applied with offsets −131 (main.f90) / −4 (pres.f90 hunk 2). Declaration in patched `pres.f90` is `CHARACTER(256) :: BASE` only. Docs note commit `05d78e2`.
+
+| Check | Result |
+|---|---|
+| Stock `ompi_gnu_linux_db` (`-Wall -Werror -fcheck=all`, no demoted warnings) | **PASS** — builds and links; no unused-variable diagnostic |
+| Smoke `ns2d_16` 1 rank, switch off | **PASS** — exit 0, `STOP: FDS completed successfully`, no Fortran runtime check |
+
+Evidence: `vv-runs/up0011-stock-debug/logs/build_ompi_gnu_linux_db.log`, `vv-runs/up0011-stock-debug/runs/ns2d/`. Finding CLOSED.

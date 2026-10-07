@@ -23,3 +23,18 @@ artifact directory `Header` + `Level_*/Cell_H`, fields **RHO, U, V, W**; CLI
 - `(local project directory)/scratch/role1-plotpack/ns2d_regrid/plt_ns2d_regrid_final` (also `_s5`, `_s10` mid-regrid dumps)
 
 **FDS VTKHDF is not the show gate** (see `vv/show_and_tell_notes.md`).
+
+## Owner movies (on disk)
+
+Rebuild: `prototypes/s4_cuda_mass/stage1/plotfile_smoke/make_movies.sh`.
+Overlays: dark-grey cell mesh at actual `dx` + AMR box outlines.
+
+| File under `vv-runs/owner-show/movies/` | Content |
+|---|---|
+| `blob_adapt_rho_boxes.mp4` / `.gif` | adaptive blob s5→s10→s15→s20→final; RHO + mesh + moving L1 boxes |
+| `blob_adapt_vel_boxes.mp4` / `.gif` | same series; \|u\| + mesh + moving L1 boxes |
+| `ns2d_regrid_vel_boxes.mp4` / `.gif` | ns2d regrid \|u\| + mesh + boxes |
+| `blob_static_rho_boxes.mp4` / `.gif` | blob_static RHO + mesh + boxes (hold) |
+
+Adaptive inputs: `vv-runs/owner-show/blob_adapt_regrid5/plt_blob_adapt_{s5,s10,s15,s20,final}`.
+Index: `vv-runs/owner-show/movies/MOVIES.md`.

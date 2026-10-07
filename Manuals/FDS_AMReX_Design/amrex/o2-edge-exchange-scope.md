@@ -26,7 +26,7 @@ The claim of section 1 was checked again. The five loops were re-read in the pin
 - L1399 (514-550), L1364 (1376-1400) and L1367 (1858-1897) each begin the wall iteration with `IF (EWC%NOM==0) CYCLE` (L1364: `IF (NOM==0) CYCLE`); everything after it reads `OMESH(NOM)`. On a single mesh no iteration does any work.
 - L1363 (2891-3015) skips every wall that is not `INTERPOLATED_BOUNDARY` and then uses `OMESH(NOM)` and `MESHES(NOM)` with `NOM = EWC%NOM`; an interpolated wall always has a neighbour mesh, so the loop is the neighbour-mesh branch as a whole. In the AMReX build the routine also returns early under `EXTERNAL_GHOSTS_FILLED` (the shared-face flux match is done by the driver), and for one mesh (`NMESHES==1`).
 - L1366 (1463-1559) still reads no neighbour-mesh array: `NOM` only selects the branch and skips internal null walls.
-- Claim register update (Mesh Data): L1363, L1364, L1367, L1399 are `not planned (host)` under D-055 (same-mesh empty; nothing to translate). L1366 is `translated` on s5-gen tip `01e57b1e20`. The work-list generated tables refresh from `loop_claims.csv` via `tools/inventory/loop_work_list.py`.
+- Claim register update (Mesh Data): L1363, L1364, L1367, L1399 are `not planned (host)` under D-055 (same-mesh empty; nothing to translate). L1366 is `translated` on s5-gen tip `20fb4a1f03`. The work-list generated tables refresh from `loop_claims.csv` via `tools/inventory/loop_work_list.py`.
 
 Status rows (to copy into the work list when its owner next refreshes the hand-written part; the generated tables are not edited by hand):
 
@@ -36,7 +36,7 @@ Status rows (to copy into the work list when its owner next refreshes the hand-w
 | L1364 | `NO_FLUX`, fill of `HP` | no | `IF (NOM==0) CYCLE`: only the `NOM>0` branch remains (D-055) | not planned (host); claim register updated |
 | L1367 | `VELOCITY_BC`, normal ghost face | no | `IF (EWC%NOM==0) CYCLE`: only the `NOM>0` branch remains (D-055) | not planned (host); claim register updated |
 | L1399 | `VISCOSITY_BC` | no | `IF (EWC%NOM==0) CYCLE`: only the `NOM>0` branch remains (D-055) | not planned (host); claim register updated |
-| L1366 | `NO_FLUX`, face values at walls | yes | no neighbour-mesh array is read; `NOM` is a flag (table column `EW_NOM`); needs the thin-wall uniqueness check | translated on s5-gen tip `01e57b1e20` |
+| L1366 | `NO_FLUX`, face values at walls | yes | no neighbour-mesh array is read; `NOM` is a flag (table column `EW_NOM`); needs the thin-wall uniqueness check | translated on s5-gen tip `20fb4a1f03` |
 
 ## 2. The four neighbour-mesh loops: what each would be, if the ruling is ever lifted
 

@@ -468,7 +468,7 @@ Two measurement pitfalls that apply to any driver using managed memory: (a) firs
 
 The seven descriptor questions (stacked `UII`/`QR`, meaning of the `ILS` indices, `W_NIC_MIN`/`W_NIC_MAX`, internal OPEN walls, `W_RAMP_VAL`, the 2D path, the padding cost of the whole-array kernels) were answered in the stage 1 to 3 work (`UII`/`QR`/`QR_W` stacked kernels; the `ILS` indices as in §2; `W_NIC_MIN/MAX` in the `wall1` signature; the internal OPEN rows in `open_ilw_zero` via `W_BTZ`; `W_RAMP_VAL` once per angle in `wall1`; the 2D kernels; per-box extents `BOX_*BAR` so that padding is not computed). Nothing is open on them. The padding-cost question is answered by the per-box extents: the whole-array kernels loop over `BOX_IBAR/JBAR/KBAR(IB)`, and the tests check that the padding cells are untouched.
 
-Follow-ups R1 to R4 of `solid/08-new-wall-kernel-review.md` §7: R2, R3, R4 are in `05-br-ilw-table-spec.md` (row ownership, OQ-S6 `Q_RAD_IN` owner rule, `W_B1_PRESENT`). **R1** (compiler scope of the L1243 `SUM`-order claim): the claim "the ascending-order sum is the result" holds for gfortran at every flag set tested and for ifx `-O2 -fp-model=precise` (D-079 (a): 0 mismatches); it holds for nvfortran only with `-Mnovect` on the host (§8: without it 34 of 151 sweep cases and 45 of 160 `open_qin_spec` cases differ by 1 ulp from the device and from gfortran) and always on the device. The claim therefore has this scope: gfortran 13 (all flag sets), ifx `-O2 -fp-model=precise`, nvfortran 26.9 with `-Mnofma -Mnovect` (host) and on the device. A compiler or flag set outside that list needs the `open_qin_spec` test before it is used as a reference.
+Follow-ups R1 to R4 of `solid/08-new-wall-kernel-review.md` §7: **all closed on Radiation's side** (docs `05` Additional rules + this paragraph; no `s5_rad_*` code change; Wall owns wall tables). **R2** row ownership, **R3** OQ-S6 owner+fan-out (emissivity per surface), **R4** pure `W_B1_PRESENT` are in `05-br-ilw-table-spec.md`. **R1** (compiler scope of the L1243 `SUM`-order claim): the claim "the ascending-order sum is the result" holds for gfortran at every flag set tested and for ifx `-O2 -fp-model=precise` (D-079 (a): 0 mismatches); it holds for nvfortran only with `-Mnovect` on the host (§8: without it 34 of 151 sweep cases and 45 of 160 `open_qin_spec` cases differ by 1 ulp from the device and from gfortran) and always on the device. The claim therefore has this scope: gfortran 13 (all flag sets), ifx `-O2 -fp-model=precise`, nvfortran 26.9 with `-Mnofma -Mnovect` (host) and on the device. A compiler or flag set outside that list needs the `open_qin_spec` test before it is used as a reference; with D-079 flags no oneAPI/ifx tolerance class is required for open-boundary cases.
 
 ## 15. INTERPOLATE_IL wall part (claim L1248) and L1245 note
 
@@ -563,7 +563,7 @@ The code in this round uses the pin lines. Drift checks assert the first stateme
 
 ### 17.2 L1251: neighbour-mesh `IL_R` interpolation (3698-3713)
 
-**Disposition: host now (FDS-mode path unchanged). AMR replacement: a ghost fill of `IL` from neighbour patches, owned by the Regrid and Multi-Level Transport Implementer (FillPatch, FR-016).** No kernel.
+**Disposition: host now (FDS-mode path unchanged). AMR replacement: Role 3 lagged `ILR` ghost table (`fdsrt::build_il_ghost_table`), no Radiation kernel.** Sweep contract unchanged: `s5rad_ils` packs, whole-array `ILS→ILR` lag copy, `s5rad_wall1` reads the mean of `ILR(W_NIC_MIN:W_NIC_MAX,N,IBND)`.
 
 What upstream does:
 
@@ -573,24 +573,36 @@ What upstream does:
 
 Why no kernel now:
 
-- In AMR mode there are no `OMESH` arrays. Patch-to-patch intensity at box and level boundaries is a ghost fill of `IL`.
-- The per-element arithmetic of 3707-3709 equals that of L1248. So if the AMR design keeps a lagged ghost table, the existing `s5rad_ilw_old_copy` / `s5rad_ilw_interp` kernels (§15.3) apply unchanged with an identity gather (`W_BR_INDEX(L)=L`, `NBR=NICR`).
+- In AMR mode there are no `OMESH` arrays. Patch-to-patch intensity at box and level boundaries is Role 3's lagged `ILR` table (not a live FillPatch of `IL` into the sweep).
+- The per-element arithmetic of 3707-3709 equals that of L1248. Angle rotation re-interpolates `ILR` with the existing `s5rad_ilw_old_copy` / `s5rad_ilw_interp` kernels (§15.3) and an identity gather (`W_BR_INDEX(L)=L`, `NBR=NICR`).
 - The loop order (`LL`, then band, then `I_INTP`) does not matter: every element is independent.
 
-Interface note for Role 3 (to be agreed; nothing here is implemented):
+#### Role 3 entry point — Radiation review (2026-10-06)
 
-1. **What is filled.** Ghost cells of `IL` per angle `N` and band `IBND`, for the boundary faces that the sweep for angle `N` treats as upwind. Values are non-negative.
-2. **When.** Upstream uses the neighbour values from the previous radiation update: lagged, because there is no iteration inside one update. Two options:
-   - (a) keep that lag: store a per-angle, per-band ghost table across radiation updates, the AMR analogue of `IL_R`;
-   - (b) fill from the current neighbour sweep. That changes the answer relative to FDS and needs an ordering of patch sweeps, so it is a design decision for Role 3 and the Integration Lead.
-3. **Angle rotation** (`ANGLE_INCREMENT` steps, `ITER==1`, after `CALCULATE_DIRECTION_COEFFICIENTS`). With option (a), the stored ghost table must be either re-interpolated (identity-gather L1248 kernels, bitwise with upstream 3702-3711) or reset. A reset is not bitwise with FDS mode.
-4. **Coarse/fine.**
-   - Upstream averages `NIC_MIN:NIC_MAX` (fine to coarse) at 4361.
-   - Coarse-to-fine spatial interpolation of `IL` and its conservation or limiter policy are Role 3's call.
-   - Non-negativity must hold after interpolation.
-5. **Layout.** `ILR(NICR,NRA,NSB)` with the ghost index fastest (same as `BR_ILW`), or `IL(i,j,k,box)` ghost cells read directly by the sweep. The sweep boundary block then changes from the `INTERPOLATED_BOUNDARY` mean to a plain ghost read. That change is the Radiation Lead's, once Role 3 picks the layout.
+Delivered on FireX `cdb0e8d45d` (`IlGhost.H`/`.cpp`, `notes/radiation-il-ghost.md`, `test_il_ghost`): `fdsrt::build_il_ghost_table` builds index tables only (no intensity, no average).
 
-loop_claims: L1251 `not planned (host)`, with the AMR ghost fill handed to Role 3.
+| Contract item | Evidence | Verdict |
+|---|---|---|
+| Layout `ILR(NICR,NRA,NSB)` ghost-fastest | notes §Contract; matches `s5rad_wall1` / `s5rad_ils` | **Accept** |
+| `W_NIC_MIN`/`W_NIC_MAX` + sender lists in FDS `IIO_R` order | positions grouped by (recv,send) then K,J,I with I fastest; test compares to coordinate `IIO_R` reimplementation | **Accept** |
+| Raw lagged fill; mean stays in `s5rad_wall1` | table fills no value; test packs as `s5rad_ils`, copies `ILS→ILR`, checks wall1 mean == FDS mean bitwise | **Accept** |
+| Lag = whole-array `ILS→ILR` (not pointer swap) | notes: unswept angles under `ANGLE_INCREMENT>1` keep old values | **Accept** |
+| Equal-level bitwise; c/f ratios 2 and 4; three-level | `test_il_ghost`: 7370 checks, 0 failed; wrong-layer mutant 660 failures | **Accept** |
+| Multi-rank send/recv | not written; waits on Radiation row-distribution choice (below) | **Open (Role 3)** |
+
+**Review verdict: accept** the entry point and host test. No Radiation `s5_rad_*` change required. Remaining: multi-rank exchange (Role 3 implements; Radiation choice below).
+
+#### Multi-rank ILS/ILR distribution choice (Radiation → Role 3)
+
+**Choice: global NICR indices, pair-contiguous one-way slabs.**
+
+1. Keep the global position numbering from `build_il_ghost_table` (FDS `IIO_R` order). `W_NIC_MIN`/`W_NIC_MAX` passed to `s5rad_wall1` / `s5rad_ils` are those global 1-based indices on every rank — no remapping, so equal-level bitwise is unchanged.
+2. Each radiation rank that owns any box appearing as sender or receiver allocates `ILS(NICR,NRA,NSB)` and `ILR(NICR,NRA,NSB)` (ghost index fastest). Rows this rank never touches may stay undefined; kernels only read `W_NIC_*` ranges of walls on local boxes and write `ILS` rows for local sender packs.
+3. Message unit = one `pair_lo[p] .. pair_lo[p+1]-1` range (already one contiguous (receiver box, sender box) block). Payload is the Fortran slab `ILS(lo:hi, 1:NRA, 1:NSB)` (first dimension contiguous ⇒ no gather). Direction: sender-box rank → receiver-box rank into the matching `ILR(lo:hi, :, :)` slab. Same-rank pairs: copy those slabs `ILS→ILR` (or one whole-array copy covering all same-rank pairs).
+4. Timing: after each radiation update's pack of swept `(N,IBND)` into `ILS`, exchange/copy the full `(NRA,NSB)` for every pair range (unswept angles keep prior `ILS` values — the FDS lag). Do not pointer-swap.
+5. Rejected alternatives: rank-local renumbering of `LL` (breaks bitwise / remaps `W_NIC_*`); per-angle messages (extra sync, worse than one slab per neighbour pair per update).
+
+loop_claims: L1251 `not planned (host)`, AMR table owned by Role 3; Radiation accepted `cdb0e8d45d` and published the multi-rank choice above.
 
 ### 17.3 L1247: angle weights (3623-3645)
 
@@ -755,4 +767,4 @@ No new `s5-gen` commits. Land pause until Legacy Mapper posts FF (s5-land at `66
 
 **Not in this table (already closed or owned elsewhere):** angular sweep and `UIID`/`QR`/`UII` (FR-062 / translated); `IL_S` mesh pack (FR-062 exchange, §18.1); L1238/L1247-L1250/L1240/L1244 translated; L1245 host; L1251 Role 3 ghost fill.
 
-**Next-work status (2026-10-06, s5-gen OPEN at `09ad2921c0`):** (1) gate hookup for radiation kernels — **partial / blocked on Integration + V&V gate owner**; remaining steps documented in `radiation/03` §10. L1240/L1244 landed this round under `s5_rad_lp/`. (2) ghost `UII`/`UIID` reader list — **draft confirmation in §6**; V&V Lead message drafted (do not send from here); waits V&V sign-off to close D-073 (b) / D-077 (6) / A-50 reader clause. (3) L1242 A1 remainders above: feature requests only until taken. (4) radiation under regrid (`radiation/04` / FR-063) waits on Role 3. Update: (2) closed — V&V co-signed, R-D073b-out (A) elected; Wall confirmed the L1244 join; L1251 decisions agreed with Role 3 (lagged `ILR` fill, raw values, mean stays in `s5rad_wall1`), fill pending from Role 3.
+**Next-work status (2026-10-06):** (1) gate hookup — partial / blocked on Integration device `rad_*` driver + `ported.toml`; host steps in `radiation/03` §10. (2) ghost `UII`/`UIID` reader list — **closed** (V&V co-sign; R-D073b-out (A)). (3) L1242 A1 remainders: feature requests only until taken. (4) solid/08 R1–R4 — **closed** on Radiation (`05` + §14). (5) L1251 — Role 3 entry `build_il_ghost_table` at `cdb0e8d45d` **accepted** (§17.2); multi-rank pair-contiguous choice published; Role 3 implements send/recv. (6) FR-063 regrid still waits on Role 3 beyond L1251.

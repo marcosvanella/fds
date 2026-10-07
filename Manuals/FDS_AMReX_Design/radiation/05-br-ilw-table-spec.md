@@ -112,10 +112,10 @@ Conditions kept from the original (radi.f90:4965-4974): `IW=1,N_EXTERNAL_WALL_CE
 
 ### Additional rules for L1243 and B1_PRESENT
 
-- **Ownership of Q_RAD_IN.** Covered coarse OPEN walls are not in the owner list (row ownership): a wall row covered by a finer box has no owner row of its own and gets no `Q_RAD_IN` from the kernel.
-- **Summation order.** The L1243 bitwise claim holds for gfortran's `SUM` order only (ascending, one accumulator per band). ifx may vectorise `SUM` and change the order; for ifx the claim becomes "within rounding" unless the kernel's explicit chain is the reference (the kernel's chain is the one written in the rule above).
-- **B1_PRESENT is the pure flag.** `W_B1_PRESENT(IW)` is exactly `B1_INDEX /= 0`; it does not include the `NULL_BOUNDARY` test. The L1243 kernel keeps its own `NULL_BOUNDARY` test (it does not take it from `B1_PRESENT`), and L1239 combines both as the original does (`B1_INDEX==0 .OR. BOUNDARY_TYPE==NULL_BOUNDARY`).
-- **Q_RAD_IN belongs to the owner row, conditional on EMISSIVITY staying per surface** (func.f90:4920). If `EMISSIVITY` ever becomes per cell or per band-dependent state outside the surface record, the owner-row rule for `Q_RAD_IN` has to be re-examined.
+- **Ownership of Q_RAD_IN (R2).** Covered coarse OPEN walls are not in the owner list: a wall row covered by a finer box has no owner row of its own and gets no `Q_RAD_IN` from the kernel. `W_BR_INDEX` slots stay unique over owner rows (same assertion as §5).
+- **Summation order (R1).** The L1243 bitwise claim holds for gfortran's `SUM` order only (ascending, one accumulator per band). Scope of the bitwise reference is recorded in `06` §14 (gfortran all flag sets; ifx `-O2 -fp-model=precise`; nvfortran host with `-Mnofma -Mnovect`, and on the device). Outside that list run `open_qin_spec` before treating the build as a reference; no oneAPI/ifx tolerance class is needed when D-079 flags are used (0 mismatches).
+- **B1_PRESENT is the pure flag (R4).** `W_B1_PRESENT(IW)` is exactly `B1_INDEX /= 0`; it does not include the `NULL_BOUNDARY` test. The kernel owns the `NULL` test (L1243 keeps it separate; L1239 combines both as the original does).
+- **OQ-S6 / Q_RAD_IN owner rule (R3).** `Q_RAD_IN` belongs to the owner row and is copied (fan-out) to the face records after each radiation update; valid while `B1%EMISSIVITY` is per surface (`func.f90:4920`). If emissivity ever varies per record, hold the **incoming** flux in the owner row instead and let each record absorb with its own emissivity.
 
 ## 8. B1_PRESENT
 
