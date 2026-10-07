@@ -130,7 +130,10 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     std::ostringstream amr;
     amr << "&AMR MAX_LEVEL=" << o.max_level << ", REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize
-        << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "' /\n";
+        << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "'";
+    // Adaptive: TAG_* so ErrorEst follows the tracer; static (regrid_every==0) keeps nested set_tag_function only.
+    if (o.regrid_every > 0) amr << ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=0.05, TAG_KEEP=0.8";
+    amr << " /\n";
     amr << std::setprecision(17) << "&AMR_REGION XB=";
     for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
     amr << ", LEVEL=" << o.max_level << " /\n";
@@ -172,6 +175,23 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
     };
     core.set_data_transfer(&tr);
+    // Registry fields for ErrorEst TAG_* (preferred when AmrParams has a criterion). Fallback nested set_tag_function for static.
+    core.set_tag_fields([&](int lev) {
+        Fields& F = reg.fields(lev);
+        const amrex::Periodicity per = reg.level(lev).geom.periodicity();
+        fdsrt::TagFields f;
+        if (F.has("TMP")) { F["TMP"].FillBoundary(per); f.tmp = &F["TMP"]; }
+        if (F.has("RHO")) { F["RHO"].FillBoundary(per); f.rho = &F["RHO"]; }
+        if (F.has("ZZ")) {
+            F["ZZ"].FillBoundary(per);
+            f.zz = &F["ZZ"];
+            // FDS ZZ: BACKGROUND first when declared first; TRACER is comp 1 for blob_16_l0 (2 tracked).
+            f.zz_comp = (F["ZZ"].nComp() > 1) ? 1 : 0;
+        }
+        if (F.has("HRRPUV")) f.hrrpuv = &F["HRRPUV"];
+        for (int d = 0; d < 3; ++d) f.dirs[d] = (dom.length(d) == 1) ? 0 : 1;
+        return f;
+    });
     // Nested tags: level 0 tags `patch` (creates level 1); levels 1..max_level-1 tag the refined image of `patch2` (creates levels 2..max_level).
     core.set_tag_function([&](int lev, amrex::TagBoxArray& tags, amrex::Real) {
         if (lev >= o.max_level) return;
