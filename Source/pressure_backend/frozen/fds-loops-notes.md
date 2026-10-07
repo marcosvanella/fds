@@ -112,3 +112,22 @@ same dump hook. Sets and census predicates (`tests/fds_loops_test.py` CENSUS):
 CTests: `pb_fdsloops_census` (predicates only, no executable), `pb_fdsloops_fds_sets` (pb_fds_loops bitwise on every set), and
 `pb_fdsloops_fds_sets_uu_lb0` (negative control: wrong velocity lower bound must fail at least one set). The single-set archive
 `fds_loops_cases.tar` and its tests remain for the original closed / two-mesh coverage.
+
+## R4 / R5 coverage gate (pressure/08)
+
+pressure/08 tests **R4** (section 2.4, L1220-L1222 H BC fill) and **R5** (section 2.5, L1209) ask for real-FDS dumps that close the
+gaps left by the original closed / two-mesh archive. The r5 archive is that input set. CTest `pb_fdsloops_r4r5` (`tests/fds_loops_test.py`
+action `r4r5`) is the explicit coverage gate:
+
+| Clause | Requirement | Satisfying sets |
+|---|---|---|
+| R4 periodic | FISHPAK code 0 on a real dump (`perx` LBC=0 and/or `peryz` MBC=NBC=0) | perx, peryz |
+| R4 Dirichlet low face | code 2 on a real dump (`dirx` LBC=2; MBC/NBC=2 also accepted) | dirx (ylow also has MBC=NBC=2) |
+| R4 original closed/two-mesh | still covered by `fds_loops_cases.tar` | `pb_fdsloops_fds` |
+| R5(a) | SOLID-Dirichlet with `WALL_WORK1 /= 0` | dirx (IOR=1), dirxhi (IOR=-1) |
+| R5(b) | open y faces and +z with wind; z ghosts KK=0 and KK=KBP1 | openyz |
+| R5(c) | synthetic-eddy inflow `N_EDDY>0`, `WV_EDDYV` nonzero | eddy |
+| R5(d) | ramped open vent with `T_IGN /= T_BEGIN` | ramp |
+
+Bitwise equality of `HBC_*` (R4) and `L1209_*` (R5) on those sets is `pb_fdsloops_fds_sets` (`check-fds-sets`); `pb_fdsloops_r4r5` does
+not re-run the bitwise comparison.

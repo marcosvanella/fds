@@ -11,6 +11,8 @@
              made with the same hook from frozen/fds_cases/ldump_*.fds) and run pb_fds_loops on every set; all must be bitwise equal.
   census   : read the same archive and check that every input really exercises what it was made for (the boundary codes, wall kinds, wind,
              ramp and eddy classes listed in CENSUS below); a changed input or hook that silently lost the feature fails here.
+  r4r5     : coverage gate for pressure/08 tests R4 (L1220-L1222 H BC fill) and R5 (L1209) on the r5 multi-set archive; exit 0 only if
+             every clause passes. Bitwise equality of the same sets is covered by check-fds-sets / pb_fdsloops_fds_sets.
   drift    : the generator step on a copy of pres.f90 with one inserted line must REFUSE (the pinned line ranges moved).
 """
 import argparse, os, shutil, subprocess, sys
@@ -113,9 +115,111 @@ def unpack_sets(archive, work):
     return d
 
 
+def fmt_facts(f):
+    return {k: (sorted(v) if isinstance(v, set) else v) for k, v in f.items()}
+
+
+def r4r5_coverage(archive, work):
+    """pressure/08 R4 (H BC fill codes 0 and 2) and R5 (L1209 wall classes) on the r5 multi-set archive.
+
+    Bitwise equality of HBC_* / L1209_* in these sets is the job of check-fds-sets (ctest pb_fdsloops_fds_sets);
+    this action is the coverage gate the Pressure Lead can point at.
+    """
+    d = unpack_sets(archive, work)
+    sets = sorted(n for n in os.listdir(d) if os.path.isdir(os.path.join(d, n)))
+    facts = {n: census_set(os.path.join(d, n)) for n in sets}
+    rows = []  # (clause, ok, detail)
+
+    # --- R4 (pressure/08 section 2.4): periodic code 0 and Dirichlet low-face code 2 meet real data ---
+    periodic_sets = [n for n, f in facts.items()
+                     if any(c[0] == 0 or c[1] == 0 or c[2] == 0 for c in f["codes"])]
+    # Prefer naming the known inputs; still accept any set that carries the codes.
+    has_perx = "perx" in facts and any(c[0] == 0 for c in facts["perx"]["codes"])
+    has_peryz = "peryz" in facts and any(c[1] == 0 and c[2] == 0 for c in facts["peryz"]["codes"])
+    ok_period = has_perx or has_peryz
+    rows.append(("R4 periodic codes 0 (perx LBC=0 and/or peryz MBC=NBC=0)",
+                 ok_period,
+                 "sets=%s codes=%s" % (
+                     periodic_sets,
+                     {n: sorted(facts[n]["codes"]) for n in periodic_sets})))
+
+    dir_low_sets = [n for n, f in facts.items()
+                    if any(c[0] == 2 or c[1] == 2 or c[2] == 2 for c in f["codes"])]
+    has_dirx = "dirx" in facts and any(c[0] == 2 for c in facts["dirx"]["codes"])
+    ok_dirlow = has_dirx or bool(dir_low_sets)  # acceptance: LBC=2 or MBC/NBC=2
+    rows.append(("R4 Dirichlet low face code 2 (dirx LBC=2)",
+                 ok_dirlow,
+                 "sets=%s codes=%s" % (
+                     dir_low_sets,
+                     {n: sorted(facts[n]["codes"]) for n in dir_low_sets})))
+
+    # Original closed/two-mesh coverage lives in fds_loops_cases.tar (ctest pb_fdsloops_fds); record that dependency.
+    rows.append(("R4 original closed/two-mesh still in fds_loops_cases.tar (pb_fdsloops_fds)",
+                 True,
+                 "covered by pb_fdsloops_fds; not re-checked here"))
+
+    # --- R5 (pressure/08 section 2.5): four real-FDS wall classes ---
+    # (a) SOLID-Dirichlet with WALL_WORK1 /= 0 (dirx / dirxhi)
+    solid_sets = [n for n, f in facts.items() if f["solid_dir_ww1"]]
+    ok_a = bool(solid_sets) and (
+        ("dirx" in facts and facts["dirx"]["solid_dir_ww1"]) or
+        ("dirxhi" in facts and facts["dirxhi"]["solid_dir_ww1"]))
+    rows.append(("R5(a) SOLID-Dirichlet WALL_WORK1/=0 (dirx/dirxhi)",
+                 ok_a,
+                 "sets=%s solid_dir_ww1=%s" % (
+                     solid_sets,
+                     {n: sorted(facts[n]["solid_dir_ww1"]) for n in solid_sets})))
+
+    # (b) open y faces and +z with wind; z ghosts KK=0 and KBP1 (openyz)
+    openyz_ok = False
+    openyz_detail = {}
+    for n, f in facts.items():
+        need_ior = {2, -2, 3, -3}
+        if f["wind"] and need_ior.issubset(f["open_ior"]) and f["z_ghost_k"] == {0, 1}:
+            openyz_ok = True
+            openyz_detail[n] = {"open_ior": sorted(f["open_ior"]), "z_ghost_k": sorted(f["z_ghost_k"]), "wind": f["wind"]}
+    if not openyz_detail and "openyz" in facts:
+        f = facts["openyz"]
+        openyz_detail["openyz"] = {"open_ior": sorted(f["open_ior"]), "z_ghost_k": sorted(f["z_ghost_k"]), "wind": f["wind"]}
+    rows.append(("R5(b) open y/+z with wind; z ghosts KK=0 and KBP1 (openyz)",
+                 openyz_ok,
+                 "satisfying=%s detail=%s" % (sorted(openyz_detail), openyz_detail)))
+
+    # (c) synthetic-eddy inflow N_EDDY>0 with nonzero WV_EDDYV (eddy)
+    eddy_sets = [n for n, f in facts.items() if f["eddy_walls"] > 0 and f["eddy_nonzero"] > 0]
+    ok_c = bool(eddy_sets)
+    rows.append(("R5(c) synthetic-eddy inflow N_EDDY>0 WV_EDDYV nonzero (eddy)",
+                 ok_c,
+                 "sets=%s eddy_walls/nonzero=%s" % (
+                     eddy_sets,
+                     {n: (facts[n]["eddy_walls"], facts[n]["eddy_nonzero"]) for n in eddy_sets})))
+
+    # (d) ramped open vent with T_IGN /= T_BEGIN (ramp)
+    ramp_sets = [n for n, f in facts.items() if f["ramp_t_ne"] > 0]
+    ok_d = bool(ramp_sets)
+    rows.append(("R5(d) ramped open vent T_IGN /= T_BEGIN (ramp)",
+                 ok_d,
+                 "sets=%s ramp_t_ne/tbegin=%s" % (
+                     ramp_sets,
+                     {n: (facts[n]["ramp_t_ne"], sorted(facts[n]["tbegin"])) for n in ramp_sets})))
+
+    rows.append(("bitwise HBC_*/L1209_* on R4/R5 sets (pb_fdsloops_fds_sets)",
+                 True,
+                 "covered by check-fds-sets / pb_fdsloops_fds_sets; this test is the coverage gate"))
+
+    print("R4/R5 coverage on archive sets: %s" % " ".join(sets))
+    print("%-72s %s  %s" % ("CLAUSE", "RESULT", "EVIDENCE"))
+    bad = 0
+    for clause, ok, detail in rows:
+        print("%-72s %s  %s" % (clause, "PASS" if ok else "FAIL", detail))
+        bad += 0 if ok else 1
+    print("SUMMARY  %s  (%d fail of %d)" % ("PASS" if bad == 0 else "FAIL", bad, len(rows)))
+    return 0 if bad == 0 else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["make-ref", "check", "check-fds", "check-fds-sets", "census", "drift"])
+    ap.add_argument("action", choices=["make-ref", "check", "check-fds", "check-fds-sets", "census", "r4r5", "drift"])
     ap.add_argument("--pres", default=os.path.join(HERE, "..", "..", "pres.f90"))
     ap.add_argument("--git-repo", default=None)
     ap.add_argument("--fortran", default=os.environ.get("FC", "gfortran"))
@@ -230,6 +334,10 @@ def main():
                 print("         facts:", {k: (sorted(v) if isinstance(v, set) else v) for k, v in f.items()})
             bad += 0 if ok else 1
         return 1 if bad else 0
+    if a.action == "r4r5":
+        if not a.archive:
+            sys.exit("--archive required")
+        return r4r5_coverage(a.archive, a.work)
     if a.action == "drift":
         bad = os.path.join(a.work, "pres_drifted.f90")
         with open(a.pres, errors="replace") as f:

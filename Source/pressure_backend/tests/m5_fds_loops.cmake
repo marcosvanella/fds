@@ -63,6 +63,8 @@ set_tests_properties(pb_fdsloops_fds_uu_lb0 PROPERTIES TIMEOUT 300)
 # exercises the boundary codes / wall kinds / wind / ramp / eddy classes listed in tests/fds_loops_test.py CENSUS
 # (no executable needed). pb_fdsloops_fds_sets runs pb_fds_loops on every set and requires bitwise equality.
 # pb_fdsloops_fds_sets_uu_lb0 is the negative control (wrong velocity lower bound must fail at least one set).
+# pb_fdsloops_r4r5 is the pressure/08 R4 (H BC codes 0 and 2) / R5 (L1209 wall classes) coverage gate on the
+# same archive; bitwise of those sets stays on pb_fdsloops_fds_sets (and the original closed/two-mesh on pb_fdsloops_fds).
 add_test(NAME pb_fdsloops_census
   COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} census
           --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz
@@ -80,6 +82,11 @@ add_test(NAME pb_fdsloops_fds_sets_uu_lb0
           --work ${CMAKE_CURRENT_BINARY_DIR}/fds_loops_sets_lb0
           --exe $<TARGET_FILE:pb_fds_loops>)
 set_tests_properties(pb_fdsloops_fds_sets_uu_lb0 PROPERTIES TIMEOUT 600)
+add_test(NAME pb_fdsloops_r4r5
+  COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} r4r5
+          --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz
+          --work ${CMAKE_CURRENT_BINARY_DIR}/fds_loops_r4r5)
+set_tests_properties(pb_fdsloops_r4r5 PROPERTIES TIMEOUT 300)
 
 # Guards and edge indices (harness/loops_guards.cpp): C1 whole-extent guard of the periodic H fill, C2 TUNNEL_PRECONDITIONER refusal,
 # C3 L1209 wind arrays must cover 0..KBP1 and the z-wall indices KK=0 / KK=KBP1. Mutants 19 (no whole-extent guard), 20 (the former
