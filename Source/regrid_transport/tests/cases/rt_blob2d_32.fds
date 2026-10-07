@@ -2,6 +2,11 @@
 This is a driver test input of the Role 3 end-to-end tests (tests/run_e2e_driver.sh): doubly periodic unit square, two species of equal molecular weight (the second one is a passive
 tracer; the tracer blobs and the constant velocity are set by the test mode, not by this input), uniform temperature.
 
+Tagging for the registry moving-blob gates (test_blob_registry --gates, R=2 only): the test builds an &AMR line with
+TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF (undivided difference on ZZ, working value 0.05; extremes for cover-all / cover-none),
+TAG_KEEP=0.8, and N_ERROR_BUF from the case config. This input has no &AMR line; the driver e2e modes set a static patch.
+Ratio-4 registry rows are not part of the adaptive show.
+
 &MESH IJK=32,1,32, XB=0.0,1.0,-0.05,0.05,0.0,1.0 /
 
 &TIME T_END=1.0 /

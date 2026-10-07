@@ -174,4 +174,32 @@ amrex::iMultiFab make_covered_mask(const amrex::BoxArray& ba, const amrex::Distr
     return m;
 }
 
+
+void apply_tag_criteria(amrex::TagBoxArray& tags, const AmrParams& p, const TagFields& f, const amrex::iMultiFab* covered)
+{
+    TagCriterion c;
+    c.keepfac = p.tag_keep;
+    c.dirs = f.dirs;
+    if (p.has_tag_tmp_diff() && f.tmp) {
+        c.mode = TagMode::Diff; c.thr = p.tag_tmp_diff; c.relative = false; c.comp = 0;
+        tag_cells(tags, *f.tmp, nullptr, 0, covered, c);
+    }
+    if (p.has_tag_tmp_above() && f.tmp) {
+        c.mode = TagMode::Above; c.thr = p.tag_tmp_above; c.base = f.tmp_ambient; c.comp = 0;
+        tag_cells(tags, *f.tmp, nullptr, 0, covered, c);
+    }
+    if (p.has_tag_rho_diff() && f.rho) {
+        c.mode = TagMode::Diff; c.thr = p.tag_rho_diff; c.relative = true; c.comp = 0;
+        tag_cells(tags, *f.rho, nullptr, 0, covered, c);
+    }
+    if (p.has_tag_spec_diff() && !p.tag_spec_id.empty() && f.zz) {
+        c.mode = TagMode::Diff; c.thr = p.tag_spec_diff; c.relative = false; c.comp = f.zz_comp;
+        tag_cells(tags, *f.zz, f.zz_den, 0, covered, c);
+    }
+    if (p.has_tag_hrrpuv() && f.hrrpuv) {
+        c.mode = TagMode::Above; c.thr = p.tag_hrrpuv; c.base = 0.0; c.comp = 0;
+        tag_cells(tags, *f.hrrpuv, nullptr, 0, covered, c);
+    }
+}
+
 }  // namespace fdsrt

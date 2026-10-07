@@ -252,8 +252,11 @@ void build(Sim& S, const Cfg& c)
 {
     S.c = c;
     Report rep;
+    const double tag_thr = c.cover == 1 ? -1.0e30 : (c.cover == 2 ? 1.0e30 : 0.05);
     std::string text = "&AMR MAX_LEVEL=" + std::to_string(c.max_level) + ", REF_RATIO=" + std::to_string(c.ratio) + ", BLOCKING_FACTOR=4, MAX_GRID_SIZE=16, N_ERROR_BUF=" +
-                       std::to_string(c.nbuf) + ", N_PROPER=1" + (c.project ? "" : ", POST_REGRID_PROJECTION='OFF'") + " /\n" +
+                       std::to_string(c.nbuf) + ", N_PROPER=1, REGRID_INTERVAL=" + std::to_string(c.interval) +
+                       ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=" + std::to_string(tag_thr) + ", TAG_KEEP=0.8" +
+                       (c.project ? "" : ", POST_REGRID_PROJECTION='OFF'") + " /\n" +
                        (c.cover == 1 ? std::string("&AMR_REGION XB=0.0,1.0,0.0,1.0,0.0,1.0 /\n")
                                         : std::string("&AMR_REGION XB=0.0625,0.9375,") + (c.dim == 3 ? "0.0625,0.9375" : "0.0,1.0") + ",0.0625,0.9375 /\n");
     S.p = parse_amr_params(text, rep);
@@ -289,15 +292,14 @@ void build(Sim& S, const Cfg& c)
     S.rt->initial.cell = [sp](double x, double y, double z, double* rho, double* tmp, double* zz) { cell_state(sp->c, x, y, z, rho, zz); *tmp = 300.0; };
     S.rt->initial.velocity = [sp](int dir, double x, double y, double z) { return vel_comp(sp->c, dir, x, y, z); };
     S.core->set_data_transfer(S.rt.get());
-    S.core->set_tag_function([sp](int lev, amrex::TagBoxArray& tags, amrex::Real) {
+    // One path: ErrorEst applies TAG_SPEC_* from AmrParams via set_tag_fields (ZZ = tracer mass fraction).
+    S.core->set_tag_fields([sp](int lev) {
         fdsamr::Fields& F = sp->reg->fields(lev);
-
         F["ZZ"].FillBoundary(sp->core->Geom(lev).periodicity());
-        TagCriterion cr;
-        cr.mode = TagMode::Above; cr.base = 0.05; cr.thr = sp->c.cover == 1 ? -1.0e30 : (sp->c.cover == 2 ? 1.0e30 : 0.25); cr.keepfac = 0.8; cr.comp = 0;
-        cr.dirs = {1, sp->c.dim == 3 ? 1 : 0, 1};
-        amrex::iMultiFab cv = sp->core->covered_mask(lev);
-        tag_cells(tags, F["ZZ"], nullptr, 0, &cv, cr);
+        TagFields f;
+        f.zz = &F["ZZ"];
+        f.dirs = {1, sp->c.dim == 3 ? 1 : 0, 1};
+        return f;
     });
     // level 0 data, then the hierarchy from the tags at t = 0 (initial conditions evaluated on each new level, one average-down at the end)
     fill_analytic(S, 0, true, true);

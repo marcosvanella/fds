@@ -49,7 +49,7 @@ amrex::AmrInfo make_amr_info(const Hierarchy& h, const AmrParams& p)
 }
 
 RegridAmrCore::RegridAmrCore(const Hierarchy& h, const AmrParams& p)
-    : amrex::AmrCore(make_level0_geometry(h), make_amr_info(h, p)), h_(h), n_error_buf_(p.n_error_buf),
+    : amrex::AmrCore(make_level0_geometry(h), make_amr_info(h, p)), h_(h), params_(p), n_error_buf_(p.n_error_buf),
       post_mode_(p.post_regrid_projection)
 {
 }
@@ -136,7 +136,13 @@ void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time
         stats_.buffer_blocks_discarded.assign(h_.levels.size(), 0);
         reported_discard_.assign(h_.levels.size(), false);
     }
-    if (tag_fn_) tag_fn_(lev, tags, time);
+    if (params_.has_any_tag_criterion() && tag_fields_fn_) {
+        TagFields f = tag_fields_fn_(lev);
+        amrex::iMultiFab cv = covered_mask(lev);
+        apply_tag_criteria(tags, params_, f, &cv);
+    } else if (tag_fn_) {
+        tag_fn_(lev, tags, time);
+    }
     // static finer &MESH footprints are always refined (IR-002): force-tag their coarsened boxes on this level
     if (lev + 1 <= h_.top) {
         const amrex::IntVect r = amrex::AmrCore::refRatio(lev);

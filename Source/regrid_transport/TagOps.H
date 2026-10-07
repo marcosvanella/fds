@@ -19,6 +19,8 @@
 #include <AMReX_iMultiFab.H>
 #include <AMReX_TagBox.H>
 
+#include "AmrInput.H"
+
 #include <array>
 #include <vector>
 
@@ -58,6 +60,21 @@ void buffer_tags(amrex::TagBoxArray& tags, int nbuf, const amrex::Geometry& geom
 
 // Mask on (ba, dm): 1 where the cell is covered by `fine_ba` coarsened by `ratio`, else 0.
 amrex::iMultiFab make_covered_mask(const amrex::BoxArray& ba, const amrex::DistributionMapping& dm, const amrex::BoxArray& fine_ba, const amrex::IntVect& ratio);
+
+// Fields for apply_tag_criteria (one level). Null pointers skip that criterion. zz is mass fraction when zz_den is null, else rho*Z with den = RHO.
+struct TagFields {
+    const amrex::MultiFab* tmp = nullptr;
+    const amrex::MultiFab* rho = nullptr;
+    const amrex::MultiFab* zz = nullptr;
+    const amrex::MultiFab* zz_den = nullptr;
+    int zz_comp = 0;
+    const amrex::MultiFab* hrrpuv = nullptr;
+    double tmp_ambient = 293.15;             // base for TAG_TMP_ABOVE (TMPA)
+    std::array<int, 3> dirs{1, 1, 1};       // 0 in a single-cell direction
+};
+
+// OR of every set &AMR TAG_* criterion into `tags` (caller fills ghosts). keepfac from TAG_KEEP.
+void apply_tag_criteria(amrex::TagBoxArray& tags, const AmrParams& p, const TagFields& f, const amrex::iMultiFab* covered);
 
 }  // namespace fdsrt
 

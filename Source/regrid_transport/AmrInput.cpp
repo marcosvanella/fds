@@ -113,6 +113,22 @@ bool get_double(const NamelistGroup& g, const std::string& key, double& out, Rep
     }
     return true;
 }
+bool get_string(const NamelistGroup& g, const std::string& key, std::string& out, Report& rep)
+{
+    auto it = g.values.find(key);
+    if (it == g.values.end()) return false;
+    if (it->second.size() != 1) {
+        rep.error(at_line(g) + key + " must be one character string");
+        return false;
+    }
+    out = it->second[0];
+    return true;
+}
+bool get_opt_double(const NamelistGroup& g, const std::string& key, double& out, Report& rep)
+{
+    if (!g.values.count(key)) return false;
+    return get_double(g, key, out, rep);
+}
 bool get_int_list(const NamelistGroup& g, const std::string& key, std::vector<int>& out, Report& rep)
 {
     auto it = g.values.find(key);
@@ -193,7 +209,8 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
 {
     AmrParams p;
     const std::vector<std::string> keys = {"MAX_LEVEL", "REF_RATIO", "REGRID_INTERVAL", "BLOCKING_FACTOR", "MAX_GRID_SIZE", "N_ERROR_BUF",
-                                           "N_PROPER", "GRID_EFF", "OUTPUT_LEVEL_CAP", "VELOCITY_TRANSFER", "POST_REGRID_PROJECTION"};
+                                           "N_PROPER", "GRID_EFF", "OUTPUT_LEVEL_CAP", "VELOCITY_TRANSFER", "POST_REGRID_PROJECTION",
+                                           "TAG_TMP_DIFF", "TAG_TMP_ABOVE", "TAG_RHO_DIFF", "TAG_SPEC_ID", "TAG_SPEC_DIFF", "TAG_HRRPUV", "TAG_KEEP"};
     int n_amr = 0;
     for (const auto& g : scan_namelists(text)) {
         if (g.name == "AMR") {
@@ -231,6 +248,13 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
                     rep.warn(at_line(g) + "POST_REGRID_PROJECTION='OFF': no projection after a regrid; the divergence of the new fine faces next to retained ones is not repaired. "
                                           "This is a diagnostic setting, not valid for a gate run");
             }
+            get_opt_double(g, "TAG_TMP_DIFF", p.tag_tmp_diff, rep);
+            get_opt_double(g, "TAG_TMP_ABOVE", p.tag_tmp_above, rep);
+            get_opt_double(g, "TAG_RHO_DIFF", p.tag_rho_diff, rep);
+            get_string(g, "TAG_SPEC_ID", p.tag_spec_id, rep);
+            get_opt_double(g, "TAG_SPEC_DIFF", p.tag_spec_diff, rep);
+            get_opt_double(g, "TAG_HRRPUV", p.tag_hrrpuv, rep);
+            if (g.values.count("TAG_KEEP")) get_double(g, "TAG_KEEP", p.tag_keep, rep);
         } else if (g.name == "MISC") {
             auto es = g.values.find("EXACT_SUMS");   // the FDS reader owns &MISC; only this one logical is looked at, and it has no effect here
             if (es != g.values.end()) {
@@ -319,6 +343,17 @@ void validate_amr_params(const AmrParams& p, Report& rep)
     }
     if (p.max_level == 0 && p.present && !p.regions.empty())
         rep.warn("&AMR_REGION lines are ignored with MAX_LEVEL = 0");
+    // Tagging keys (FR-011)
+    if (!(p.tag_keep > 0.0 && p.tag_keep <= 1.0))
+        rep.error("&AMR: TAG_KEEP must be in (0, 1]");
+    const bool spec_id = !p.tag_spec_id.empty(), spec_diff = p.has_tag_spec_diff();
+    if (spec_id && !spec_diff)
+        rep.error("&AMR: TAG_SPEC_ID requires TAG_SPEC_DIFF");
+    if (spec_diff && !spec_id)
+        rep.error("&AMR: TAG_SPEC_DIFF requires TAG_SPEC_ID");
+    if (p.present && p.max_level > 0 && p.regrid_interval > 0 && !p.has_any_tag_criterion())
+        rep.warn("&AMR: REGRID_INTERVAL > 0 but no TAG_* criterion is set; dynamic regrids will not refine from the solution "
+                 "(static finer &MESH footprints are still force-tagged)");
 }
 
 }  // namespace fdsrt

@@ -17,6 +17,7 @@
 
 #include "Hierarchy.H"
 #include "RegridInterface.H"
+#include "TagOps.H"
 
 namespace fdsrt {
 
@@ -60,7 +61,12 @@ public:
                      const amrex::DistributionMapping* level0_dm = nullptr);
 
     // ---- R4 dynamic hierarchy -------------------------------------------------------------------------------------------------------------------
+    // Preferred path: AmrParams TAG_* keys + set_tag_fields (ErrorEst calls apply_tag_criteria). set_tag_function is the fallback for unit tests
+    // that build a TagCriterion by hand (used only when no TAG_* criterion is set).
     void set_tag_function(TagFn f) { tag_fn_ = std::move(f); }
+    using TagFieldsFn = std::function<TagFields(int lev)>;
+    void set_tag_fields(TagFieldsFn f) { tag_fields_fn_ = std::move(f); }
+    const AmrParams& amr_params() const { return params_; }
     void set_data_transfer(LevelDataTransfer* t) { transfer_ = t; }
 
     // D-080: by default we buffer tags ourselves (ghost exchange + dilation) and pass n_error_buf = 0 to AMReX so it does not
@@ -109,9 +115,11 @@ protected:
 
 private:
     Hierarchy h_;
+    AmrParams params_;
     LevelListener* listener_ = nullptr;
     LevelDataTransfer* transfer_ = nullptr;
     TagFn tag_fn_;
+    TagFieldsFn tag_fields_fn_;
     DmFn dm_fn_;
     amrex::DistributionMapping level0_dm_;
     bool have_level0_dm_ = false;

@@ -103,15 +103,20 @@ int main()
             parse("&AMR MAX_LEVEL=1, POST_REGRID_PROJECTION='SOMETIMES' /", re);
             CHECK(re.has_error_containing("POST_REGRID_PROJECTION"));
             CHECK(!ra.has_error_containing("POST_REGRID") && !rb.has_error_containing("POST_REGRID"));
-            // OFF prints a warning (diagnostic setting, not a gate run); AUTO and ON do not
-            CHECK(ra.warnings.empty() && rb.warnings.empty());
-            CHECK(rc.warnings.size() == 1 && rc.warnings[0].find("not valid for a gate run") != std::string::npos);
-            CHECK(rd.warnings.size() == 1);
+            // OFF warns (diagnostic, not a gate run); MAX_LEVEL>0 with default REGRID_INTERVAL and no TAG_* also warns
+            auto hasw = [](const Report& r, const char* s) {
+                for (const auto& w : r.warnings) if (w.find(s) != std::string::npos) return true;
+                return false;
+            };
+            CHECK(hasw(ra, "no TAG_* criterion") && hasw(rb, "no TAG_* criterion"));
+            CHECK(hasw(rc, "not valid for a gate run") && hasw(rc, "no TAG_* criterion"));
+            CHECK(hasw(rd, "not valid for a gate run") && hasw(rd, "no TAG_* criterion"));
         }
         {   // &MISC EXACT_SUMS is accepted (logical, default F) and has no effect; other &MISC content is not looked at; a non-logical value is an error
             Report ra, rb, rc, rd;
             CHECK(!parse("&AMR MAX_LEVEL=1 /", ra).exact_sums && ra.ok());
-            CHECK(parse("&MISC EXACT_SUMS=.TRUE., SIMULATION_MODE='DNS', ANYTHING_ELSE=3 /\n&AMR MAX_LEVEL=1 /", rb).exact_sums && rb.ok() && rb.warnings.empty());
+            AmrParams pb = parse("&MISC EXACT_SUMS=.TRUE., SIMULATION_MODE='DNS', ANYTHING_ELSE=3 /\n&AMR MAX_LEVEL=1 /", rb);
+            CHECK(pb.exact_sums && rb.ok() && rb.warnings.size() == 1 && rb.warnings[0].find("no TAG_* criterion") != std::string::npos);
             CHECK(!parse("&MISC EXACT_SUMS=.FALSE. /", rc).exact_sums && rc.ok());
             parse("&MISC EXACT_SUMS='maybe' /", rd);
             CHECK(rd.has_error_containing("EXACT_SUMS"));
@@ -133,6 +138,43 @@ int main()
         Report r4;
         parse("&AMR_REGION XB=0,1,0,1,0,1 /", r4);
         CHECK(r4.has_error_containing("without an &AMR line"));
+    }
+    {  // TAG_* keys (FR-011 / IR-003): unset = off; TAG_KEEP default 0.8; SPEC_ID/DIFF paired; KEEP range; regrid without criterion warns
+        Report r;
+        AmrParams p = parse("&AMR MAX_LEVEL=1, TAG_TMP_DIFF=5.0, TAG_TMP_ABOVE=50.0, TAG_RHO_DIFF=0.1, "
+                            "TAG_SPEC_ID='SLUG', TAG_SPEC_DIFF=0.05, TAG_HRRPUV=200.0, TAG_KEEP=0.5 /", r);
+        CHECK(r.ok());
+        CHECK(p.has_tag_tmp_diff() && p.tag_tmp_diff == 5.0);
+        CHECK(p.has_tag_tmp_above() && p.tag_tmp_above == 50.0);
+        CHECK(p.has_tag_rho_diff() && p.tag_rho_diff == 0.1);
+        CHECK(p.tag_spec_id == "SLUG" && p.has_tag_spec_diff() && p.tag_spec_diff == 0.05);
+        CHECK(p.has_tag_hrrpuv() && p.tag_hrrpuv == 200.0);
+        CHECK(p.tag_keep == 0.5 && p.has_any_tag_criterion());
+        Report r0;
+        AmrParams p0 = parse("&AMR MAX_LEVEL=1 /", r0);
+        CHECK(r0.ok() && !p0.has_any_tag_criterion() && p0.tag_keep == 0.8);
+        CHECK(r0.warnings.size() == 1 && r0.warnings[0].find("no TAG_* criterion") != std::string::npos);
+        Report r1;
+        parse("&AMR MAX_LEVEL=1, TAG_SPEC_ID='A' /", r1);
+        CHECK(r1.has_error_containing("TAG_SPEC_ID requires TAG_SPEC_DIFF"));
+        Report r2;
+        parse("&AMR MAX_LEVEL=1, TAG_SPEC_DIFF=0.05 /", r2);
+        CHECK(r2.has_error_containing("TAG_SPEC_DIFF requires TAG_SPEC_ID"));
+        Report r3;
+        parse("&AMR MAX_LEVEL=1, TAG_KEEP=0 /", r3);
+        CHECK(r3.has_error_containing("TAG_KEEP must be in (0, 1]"));
+        Report r4;
+        parse("&AMR MAX_LEVEL=1, TAG_KEEP=1.5 /", r4);
+        CHECK(r4.has_error_containing("TAG_KEEP must be in (0, 1]"));
+        Report r5;
+        parse("&AMR MAX_LEVEL=1, REGRID_INTERVAL=0, TAG_TMP_DIFF=1 /", r5);
+        CHECK(r5.ok() && r5.warnings.empty());   // static hierarchy: no "missing criterion" warning
+        Report r6;
+        parse("&AMR MAX_LEVEL=0, REGRID_INTERVAL=4 /", r6);
+        CHECK(r6.ok());   // MAX_LEVEL=0: no criterion required
+        Report r7;
+        parse("&AMR MAX_LEVEL=1, TAG_VORT=1 /", r7);
+        CHECK(r7.has_error_containing("unknown parameter TAG_VORT"));
     }
     std::printf("test_amr_input: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;
