@@ -91,3 +91,24 @@ and not of the dump point.
 4. **Result.** L1209 bitwise equal to FDS output for all walls, closed run steps 1 and 2 (4 files, 2552 elements) and two-mesh run steps 1 to 3 (12 files,
    8616 elements), predictor and corrector, 0 differing elements. The C++ function may replace the FDS loop on open boundaries; the NIC>1 and synthetic-eddy
    branches remain untested against FDS (the dump hook stops on synthetic eddies).
+
+## Multi-set FDS archive (r5)
+
+`frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz` holds nine set directories, one per `frozen/fds_cases/ldump_*.fds` input, written with the
+same dump hook. Sets and census predicates (`tests/fds_loops_test.py` CENSUS):
+
+| Set | What the census requires |
+|---|---|
+| 2d | TWO_D, JBAR=1, mirror-type y walls |
+| perx | periodic in x (LBC=0), PRHS leading dimension IBAR |
+| peryz | periodic in y and z (MBC=NBC=0) |
+| dirx | Dirichlet low-x (LBC=2), SOLID-Dirichlet WALL_WORK1 /= 0 at IOR=1, open IOR=1 |
+| dirxhi | Dirichlet high-x (LBC=4), SOLID-Dirichlet at IOR=-1, open IOR=-1 |
+| ylow | Dirichlet low-y and low-z (MBC=NBC=2), open IOR=2 and 3 |
+| openyz | open y faces, both z faces and +x with wind; z walls at KK=0 and KK=KBP1 |
+| ramp | T_BEGIN /= 0; ramped open walls with T_IGN = T_BEGIN and T_IGN /= T_BEGIN, and open walls without a ramp |
+| eddy | synthetic eddy inflow with wind: N_EDDY > 0 walls with non-zero eddy values |
+
+CTests: `pb_fdsloops_census` (predicates only, no executable), `pb_fdsloops_fds_sets` (pb_fds_loops bitwise on every set), and
+`pb_fdsloops_fds_sets_uu_lb0` (negative control: wrong velocity lower bound must fail at least one set). The single-set archive
+`fds_loops_cases.tar` and its tests remain for the original closed / two-mesh coverage.

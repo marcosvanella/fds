@@ -58,6 +58,29 @@ add_test(NAME pb_fdsloops_fds_uu_lb0
           --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases.tar)
 set_tests_properties(pb_fdsloops_fds_uu_lb0 PROPERTIES TIMEOUT 300)
 
+# Multi-set FDS dump archive (frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz): one sub-directory per ldump_* input
+# (2d, dirx, dirxhi, eddy, openyz, perx, peryz, ramp, ylow). pb_fdsloops_census checks that every set really
+# exercises the boundary codes / wall kinds / wind / ramp / eddy classes listed in tests/fds_loops_test.py CENSUS
+# (no executable needed). pb_fdsloops_fds_sets runs pb_fds_loops on every set and requires bitwise equality.
+# pb_fdsloops_fds_sets_uu_lb0 is the negative control (wrong velocity lower bound must fail at least one set).
+add_test(NAME pb_fdsloops_census
+  COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} census
+          --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz
+          --work ${CMAKE_CURRENT_BINARY_DIR}/fds_loops_census)
+set_tests_properties(pb_fdsloops_census PROPERTIES TIMEOUT 300)
+add_test(NAME pb_fdsloops_fds_sets
+  COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} check-fds-sets
+          --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz
+          --work ${CMAKE_CURRENT_BINARY_DIR}/fds_loops_sets
+          --exe $<TARGET_FILE:pb_fds_loops>)
+set_tests_properties(pb_fdsloops_fds_sets PROPERTIES TIMEOUT 600)
+add_test(NAME pb_fdsloops_fds_sets_uu_lb0
+  COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} check-fds-sets --expect-fail --exe-arg uu_lb0=1
+          --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz
+          --work ${CMAKE_CURRENT_BINARY_DIR}/fds_loops_sets_lb0
+          --exe $<TARGET_FILE:pb_fds_loops>)
+set_tests_properties(pb_fdsloops_fds_sets_uu_lb0 PROPERTIES TIMEOUT 600)
+
 # Guards and edge indices (harness/loops_guards.cpp): C1 whole-extent guard of the periodic H fill, C2 TUNNEL_PRECONDITIONER refusal,
 # C3 L1209 wind arrays must cover 0..KBP1 and the z-wall indices KK=0 / KK=KBP1. Mutants 19 (no whole-extent guard), 20 (the former
 # wind guard 1..KBAR) and 21 (no tunnel refusal) must fail it. The AddressSanitizer build proves that no read leaves an array; mutant 20
