@@ -13,7 +13,7 @@ Status: draft for the Chief Architect. No code yet. Covers milestone R4 of `plan
 | Temperature | `TAG_TMP_DIFF` (K), `TAG_TMP_ABOVE` (K above ambient) | max over 6 neighbours of abs(T - T_nb) > threshold; or T - T_ambient > threshold |
 | Density | `TAG_RHO_DIFF` (relative) | max abs(rho - rho_nb) / rho > threshold |
 | Species or mixture fraction | `TAG_SPEC_ID`, `TAG_SPEC_DIFF` | same difference test on Y of the named species |
-| Heat release rate per unit volume | `TAG_HRRPUV` (kW/m3) | HRRPUV > threshold (**assumption**: the cell array is kept at end of step) |
+| Heat release rate per unit volume | `TAG_HRRPUV` (kW/m3) | Q > thr×1000 (namelist kW/m³; ErrorEst/`apply_tag_criteria` converts once to W/m³ to match registry Q; **assumption**: the cell array is kept at end of step) |
 | Vorticity | `TAG_VORT` (1/s) | magnitude of curl u from centred differences of face velocities > threshold |
 | User boxes | existing `&AMR_REGION` (+ `LEVEL`) | forced inside the box (already R1) |
 | Distance to OBST/VENT | `TAG_DIST`, `TAG_DIST_ID` | needs OBST on levels: **deferred to Phase 5** |

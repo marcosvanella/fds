@@ -197,7 +197,8 @@ void apply_tag_criteria(amrex::TagBoxArray& tags, const AmrParams& p, const TagF
         tag_cells(tags, *f.zz, f.zz_den, 0, covered, c);
     }
     if (p.has_tag_hrrpuv() && f.hrrpuv) {
-        c.mode = TagMode::Above; c.thr = p.tag_hrrpuv; c.base = 0.0; c.comp = 0;
+        // namelist TAG_HRRPUV is kW/m3; Q field is W/m3 (FDS IN%HRRPUV *= 1000)
+        c.mode = TagMode::Above; c.thr = p.tag_hrrpuv * 1000.0; c.base = 0.0; c.comp = 0;
         tag_cells(tags, *f.hrrpuv, nullptr, 0, covered, c);
     }
     if (p.has_tag_vort() && f.vort) {
