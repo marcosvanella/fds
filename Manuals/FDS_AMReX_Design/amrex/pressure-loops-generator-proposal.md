@@ -1,7 +1,8 @@
 # Generator kernel entries for L1211 and L1207 (proposal for the generator owners)
 
-Status: proposal only. No file in the generator worktree was edited. The probe ran against a scratch copy of the generator tree with the
+Status: proposal only (for the Generator Engineer). No file in the generator worktree was edited. The probe ran against a scratch copy of the generator tree with the
 command `s5gen.py --repo <src> --commit 36975d7 --markers <probe sidecar> --out <dir> --golden <file>`.
+L1210 and L1212–L1214 are RETIRED (pressure/09), so the transposed-PRHS layout-contract need drops out; Role 2 close-out is in `amrex/pressure-loops-r2-status.md`.
 
 The independent CPU reference implementations are in `Source/pressure_backend/FdsPressureLoops.cpp` (`pres_p_from_h`,
 `pres_compute_rhs_div`), tested bitwise against the verbatim upstream lines (see `Source/pressure_backend/frozen/fds-loops-notes.md`). A
@@ -23,7 +24,7 @@ layout = "exact"
 The generator accepted the entry and
 produced the correct bounds, including `RHOP(-1:IBAR+2, ...)`. Trap for the review: the box includes ghost cells in every direction.
 
-## L1211 (pres.f90:250-260), needs a generator feature
+## L1211 (pres.f90:250-260), needs a generator feature (IPS 1/4/7 natural layout only)
 
 ```toml
 [[kernel]]
@@ -47,8 +48,9 @@ is periodic), JTRN is 1 when JBAR=1, so the strides and the index origin differ 
   path (CONNECTED_ZONES) turns extent symbols into scalar arguments.
 
 What the generator owners need to add: extent symbols of an `exact` allocation (here ITRN, JTRN, KTRN) become integer arguments for
-cell-loop kernels too, and PRHS gets an index origin of 1. The same "layout contract" is what L1212-L1214 (transposed PRHS) need.
+cell-loop kernels too, and PRHS gets an index origin of 1.
 
 ## What the CPU reference already covers
 
-L1211 (IPS 1/4/7, non-cylindrical) with ITRN either IBAR+1 or IBAR; L1207. L1210 (cylindrical branch) and L1212-L1214 are not covered.
+L1211 (IPS 1/4/7, non-cylindrical) with ITRN either IBAR+1 or IBAR; L1207. L1210 and L1212–L1214 are RETIRED (pressure/09); see
+`amrex/pressure-loops-r2-status.md`.

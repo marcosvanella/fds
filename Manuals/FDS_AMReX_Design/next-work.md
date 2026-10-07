@@ -5,6 +5,8 @@ Owner rule: nobody sits idle. Each role has an ordered list of ready items, each
 
 Status as of spec v0.4.41 plus D-081 to D-083 and the local FireX merge into FDS-AMReX, next-work revision r6.
 
+Standing coding rule for implementers: `coding-rules.md` / D-084 (simplicity; minimum lines, FLOPs, conditionals, copies). Decisions since that note: D-085 (scheme-3 device `maxulp ≤ 8192`, named exception to D-070).
+
 Decisions since r5: D-083 (`CHECK_MASS_DENSITY`: GPU-only hand-written two-pass kernel in the K2 style, CPU loop unchanged, `UP-0003` tabled), D-082 (MP5 out of scope, `UP-0001` and `UP-0002` tabled; MP5-only kernels, markers, registry entries and tests are marked out of scope, not deleted, and do not count against coverage), D-081 (single-mesh FDS is the ground truth for step-sequence checks; multi-mesh first-step offset is a reference quirk). Earlier: D-080 (tag buffering, `MAXLOC` sign-offs, `WALL_LOOP_2` host path, test lock, `run_class_tolerance`, pressure conditions C1 to C3), D-079, D-078, D-077.
 
 Landed since r5 (items removed from the lists, each checked in the repositories): the test-lock wrapper `test/with_s5lock.sh` with the 30-minute self-release and the lock rules in the generator README (s5-gen `ce4cb8704b`, `9f0b70924b`); the `rho_d_maxloc_fix` NaN limit in the kernel note and the tie test with three or more species that kills `maxloc_x_last_wins` and `maxloc_z_last_wins` (generator README, "Tie rule" and "Limit"; `test/s5_div1_bitwise.F90`); the HYPRE-off build fix (driver `HypreStub.cpp` and its CMake entry removed, src `fc49f96cc4`, the rewritten form of `c8e83f2b43`); Role 1's variable-density two-level case with discriminating overwrite on/off controls at 1 and 4 ranks (`617da72d85`), drafts of driver patches `0011` and `0012` with hooks and `run_mesh_dumps_check.sh` (`9442836334`, not yet run), the residual-check report of the solves (`91c75e9e49`) and the D-081 step-sequence check against single-mesh FDS (`e5164b00c6`, `9238d90e5f`); Role 2's conditions C1 to C3 (`d59803eb56`) and loop tests R2 and R3 (`8160c2cafc`); the `rad_wall_qin_zero` and `W_SURF_INDEX` fix and the wall-check hard stops, merged with `s5-four`, `s5-wall-next`, `s5-merge` and the `pvf_fvx/fvy/fvz` kernels on `s5-land` (`fd5b22dcae`, `fb990f42f6`), where `ci_checks --strict` passes (128 kernels, 111 in the golden); spec v0.4.41 with D-079 and D-080 and actions A-75 to A-77 (docs `ac04814`); the Pressure Solver Lead's sign-offs of L1211, L1207, L1220 to L1222 and L1209. A-77 closed: `WALL_LOOP_2` host path bitwise on `dec2_obst` with gather/scatter cost recorded (docs `d1e73c1`, stage1 §7.16).
@@ -55,14 +57,15 @@ Blocked on: nothing.
 Blocked on: nothing for items 1 to 5.
 
 **AMReX Integration Lead. Dry risk: low (5 ready).**
-1. Follow-on after A-77: K1 scatter for `WALL_LOOP_2`, driver wire-up and device run on the test machine (not a reopen of A-77; host path closed).
-2. FASTMATH CMake pin: apply `tools/patches/cmake-fastmath-pin.patch` to the generator worktree (D-068; `amrex/ported-candidates.md` section 3).
-3. Held-out kernels: real-field runs for `rho_d_interp`, `dp_div_heat` and a host-tier result for `d_z_max` and `del_rho_d_del_z`; `rho_d_maxloc_fix` stays out of `ported.toml` until A-76 (NS≥3 tie frequency) lands (`amrex/ported-candidates.md`, held out; Species ACCEPT-with-conditions).
-4. WP9b pieces 9b-5 and 9b-7: device launch sequence part A, hook, part B (`amrex/wp3-generator-coverage.md` section 3.2).
-5. Rule-7 macro form in `s4_omp.inc` and re-time (`amrex/s4-k2-single-source.md`; D-072 (d)).
-6. Open actions A-28, A-31, A-44, A-48, A-49, A-51, A-54 (`README.md`).
-7. Sweep launch layer: one launch per wavefront plane across all boxes of a level (D-073 (f), D-075 (7); stage-1 plan 7.14). Waits for GPU time.
-8. WP8 flat tables on the device and WP11 wall kernels in the driver after generator change W1 (`amrex/stage1-gpu-spike-plan.md`). Waits for W1 and GPU time.
+1. Encode D-085 scheme-3 device limit (`maxulp ≤ 8192` for `s5rad_plane3d_ild` under `-DS5_LIBM_CLASS`) in the device-tier judge / `kernel_categories.json` (V&V records in `vv/rad_scheme3_tolerance.md`).
+2. Follow-on after A-77: K1 scatter for `WALL_LOOP_2`, driver wire-up and device run on the test machine (not a reopen of A-77; host path closed).
+3. FASTMATH CMake pin: apply `tools/patches/cmake-fastmath-pin.patch` to the generator worktree (D-068; `amrex/ported-candidates.md` section 3).
+4. Held-out kernels: real-field runs for `rho_d_interp`, `dp_div_heat` and a host-tier result for `d_z_max` and `del_rho_d_del_z`; `rho_d_maxloc_fix` stays out of `ported.toml` until A-76 (NS≥3 tie frequency) lands (`amrex/ported-candidates.md`, held out; Species ACCEPT-with-conditions).
+5. WP9b pieces 9b-5 and 9b-7: device launch sequence part A, hook, part B (`amrex/wp3-generator-coverage.md` section 3.2).
+6. Rule-7 macro form in `s4_omp.inc` and re-time (`amrex/s4-k2-single-source.md`; D-072 (d)).
+7. Open actions A-28, A-31, A-44, A-48, A-49, A-51, A-54 (`README.md`).
+8. Sweep launch layer: one launch per wavefront plane across all boxes of a level (D-073 (f), D-075 (7); stage-1 plan 7.14). Waits for GPU time.
+9. WP8 flat tables on the device and WP11 wall kernels in the driver after generator change W1 (`amrex/stage1-gpu-spike-plan.md`). Waits for W1 and GPU time.
 Blocked on: GPU time on the test machine for items 7 and 8.
 
 **Pressure Solver Lead (loop duty). Dry risk: low (7 ready, 4 of them loop items).**
@@ -117,21 +120,22 @@ Blocked on: nothing for items 1 to 7.
 2. Loops L1248, L1249, L1250, L1247, L1238, L1241: translated on s5-land (see radiation/06 §16-§17).
 3. Gate hookup for radiation kernels (`radiation/03-radiation-translation-notes.md`). Open; do not start under land pause.
 4. Follow-ups R1 to R4 from `solid/08-new-wall-kernel-review.md` section 7.
-5. Confirm the ghost `UII`/`UIID` reader list with the V&V Lead (D-073 (b), D-077 (6)); radiation verification variants (A-50). Wait on the V&V Lead.
+5. Ghost `UII`/`UIID`/`QR` readers: V&V closed D-073(b) with keep-ghost-bits for CASE(18)/(19) (`vv/d073b_ghost_readers.md`); A-50 box-split ghost clause closed. Remaining radiation verification variants as needed (FR-060/FR-062/FR-063).
 6. Radiation under regrid (`radiation/04-radiation-phase4-notes.md`; FR-063). Waits on Role 3.
 7. Setup/deferred closes confirmed: L0825-L0827 host (FR-062 exchange), L0676 host, L0664/L0665 host, L0006/L0007 GEOM deferred D-033 (`radiation/06` §18).
 
 **V&V Lead. Dry risk: low.**
-1. `run_class_tolerance` in `kernel_categories.json` and the `RUNCMP` lines of the harness (D-080 (5); `vv/dt_class_tolerance.md`).
-2. Device-tier 2-ulp harness (D-070, D-072 (b)), including the run-level class-tolerance comparison for `wall_visc_les`.
-3. Tests for D-080 and D-083: zero-lost-cell tag-buffer rows (P3 tagging), review of the landed `rho_d_maxloc_fix` tie test, the `WALL_LOOP_2` gate on `dec2_obst`, pressure tests R4 and R5, and the acceptance cases for the D-083 two-pass kernel (clipping exercised, bitwise against the CPU loop).
-4. Drop MP5 from the case inventory and gate sets as out of scope (D-082); MP5 cases are not counted (`vv/case_inventory.md`, `vv/test-plan.md`).
-5. P3-B09 distance d(n) = 4n in the test plan and `vv-runs/phase3/phase3_cases.csv` (A-61).
-6. Flip-budget harness (D-077 (1); `solid/09`, test plan 5.10).
-7. Gate rows of the Phase 3 moving blob; decomposition rows with `EXACT_SUMS` on (`vv/test-plan.md` 5.11, 5.12.6).
-8. Gate hookup for the radiation kernels (`radiation/03-radiation-translation-notes.md`).
-9. Debug `int_1to2` and the 13 skipped four-rank Intel cases when the test machine is idle (`vv/baseline_status.md`).
-10. Held-out kernel reviews as evidence lands (`vv/ported-review.md`); A-46, A-47, A-26, A-39, A-42, A-49.
+1. D-085: record ratification in `vv/rad_scheme3_tolerance.md` (Architect number `maxulp ≤ 8192` for scheme-3 `s5rad_plane3d_ild` under LIBM-CLASS); ask Integration to encode the limit in the device-tier judge / `kernel_categories.json`. Schemes 1–2 stay bitwise; host gate stays bitwise.
+2. `run_class_tolerance` in `kernel_categories.json` and the `RUNCMP` lines of the harness (D-080 (5); `vv/dt_class_tolerance.md`).
+3. Device-tier 2-ulp harness (D-070, D-072 (b)), including the run-level class-tolerance comparison for `wall_visc_les`.
+4. Tests for D-080 and D-083: zero-lost-cell tag-buffer rows (P3 tagging), review of the landed `rho_d_maxloc_fix` tie test, the `WALL_LOOP_2` gate on `dec2_obst`, pressure tests R4 and R5, and the acceptance cases for the D-083 two-pass kernel (clipping exercised, bitwise against the CPU loop).
+5. Drop MP5 from the case inventory and gate sets as out of scope (D-082); MP5 cases are not counted (`vv/case_inventory.md`, `vv/test-plan.md`).
+6. P3-B09 distance d(n) = 4n in the test plan and `vv-runs/phase3/phase3_cases.csv` (A-61).
+7. Flip-budget harness (D-077 (1); `solid/09`, test plan 5.10).
+8. Gate rows of the Phase 3 moving blob; decomposition rows with `EXACT_SUMS` on (`vv/test-plan.md` 5.11, 5.12.6).
+9. Gate hookup for the radiation kernels (`radiation/03-radiation-translation-notes.md`).
+10. Debug `int_1to2` and the 13 skipped four-rank Intel cases when the test machine is idle (`vv/baseline_status.md`).
+11. Held-out kernel reviews as evidence lands (`vv/ported-review.md`); A-46, A-47, A-26, A-39, A-42, A-49.
 
 ## GPU and build roles
 
