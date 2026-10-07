@@ -90,11 +90,22 @@ void apply_operator (PressureProblem const& p, amrex::MultiFab& phi, amrex::Mult
 struct ResidualNorms { double rel2 = 0.0; double relmax = 0.0; };
 ResidualNorms true_residual (PressureProblem const& p, amrex::MultiFab& phi, amrex::MultiFab const& rhs);
 
+// Bound of the discrete operator norm on one level: 4 sum_d 1/dx_d^2 over directions with more than one cell (D-084: shared by
+// residual_sums and the composite E3 floor). dx is CellSizeArray(); dom is the level Domain().
+inline double operator_anorm (amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> const& dx, amrex::Box const& dom)
+{
+    double a = 0.0;
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+        if (dom.length(d) > 1) { a += 4.0 / (double(dx[d]) * double(dx[d])); }
+    }
+    return a;
+}
+
 // ---- Scaled, pin-aware residual check (see PressureResult::residual_check and frozen/hypre-notes.md) -----------------------
 // The sums behind it, all with the same cell weights w (1 on a single level, the cell volume on a hierarchy) over the uncovered cells:
 //   r2 = sum w r^2, r2_nopin = same with the pin cell's r set to 0, pin2 = w_pin r_pin^2, sumr = sum w r, sumw = sum w,
-//   b2 = sum w b^2, phi2 = sum w H^2, anorm = bound of the operator norm (4 sum_d 1/dx_d^2 over directions with more than one cell;
-//   single level: that grid; composite: effective ||A|| with level-wise A_l weighted like phi2, E3), rmax = max |r| over all cells,
+//   b2 = sum w b^2, phi2 = sum w H^2, anorm = bound of the operator norm (operator_anorm; single level: that grid; composite:
+//   min(2*anorm_eff, A_finest) with anorm_eff level-wise A_l weighted like phi2, E3 / D-087), rmax = max |r| over all cells,
 //   rmax_nopin = same without the pin cell, bmax = max |b|, pin_abs = |r_pin|.
 struct ResidualSums {
     double r2 = 0, r2_nopin = 0, pin2 = 0, sumr = 0, sumw = 0, b2 = 0, phi2 = 0, anorm = 0, rmax = 0, rmax_nopin = 0, bmax = 0, pin_abs = 0;

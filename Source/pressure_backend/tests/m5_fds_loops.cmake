@@ -63,8 +63,8 @@ set_tests_properties(pb_fdsloops_fds_uu_lb0 PROPERTIES TIMEOUT 300)
 # exercises the boundary codes / wall kinds / wind / ramp / eddy classes listed in tests/fds_loops_test.py CENSUS
 # (no executable needed). pb_fdsloops_fds_sets runs pb_fds_loops on every set and requires bitwise equality.
 # pb_fdsloops_fds_sets_uu_lb0 is the negative control (wrong velocity lower bound must fail at least one set).
-# pb_fdsloops_r4r5 is the pressure/08 R4 (H BC codes 0 and 2) / R5 (L1209 wall classes) coverage gate on the
-# same archive; bitwise of those sets stays on pb_fdsloops_fds_sets (and the original closed/two-mesh on pb_fdsloops_fds).
+# R4/R5 evidence: census predicates + bitwise on pb_fdsloops_fds_sets (Architect ACCEPT evidence, CHANGE the loose re-check).
+# Named gate pb_fdsloops_r4r5 requires the CENSUS keys and FIXTURES_REQUIRED on the bitwise sets test.
 add_test(NAME pb_fdsloops_census
   COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} census
           --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz
@@ -86,12 +86,13 @@ add_test(NAME pb_fdsloops_r4r5
   COMMAND ${Python3_EXECUTABLE} ${PB_LOOPS_TEST} r4r5
           --archive ${CMAKE_CURRENT_LIST_DIR}/../frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz
           --work ${CMAKE_CURRENT_BINARY_DIR}/fds_loops_r4r5)
-set_tests_properties(pb_fdsloops_r4r5 PROPERTIES TIMEOUT 300)
+set_tests_properties(pb_fdsloops_r4r5 PROPERTIES TIMEOUT 300 FIXTURES_REQUIRED pb_fdsloops_fds_sets)
+set_tests_properties(pb_fdsloops_fds_sets PROPERTIES FIXTURES_SETUP pb_fdsloops_fds_sets)
 
-# Guards and edge indices (harness/loops_guards.cpp): C1 whole-extent guard of the periodic H fill, C2 TUNNEL_PRECONDITIONER refusal,
-# C3 L1209 wind arrays must cover 0..KBP1 and the z-wall indices KK=0 / KK=KBP1. Mutants 19 (no whole-extent guard), 20 (the former
-# wind guard 1..KBAR) and 21 (no tunnel refusal) must fail it. The AddressSanitizer build proves that no read leaves an array; mutant 20
-# under the sanitizer reproduces the former heap-buffer-overflow at the W_WIND(K) read (tests expects it to fail).
+# Guards and edge indices (harness/loops_guards.cpp): C1 whole-extent guard of the H fill (every code), C3 L1209 wind arrays must
+# cover 0..KBP1 and the z-wall indices KK=0 / KK=KBP1. Mutants 19 (no whole-extent guard) and 20 (the former wind guard 1..KBAR)
+# must fail it. C2 TUNNEL refusal is at converter/setup (Role 3). The AddressSanitizer build proves that no read leaves an array;
+# mutant 20 under the sanitizer reproduces the former heap-buffer-overflow at the W_WIND(K) read (tests expects it to fail).
 function(pb_loops_guards_exe name)
   add_executable(${name} ${CMAKE_CURRENT_LIST_DIR}/../harness/loops_guards.cpp ${CMAKE_CURRENT_LIST_DIR}/../FdsPressureLoops.cpp)
   target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
@@ -103,7 +104,7 @@ function(pb_loops_guards_exe name)
 endfunction()
 pb_loops_guards_exe(pb_fds_loops_guards)
 add_test(NAME pb_fdsloops_guards COMMAND pb_fds_loops_guards)
-foreach(m 19 20 21)
+foreach(m 19 20)
   pb_loops_guards_exe(pb_fds_loops_guards_mut${m} PB_FDSLOOPS_MUTANT=${m})
   add_test(NAME pb_fdsloops_guards_mutant_${m} COMMAND pb_fds_loops_guards_mut${m})
   set_tests_properties(pb_fdsloops_guards_mutant_${m} PROPERTIES WILL_FAIL TRUE)

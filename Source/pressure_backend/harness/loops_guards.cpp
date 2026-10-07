@@ -1,9 +1,10 @@
 // loops_guards.cpp: pb_fds_loops_guards, guard and edge-index tests of the host loop translations (FdsPressureLoops.cpp).
-//   C1  periodic wrap of the H boundary fill (L1220-L1222) needs the box to be the whole domain extent (throws otherwise);
-//   C2  TUNNEL_PRECONDITIONER is refused (NotBuilt) by the H fill and by L1209;
+//   C1  H boundary fill (L1220-L1222) needs the box to be the whole domain extent in the fill direction for every code
+//       (throws otherwise); tangential sub-boxes remain allowed;
 //   C3  L1209 wind arrays U_WIND/V_WIND/W_WIND must cover 0..KBP1; z walls have KK=0 and KK=KBP1 and read the wind at those indices.
-// Every check prints PASS/FAIL; exit 0 only if all pass. Mutants (PB_FDSLOOPS_MUTANT 19, 20, 21 in FdsPressureLoops.cpp: no whole-extent
-// guard, the former wind guard 1..KBAR, no tunnel refusal) must make this program fail (tests/m5_fds_loops.cmake).
+// C2 TUNNEL_PRECONDITIONER refusal moved to converter/setup (D-080(6)); not tested here (Role 3).
+// Every check prints PASS/FAIL; exit 0 only if all pass. Mutants (PB_FDSLOOPS_MUTANT 19, 20 in FdsPressureLoops.cpp: no whole-extent
+// guard, the former wind guard 1..KBAR) must make this program fail (tests/m5_fds_loops.cmake).
 // Built also with -fsanitize=address (pb_fds_loops_guards_asan): the C3 cases then also prove that no read leaves the arrays.
 // No AMReX, no MPI.
 #include "FdsPressureLoops.H"
@@ -37,7 +38,7 @@ struct Arr1 { std::vector<double> v; F1 f; Arr1 (int lo, int hi, double fill = 0
 // ---------------------------------------------------------------------------------------------------------------- C1
 void test_c1 ()
 {
-    std::printf("C1 periodic wrap needs the whole domain extent\n");
+    std::printf("C1 H fill needs the whole domain extent in the fill direction (every code)\n");
     const int N = 6;
     const Box3 dom = fds_interior(N, N, N);
     Arr2 bxs(N, N), bxf(N, N), bys(N, N), byf(N, N), bzs(N, N), bzf(N, N);
@@ -66,14 +67,23 @@ void test_c1 ()
         check(throws_as<std::invalid_argument>([&] { fill(hi_short, 0, h2); (void)0; return 0; }) , (std::string("sub-box (high end cut) refused in ") + nm).c_str());
         check(throws_as<std::invalid_argument>([&] { fill(lo_short, 0, h2); return 0; }), (std::string("sub-box (low end cut) refused in ") + nm).c_str());
         check(h2.v == before, (std::string("refused call wrote nothing in ") + nm).c_str());
-        // a non-periodic code on a sub-box is not a wrap and stays allowed (physical-face fill of a piece of a face)
-        bool ok = true; try { fill(hi_short, 3, h2); } catch (...) { ok = false; }
-        check(ok, (std::string("non-periodic code on a sub-box is allowed in ") + nm).c_str());
+        // C1 CHANGE: every code needs the whole extent in the fill (normal) direction; a normal cut is refused
+        check(throws_as<std::invalid_argument>([&] { fill(hi_short, 3, h2); return 0; }),
+              (std::string("non-periodic code on a normal-direction cut refused in ") + nm).c_str());
+        // a tangential cut (box short in a direction other than the fill) stays allowed
+        Box3 tang = dom;
+        const int td = (dir + 1) % 3;
+        tang.hi[td] = N - 1;
+        bool ok = true; try { fill(tang, 3, h2); } catch (...) { ok = false; }
+        check(ok, (std::string("tangential sub-box allowed for non-periodic fill in ") + nm).c_str());
+        // code 0 on a tangential cut is also allowed (extent check is only in the fill direction)
+        bool ok0 = true; try { fill(tang, 0, h2); } catch (...) { ok0 = false; }
+        check(ok0, (std::string("tangential sub-box allowed for periodic fill in ") + nm).c_str());
     }
 }
 
-// ---------------------------------------------------------------------------------------------------------------- C2
-// A small valid L1209 context (closed Neumann walls only) for the tunnel check and the wind cases.
+// ---------------------------------------------------------------------------------------------------------------- C3 helpers
+// A small valid L1209 context (closed Neumann walls only) for the wind cases.
 struct Ctx {
     int ib, jb, kb;
     Arr3 hp, kres, fvx, fvy, fvz, uu, vv, ww;
@@ -111,30 +121,6 @@ struct Ctx {
         vent.pressure_ramp_index = 1; vent.dynamic_pressure = 7.0; vent.ior = 3;
     }
 };
-
-void test_c2 ()
-{
-    std::printf("C2 TUNNEL_PRECONDITIONER is refused\n");
-    const int N = 4;
-    Arr2 b(N, N); Arr3 h(0, N + 1, 0, N + 1, 0, N + 1); h.fill_pattern(1.0);
-    HFillOptions opt; opt.domain = fds_interior(N, N, N);
-    const std::vector<double> before = h.v;
-    bool ok = true; try { pres_h_bc_x(opt.domain, opt, 3, 0.5, b.f, b.f, h.f); pres_h_bc_y(opt.domain, opt, 3, 0.5, b.f, b.f, h.f); pres_h_bc_z(opt.domain, opt, 3, 0.5, b.f, b.f, h.f); } catch (...) { ok = false; }
-    check(ok, "tunnel flag off: the H fill runs");
-    h.v = before;
-    opt.tunnel_preconditioner = true;
-    check(throws_as<NotBuilt>([&] { pres_h_bc_x(opt.domain, opt, 3, 0.5, b.f, b.f, h.f); return 0; }), "x fill refuses (NotBuilt)");
-    check(throws_as<NotBuilt>([&] { pres_h_bc_y(opt.domain, opt, 3, 0.5, b.f, b.f, h.f); return 0; }), "y fill refuses (NotBuilt)");
-    check(throws_as<NotBuilt>([&] { pres_h_bc_z(opt.domain, opt, 0, 0.5, b.f, b.f, h.f); return 0; }), "z fill refuses (NotBuilt) also for a periodic code");
-    check(h.v == before, "refused fills wrote nothing");
-    try { pres_h_bc_x(opt.domain, opt, 3, 0.5, b.f, b.f, h.f); } catch (NotBuilt const& e) { check(std::strstr(e.what(), "TUNNEL_PRECONDITIONER") != nullptr, "message names TUNNEL_PRECONDITIONER"); }
-    Ctx x(3, 3, 3);
-    PoissonWall w; w.i = 1; w.j = 1; w.k = 1; w.ior = 1; w.pressure_bc_type = fdsconst::NEUMANN; w.boundary_type = fdsconst::SOLID_BOUNDARY;
-    bool ok2 = true; try { pres_poisson_boundary_arrays(x.c, &w, 1); } catch (...) { ok2 = false; }
-    check(ok2, "tunnel flag off: L1209 runs");
-    x.c.tunnel_preconditioner = true;
-    check(throws_as<NotBuilt>([&] { pres_poisson_boundary_arrays(x.c, &w, 1); return 0; }), "L1209 refuses (NotBuilt)");
-}
 
 // ---------------------------------------------------------------------------------------------------------------- C3
 // One open z wall with the wind option on, at KK = 0 (IOR=3) or KK = KBP1 (IOR=-3): the value must be the one computed by hand from
@@ -201,7 +187,6 @@ void test_c3 ()
 int main ()
 {
     test_c1();
-    test_c2();
     test_c3();
     std::printf("SUMMARY checks=%d failed=%d %s\n", g_n, g_fail, g_fail == 0 ? "PASS" : "FAIL");
     return g_fail == 0 ? 0 : 1;

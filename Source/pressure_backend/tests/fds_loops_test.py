@@ -120,100 +120,28 @@ def fmt_facts(f):
 
 
 def r4r5_coverage(archive, work):
-    """pressure/08 R4 (H BC fill codes 0 and 2) and R5 (L1209 wall classes) on the r5 multi-set archive.
+    """Named R4/R5 gate: require the CENSUS keys that close pressure/08 R4/R5 (clause table in frozen/fds-loops-notes.md).
 
-    Bitwise equality of HBC_* / L1209_* in these sets is the job of check-fds-sets (ctest pb_fdsloops_fds_sets);
-    this action is the coverage gate the Pressure Lead can point at.
+    Bitwise equality is pb_fdsloops_fds_sets (FIXTURES_REQUIRED). This action no longer re-derives loose subset predicates.
     """
     d = unpack_sets(archive, work)
     sets = sorted(n for n in os.listdir(d) if os.path.isdir(os.path.join(d, n)))
-    facts = {n: census_set(os.path.join(d, n)) for n in sets}
-    rows = []  # (clause, ok, detail)
-
-    # --- R4 (pressure/08 section 2.4): periodic code 0 and Dirichlet low-face code 2 meet real data ---
-    periodic_sets = [n for n, f in facts.items()
-                     if any(c[0] == 0 or c[1] == 0 or c[2] == 0 for c in f["codes"])]
-    # Prefer naming the known inputs; still accept any set that carries the codes.
-    has_perx = "perx" in facts and any(c[0] == 0 for c in facts["perx"]["codes"])
-    has_peryz = "peryz" in facts and any(c[1] == 0 and c[2] == 0 for c in facts["peryz"]["codes"])
-    ok_period = has_perx or has_peryz
-    rows.append(("R4 periodic codes 0 (perx LBC=0 and/or peryz MBC=NBC=0)",
-                 ok_period,
-                 "sets=%s codes=%s" % (
-                     periodic_sets,
-                     {n: sorted(facts[n]["codes"]) for n in periodic_sets})))
-
-    dir_low_sets = [n for n, f in facts.items()
-                    if any(c[0] == 2 or c[1] == 2 or c[2] == 2 for c in f["codes"])]
-    has_dirx = "dirx" in facts and any(c[0] == 2 for c in facts["dirx"]["codes"])
-    ok_dirlow = has_dirx or bool(dir_low_sets)  # acceptance: LBC=2 or MBC/NBC=2
-    rows.append(("R4 Dirichlet low face code 2 (dirx LBC=2)",
-                 ok_dirlow,
-                 "sets=%s codes=%s" % (
-                     dir_low_sets,
-                     {n: sorted(facts[n]["codes"]) for n in dir_low_sets})))
-
-    # Original closed/two-mesh coverage lives in fds_loops_cases.tar (ctest pb_fdsloops_fds); record that dependency.
-    rows.append(("R4 original closed/two-mesh still in fds_loops_cases.tar (pb_fdsloops_fds)",
-                 True,
-                 "covered by pb_fdsloops_fds; not re-checked here"))
-
-    # --- R5 (pressure/08 section 2.5): four real-FDS wall classes ---
-    # (a) SOLID-Dirichlet with WALL_WORK1 /= 0 (dirx / dirxhi)
-    solid_sets = [n for n, f in facts.items() if f["solid_dir_ww1"]]
-    ok_a = bool(solid_sets) and (
-        ("dirx" in facts and facts["dirx"]["solid_dir_ww1"]) or
-        ("dirxhi" in facts and facts["dirxhi"]["solid_dir_ww1"]))
-    rows.append(("R5(a) SOLID-Dirichlet WALL_WORK1/=0 (dirx/dirxhi)",
-                 ok_a,
-                 "sets=%s solid_dir_ww1=%s" % (
-                     solid_sets,
-                     {n: sorted(facts[n]["solid_dir_ww1"]) for n in solid_sets})))
-
-    # (b) open y faces and +z with wind; z ghosts KK=0 and KBP1 (openyz)
-    openyz_ok = False
-    openyz_detail = {}
-    for n, f in facts.items():
-        need_ior = {2, -2, 3, -3}
-        if f["wind"] and need_ior.issubset(f["open_ior"]) and f["z_ghost_k"] == {0, 1}:
-            openyz_ok = True
-            openyz_detail[n] = {"open_ior": sorted(f["open_ior"]), "z_ghost_k": sorted(f["z_ghost_k"]), "wind": f["wind"]}
-    if not openyz_detail and "openyz" in facts:
-        f = facts["openyz"]
-        openyz_detail["openyz"] = {"open_ior": sorted(f["open_ior"]), "z_ghost_k": sorted(f["z_ghost_k"]), "wind": f["wind"]}
-    rows.append(("R5(b) open y/+z with wind; z ghosts KK=0 and KBP1 (openyz)",
-                 openyz_ok,
-                 "satisfying=%s detail=%s" % (sorted(openyz_detail), openyz_detail)))
-
-    # (c) synthetic-eddy inflow N_EDDY>0 with nonzero WV_EDDYV (eddy)
-    eddy_sets = [n for n, f in facts.items() if f["eddy_walls"] > 0 and f["eddy_nonzero"] > 0]
-    ok_c = bool(eddy_sets)
-    rows.append(("R5(c) synthetic-eddy inflow N_EDDY>0 WV_EDDYV nonzero (eddy)",
-                 ok_c,
-                 "sets=%s eddy_walls/nonzero=%s" % (
-                     eddy_sets,
-                     {n: (facts[n]["eddy_walls"], facts[n]["eddy_nonzero"]) for n in eddy_sets})))
-
-    # (d) ramped open vent with T_IGN /= T_BEGIN (ramp)
-    ramp_sets = [n for n, f in facts.items() if f["ramp_t_ne"] > 0]
-    ok_d = bool(ramp_sets)
-    rows.append(("R5(d) ramped open vent T_IGN /= T_BEGIN (ramp)",
-                 ok_d,
-                 "sets=%s ramp_t_ne/tbegin=%s" % (
-                     ramp_sets,
-                     {n: (facts[n]["ramp_t_ne"], sorted(facts[n]["tbegin"])) for n in ramp_sets})))
-
-    rows.append(("bitwise HBC_*/L1209_* on R4/R5 sets (pb_fdsloops_fds_sets)",
-                 True,
-                 "covered by check-fds-sets / pb_fdsloops_fds_sets; this test is the coverage gate"))
-
-    print("R4/R5 coverage on archive sets: %s" % " ".join(sets))
-    print("%-72s %s  %s" % ("CLAUSE", "RESULT", "EVIDENCE"))
+    need = ("perx", "peryz", "dirx", "dirxhi", "ylow", "openyz", "eddy", "ramp")
+    missing = [n for n in need if n not in sets]
+    print("R4/R5 named gate: archive sets=%s" % " ".join(sets))
+    print("require CENSUS keys: %s" % " ".join(need))
+    if missing:
+        print("FAIL missing sets: %s" % " ".join(missing))
+        return 1
     bad = 0
-    for clause, ok, detail in rows:
-        print("%-72s %s  %s" % (clause, "PASS" if ok else "FAIL", detail))
+    for n in need:
+        f = census_set(os.path.join(d, n))
+        what, pred = CENSUS[n]
+        ok = bool(pred(f))
+        print("%s: %s  %s  facts=%s" % (n, "PASS" if ok else "FAIL", what, fmt_facts(f)))
         bad += 0 if ok else 1
-    print("SUMMARY  %s  (%d fail of %d)" % ("PASS" if bad == 0 else "FAIL", bad, len(rows)))
+    print("SUMMARY  %s  (%d fail of %d); bitwise dependency: pb_fdsloops_fds_sets" % (
+        "PASS" if bad == 0 else "FAIL", bad, len(need)))
     return 0 if bad == 0 else 1
 
 

@@ -151,30 +151,32 @@ public:
         mlmg.setThrowException(true);
         BackendStatus s;
         const Real tgt = Real(kMlmgTolFactor*o.tol_rel);
+        // Polish toward residual_tol (proxy for residual_limit) when that is looser than half-tol; never chase below 0.5*tol_rel
+        // when the caller asked for a loose solve (negative controls with tol_rel >> residual_tol must still warn).
+        const Real polish_tgt = std::max(tgt, Real(o.residual_tol > 0.0 ? o.residual_tol : tgt));
         Real tol = tgt;
         int iters = 0;
+        bool first_ok = false;
         try {
             mlmg.solve({&phi}, {&rhs}, tol, Real(0.0));
             iters = mlmg.getNumIters();
-            s.converged = true;
-            // 2-norm polish (E1 follow-up): the stopping rule above is a max-norm rule, the common-layer check a 2-norm one; for smooth
-            // periodic data the ratio of the two reaches ~5, so a solve can stop at 1.1e-12..1.4e-12 in the checked norm even at half the
-            // tolerance (periodic 32..96^3, measured). Measure ||b - L phi||_2/||b||_2 once and, if it is above the target, continue from
-            // the current iterate with the max-norm tolerance tightened by the measured ratio (at most kMlmgPolish extra solves).
+            first_ok = true;
+            // 2-norm polish (E1): max-norm stop vs common-layer 2-norm; hoist residual MultiFab; keep first-solve status if polish fails.
             const Real bn2 = rhs.norm2(0);
+            MultiFab res(p.ba, p.dm, 1, 0);
             for (int pass = 0; pass < kMlmgPolish && bn2 > Real(0); ++pass) {
-                MultiFab res(p.ba, p.dm, 1, 0);
                 mlmg.compResidual({&res}, {&phi}, {&rhs});
                 const Real r2 = res.norm2(0) / bn2;
-                if (r2 <= tgt) { break; }
+                if (r2 <= polish_tgt) { break; }
                 const Real rmax = res.norm0(0) / rhs.norm0(0);
-                const Real q = (rmax > Real(0)) ? r2 / rmax : Real(1);          // norm ratio, >= 1/sqrt(N) .. sqrt(N)
-                tol = Real(0.8) * tgt / std::max(q, Real(1.0e-3));
+                const Real q = (rmax > Real(0)) ? r2 / rmax : Real(1);
+                tol = Real(0.8) * polish_tgt / std::max(q, Real(1.0e-3));
                 mlmg.solve({&phi}, {&rhs}, tol, Real(0.0));
                 iters += mlmg.getNumIters();
             }
+            s.converged = true;
         } catch (std::exception const&) {
-            s.converged = false;
+            s.converged = first_ok;   // polish (or a later pass) failed: keep Ok if the half-tol first solve met its target
             iters += mlmg.getNumIters();
         }
         s.iterations = iters;

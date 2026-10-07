@@ -615,11 +615,7 @@ ResidualSums residual_sums (PressureProblem const& p, MultiFab& phi, MultiFab co
     }
     const double bn = rhs.norm2(0);
     S.b2 = bn*bn; S.phi2 = pn*pn; S.bmax = rhs.norm0(0);
-    const auto dx = p.geom.CellSizeArray();
-    const Box dom = p.geom.Domain();
-    double a = 0.0;
-    for (int d = 0; d < 3; ++d) { if (dom.length(d) > 1) { a += 4.0/(double(dx[d])*double(dx[d])); } }
-    S.anorm = a;
+    S.anorm = operator_anorm(p.geom.CellSizeArray(), p.geom.Domain());
     return S;
 }
 

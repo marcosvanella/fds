@@ -71,3 +71,15 @@ Floor/check is now typically O(1)–few (in line with single-level Neumann and t
 
 Note: MLMG reports `NotConverged` on neumann 3-level ratio 4 (pre-existing, true residual still ~6e-14; same as docs/pressure/07 §14.2); residual_ok stays true.
 
+## D-087 (A-72 E3 CHANGE, docs/pressure/08 §8.1)
+
+Architect ACCEPT WITH CHANGE: keep the level-wise form but restore margin. Composite only:
+
+    anorm = min(2 * anorm_eff, A_finest)
+
+where `anorm_eff = sqrt(sum_l A_l^2 phi2_l / phi2)` is the previous E3 value and `A_finest` is the last (finest) `A_l` of that loop. Same reduction (weight `vol[l]*A_l^2`); no new reduction. Do **not** use `max(old, new)` or bare factor-10.
+
+Shared helper `operator_anorm(dx, dom)` in `CommonLayer.H` serves the single-level path and this loop (D-084).
+
+Expected where the floor binds (n=32, 2 ranks): Neumann 3-level ratio 4 floor/check ~3.3 (floor ~5.2e-12); periodic ~2.4. Tests: `pb_resid_e3_worst` (HYPRE Neumann and periodic, 3-level, ratio 4, n=32) and `pb_resid_e3_near` (near-limit negative control).
+

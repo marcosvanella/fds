@@ -686,20 +686,19 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
             S.sumr = exact_sum_multi(terms_of(W, res, true), 1).sum[0];
             S.sumw = total_volume(W);
             S.rmax = max_abs_uncovered(W, res); S.bmax = max_abs_uncovered(W, b);
-            // E3 (docs/pressure/08 §4.2): level-wise ||A|| weighted like phi2. Finest-only ||A|| over-estimates
-            // the floor by up to the cell-area ratio when coarse mass is present. Effective anorm satisfies
-            // anorm*sqrt(phi2)=sqrt(sum_l A_l^2 phi2_l); one reduction over pq with weight vol[l]*A_l^2 (no extra temps).
+            // E3 / D-087 (docs/pressure/08 §8.1): anorm_eff with level-wise A_l weighted like phi2; restore margin with
+            // anorm = min(2*anorm_eff, A_finest). Same reduction as before (weight vol[l]*A_l^2); no new reduction.
             std::vector<SumTerm> ta; ta.reserve(nlev);
+            double A_finest = 0.0;
             for (int l = 0; l < nlev; ++l) {
-                const auto dx = W.geom[l].CellSizeArray();
-                const Box dom = W.geom[l].Domain();
-                double al = 0.0;
-                for (int d = 0; d < 3; ++d) { if (dom.length(d) > 1) { al += 4.0/(double(dx[d])*double(dx[d])); } }
+                const double al = operator_anorm(W.geom[l].CellSizeArray(), W.geom[l].Domain());
+                A_finest = al;   // levels are coarse->fine; last is finest
                 SumTerm t; t.mf = pq[l].get(); t.comp = 0; t.weight = double(W.vol[l])*al*al; t.uncovered = W.unc[l].get();
                 ta.push_back(t);
             }
             const double a2phi2 = exact_sum_multi(ta, 1).sum[0];
-            S.anorm = (S.phi2 > 0.0) ? std::sqrt(a2phi2 / S.phi2) : 0.0;
+            const double anorm_eff = (S.phi2 > 0.0) ? std::sqrt(a2phi2 / S.phi2) : 0.0;
+            S.anorm = std::min(2.0 * anorm_eff, A_finest);
         }
         S.r2_nopin = S.r2; S.rmax_nopin = S.rmax;
         if (bs.pin_applied) {

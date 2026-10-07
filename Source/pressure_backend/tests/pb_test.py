@@ -30,9 +30,10 @@ def eps_H(n): m = max(int(x) for x in n.split()); return max(1e-8, 2.4e-12 * m *
 
 def run(np_, **kw):
     # Each key=value is one argv entry (values may contain spaces, e.g. n_cell="64 64 64").
+    timeout = float(kw.pop("timeout", 500))
     cmd = [A.mpiexec, "--oversubscribe", "--bind-to", "none", "-np", str(np_), A.harness]
     cmd += [f"{k}={v}" for k, v in kw.items()]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=500)
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     return p.returncode, p.stdout + p.stderr
 
 def lines(out, tag): return [l for l in out.splitlines() if l.startswith(tag + " ")]
@@ -797,6 +798,27 @@ def hypresidcomp():
         rc, out = run(2, tol_rel=1e-4, expect_warn=1, **kw)
         ok(rc == 0, f"hypre_resid {bc} nlev={nlev} ratio={ratio} {extra}: negative control tol_rel=1e-4 warns (both backends)")
 
+def resid_e3_worst():
+    """D-087 / A-72 E3 CHANGE: HYPRE worst cases (Neumann and periodic, 3-level, ratio 4, n=32): check<=limit, floor below pre-D-087 finest-only."""
+    for bc in ("neumann", "periodic"):
+        rc, out = run(2, mode="hypre_resid", n=32, nlev=3, ratio=4, mgs=16, bc=bc, backend="hypre", e3_worst=1, timeout=800)
+        print(out)
+        ok(rc == 0, f"E3 worst {bc} 3-level ratio4 n=32 HYPRE: harness checks pass")
+        rows = [kv(l) for l in lines(out, "HYPRESID")]
+        ok(len(rows) == 1, f"E3 worst {bc}: one HYPRESID line")
+        r = rows[0]
+        chk, fl, lim = float(r["check"]), float(r["floor"]), float(r["limit"])
+        print(f"E3 worst {bc}: check={chk:.3e} floor={fl:.3e} limit={lim:.3e} ok={r['ok']}")
+        ok(r["ok"] == "1" and chk <= lim, f"E3 worst {bc}: check {chk:.3e} <= limit {lim:.3e}, ok=1")
+        old = 3.94e-11 if bc == "neumann" else 9.93e-12
+        ok(fl <= old * 1.01, f"E3 worst {bc}: floor {fl:.3e} <= pre-D-087 finest-only {old:.3e}")
+
+def resid_e3_near():
+    """D-087 near-limit negative control on Neumann 3-level ratio 4: smooth perturbation warns at ~3*limit."""
+    rc, out = run(2, mode="hypre_resid_e3_near", n=32, nlev=3, ratio=4, mgs=16, bc="neumann", backend="hypre", timeout=800)
+    print(out)
+    ok(rc == 0, "E3 near-limit neg control: harness checks pass")
+
 
 def masked_dense(n, bcp, cls, kn, rhs):
     """Independent dense reference of the masked problem (frozen/masked-notes.md): own flood fill over gas-gas faces (periodic wrap),
@@ -1002,7 +1024,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "masked": masked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

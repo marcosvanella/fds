@@ -1467,8 +1467,9 @@ void run_hypre_cmp (ParmParse& pp)
     }
 }
 
-// Scaled, pin-aware residual check on a hierarchy (frozen/hypre-notes.md, "Residual check"): HYPRE and MLMG with the DEFAULT residual_tol
-// (1e-12). expect_warn=0: neither warns; expect_warn=1 (negative control, loose tol_rel): both warn.
+// Scaled, pin-aware residual check on a hierarchy (frozen/hypre-notes.md, "Residual check"): HYPRE and/or MLMG with the DEFAULT residual_tol
+// (1e-12). expect_warn=0: no warn; expect_warn=1 (negative control, loose tol_rel): warns.
+// backend=hypre|mlmg|both (default both). e3_worst=1: assert check<=limit and floor <= pre-D-087 finest-only floor.
 void run_hypre_resid (ParmParse& pp)
 {
     std::string bcs;
@@ -1476,22 +1477,95 @@ void run_hypre_resid (ParmParse& pp)
     int dmkind = 0; pp.query("dmkind", dmkind);
     double tol_rel = 1e-12; pp.query("tol_rel", tol_rel);
     int expect_warn = 0; pp.query("expect_warn", expect_warn);
+    int e3_worst = 0; pp.query("e3_worst", e3_worst);
+    std::string beq = "both"; pp.query("backend", beq);
     Hier h = build_hier(c, dmkind);
     pb::PressureProblem p = make_problem(c, h);
-    for (int be = 0; be < 2; ++be) {
-        pb::PressureOptions o; o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.verbose = 0;   // residual_tol: default
-        o.backend = be == 0 ? pb::BackendKind::HYPRE : pb::BackendKind::MLMG;
-        if (be == 0) { apply_backend_opts(pp, o); o.backend = pb::BackendKind::HYPRE; }
+    auto run_one = [&] (pb::BackendKind bk, const char* tag) {
+        pb::PressureOptions o; o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.verbose = 0;
+        o.backend = bk;
+        if (bk == pb::BackendKind::HYPRE) { apply_backend_opts(pp, o); o.backend = pb::BackendKind::HYPRE; }
         for (auto& m : h.phi) { m->setVal(0.0); }
         pb::PressureResult r = pb::solve_pressure(p, o);
-        Print() << std::setprecision(6) << "HYPRESID " << (be == 0 ? "hypre" : "mlmg") << " bc=" << bcs << " nlev=" << c.nlev << " ratio=" << c.ratio
+        Print() << std::setprecision(6) << "HYPRESID " << tag << " bc=" << bcs << " nlev=" << c.nlev << " ratio=" << c.ratio
                 << " tol_rel=" << tol_rel << " status=" << pb::to_string(r.status) << " raw=" << r.residual_rel2 << " mr=" << r.residual_rel2_mr
                 << " nopin=" << r.residual_rel2_nopin << " pin_rel=" << r.residual_pin_rel << " floor=" << r.residual_floor
                 << " check=" << r.residual_check << " limit=" << r.residual_limit << " ok=" << int(r.residual_ok) << " nwarn=" << r.warnings.size()
                 << " singular=" << int(!r.components.empty() && r.components[0].singular) << " pin_applied=" << int(r.backend_status.pin_applied) << "\n";
-        ccheck(r.status == pb::Status::Ok || expect_warn, std::string(be == 0 ? "HYPRE" : "MLMG") + " composite solve status Ok");
+        ccheck(r.status == pb::Status::Ok || expect_warn, std::string(tag) + " composite solve status Ok");
         ccheck(r.residual_checked && (r.residual_ok == (expect_warn == 0)) && ((r.warnings.empty()) == (expect_warn == 0)),
-               std::string(be == 0 ? "HYPRE" : "MLMG") + (expect_warn ? " loose solve warns (negative control)" : " default residual_tol: no warning"));
+               std::string(tag) + (expect_warn ? " loose solve warns (negative control)" : " default residual_tol: no warning"));
+        if (e3_worst && expect_warn == 0) {
+            ccheck(r.residual_check <= r.residual_limit, std::string(tag) + " E3 worst: check <= limit");
+            ccheck(r.residual_ok, std::string(tag) + " E3 worst: residual_ok");
+            // Pre-D-087 finest-only floors at n=32, 3-level ratio 4 (frozen/residual-notes.md).
+            const double old_finest_floor = (bcs == "neumann") ? 3.94e-11 : (bcs == "periodic") ? 9.93e-12 : 1.0;
+            ccheck(r.residual_floor <= old_finest_floor * 1.01, std::string(tag) + " E3 worst: floor <= pre-D-087 finest-only floor");
+        }
+    };
+    if (beq == "hypre" || beq == "both") { run_one(pb::BackendKind::HYPRE, "hypre"); }
+    if (beq == "mlmg" || beq == "both") { run_one(pb::BackendKind::MLMG, "mlmg"); }
+}
+
+// D-087 near-limit negative control: after a good HYPRE solve on the E3 worst geometry, re-check with a smooth H
+// perturbation sized so check is about 3*limit (above the new floor; below the pre-D-087 finest-only floor when possible).
+void run_hypre_resid_e3_near (ParmParse& pp)
+{
+    std::string bcs;
+    Cfg c = cfg_from_pp(pp, bcs);
+    int dmkind = 0; pp.query("dmkind", dmkind);
+    Hier h = build_hier(c, dmkind);
+    pb::PressureProblem p = make_problem(c, h);
+    pb::PressureOptions o; o.tol_rel = 1e-12; o.removed_mean_warn = 1.0; o.verbose = 0;
+    o.backend = pb::BackendKind::HYPRE; apply_backend_opts(pp, o); o.backend = pb::BackendKind::HYPRE;
+    for (auto& m : h.phi) { m->setVal(0.0); }
+    pb::PressureResult r0 = pb::solve_pressure(p, o);
+    Print() << std::setprecision(6) << "E3NEAR base bc=" << bcs << " check=" << r0.residual_check << " floor=" << r0.residual_floor
+            << " limit=" << r0.residual_limit << " ok=" << int(r0.residual_ok) << "\n";
+    ccheck(r0.status == pb::Status::Ok && r0.residual_ok, "E3 near: base HYPRE solve Ok / residual_ok");
+    const double lim = r0.residual_limit;
+    const double old_finest_floor = (bcs == "neumann") ? 3.94e-11 : 9.93e-12;
+    auto add_mode = [&] (double amp) {
+        for (int l = 0; l < c.nlev; ++l) {
+            const Box dom = h.geom[l].Domain();
+            const int nx = dom.length(0), ny = std::max(dom.length(1), 1), nz = dom.length(2);
+            for (MFIter mfi(*h.phi[l]); mfi.isValid(); ++mfi) {
+                auto const& a = h.phi[l]->array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    const double m = std::cos(kPi * (i + 0.5) / nx) * std::cos(kPi * (j + 0.5) / ny) * std::cos(kPi * (k + 0.5) / nz);
+                    a(i, j, k) += Real(amp * m);
+                });
+            }
+        }
+    };
+    double pmax = 0.0;
+    for (int l = 0; l < c.nlev; ++l) { pmax = std::max(pmax, double(h.phi[l]->norm0(0))); }
+    ParallelDescriptor::ReduceRealMax(pmax);
+    bool landed = false;
+    double best_check = 0.0;
+    for (double fac : {3e-11, 1e-10, 3e-10, 1e-9, 3e-9, 1e-8, 3e-8}) {
+        for (auto& m : h.phi) { m->setVal(0.0); }
+        pb::PressureResult rb = pb::solve_pressure(p, o);
+        (void)rb;
+        add_mode(fac * std::max(pmax, 1.0));
+        pb::PressureOptions o2 = o;
+        o2.use_initial_guess = true;
+        o2.max_iter = 0;
+        pb::PressureResult rp = pb::solve_pressure(p, o2);
+        Print() << std::setprecision(6) << "E3NEAR trial amp_fac=" << fac << " check=" << rp.residual_check
+                << " limit=" << rp.residual_limit << " floor=" << rp.residual_floor << " ok=" << int(rp.residual_ok) << "\n";
+        if (!rp.residual_ok && rp.residual_check > lim && rp.residual_check < old_finest_floor) {
+            landed = true; best_check = rp.residual_check; break;
+        }
+        if (!rp.residual_ok && rp.residual_check > 2.0 * lim && rp.residual_check < 6.0 * lim) {
+            landed = true; best_check = rp.residual_check; break;
+        }
+    }
+    ccheck(landed, "E3 near: smooth perturbation warns with check ~ 3*limit (above new limit)");
+    if (landed) {
+        ccheck(best_check > lim, "E3 near: check > limit");
+        Print() << std::setprecision(6) << "E3NEAR PASS check=" << best_check << " limit=" << lim
+                << " old_finest_floor=" << old_finest_floor << " ratio_to_limit=" << best_check / lim << "\n";
     }
 }
 
@@ -1604,6 +1678,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "hypre_op") { run_hypre_op(pp); }
     else if (mode == "hypre_cmp") { run_hypre_cmp(pp); }
     else if (mode == "hypre_resid") { run_hypre_resid(pp); }
+    else if (mode == "hypre_resid_e3_near") { run_hypre_resid_e3_near(pp); }
     else if (mode == "err_map") { run_err_map(pp); }
     else { return -1; }
     return g_cfail;

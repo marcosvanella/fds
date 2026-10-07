@@ -15,14 +15,13 @@ namespace pressure_backend { namespace fdsloops {
 
 namespace {
 void need (bool ok, const char* what) { if (!ok) throw std::invalid_argument(std::string("fdsloops: view does not cover ") + what); }
-void check_hfill (Box3 const& b, HFillOptions const& opt, int dir, int code, const char* name)
+void check_hfill (Box3 const& b, HFillOptions const& opt, int dir, int /*code*/, const char* name)
 {
-#if PB_FDSLOOPS_MUTANT != 21
-    if (opt.tunnel_preconditioner) throw NotBuilt("fdsloops: TUNNEL_PRECONDITIONER is not built (the H_BAR/BXS_BAR/BXF_BAR add-back before the H boundary fill is not translated)");
-#endif
+    // C1 (docs/pressure/08 §9): every code writes both ghost layers of b in `dir`; that is correct only when b spans
+    // the domain in that direction (a high-end cut overwrites an interior cell). Tunnel refusal is at converter/setup (C2 / D-080(6)).
 #if PB_FDSLOOPS_MUTANT != 19
-    if (code == 0 && (b.lo[dir] != opt.domain.lo[dir] || b.hi[dir] != opt.domain.hi[dir]))
-        throw std::invalid_argument(std::string("fdsloops: periodic wrap in ") + name + " needs the box to be the whole domain extent in that direction");
+    if (b.lo[dir] != opt.domain.lo[dir] || b.hi[dir] != opt.domain.hi[dir])
+        throw std::invalid_argument(std::string("fdsloops: H fill in ") + name + " needs the box to be the whole domain extent in that direction");
 #endif
 }
 }
@@ -196,9 +195,6 @@ void pres_h_bc_z (Box3 const& b, HFillOptions const& opt, int NBC, double DZETA,
 void pres_poisson_boundary_arrays (PoissonBcContext const& c, PoissonWall const* walls, int nwalls)
 {
     using namespace fdsconst;
-#if PB_FDSLOOPS_MUTANT != 21
-    if (c.tunnel_preconditioner) throw NotBuilt("fdsloops: TUNNEL_PRECONDITIONER is not built (the H_BAR/BXS_BAR/BXF_BAR add-back is not translated)");
-#endif
     const int IBAR = c.ibar, JBAR = c.jbar, KBAR = c.kbar, IBP1 = IBAR + 1, JBP1 = JBAR + 1, KBP1 = KBAR + 1;
     need(c.hp.covers(0, IBP1, 0, JBP1, 0, KBP1) && c.kres.covers(1, IBAR, 1, JBAR, 1, KBAR), "HP(0:IBP1,..) / KRES");
     need(c.fvx.covers(0, IBAR, 0, JBP1, 0, KBP1) && c.fvy.covers(0, IBP1, 0, JBAR, 0, KBP1) && c.fvz.covers(0, IBP1, 0, JBP1, 0, KBAR), "FVX/FVY/FVZ");

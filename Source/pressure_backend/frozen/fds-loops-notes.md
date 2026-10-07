@@ -129,5 +129,6 @@ action `r4r5`) is the explicit coverage gate:
 | R5(c) | synthetic-eddy inflow `N_EDDY>0`, `WV_EDDYV` nonzero | eddy |
 | R5(d) | ramped open vent with `T_IGN /= T_BEGIN` | ramp |
 
-Bitwise equality of `HBC_*` (R4) and `L1209_*` (R5) on those sets is `pb_fdsloops_fds_sets` (`check-fds-sets`); `pb_fdsloops_r4r5` does
-not re-run the bitwise comparison.
+Bitwise equality of `HBC_*` (R4) and `L1209_*` (R5) on those sets is `pb_fdsloops_fds_sets` (`check-fds-sets`).
+`pb_fdsloops_r4r5` only requires those CENSUS keys to pass (FIXTURES_REQUIRED on the bitwise sets test); it does not re-derive loose
+subset predicates.
