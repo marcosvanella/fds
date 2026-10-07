@@ -39,6 +39,7 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/GhostExchange.cpp
     ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/OutputPlan.cpp
     ${CMAKE_CURRENT_LIST_DIR}/LevelRegistry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/TimeLoop.cpp
     ${CMAKE_CURRENT_LIST_DIR}/CompositeOps.cpp
@@ -120,6 +121,7 @@ add_executable(driver_unit_tests
     ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
     ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/OutputPlan.cpp
     ${CMAKE_CURRENT_LIST_DIR}/LevelRegistry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/RegistryTransfer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/CellTransfer.cpp

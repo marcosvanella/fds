@@ -10,6 +10,7 @@
 //   fill        ghost fill (faces, edges, corners, periodic images; nothing beyond a non-periodic domain edge).
 //   sidedata    per-box side data: valid+2 mask, interface faces open, domain faces closed, layout-independent hash.
 //   registry    default field set, scratch arrays refused, passive-scalar component count.
+//   output_plan FR-072 Step C: OutputPlan make/fill + D6 composite_mass_exact vs uncovered FP / naive double-count.
 //   tile_race   IR-007 skeleton: a reduction-free kernel gives bitwise equal results for tile sizes, box layouts and (optionally) threads.
 #include <AMReX.H>
 #include <AMReX_MultiFabUtil.H>
@@ -37,6 +38,7 @@
 #include "SideData.H"
 #include "check.H"
 #include "ExactSum.H"
+#include "OutputPlan.H"
 #include "LevelRegistry.H"
 #include "PressureBcMap.H"
 #include "tests/two_level_transport.H"
@@ -1197,6 +1199,149 @@ long test_species_average(int nranks)
 
 
 // ---------- FireX exchange-code mapping (code 6 = U/V/W/H only; 66/67 stay on the FDS host path) ----------
+
+long test_output_plan(int nranks)
+{
+    // FR-072 / ADR-004 D6: composite_mass_exact = uncovered FP mass; differs from a naive sum that includes covered coarse cells.
+    Layout L0{"outplan", {16, 8, 16}, {2, 1, 2}, {0, 1, 0}};
+    Level0 l0 = make_level0(L0, nranks);
+    const int ns = 2;
+    Fields F0(l0, ns);
+    SideData sd0(l0, layout_cell_walls(l0));
+    LevelRegistry reg(l0.dom, ns);
+    reg.adopt_level0(l0, F0, sd0);
+
+    const amrex::IntVect rr(2, 2, 2);
+    fdsrt::LevelLayout fl;
+    fl.level = 1;
+    fl.ref_ratio_from_parent = rr;
+    amrex::Box fdom = amrex::refine(l0.geom.Domain(), rr);
+    amrex::RealBox rb(l0.geom.ProbLo(), l0.geom.ProbHi());
+    fl.geom.define(fdom, rb, 0, l0.geom.isPeriodic());
+    // Fine patch over coarse [0..15,0..3,0..7] -> fine [0..31,0..7,0..15]
+    fl.ba.define(amrex::BoxList{amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(31, 7, 15))});
+    fl.dm.define(fl.ba);
+    reg.make_level(fl);
+    CHECK_MSG(reg.covered_mask(0) != nullptr, "level 0 has a covered mask under the fine patch");
+
+    // Distinct positive densities: covered coarse = 10, uncovered coarse = 1, fine = 2 (so naive double-counts covered coarse).
+    auto& R0 = reg.fields(0)["RHO"];
+    auto& Z0 = reg.fields(0)["ZZ"];
+    R0.setVal(1.0);
+    Z0.setVal(0.25);
+    const amrex::iMultiFab* cov = reg.covered_mask(0);
+    for (amrex::MFIter mfi(R0); mfi.isValid(); ++mfi) {
+        auto a = R0.array(mfi);
+        auto z = Z0.array(mfi);
+        auto cv = cov->const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            if (cv(i, j, k) != 0) {
+                a(i, j, k) = 10.0;
+                z(i, j, k, 0) = 0.5;
+                z(i, j, k, 1) = 0.5;
+            } else {
+                a(i, j, k) = 1.0;
+                z(i, j, k, 0) = 0.25;
+                z(i, j, k, 1) = 0.75;
+            }
+        });
+    }
+    auto& R1 = reg.fields(1)["RHO"];
+    auto& Z1 = reg.fields(1)["ZZ"];
+    R1.setVal(2.0);
+    Z1.setVal(0.0);
+    for (amrex::MFIter mfi(Z1); mfi.isValid(); ++mfi) {
+        auto z = Z1.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+            z(i, j, k, 0) = 0.4;
+            z(i, j, k, 1) = 0.6;
+        });
+    }
+
+    // FP uncovered composite (same definition as TwoLevelRun::composite_mass).
+    auto fp_mass = [&](int nl) {
+        std::vector<double> m(1 + ns, 0.0);
+        for (int l = 0; l < nl; ++l) {
+            const Level& lv = reg.level(l);
+            Fields& F = reg.fields(l);
+            const amrex::iMultiFab* c = reg.covered_mask(l);
+            const double vol = lv.dx[0] * lv.dx[1] * lv.dx[2];
+            for (amrex::MFIter mfi(F["RHO"]); mfi.isValid(); ++mfi) {
+                auto r = F["RHO"].const_array(mfi);
+                auto z = F["ZZ"].const_array(mfi);
+                amrex::Array4<const int> cv;
+                if (c) cv = c->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                    if (c && cv(i, j, k) != 0) return;
+                    m[0] += r(i, j, k) * vol;
+                    for (int n = 0; n < ns; ++n) m[1 + n] += r(i, j, k) * z(i, j, k, n) * vol;
+                });
+            }
+        }
+        amrex::ParallelAllReduce::Sum(m.data(), static_cast<int>(m.size()), amrex::ParallelContext::CommunicatorSub());
+        return m;
+    };
+    // Naive: every level summed with no covered mask (double-counts covered coarse).
+    auto naive_mass = [&](int nl) {
+        std::vector<double> m(1 + ns, 0.0);
+        for (int l = 0; l < nl; ++l) {
+            const Level& lv = reg.level(l);
+            Fields& F = reg.fields(l);
+            const double vol = lv.dx[0] * lv.dx[1] * lv.dx[2];
+            for (amrex::MFIter mfi(F["RHO"]); mfi.isValid(); ++mfi) {
+                auto r = F["RHO"].const_array(mfi);
+                auto z = F["ZZ"].const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                    m[0] += r(i, j, k) * vol;
+                    for (int n = 0; n < ns; ++n) m[1 + n] += r(i, j, k) * z(i, j, k, n) * vol;
+                });
+            }
+        }
+        amrex::ParallelAllReduce::Sum(m.data(), static_cast<int>(m.size()), amrex::ParallelContext::CommunicatorSub());
+        return m;
+    };
+
+    const int nl = 2;
+    const std::vector<double> exact = composite_mass_exact(reg, nl, ns);
+    const std::vector<double> fp = fp_mass(nl);
+    const std::vector<double> naive = naive_mass(nl);
+    CHECK_MSG(exact.size() == 1 + ns && fp.size() == exact.size(), "composite_mass_exact returns 1+ns entries");
+    for (int i = 0; i < 1 + ns; ++i) {
+        const double tol = 1e-12 * std::max(1.0, std::abs(fp[i]));
+        CHECK_MSG(std::abs(exact[i] - fp[i]) <= tol,
+                  "D6 exact matches uncovered FP for slot " + std::to_string(i) + " exact " + std::to_string(exact[i]) + " FP " + std::to_string(fp[i]));
+    }
+    const double covered_extra = naive[0] - fp[0];
+    CHECK_MSG(covered_extra > 0.0, "covered-coarse extra mass must be positive (got " + std::to_string(covered_extra) + ")");
+    CHECK_MSG(exact[0] < naive[0], "D6 exact mass must be below naive double-count control");
+    if (amrex::ParallelDescriptor::IOProcessor())
+        std::printf("RESULT D6 exact composite mass %.17g (FP composite %.17g, covered-coarse extra %.17g, naive with double-count %.17g)\n",
+                    exact[0], fp[0], covered_extra, naive[0]);
+
+    // Layout skeleton: make + fill + bind_ready gate.
+    OutputPlanOptions oo;
+    oo.refinable = amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(15, 3, 7));
+    oo.L_out = 1;
+    oo.ratio = rr;
+    oo.maxsize = 16;
+    oo.blocking = 4;
+    oo.cell_names = {"RHO", "TMP"};
+    oo.face_names = {};  // keep fill short in the unit test
+    OutputPlan plan;
+    plan.make(reg, oo);
+    CHECK_MSG(!plan.bind_ready(), "bind_ready stays false until N_OUT_MESHES > NMESHES");
+    CHECK_MSG(!plan.groups().empty(), "OutputPlan has at least one group");
+    plan.fill(reg);
+    if (amrex::ParallelDescriptor::IOProcessor())
+        std::printf("OutputPlan groups %zu (bind_ready=%d)\n", plan.groups().size(), plan.bind_ready() ? 1 : 0);
+    for (const auto& g : plan.groups()) {
+        CHECK_MSG(g.cell && g.cell->nComp() == static_cast<int>(oo.cell_names.size()), "group cell MultiFab allocated");
+        CHECK_MSG(g.amr_level && g.amr_level->nComp() == 1, "AMR_LEVEL MultiFab allocated");
+    }
+    return fdstest::report("OutputPlan layout/fill + D6 composite_mass_exact");
+}
+
+
 long test_exchange_codes(int /*nranks*/)
 {
     // Mapping table: code 6 fills only velocity/pressure ghosts (back-wall left code 6 after FireX).
@@ -1279,6 +1424,7 @@ int main(int argc, char** argv)
             fails += test_species_average(nranks);
             fails += test_two_level_transport(nranks);
             fails += test_pressure_bc_map(nranks);
+            fails += test_output_plan(nranks);
             fails += test_exchange_codes(nranks);
             if (amrex::ParallelDescriptor::IOProcessor()) std::printf("%s: %ld failing checks\n", fails == 0 ? "ALL PASS" : "SOME FAILED", fails);
         }
