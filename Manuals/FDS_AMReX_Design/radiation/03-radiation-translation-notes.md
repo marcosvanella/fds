@@ -198,3 +198,5 @@ Shared-file requests that are still not Radiation's to make (see §8): `new_buil
 - Start FR-063 regrid work (waits Role 3) or L1240/L1244 (waits Mesh Data particle gathers) or L1251 (Role 3 ghost fill).
 
 **Next recommended action:** Integration Lead (or gate device-driver owner) schedule the `rad_*` device driver; V&V Lead confirm the ghost reader list (§6 of `radiation/06`) and, when ready, bump `SWEEP_PIN` after reviewing the 1246-case evidence.
+
+**Update 2026-10-06:** V&V bumped `SWEEP_PIN` to `d054f283f0`; ghost reader list co-signed (`radiation/06` §6). Scheme-3 device limit `maxulp<=8192` for `s5rad_plane3d_ild` ratified by Architect D-085 (LIBM-CLASS; schemes 1-2 stay bitwise); Integration encoding. ZS-05 `s5rad_wall1` waiver accepted by Integration (serial ascending sum into a uniquely owned ghost element).

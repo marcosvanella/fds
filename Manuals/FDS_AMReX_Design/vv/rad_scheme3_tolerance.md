@@ -1,11 +1,14 @@
 # Device tolerance for `s5rad_plane3d_ild` scheme 3 (EXP / LIBM-CLASS)
 
+Version: v0.2 (prior: `archive/rad_scheme3_tolerance_v0.1.md`).
 Owner: V&V Lead. Status: **RATIFIED (D-085)**. Architect number: device-tier `maxulp ≤ 8192` for scheme 3 under `-DS5_LIBM_CLASS`.
 Subject: the per-value ulp limit that a device-tier comparison may accept for `s5rad_plane3d_ild` when `RAD_DIFF_SCHEME = 3` (EXPONENTIAL), under `-DS5_LIBM_CLASS`, against the host reference. Schemes 1 and 2 stay bitwise.
 
 Source measurement (Radiation Lead, RTX 4070, nvfortran 26.9, `s5_rad_sweep` at s5-gen `d054f283f0`, 1246 cases): 18 of 1246 cases differ on the device; all 18 have scheme 3; max **5632 ulp** (~1e-12 relative) over `IL` / `UIID` / `UII` / `QR` / `QR_W` / `ILW` / `INRAD_W` / `IL_S` (212 differing fields); schemes 1–2 bitwise; host builds bitwise.
 
-**Change log (2026-10-06).** Architect ratification **D-085**: device-tier `maxulp ≤ 8192` for `s5rad_plane3d_ild` when `RAD_DIFF_SCHEME = 3` (EXPONENTIAL) under `-DS5_LIBM_CLASS`, over the LIBM-CLASS fields listed below. Measured basis unchanged (max 5632 ulp on the 1246-case sweep; 8192 is the next power of two, ~1.45× margin). Provisional on that evidence set; reopen if a later sweep exceeds 8192. Named exception to D-070's default 2 ulp; does not widen the global rule. Flip-budget / Level A (D-077) unchanged.
+**Change log.**
+- v0.2 (2026-10-06): versioned; status RATIFIED (D-085), device `maxulp ≤ 8192` for scheme 3, named exception to D-070's 2 ulp; schemes 1–2 device bitwise; host bitwise for all schemes; provisional on the 1246-case evidence (reopen if exceeded; do not widen silently). Prior archived as v0.1.
+- v0.1 (2026-10-06): Architect ratification **D-085**: device-tier `maxulp ≤ 8192` for `s5rad_plane3d_ild` when `RAD_DIFF_SCHEME = 3` (EXPONENTIAL) under `-DS5_LIBM_CLASS`, over the LIBM-CLASS fields listed below. Measured basis unchanged (max 5632 ulp on the 1246-case sweep; 8192 is the next power of two, ~1.45× margin). Provisional on that evidence set; reopen if a later sweep exceeds 8192. Named exception to D-070's default 2 ulp; does not widen the global rule. Flip-budget / Level A (D-077) unchanged.
 
 ## 1. Ratified limit (D-085)
 
@@ -39,4 +42,4 @@ Basis:
 
 - Registering `s5_rad_interp` / `s5_rad_hrr` gate steps (see `vv-runs/gpu_gate/README.md`, pending Integration).
 - Changing the host pin counts (done separately: `SWEEP_PIN` → `d054f283f0`).
-- Widening the global D-070 2-ulp rule, or silently raising 8192 without a new ruling.
+- Widening the global D-070 2-ulp rule, or silently raising 8192 without a new ruling. If any later sweep exceeds 8192 ulp, reopen D-085; do not widen silently.

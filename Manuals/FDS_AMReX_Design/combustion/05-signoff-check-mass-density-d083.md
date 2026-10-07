@@ -66,15 +66,31 @@ Wrong sum order and dropped-neighbour mutants are present (`sum_mass_n_regroup`,
 
 1. `nclip` is 0/1 presence only; exact counts via CPU / P1-oracle.
 2. Multi-box `FillBoundary` of clipped `RHOP` deferred to the driver packet.
-3. No `ported.toml` entry until device real-field evidence + Integration Lead set.
+3. `ported.toml` entry: Species Lead clears for Integration Lead to set (device evidence below). Conditions 1–2 still in force.
+
+## Device evidence
+
+**PASS** — evidence commit `b582e79027cd8d7bae3e5c5656a202ccbf122c8e` on branch `s5-cmd-clip` (`DEVICE.md`; tip at evidence `f5cbeec5e8`). Kernel commit unchanged: `8edd573d331f47df660cc05361b4295d74e3ec58`.
+
+| Item | Value |
+|------|--------|
+| Flags | `nvfortran -O2 -Minline -mp=gpu -gpu=cc89,nofma,mem:managed -Mnofma -Mnovect -Mextend -Mnoflushz -Mnodaz -Mpreprocess`; `OMP_TARGET_OFFLOAD=MANDATORY` |
+| Threads | 1 and 8 |
+| P1-oracle | **150** PASS (rand / negzero / ring) at both thread counts |
+| CPU FireX path | **540** PASS (rand / dyad / open / ns1 / nsN / noclip) at both thread counts |
+| Coverage | `density_pass_runs=487`, `renorm_runs=440` |
+| Offload | `-Minfo=mp`: GPU kernels generated for `s5clip_density_gather/apply`, `s5clip_species_gather/apply/one`, `s5clip_renorm` |
+| Conditions 1–2 | Still in force (`nclip` 0/1 presence; multi-box FillBoundary not claimed) |
+
+Spot-check: `device_run.log` and `minfo_k2.log` under the Mesh Data scratch match `DEVICE.md` (no invented numbers; GPU kernels present).
 
 ## Recommendation for `ported.toml`
 
-**Do not add** `s5clip_density_*` / `s5clip_species_*` / `s5clip_renorm` yet. Keep the packet unmarked until: (a) a device run on real fields is on record within class tolerance, (b) conditions 1–2 are acknowledged by the driver owner, (c) Integration Lead sets the entry with Species Lead as reviewer.
+**Species Lead clears** for Integration Lead to add the `[[ported]]` entry (Species Lead = `reviewed_by`; Integration Lead = `set_by`). Conditions 1–2 remain in force and must stay in the entry note. Also record the device run in `tools/device_runs.toml` (PM-08) if not already present. Exact entry text: `work-species/handoff-s4/cmd_ported_clearance.md`. Do **not** claim multi-box FillBoundary.
 
 ## Notify
 
-Integration Lead and Architect: this file is the record (do not duplicate). Mesh Data Loops Engineer: see `work-species/handoff-s4/cmd_review_reply.md`.
+Integration Lead: set `ported.toml` (+ `device_runs.toml` if needed) from the clearance handoff. Architect: this file remains the record. Mesh Data Loops Engineer: see `work-species/handoff-s4/cmd_ported_clearance.md`.
 
 ## Caller-contract mirror
 

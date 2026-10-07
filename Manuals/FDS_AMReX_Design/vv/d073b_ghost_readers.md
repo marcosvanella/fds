@@ -1,6 +1,12 @@
 # D-073(b) / D-077(6): ghost readers of UII / UIID / QR
 
-Owner: AMR V&V Lead (co-sign for Radiation Lead).
+Version: v0.2 (prior: `archive/d073b_ghost_readers_v0.1.md`).
+Owner: AMR V&V Lead. Status: **CLOSED — co-signed with Radiation Lead**. Election: **R-D073b-out (A) keep-ghost-bits**.
+
+**Change log.**
+- v0.2 (2026-10-06): Radiation Lead elected R-D073b-out (A); D-073(b) CLOSED, co-signed V&V + Radiation. Options (B)/(C) not taken. Prior archived as v0.1.
+- v0.1 (2026-10-06): reader classification at `bee11f0329`; verdicts 1–4; options (A)–(C) named, (A) as default pending Radiation election.
+
 Pin: FireX `bee11f0329` (full `bee11f032907e53585dbb33ee76c30b0d2667a66`).
 Script: `amrex/s4_mass/s5_gen/s5_rad_sweep/test/sweep_ghost_reads.py` (tree copies under `src-s5*`).
 Docs cited: `docs/radiation/06-fr062-sweep-kernel-design.md` §6 (commit `dc44e30`); `vv-runs/gpu_gate/README.md` § "Rule D-073 (2)" (D-077(6) interior-only restart).
@@ -72,11 +78,11 @@ Spot-check on pin:
 
 So the bare claim "device/slice never address the ghost layer" is **false for SLCF/ISOF (and any full-mesh node fill) of qty 18/19**. Devices alone would be CONFIRM.
 
-**Named rule (R-D073b-out)** — pick one; V&V co-sign uses (A) as the default closing rule unless Radiation Lead elects (B) or (C):
+**Named rule (R-D073b-out)** — **ELECTED: (A)** by Radiation Lead (v0.2). (B) and (C) are recorded for reference only, not adopted:
 
 | Option | Rule |
 |---|---|
-| **(A) keep-ghost-bits (default)** | If any active SLCF, ISOF, PLOT3D, or user SMOKE3D requests `INTEGRATED INTENSITY` or `RADIATION LOSS`, the box-split path must keep ghost `UII`/`QR` (and thus `UIID` feeding them) bit-reproduced for that run. Otherwise ghosts of `UII`/`UIID`/`QR` need not be bit-reproduced. |
+| **(A) keep-ghost-bits — ELECTED** | If any active SLCF, ISOF, PLOT3D, or user SMOKE3D requests `INTEGRATED INTENSITY` or `RADIATION LOSS`, the box-split path must keep ghost `UII`/`QR` (and thus `UIID` feeding them) bit-reproduced for that run. Otherwise ghosts of `UII`/`UIID`/`QR` need not be bit-reproduced. |
 | **(B) clamp** | Change `CASE(18)`/`CASE(19)` to clamp like `CASE(16)`. Upstream behaviour change at domain-boundary corners; needs FireX patch agreement. |
 | **(C) refuse** | AMR mode refuses SLCF/ISOF/PLOT3D/SM3D of qty 18/19 until (A) or (B). |
 
@@ -94,10 +100,10 @@ V&V Lead accepts radiation/06 §6 reader list at pin `bee11f0329` with the amend
 
 1. Physics ghosts of `UII`/`UIID`/`QR`: **not required** bit-reproduced (`IL` only).
 2. Restart ghosts: **interior-only compare** (D-077(6)); no other restart consumer needs ghost bit-identity.
-3. Output: **R-D073b-out (A)** unless Radiation Lead chooses (B) or (C).
+3. Output: **R-D073b-out (A), elected**: keep ghost bits of `UII`/`UIID`/`QR` on the box-split path when any SLCF, ISOF, PLOT3D, or user SMOKE3D requests `INTEGRATED INTENSITY` or `RADIATION LOSS`; otherwise these ghosts need not be bit-reproduced.
 4. Thermocouple: **no ghost requirement**.
 
-With (A)–(C) named, D-073(b) / D-077(6) / A-50 reader confirmation is ready for Radiation Lead co-sign.
+**Status: CLOSED.** Radiation Lead elected (A) and co-signs; D-073(b) / D-077(6) / A-50 reader confirmation is closed on clauses 1–4 above.
 
 ## Evidence index
 

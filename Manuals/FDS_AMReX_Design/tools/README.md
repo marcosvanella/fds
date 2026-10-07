@@ -54,7 +54,7 @@ loop, which keeps both. The `.golden` files hold kernel bodies without their hea
 
 K1 registry: `tools/kernel_registry.toml`. A `[[k1]]` entry (file, function, category, reason, status) allows device code in the C++ layer. The
 categories `pack`, `gather`, `scatter`, `checksum` are the data-movement kernels that D-066 allows to be K1 because they contain no physics; any
-other category (`reference`, `test-harness`, `physics-fallback`) is always printed as WAIVED. `[[waiver]]` entries accept a K2 finding for now.
+other category (`reference`, `test-harness`, `physics-fallback`) is always printed as WAIVED. `[[waiver]]` entries accept a K2, lint or zone-sum finding for now.
 `status = "proposed"` means nobody has accepted the reason yet: the tool exits 0 and prints it, `--strict` exits 1.
 Exit codes: 0 pass, 1 findings, 2 usage or tool error.
 
@@ -80,7 +80,7 @@ waiver was refused: the finding is a real violation, stays visible as "prototype
 used for anything but evaluation. Today that is the rule-7 pair in `s4_mass_k2.F90`: `s4k2_face_values` calls a routine and `s4k2_clip_terms`
 uses a local array, both inside plain `target teams loop`. They were not edited because the file is a measured S4 artefact and the machine
 that runs the tools has no nvfortran or GPU to re-verify a changed directive; they go away when the file is replaced by generator output.
-No `[[waiver]]` entry is open.
+One `[[waiver]]` entry is open: ZS-05 for `s5rad_wall1` (a serial per-wall sum into a uniquely owned ghost element; see the registry).
 
 ## 2. `kernel_lint.py` - build-flag and clause-list lint
 

@@ -115,9 +115,9 @@ Blocked on: nothing for items 1 to 7.
 9. Follow-ups W1 to W5 from `solid/08-new-wall-kernel-review.md` section 7; O3 (L1402) uniqueness review with the Wall Loops Engineer.
 10. L1485 retirement: ready to merge once the GNU half of patch 0010 and P-3 and N-5 pass (D-077 (2), A-65). Waits for the GNU Build Chief.
 
-**Radiation Lead (loop duty). Dry risk: medium (setup L0825-27/L0676/L0664-65/L0006-07 confirmed host or GEOM-deferred in radiation/06 §18; land pause until Mapper FF; L1240/L1244 still wait on particle tables).**
+**Radiation Lead (loop duty). Dry risk: medium (setup L0825-27/L0676/L0664-65/L0006-07 confirmed host or GEOM-deferred in radiation/06 §18; L1240/L1244 host-translated on s5-gen `313c54ef43`, Wall BR-join confirmed; duplicate `s5rad_lp_qin_zero` dropped in `d283813c68`; ready for ported.toml when the gate opens).**
 1. Loop L1242 sweep kernels: landed on s5-land (`664917ad50`); no new s5-gen commits until Mapper posts FF. Remaining A1 pieces classified/feature-requested only (`radiation/06` §19; `radiation/02` A1).
-2. Loops L1248, L1249, L1250, L1247, L1238, L1241: translated on s5-land (see radiation/06 §16-§17).
+2. Loops L1248, L1249, L1250, L1247, L1238, L1241: translated on s5-land (see radiation/06 §16-§17). L1240 / L1244 (both host): translated on s5-gen `313c54ef43` (radiation/06 §16.3); duplicate bind(c) dropped in `d283813c68`; not in `ported.toml` until the gate opens.
 3. Gate hookup for radiation kernels (`radiation/03-radiation-translation-notes.md`). Open; do not start under land pause.
 4. Follow-ups R1 to R4 from `solid/08-new-wall-kernel-review.md` section 7.
 5. Ghost `UII`/`UIID`/`QR` readers: V&V closed D-073(b) with keep-ghost-bits for CASE(18)/(19) (`vv/d073b_ghost_readers.md`); A-50 box-split ghost clause closed. Remaining radiation verification variants as needed (FR-060/FR-062/FR-063).

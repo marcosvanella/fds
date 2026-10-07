@@ -51,10 +51,10 @@ Owner: AMR Radiation Lead. Status: draft, not reviewed.
 | L1242 | `RADIATION_FVM` band loop, 3913-4957 | **4.576%** (rank 7) | alloc_ptr_local 462, dt_alloc_component 93, pointer_reassign 63, reduction_accum 23, module_global_write 6; callees: recursion | **not covered by the R1 sign-off**; geometry-deferred (O4); pieces above | FR-062 for the sweep; the rest per A1 |
 | L1238 | `ADD_VOLUMETRIC_HEAT_SOURCE`, 5098-5146 | 0.024% | alloc_ptr_local 26, dt_alloc_component 6, reduction_accum 4 | host | none |
 | L1239 | `RADIATION_FVM`, 3887-3893 (zero `Q_RAD_IN`) | 0.000% | alloc_ptr_local 8, pointer_reassign 3 (`B1_INDEX` as a value) | **translated** (`rad_wall_qin_zero`) | wall-table flag `B1_PRESENT` |
-| L1240 | particle zeroing, 3894-3901 | 0.000% | alloc_ptr_local 10 | translatable with the particle table | particle table with a presence flag |
+| L1240 | particle zeroing, 3894-3901 | 0.000% | alloc_ptr_local 10 | **translated** (host `s5rad_lp_qin_zero`, s5-gen `313c54ef43`, moved from K2 `b175a7386b` to host; Mesh Data duplicate bind(c) twin dropped in `d283813c68`; ready for `ported.toml` when the gate opens; radiation/06 §16.3) | particle table with a presence flag (Mesh Data `s5_part_gather`) |
 | L1241 | cface zeroing, 3902-3908 | 0.000% | alloc_ptr_local 8 | translatable (geometry) | cface table |
 | L1243 | open-boundary `Q_RAD_IN`, 4965-4974 | 0.000% | pointer assignment `BR => BOUNDARY_RADIA(WC%BR_INDEX)`, `SUM` | **blocked**; hand-written specification kernel tested (`open_qin_spec`) | ragged per-wall table `BR_ILW(NRA,NSB,wall)` and a `BR` alias |
-| L1244 | solid-particle flux, 4992-5037 | 0.001% | particle tree, alloc_ptr_local 38 | host | none |
+| L1244 | solid-particle flux, 4993-5038 | 0.001% | particle tree, alloc_ptr_local 38 | **translated** (host `s5rad_lp_qin_in`, doc 05 Q6; s5-gen `b175a7386b`, orientation ramp `313c54ef43`; Wall BR-join confirmed, asserts `a71c662376`; ready for `ported.toml` when the gate opens) | particle gathers (Mesh Data `s5_part_gather`) |
 | L1245 | `RADF` write, 5048-5063 | 0.002% | io 7, string_op 3 | host | none |
 | L1246 | `GET_KAPPA` loop, 5174-5212 | 0.000% | reduction_accum, reduction_intrinsic | with the RADCAL `KAPPA_GAS` row | source-function callee |
 | L1247 | `INTERPOLATE_IL` angle weights, 3623-3645 | 0.000% | write_indirect (`IDX`), reduction_intrinsic | host (run at new angle cycles only) | none |
