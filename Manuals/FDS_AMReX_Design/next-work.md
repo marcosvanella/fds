@@ -3,7 +3,7 @@
 
 Owner rule: nobody sits idle. Each role has an ordered list of ready items, each with a source reference (document path and item id). The Chief Architect owns these lists; the Spec & Program Lead refreshed an earlier version at spec v0.4.35, and this is the Chief Architect's refresh (r6) through D-083. Where another list differs, this one wins. A role that finishes its list tells the Chief Architect. "Dry risk" is the chance the role runs out of ready work within two days (low: five or more ready items; medium: three or four; high: fewer than three or all blocked). Items that wait for another role are counted as not ready when the level is set.
 
-Status as of spec v0.4.44 plus D-081 to D-089 and the local FireX merge into FDS-AMReX, next-work revision r6 refresh (GNU A-14 stretch `USE_AMREX=ON`+HDF5 closed; Species combustion/06 host ACCEPT; Radiation solid/08 R1–R4 and L1251 closed; Intel UP-0011 tip Rel+Dbg PASS; Mesh Data D-083 `[[ported]]` on s5-gen `08f6016e28`; Role 3 adaptive TAG_* green `370c4412cf` + Role 1 D-089 `8c8381b946`; V&V enabling adaptive owner-show).
+Status as of spec v0.4.44 plus D-081 to D-089 and the local FireX merge into FDS-AMReX, next-work revision r6 refresh (GNU A-14 stretch `USE_AMREX=ON`+HDF5 closed; Species combustion/06 host ACCEPT; Radiation solid/08 R1–R4 and L1251 closed; Intel UP-0011 tip Rel+Dbg PASS; Mesh Data D-083 `[[ported]]` on s5-gen `08f6016e28`; Role 3 adaptive TAG_* green `370c4412cf` + Role 1 D-089 `8c8381b946`; V&V enabling adaptive owner-show). Landed since: Role 2 D-092+S6 accepted; owner-show MIRROR overnight; Mesh Data L1305/L1317 claimed.
 
 Standing coding rule for implementers: `coding-rules.md` / D-084 (simplicity; minimum lines, FLOPs, conditionals, copies). Decisions since that note: D-085 (scheme-3 device `maxulp ≤ 8192`, named exception to D-070); D-089 (`FREEZE_VELOCITY` cold-flow exception for AMR adaptive demos).
 
@@ -24,7 +24,7 @@ FireX `1fb5c300fa` is merged into FDS-AMReX locally (src `8ad685f435`; check rep
 - **New `BLOCK_CELL` branch.** A single-cell consumable-obstruction branch reads `CELL%WALL_INDEX(±1..±3)`, neighbour `TMP`, `PBAR_S`, `PRESSURE_ZONE`, `RSUM0` and `OBSTRUCTION%CONSUMABLE`, and writes `TMP`, `RHO`, `RHOS`. L0630 needs either a translation that takes these as kernel and shim arguments or a host path (it runs only when an obstruction is created or removed).
 - **Exchange codes.** `MESH_EXCHANGE` code 6 no longer carries back-wall data; that moves to code 66 (full `PACK_WALL`, once at set-up) and 67 (`PACK_WALL_LITE`, every step). The driver's code 6 fills only `U`, `V`, `W`, `H` ghosts, so nothing breaks today; the driver's exchange-code mapping must keep 66 and 67 on the FDS host path and must follow the split if it ever takes over back-wall exchange.
 
-Summary of dry risk: Role 1 low; Role 2 low; Role 3 low; Integration Lead low; Pressure Solver Lead low; Legacy Mapper low; Species and Combustion low; Solid Phase low; Radiation medium; V&V low; Spec Lead low; Generator Engineer low; Wall Loops Engineer low; Mesh Data Loops Engineer medium; GNU Build Chief high; Intel Build Chief medium. GNU Build Chief is high (1 ready: owner-show Release `USE_AMREX=ON` rebuild); FASTMATH GNU verify PASS (`vv-runs/d068-fastmath-pin/RESULT.md`). Adaptive owner-show: Role 3 adaptive+plotfile green `370c4412cf`, Role 1 D-089 refuse lift `8c8381b946`, V&V enabling adaptive as primary under `vv-runs/owner-show/`. Every loop-translation role except Mesh Data Loops Engineer (Legacy Mapper, Generator Engineer, Wall Loops Engineer, and the Species and Combustion, Radiation, Solid Phase and Pressure Solver Leads on loop duty) has at least three ready loop items with source references; Mesh Data D-083 fully closed (`[[ported]]` on s5-gen `08f6016e28`); remaining wait is device run B / Wall merge when GPU free.
+Summary of dry risk: Role 1 low; Role 2 low; Role 3 low; Integration Lead low; Pressure Solver Lead low; Legacy Mapper low; Species and Combustion low; Solid Phase low; Radiation medium; V&V low; Spec Lead low; Generator Engineer low; Wall Loops Engineer low; Mesh Data Loops Engineer medium; GNU Build Chief medium; Intel Build Chief medium. GNU Build Chief is medium (~4 ready: items 11–14 — owner-show adaptive rebuild, overnight MIRROR vortex_ring binary ≥ `54f3441fb6`, D-092+S6 rebuild+smoke, two-level `ns2d_16` regression; item 15 parked); FASTMATH GNU verify PASS (`vv-runs/d068-fastmath-pin/RESULT.md`). Adaptive owner-show: Role 3 adaptive+plotfile green `370c4412cf`, Role 1 D-089 refuse lift `8c8381b946`, V&V enabling adaptive as primary under `vv-runs/owner-show/`. Every loop-translation role (Legacy Mapper, Generator Engineer, Wall Loops Engineer, Mesh Data Loops Engineer, and the Species and Combustion, Radiation, Solid Phase and Pressure Solver Leads on loop duty) has ready loop items with source references; Mesh Data D-083 fully closed (`[[ported]]` on s5-gen `08f6016e28`); fresh Mesh Data loop claims L1305/L1317 (not idle); device run B / Wall merge / `ci_checks` remain waiting on GPU.
 
 ## Data layout, pressure and transport implementers
 
@@ -163,17 +163,18 @@ Blocked on: nothing for items 1 to 7.
 6. Remaining W1 to W5 items from `solid/08` section 7 (the hard stops have landed in `fd5b22dcae`); SP4 scratch sums and the S2 guarded assertion.
 7. O3 (L1402) uniqueness review with the Solid Phase Lead; WP8/WP11 wall-table gather with the Integration Lead (waits for W1).
 
-**GPU Mesh Data Loops Engineer (loop duty). Dry risk: medium (3 ready, 1 of them a loop item; D-083 fully closed).**
+**GPU Mesh Data Loops Engineer (loop duty). Dry risk: medium (fresh loop claims L1305/L1317 — not idle; device run B / `ci_checks` still waiting on GPU).**
 1. ~~D-083 two-pass GPU kernel for `CHECK_MASS_DENSITY` (L0876/L0877)~~ done — fully closed: hand-written K2 two-pass on `s5-cmd-clip` (kernel `8edd573d33`; caller docs `f5cbeec5e8`; device evidence `b582e79027` / DEVICE.md); Species ACCEPT-with-conditions then CLEARANCE YES (docs `126662fc8f`); Integration restored `[[ported]]` on s5-gen `08f6016e28` (docs `b46f6d0`); `ci_checks --strict` PASS. Remaining wait: device run B / Wall merge when GPU free (nclip 0/1 and multi-box FillBoundary conditions still in force).
 2. ~~L0630 `BLOCK_CELL`~~ closed — not planned (host); cite `amrex/l0630-block-cell-host.md` (no MESH_EXCHANGE 66/67 translation).
 3. L1366 (`velo.f90:1463-1559`, `NO_FLUX` walls): translated on s5-gen `20fb4a1f03` (`amrex/loop_claims.csv`); keep thin-pair / gate evidence current.
 4. ~~Neighbour-mesh L1363/L1364/L1367/L1399 (D-055)~~ closed — not planned (host); same-mesh empty; `amrex/o2-edge-exchange-scope.md`.
 5. ~~`COMPRESSION_WAVE` batch L1276 to L1287 and L1379 `CORIOLIS_FORCE`:~~ done — CW markers `cw3_*`/`cw4p_*`/`cw4c_*` + r2 bitwise on s5-gen `f72bd9b809`; L1379 `coriolis_up` by Pressure Lead on s5-gen `6dca8b2209`.
-6. Keep `ported.toml` and the strict `ci_checks` pass current; `gsfv_mp5` stays listed but out of scope (D-082); `rho_d_maxloc_fix` only after the sign-off.
-7. Wire the fixed-point zone-sum mode into the `zone_sum_order` checks.
-8. Device run B of the four registered wall nests (stage-1 plan 7.13b) and held-out kernel evidence with the Integration Lead. Waits for GPU time.
+6. **Current claim:** L1305 `SYNTHETIC_TURBULENCE` (`turb.f90` ~1802-1867, vent eddy contrib) and L1317 `TEST_FILTER` (`turb.f90` ~1033-1049, midpoint 3×3×3); coordinate with Mapper L1315/L1316/L1321. **Do not claim** `TENSOR_DIFFUSIVITY` L1309–L1314 (Generator private `tdm_*` under L0365). Optional warm-up (unclaimed until started): L0884 `CLIP_PARTICLE_DRAG`.
+7. Keep `ported.toml` and the strict `ci_checks` pass current; `gsfv_mp5` stays listed but out of scope (D-082); `rho_d_maxloc_fix` only after the sign-off. Waits for GPU / Wall merge as needed.
+8. Wire the fixed-point zone-sum mode into the `zone_sum_order` checks.
+9. Device run B of the four registered wall nests (stage-1 plan 7.13b) and held-out kernel evidence with the Integration Lead. Waits for GPU time.
 
-**GNU Build Chief. Dry risk: high (1 ready).**
+**GNU Build Chief. Dry risk: medium (~4 ready: items 11–14).**
 1. ~~Validate patch 0010 on GNU and run P-3 and N-5 (N-5b on the bypass build) on the host build (A-65)~~ done — tip `047adca89bc6`; P-3 stock PASS (NIC_CHECK 256×3 / 512); N-5 and N-5b bypass PASS (ERROR(9001) hand tables); N-5c stock PASS (TRNX_ID converter refusal); RESULT `vv-runs/a65-0010-host/RESULT.md` (converter-supersession for stock N-5 noted there).
 2. ~~Build and validate the merged tip `8ad685f435` (FireX `1fb5c300fa`) with HYPRE on and off~~ done — tip `8ad685f435` HYPRE on/off, obst-removal + back-wall PASS, Release/Debug refbin regenerated; UP-0011 unused-FN diagnostic filed (`upstream-patches/UP-0011-gnu-debug-validation.md`).
 3. ~~Debug check of the `UP-0011` Debug build fix (`upstream-patches/README.md`); `UP-0008` Rel+Dbg already PASS.~~ done — stock Debug build+smoke PASS (`vv-runs/up0011-stock-debug/RESULT.md`; note updated); `UP-0008` Rel+Dbg already PASS.
@@ -185,6 +186,10 @@ Blocked on: nothing for items 1 to 7.
 9. ~~Fold A-14 pointers into `vv/environment.md`~~ done — assigned fold landed (docs `02f7197`; §2 HDF5/VTKHDF note and §6 point 2).
 10. ~~Stretch: `USE_AMREX=ON` + same HDF5 CMake patch / smoke~~ done — A-14 `USE_AMREX=ON` + HDF5 PASS (RESULT addendum `vv-runs/a14-hdf5-gnu/RESULT.md`; binary sha256 `e7646ad1f2af86f70cc2895e9e568a6633b905dfb4ce8d5697feb959ba2ea33c`).
 11. **Next ready:** Rebuild Release `USE_AMREX=ON` at tip including Role 3 `370c4412cf` + Role 1 D-089 `8c8381b946` for adaptive owner-show; smoke `blob_16_l0 --two-level-run --steps 20 --regrid-every 5 --plotfile`; RESULT under `vv-runs/owner-show/`.
+12. Overnight binary rebuild Release `USE_AMREX=ON` at tip ≥ `54f3441fb6` (R=0.30 a=0.20 MIRROR) for `vortex_ring_re100_wall`; record sha256.
+13. Rebuild including Role 2 D-092 `ba730a0dfd` + S6 `bf0ba2d523`; link+smoke.
+14. two-level `ns2d_16` np1/(np4) regression on that tip.
+15. Parked: OPEN floor-INERT smoke after Role 1 TimeLoop die lift.
 
 **Intel Build Chief. Dry risk: medium (3 ready; N-5b in progress).**
 1. `-O2 -fp-model=precise` speed cost (A-73) and the cause of the `-prec-div` failures; build notes and scripts to the D-079 flags (`vv/environment.md`).
