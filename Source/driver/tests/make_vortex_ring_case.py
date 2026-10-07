@@ -15,7 +15,7 @@ read does not EOF. PERIODIC_TEST=2 is the IC loader only (kept with non-all-peri
 
 IC: Rosenhead-regularised Biot-Savart circular filament (x–y plane).
 Default owner retarget (Architect): Re÷100 (ν=1e-2), Γ=-0.8 downward, cz≈0.60,
-floor INERT (no-slip), sides+top PERIODIC. OPEN vents deferred (inhomogeneous Poisson).
+floor INERT (no-slip), sides PERIODIC, top MIRROR. OPEN vents deferred (inhomogeneous Poisson).
 
 usage:
   make_vortex_ring_case.py [N] [outdir] --4m --8m
@@ -69,14 +69,15 @@ def write_uvw_block(path, U, V, W):
                        fmt="%.10g", delimiter=",")
 
 def vents(L, floor_inert: bool):
-    """Architect: floor INERT + sides/top PERIODIC. No OPEN, no WALL."""
+    """Architect/Owner: floor INERT + sides PERIODIC + top MIRROR. No OPEN, no WALL.
+    z non-periodic so driver logs periodic=(110), not (111)."""
     if floor_inert:
         return f"""&VENT PBX=0, SURF_ID='PERIODIC' /
 &VENT PBX={L:g}, SURF_ID='PERIODIC' /
 &VENT PBY=0, SURF_ID='PERIODIC' /
 &VENT PBY={L:g}, SURF_ID='PERIODIC' /
 &VENT PBZ=0, SURF_ID='INERT' /
-&VENT PBZ={L:g}, SURF_ID='PERIODIC' /
+&VENT PBZ={L:g}, SURF_ID='MIRROR' /
 """
     return f"""&VENT PBX=0, SURF_ID='PERIODIC' /
 &VENT PBX={L:g}, SURF_ID='PERIODIC' /
@@ -88,7 +89,7 @@ def vents(L, floor_inert: bool):
 
 def hdr_comments(meta, nu, floor_inert, N, tag=""):
     re_note = "Re_advect≈25 (baseline≈2460 @ μ=1e-4)" if abs(nu - 1.0e-2) < 1e-12 else ("Re_advect≈2460 @ μ=1e-4" if abs(nu - 1e-4) < 1e-12 else f"ν={nu:.1E}")
-    bc = ("floor INERT (no-slip impermeable); sides+top PERIODIC (OPEN deferred)"
+    bc = ("floor INERT (no-slip impermeable); sides PERIODIC; top MIRROR (OPEN deferred; expect periodic=(110))"
           if floor_inert else "PERIODIC all sides")
     dirn = "downward (−z)" if meta["Gamma"] < 0 else "upward (+z)"
     return f"""! 3-D vortex ring, {N}^3{(' '+tag) if tag else ''}. Re/nu: VISCOSITY={nu:.1E} → {re_note}.
@@ -197,7 +198,7 @@ def main():
     ap.add_argument("--no-downward", dest="downward", action="store_false",
                     help="Γ=+0.8, cz=0.40 (old upward periodic baseline)")
     ap.add_argument("--floor-inert", action="store_true", default=True,
-                    help="PBZ=0 INERT + sides/top PERIODIC (default on; Architect)")
+                    help="PBZ=0 INERT + sides PERIODIC + top MIRROR (default on; Architect/Owner)")
     ap.add_argument("--no-floor-inert", dest="floor_inert", action="store_false",
                     help="PERIODIC all sides (old baseline)")
     ap.add_argument("--baseline-periodic", action="store_true",

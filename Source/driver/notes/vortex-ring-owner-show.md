@@ -13,7 +13,7 @@ refined by undivided vorticity magnitude (`TAG_VORT`).
 | Pack outdir | `/workspace/fds-amr/vv-runs/owner-show/vortex_ring_re100_wall/` |
 | ν | **VISCOSITY=DIFFUSIVITY=1.0E-2** → **Re_advect≈25** (baseline≈2460 @ μ=1e-4) |
 | Γ, cz | **−0.8**, **0.60** (downward −z toward floor) |
-| BC | **PBZ=0 INERT** (no-slip impermeable floor); **PBX/PBY/PBZ=L PERIODIC**. **No OPEN, no WALL** (OPEN deferred — inhomogeneous Poisson). |
+| BC | **PBZ=0 INERT** (floor); **PBX/PBY PERIODIC**; **PBZ=L MIRROR** (top). Expect driver `periodic=(110)`. **No OPEN, no WALL**. |
 | IC loader | `PERIODIC_TEST=2` + UVW/CSVF (loader only; not a BC claim) |
 
 Generator defaults emit this retarget:
@@ -69,5 +69,5 @@ Plotfile fields: **RHO, U, V, W, OMEGA_Y**. `VORT` tagging-only.
 ## Architect notes
 
 - OPEN vents refused for this pack (TimeLoop / inhomogeneous Poisson) — deferred.
-- Floor is **INERT** (not WALL). Sides+top stay PERIODIC.
+- Floor is **INERT** (not WALL). Sides PERIODIC; top **MIRROR** (z non-periodic → `periodic=(110)`).
 - Do not scale Γ for Re; keep |Γ|=0.8, R=0.20, a=0.045.

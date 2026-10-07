@@ -1,6 +1,6 @@
 ! 3-D vortex ring, 48^3 4m. Re/nu: VISCOSITY=1.0E-02 → Re_advect≈25 (baseline≈2460 @ μ=1e-4).
 ! IC: Rosenhead Biot-Savart; Γ=-0.8, R=0.2, a=0.045, cz=0.6 → downward (−z).
-! BC: floor INERT (no-slip impermeable); sides+top PERIODIC (OPEN deferred). PERIODIC_TEST=2 + UVW/CSVF = IC loader only.
+! BC: floor INERT (no-slip impermeable); sides PERIODIC; top MIRROR (OPEN deferred; expect periodic=(110)). PERIODIC_TEST=2 + UVW/CSVF = IC loader only.
 ! Owner: --two-level-run --tag-vort auto --maxsize 8 --blocking 4; TAG_KEEP~0.85; fields RHO,U,V,W,OMEGA_Y.
 ! Hint: undivided |ω| peak ~ 2.61983; try --tag-vort auto or [0.655, 1.31].
 ! See Source/driver/notes/vortex-ring-owner-show.md.
@@ -30,5 +30,5 @@
 &VENT PBY=0, SURF_ID='PERIODIC' /
 &VENT PBY=1, SURF_ID='PERIODIC' /
 &VENT PBZ=0, SURF_ID='INERT' /
-&VENT PBZ=1, SURF_ID='PERIODIC' /
+&VENT PBZ=1, SURF_ID='MIRROR' /
 &TAIL /
