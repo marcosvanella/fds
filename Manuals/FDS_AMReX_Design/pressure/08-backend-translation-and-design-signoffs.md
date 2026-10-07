@@ -233,3 +233,14 @@ I checked the code against FireX `36975d765f` `pres.f90` (L1211 lines 250-260, L
 **Coverage of flag sets, threads and mutants.** Mutants: 22 in total, each failing for the intended reason, apart from the guard-kill of 22 noted above. Threads: not applicable (serial). Flag sets: one per run. The C++ side is built with the build type's flags plus `-ffp-contract=off`, and the Fortran reference is built with gfortran `-O2 -ffp-contract=off -fno-fast-math` or ifx `-O2 -fp-model=precise`, depending on `FC`. No matrix is registered. Recommended, not blocking: one registered `-O0` / `-O3` pair of the C++ loop executable against the same reference, and the ifx reference in the Intel CI job. Box split: add one test that runs L1211, L1207 and a non-periodic H fill on two sub-boxes against one box, comparing with `memcmp`. This is cheap, it is the shape the AMR caller will use, and it pins C1.
 
 **What the parent rows need.** A-70: C3, R2, R3 (as a composition test) and the R4/R5 evidence are done. C1 (guard for every code), C2 (move to setup) and the `r4r5` test simplification are open.
+
+## 10. A-71 answers (Q1, Q2, Q3, Q6) — Pressure Solver Lead
+
+Source: Role 2 design note at FDS commit `9df6235181` (`Source/pressure_backend/frozen/masked-branch-design.md` Q1–Q7). Domain calls only; Q4, Q5, Q7 left to the Architect / Role 1.
+
+| Q | Verdict | Recommendation and reason |
+|---|---|---|
+| Q1 | **ACCEPT** | Composite masked → assembled HYPRE only; MLMG composite masked stays `NotBuilt`. D3 needs per-stencil `avail` (Gas only); MLMG's only public knob (`setInterpBndryHalfWidth`) drops order everywhere and cannot exclude Solid/Known. HYPRE already owns `bdry_stencil`/`avail` (D3 binds). D-084: do not invent MLMG hooks; one composite masked path. |
+| Q2 | **ACCEPT** | Refuse Known/OPEN on C/F in v1 (`InvalidInput`); regrid keeps vents inside one level. Known cells hold dummy `phi=0`; reading them in a C/F stencil corrupts the gas flux (D3). Gap-face OPEN (FR-037 / doc 04 §1.3) is level-0 mask interior, not C/F. Straddling vents is a later regrid policy, not a first composite need. |
+| Q3 | **ACCEPT** | UGLMAT puts the OPEN value on the face (linear ghost). Matrix: `+2*BIJ` on the diagonal (`pres.f90:4707`); RHS: `-2*IDX*AF*BCV` with `BCV=BXS/…` (`pres.f90:1657`); post-solve ghost `HP=-HP_gas+2*B` (`pres.f90:3529-3539`). Matches backend `Known` / β=2 and doc 04 §2(a2). Close the `[VERIFY]` at doc 04:200. |
+| Q6 | **ACCEPT** | Partial-face OPEN: driver pads one Known/Solid halo layer (as `masked_geo case=stairwell`); no per-cell face-type array. Domain faces keep one BC type (FR-037 / AMReX); pad reuses the existing mask path (prefetch-friendly, single-direction messaging). Per-cell face types add a conditional on every face (D-084). UGLMAT's per-wall OPEN is already encoded by Known cells behind the face, not by a second face-type field. |

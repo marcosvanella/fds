@@ -23,7 +23,7 @@ working area and are not in this repository.
 | `tools/device_runs.toml` | 5226 (5 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/k2_ci_check.py` | 34423 (34 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/kernel_lint.py` | 36341 (35 KiB) |  | not Markdown or CSV | not recorded |
-| `tools/kernel_registry.toml` | 16293 (16 KiB) |  | not Markdown or CSV | not recorded |
+| `tools/kernel_registry.toml` | 16368 (16 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/patches/cmake-fastmath-pin.patch` | 5850 (6 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/patches/ported-gsfv-proposed.toml` | 2945 (3 KiB) |  | not Markdown or CSV | not recorded |
 | `tools/port_kernel_map.py` | 38567 (38 KiB) |  | not Markdown or CSV | not recorded |
