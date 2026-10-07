@@ -167,3 +167,34 @@ The survey numbers (36975d7) for L1239, L1243, L1245, L1248 are 3886-3892, 4961-
 ## Result lines for the V&V gate
 
 `test/run_rad.sh` writes, per flag set, `<OUT>/<flagset>/run.log` with one line per kernel: `KERNEL <name> PASS|FAIL cases=N mismatches=M vacuous=V` (the 17 kernels; `SPEC open_qin_spec ...` for the hand-written L1243 specification kernel), then the summary line and `RESULT: PASS|FAIL`. A kernel is FAIL when any launch differs in any bit or when the coverage rule of the case table was not met (`vacuous=1`). None of the 17 kernels calls a libm transcendental (`libm_check` on the generated text and on the upstream lines: nothing found); `rad_gray_kfst4` has `TMP**4` (integer exponent).
+
+## 10. Gate hookup status (radiation/03; open under next-work)
+
+Status at docs HEAD when written: **partial / blocked on Integration Lead and V&V gate owner**. No further Radiation-owned code is required under `s5_rad_*` for the host hookup; the remaining steps are registration, pin update, and a device driver that Radiation does not own alone.
+
+### Already hooked (host)
+
+| Piece | Where | Evidence |
+|---|---|---|
+| RESULT line format for the 17 `rad_*` kernels (+ L1243 `SPEC`) | this file, § "Result lines for the V&V gate"; `test/run_rad.sh` | one `KERNEL <name> PASS\|FAIL cases=N mismatches=M vacuous=V` per kernel per flag set, then `RESULT: PASS\|FAIL` |
+| Host gate steps | `vv-runs/gpu_gate/README.md` (repo `4539634`) | `drift_rad` (`test_mesh_rad.py`), `bitwise_rad` (`run_rad.sh`, reads the `KERNEL` lines), `mutants_rad` (`test_mesh_rad.py --mutants`) |
+| Sweep host gate steps | same README; `SWEEP_PIN` in `gate.py` | `drift_sweep`, `bitwise_sweep`; pin still `3814e1f893` / 961 cases / 12 groups / padding 166908 (D-079 era). Current sweep suite is larger (1246 cases / 19 groups at the Radiation evidence in `radiation/06` §7); the pin must be updated by the gate owner after review |
+| Sweep kernel descriptors and angle-loop launch order | `radiation/06` Addendum 1 §2–§3 | Integration Lead's box-batched launch layer owns the host loop over bands/updates/angles/planes (D-073 (f), D-077 (6)); SYNTHETIC evidence in stage-1 plan §7.14, docs `85b4785`, pinned s5-gen `3814e1f893` |
+
+Shared-file requests that are still not Radiation's to make (see §8): `new_builder` / merge of `markers/rad_kernels.toml`, F2008 parse, ragged `BR_ILW`, `B1_PRESENT`. Those affect generation quality, not the host gate wiring above.
+
+### Still open (owners outside Radiation Lead alone)
+
+1. **Device driver for the 17 `rad_*` kernels.** `gpu_gate/README.md` lists the `rad` group as "pending a driver" (no device-tier log; category bitwise; watch `rad_gray_kfst4` `TMP**4` on first device run). Owner: Integration Lead / gate device-driver work (same class as rounds 4–7). Radiation supplies the host harness and RESULT lines; does not invent a second driver without Integration.
+2. **`SWEEP_PIN` update** in `vv-runs/gpu_gate/gate.py` from `3814e1f893` (961/12) to a reviewed commit of the present sweep suite (1246 cases / 19 groups, ILD*/STORE included). Gate owner after Radiation evidence review (`radiation/06` §7, §9–§10).
+3. **`tools/ci_checks.sh --strict` green.** Still cited open in `tools/ported.toml` / D-077: `s5gen_rad_wall_qin_zero` / `W_SURF_INDEX` device-address list (K2-03 / CL-07). Owner: Generator / Wall Loops (shared `markers/` / `generated/`; Radiation must not edit those). Blocks any `ported.toml` radiation entry under D-072 (c).
+4. **`ported.toml` / device-run overlay for radiation.** Integration Lead sets ported after V&V review of device evidence (D-072 (c), D-077 (3)). Not started; blocked on (1) and (3).
+5. **Interior-only restart comparison mask** for `QR`/`UII`/`UIID` ghost cells: agreed (D-077 (6); `gpu_gate/README.md` § "Rule D-073 (2)"); **not implemented** until a restart-file comparison path exists. See `radiation/06` §6 and the V&V confirmation draft.
+
+### What Radiation will not do here
+
+- Edit `s5gen.py`, `markers/`, `generated/`, or `vv-runs/gpu_gate/gate.py` (other owners).
+- Claim gate hookup "done" while (1)–(3) are open.
+- Start FR-063 regrid work (waits Role 3) or L1240/L1244 (waits Mesh Data particle gathers) or L1251 (Role 3 ghost fill).
+
+**Next recommended action:** Integration Lead (or gate device-driver owner) schedule the `rad_*` device driver; V&V Lead confirm the ghost reader list (§6 of `radiation/06`) and, when ready, bump `SWEEP_PIN` after reviewing the 1246-case evidence.

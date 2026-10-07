@@ -10,7 +10,10 @@ Scope: the five loops of the Legacy Mapper's ranked list in the pressure area, F
 |---|---|---|---|
 | L1211 | 250-260 | CPU reference `pres_compute_rhs_div` (IPS 1/4/7, non-cylindrical), same operation order as the Fortran. Generator entry pending (generator owners). | Bitwise vs the verbatim loop: 10 cases (five sizes incl. JBAR=1 and 1x1x1, PRHS leading dimension IBAR+1 and IBAR). Bitwise vs arrays from a real FDS run: 16 files (max abs 0, max rel 0). |
 | L1207 | 758-764 | CPU reference `pres_p_from_h`, full box 0:IBP1 in every direction. Generator probe accepts the entry as written. | 5 cases bitwise; 16 real-FDS files bitwise. |
-| L1215 | 394-400 | Retired: the backend writes H directly (FR-037); the driver's valid-cell phi to H copy is a plain MultiFab copy. L1216-L1218 would be retired by the same reasoning (not claimed). | none needed |
+| L1215 | 394-400 | Retired: the backend writes H directly (FR-037); the driver's valid-cell phi to H copy is a plain MultiFab copy. | none needed |
+| L1210 | 238-245 | Retired (pressure/09): cylindrical PRHS nest deferred in AMR mode. Backend returns NotBuilt for cylindrical / non-Cartesian; no L1210 translation. | none needed |
+| L1212-L1214 | 267-307 | Retired (pressure/09, FR-037): transposed PRHS store for IPS 2, 3/6, 5. AMR keeps the natural layout; driver stops on IPS /= 0. | none needed |
+| L1216-L1218 | 404-430 | Retired (pressure/09): transposed HP copies for IPS 2, 3/6, 5. Same FR-037 reasoning as L1215; transposed IPS cannot occur. | none needed |
 | L1220-L1222 | 450-492 | Host code `pres_h_bc_x/y/z`, ordered IF sequence, codes 5/6 in x only. | 70 cases (every x code 0-6 against every y/z code 0-4) bitwise; 16 real-FDS files bitwise. |
 | L1209 | 65-228 | Host code `pres_poisson_boundary_arrays`. The caller supplies neighbour widths, wind arrays and the ramp callback. NIC>1 not reached (D-072). | 8 cases bitwise (all six IORs, Neumann/Dirichlet, solid/open/interpolated/null, wind on/off, T_IGN window, exact-zero velocities). Real FDS: bitwise for every wall kind including OPEN walls (the former open-wall difference was a reader defect: FDS velocity arrays start at index -1, see below). |
 
@@ -51,10 +54,29 @@ The earlier difference against real FDS was caused by the comparison reader, not
 the open-wall test (`UU(0,J,K)<0`, `WW(I,J,KBAR)>0`, wind term). With the lower bounds fixed L1209 is bitwise equal to FDS for all walls (closed run: 4 files,
 2552 elements; two-mesh run with wind and pressure ramp: 12 files, 8616 elements; 0 differences). Five L1209 files are in the committed archive and a negative
 control (`pb_fdsloops_fds_uu_lb0`, old lower bound) must fail. The FDS prints that "never fired" were in the `.out` file (FDS redirects unit 6). The OPEN-wall
-branch of `pres_poisson_boundary_arrays` is now verified against FDS output; the NIC>1 and synthetic-eddy branches are not (D-072; the hook stops on eddies).
+branch of `pres_poisson_boundary_arrays` is now verified against FDS output; the NIC>1 branch is not (D-072). Synthetic-eddy walls are dumped as WV_EDDYV (hook) with `ldump_eddy.fds`; the r5 multi-set archive and census/check-fds-sets CTests are in-tree (see below).
 Details: `Source/pressure_backend/frozen/fds-loops-notes.md`.
+
+## Closed: L1210, L1212-L1214, L1216-L1218
+
+Pressure Lead retired these in `pressure/09-pressure-loop-dispositions.md` (cylindrical deferred; transposed IPS only with stretched grids / IR-002, and the AMR driver stops on `IPS /= 0`). Role 2 confirmed `Source/pressure_backend` has no translation or call path for them: cylindrical is NotBuilt; L1211 covers only IPS 1/4/7 natural layout; comments in `FdsPressureLoops.H` and `frozen/fds-loops-notes.md` already exclude L1210 and L1212-L1214. Claims rows updated below.
+
+## Closed: r5 multi-set archive / census / check-fds-sets
+
+`frozen/fds_loops_cases/fds_loops_cases_r5.tar.gz` (9 sets from `ldump_*.fds`: 2d, dirx, dirxhi, eddy, openyz, perx, peryz, ramp, ylow).
+CTests `pb_fdsloops_census`, `pb_fdsloops_fds_sets`, and negative control `pb_fdsloops_fds_sets_uu_lb0`. Details in
+`Source/pressure_backend/frozen/fds-loops-notes.md`.
+
+## Closed: pressure/08 R4 and R5 (real-FDS coverage)
+
+Explicit coverage gate `pb_fdsloops_r4r5` (`tests/fds_loops_test.py` action `r4r5`) on the r5 archive:
+
+- **R4** (L1220-L1222, section 2.4): periodic codes via `perx` (LBC=0) and `peryz` (MBC=NBC=0); Dirichlet low face via `dirx` (LBC=2);
+  original closed/two-mesh still on `pb_fdsloops_fds`. Bitwise HBC_* via `pb_fdsloops_fds_sets`.
+- **R5** (L1209, section 2.5): (a) SOLID-Dirichlet `WALL_WORK1 /= 0` on `dirx`/`dirxhi`; (b) open y/+z with wind and z ghosts KK=0,KBP1 on
+  `openyz`; (c) synthetic-eddy inflow on `eddy`; (d) ramped open vent `T_IGN /= T_BEGIN` on `ramp`. Bitwise L1209_* via
+  `pb_fdsloops_fds_sets`.
 
 ## Left
 
-- L1210 (cylindrical PRHS), L1212-L1214 (transposed PRHS), L1216-L1218 (transposed copies; retire like L1215).
 - Register: the table in `pressure-velocity-h-loops.md` and the work list need regenerating by the Legacy Mapper (`tools/inventory/loop_work_list.py`); the statuses above were written directly in `loop_claims.csv`.

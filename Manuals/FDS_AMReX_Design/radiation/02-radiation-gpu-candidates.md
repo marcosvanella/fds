@@ -26,7 +26,7 @@ Owner: AMR Radiation Lead. Status: draft, not reviewed.
 | Optically thin `KFST4_GAS = CHI_R*Q + KAPPA_GAS*UII` | 4131-4141 | `CC_IBM` branch | **translated** (`rad_thin_kfst4`, CC_IBM off) | `CC_IBM`/`CCVAR` handling for the cut-cell case |
 | RTE-source correction scaling of `KFST4_GAS` | 4149-4163 | `CC_IBM` branch | **translated** (`rad_corr_kfst4`, CC_IBM off) | as above |
 | `ADD_VOLUMETRIC_HEAT_SOURCE` (CSV L1238, 0.024%) | call 4167, routine 5098-5146 | pointer-heavy tree loop over `INIT` regions (`alloc_ptr_local` 26, `reduction_accum` 4); only with `INIT_HRRPUV` | host | none; 0.024% does not justify it |
-| Condensed-species absorption | 4171-4202 | not examined in detail | open | to be classified when L1242 is taken up |
+| Condensed-species absorption | 4171-4202 | `INTERPOLATE1D` on mixture `R50`/`WQABS`/`WQSCA`; `CC_IBM` skip; same assumed-shape blocker as droplet row | generator feature (classified; radiation/06 §19) | assumed-shape rank-1 table callee, or keep host per-species loop |
 | `EXTCOE = KAPPA_GAS + KAPPA_PART + (SCAEFF+SCAEFF_G)*RSA_RAT` | 4206 | whole-array statement | **translated** (`rad_extcoe`) | whole-array expansion (done by the rewrite in `s5_rad.py`) |
 | `UIIOLD` copies | 4213, 4215 | whole-array / array section | **translated** (`rad_uiiold_wb`, `rad_uiiold_gray`) | as above |
 | **`RTE_SOURCE` precompute** | 4220-4222 | `ALLOCATE(MOLD=)` (F2008) | **translated** (`rad_rte_source`) | F2008 parse (done by a one-line text rewrite); local allocatable as driver scratch |

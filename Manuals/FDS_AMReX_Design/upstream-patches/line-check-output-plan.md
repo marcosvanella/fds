@@ -87,6 +87,37 @@ Not found as stated: `OutputPlan`, `OUT_MESH`, `OUT_POINT_TO`, `FDS_HOOK_SET_MES
 | master `ce1f659cd4` | both succeed (offset -131) | hunk 2 at offset -4; hunk 1 clean |
 Applied for real in the scratch copy: calls at patched main.f90:1729 (`PRESSURE_SOLVER_DUMP(NM,T,DT,.FALSE.)`, after the `PRESSURE_SOLVER_COMPUTE_RHS` loop, original 1723, and before `SELECT CASE(PRES_FLAG)` original 1728) and 1754 (`.TRUE.`, after the `END SELECT` original 1743, before the residual comment original 1745); `PRESSURE_ITERATION_SCHEME` starts at original 1674, `PRESSURE_ITERATION_LOOP` is the `DO` label at 1696; pres.f90 PUBLIC list line 12, routine 1090-1244 (155 lines), `POISSON_FACE_TYPE` 1251, `END MODULE PRES` 1267 (original 1079); the patch adds 188 lines to pres.f90 (6114 to 6302), the note says "about 190"; no added line is longer than 132 characters. The signoff note's citations all hold; the 0009 label is gone (`README.md:10` of the frozen case says UP-0011). Driver-side citations of the note moved: `FDSTL_PDUMP` is now TimeLoop.cpp:836 (was 834 in the earlier check) and the file name is built at 843 (was 841), after an unrelated driver edit; `pb_fds_frozen` is m4_modes.cpp:1-2. The level-0 guard patch 0010 also still applies clean on HEAD (no offset).
 
+## FireX delta (8ad685f435 / 1fb5c300fa)
+
+Re-check after the local FireX merge into FDS-AMReX (`8ad685f435`; `Source/` blobs match tip). Full dry-run table: `line-check-firex-1fb5c300.md`. Method unchanged (scratch `git show` + `patch --dry-run`).
+
+### Apply status of the named patches
+| Patch | Status on 8ad685f435 |
+|---|---|
+| driver 0011 draft (`Source/driver/patches/0011-main-mesh-dumps.patch`, src `9442836334`) | clean (hunks at 12, 120, 129); drafts now exist (this file previously said they did not) |
+| driver 0012 draft (`Source/driver/patches/0012-dump-output-mesh-tables.patch`) | clean; `dump.f90` sites of the patch are untouched by the merge |
+| UP-0011 | main.f90 at offset +76 (1726, then 1751 with prior hunk); was +73 on the pre-merge tip; `pres.f90` clean |
+| 0010 | hunks 1-2 clean (112, 327); hunks 3-4 at offset +3 (`INITIALIZE_MESH_EXCHANGE_1` 2135, guard 2374) |
+
+### Role 1 anchors that move (main.f90 only; dump.f90 0012 sites unchanged)
+Section 1 numbers were written against blob `2e1327bbe8` (same as pre-merge `9dc218d55b`). After the merge, citations at or after the first `MAIN_LOOP` edit move by +3 through the pressure block, then by +34 from `WRITE_STRINGS` onward (MESH_EXCHANGE growth). Unchanged early anchors: MODE=3 block main.f90:120-142, insertion 131-132, set-up 232/282/285/327/529/535/539/542/621/668, `N_WRITTEN` 114. dump.f90:405-451, 453, 627, 963, 1766, 2056-2060, 2457, 2831 and the writer-start citations in section 2 are unchanged by this merge.
+
+| Plan / section-1 citation (old) | At 8ad685f435 | Delta |
+|---|---|---|
+| MAIN_LOOP `UPDATE_CONTROLS` 1209 | 1212 | +3 |
+| `N_WRITTEN=0` / dump loop 1216-1225 | 1219-1228 (`DUMP_MESH_OUTPUTS` at 1226) | +3 |
+| `DUMP_GLOBAL_OUTPUTS` 1238 | 1241 | +3 |
+| `WRITE_STRINGS` call 1242 | 1245 | +3 |
+| `MPI_INITIALIZATION_CHORES` 1334 | 1337 | +3 |
+| `PRESSURE_ITERATION_SCHEME` 1674 / loop 1696 | 1677 / 1699 | +3 |
+| `PRESSURE_SOLVER_COMPUTE_RHS` 1723; residual comment 1745 | 1726; 1748 | +3 |
+| `INITIALIZE_MESH_EXCHANGE_1` 2132; `EWC%NIC` 2184 | 2135; 2187 | +3 |
+| `WRITE_STRINGS` routine 4231-4342 (send 4245; `DO NOM=2,NMESHES` 4269) | 4265-4376 (send 4279; `DO NOM=2,NMESHES` 4303) | +34 |
+| `EXCHANGE_DIAGNOSTICS` 4347 | 4381 | +34 |
+| `EXCHANGE_NOBST_INFO` 4794; `_NSLICE_` 4872; `_NPATCH_` 5007 | 4828; 4906; 5041 | +34 |
+
+func.f90 clocks (432, 496, 536-538) sit above the first FireX hunk in `func.f90` (4532) and do not move. Driver `TimeLoop.cpp` lines in section 1 are outside this merge; see the driver tree for current numbers.
+
 ## 5. Not verifiable without a build
 - That the level-0 arrays of the writers alias the MultiFabs for every field `DUMP_SLCF`, `DUMP_BNDF`, `DUMP_SMOKE3D` and `DUMP_ISOF` read (plan section 3 step A). `BOX_VIEW` (fds_amrex_hooks.f90:31-37) lists 20 fields; fields the writers read beyond these (for example the quantities of `GET_QUANTITY`, wall arrays, `OMESH`) were not traced.
 - That `DUMP_MESH_OUTPUTS` with the driver's T, DT and ICYC produces files whose headers equal an FDS run (plan section 5), and the T2-tolerance statement.

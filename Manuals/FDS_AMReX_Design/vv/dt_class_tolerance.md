@@ -1,9 +1,13 @@
-# Run-level class tolerance for `dt_coupled` kernels (D-070, D-078 a): measured proposal
+# Run-level class tolerance for `dt_coupled` kernels (D-070, D-078 a, D-080)
 
-Owner: V&V Lead. Status: v0.1 (proposal; `run_class_tolerance` in `vv-runs/gpu_gate/kernel_categories.json` stays `null` until the owner decides). Date of the measurement: 2026-10-04.
-Subject: the number that `check_device_logs.py` compares with `X` of the `RUNCMP` line (gate commit 38e94ae), `X = max over steps of |dt_dev - dt_host| / |dt_host|`, for kernels of class `dt_coupled` (today `cfl_wall_max`; `wall_visc_les` when registered). `c75997b` and test plan 5.10 say only "the run-level tolerance already used for cross-compiler runs", with no number.
+Owner: V&V Lead. Status: **v0.2 (Architect-ratified, D-080; provisional pending device-versus-host evidence)**. Measurement date: 2026-10-04. Ratification: 2026-10-06.
+Subject: the number that `check_device_logs.py` compares with `X` of the `RUNCMP` line (gate commit 38e94ae), `X = max over steps of |dt_dev - dt_host| / |dt_host|`, for kernels of class `dt_coupled` (today `cfl_wall_max`; `wall_visc_les` when registered). Gates the step sequence only; the 2-ulp per-value rule stays with the `ULP` line.
 
-## 1. Proposal
+**Change log v0.2 (2026-10-06).** Architect ratification **D-080**: `run_class_tolerance = 1e-11` (relative) for compared runs up to 1,000 steps. Set in `vv-runs/gpu_gate/kernel_categories.json`. Provisional because the measurement is CPU-to-CPU (Intel vs GNU) only; a device-versus-host run should be appended to this document when one exists. The `1e-14×N` form beyond 1,000 steps waits for longer-run measurement. v0.1 (proposal) is archived at `docs/vv/archive/dt_class_tolerance_v0.1.md`.
+
+**Change log v0.1 (2026-10-04).** Measured proposal from V&V Lead; `run_class_tolerance` left `null` until the owner decided.
+
+## 1. Ratified value (D-080)
 
 **`run_class_tolerance = 1e-11`** (relative, on every step of the compared run, last step included), for compared runs of up to 1,000 steps. For longer runs, the same model is `1e-14 x N` (N = number of steps compared); the gate has no N-dependent rule today, so a run longer than 1,000 steps needs the owner's decision first.
 
@@ -110,7 +114,7 @@ A kernel of class `libm` is allowed to differ by up to 2 ulp per value (about 4.
 1. `RUNCMP ... steps N maxrel X`: use the time steps the solver takes (the `dt` values as the solver computes them), not differences of an accumulated T; if a differenced T is the only record, the floor of section 3 applies (up to 1e-13 for T about 6).
 2. Choose the compared run so that the kernel is exercised in the controlling position of the dt minimum for a good fraction of the steps (for `cfl_wall_max`: a wall-dominated `UVWMAX`), otherwise `X = 0` is trivially met. The baseline cases with `X = 0` (4 of 11) show what an inert comparison looks like.
 3. The 4 cases with float32 time columns and `X = 0` do not enter the statistics; they are listed in section 2 so that nobody reads them as a bitwise result.
-4. Files: the analysis scripts, the per-case table and the summary are in `vv-runs/analysis/dt_class_tolerance/` (`load.py`, `ana2.py`, `stats.py`, `stats2.py`, `per_case_sf17.txt`, `summary.txt`). `kernel_categories.json` and the gate were not edited.
+4. Files: the analysis scripts, the per-case table and the summary are in `vv-runs/analysis/dt_class_tolerance/` (`load.py`, `ana2.py`, `stats.py`, `stats2.py`, `per_case_sf17.txt`, `summary.txt`). As of D-080, `kernel_categories.json` has `run_class_tolerance = 1e-11`.
 
 ## 8. Limits of this measurement
 
@@ -119,3 +123,31 @@ A kernel of class `libm` is allowed to differ by up to 2 ulp per value (about 4.
 - Only runs up to about 1,000 steps have a per-step record; the longer SMALL cases (4,700 steps) are bounded only to 1e-7 of T at printed steps (section 5).
 - No chaotic case with equal step counts and agreement exists on record, so the tolerance says nothing about growth in chaotic runs.
 - The explanation of the three diverging cases (section 4) is not established here.
+
+## 9. Architect ratification (D-080) and post-tolerance gate status
+
+**Ruling (D-080, 2026-10-06).** Architect accepted the section-1 number: `run_class_tolerance = 1e-11` relative, max over steps of `|dt_dev - dt_host| / |dt_host|`, for compared runs up to 1,000 steps. It gates the step sequence only; the 2-ulp per-value rule stays with the `ULP` line. The `1e-14×N` form for longer runs is not in the gate yet and waits for longer-run measurement. **Provisional:** the evidence behind the number is CPU-to-CPU only (Intel vs GNU, sections 2–5). When a device-versus-host run with a per-step `dt` record exists, append it to this document (and revisit the number if the measured `X` requires it).
+
+**Gate status after setting the tolerance** (`vv-runs/gpu_gate`, `check_device_logs.py`):
+
+| Kernel | In generator tree | ULP evidence on record | RUNCMP on record | Status after D-080 |
+|---|---|---|---|---|
+| `cfl_wall_max` | yes (`libm`, `run_compare = class`) | yes (`device_logs/stage1_cflw/`, maxulp 1 and 2) | **no** | **MISSING** (failure) — needs a `RUNCMP` line |
+| `wall_visc_les` | not yet (registry entry only; takes effect when registered) | no | no | not judged until registered |
+
+With the tolerance set, a missing `RUNCMP` stays **MISSING** until drivers print `RUNCMP` lines; once a `RUNCMP` exists the kernel can **PASS** / **FAIL** / **OPEN** per gate rules (OPEN only if the class tolerance were again undefined). Setting `1e-11` alone does not turn `cfl_wall_max` green.
+
+## 10. What is needed next (GPU engineers)
+
+Device drivers for every `dt_coupled` / `run_compare = class` kernel must print, per case, one line in the agreed format (see `vv-runs/gpu_gate/README.md`):
+
+```
+RUNCMP <kernel> <case> steps N maxrel X [quantity NAME]
+```
+
+- `case` = run or box-set name (no blanks); `N` > 0; `X = max over steps of |dt_dev - dt_host| / |dt_host|` (non-negative); `NAME` defaults to `DT`.
+- Prefer the solver's own `dt` values, not differences of an accumulated T (section 7).
+- Choose a case where the kernel controls the dt minimum for a good fraction of the steps (section 7 point 2); keep runs ≤ 1,000 steps until a longer-run rule is ratified.
+- Keep printing `ULP` lines as well: both are required for PASS.
+
+Until those lines appear in device logs copied back to the gate, `cfl_wall_max` remains MISSING regardless of the ratified tolerance.

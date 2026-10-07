@@ -7,7 +7,7 @@ Status as of spec v0.4.41 plus D-081 to D-083 and the local FireX merge into FDS
 
 Decisions since r5: D-083 (`CHECK_MASS_DENSITY`: GPU-only hand-written two-pass kernel in the K2 style, CPU loop unchanged, `UP-0003` tabled), D-082 (MP5 out of scope, `UP-0001` and `UP-0002` tabled; MP5-only kernels, markers, registry entries and tests are marked out of scope, not deleted, and do not count against coverage), D-081 (single-mesh FDS is the ground truth for step-sequence checks; multi-mesh first-step offset is a reference quirk). Earlier: D-080 (tag buffering, `MAXLOC` sign-offs, `WALL_LOOP_2` host path, test lock, `run_class_tolerance`, pressure conditions C1 to C3), D-079, D-078, D-077.
 
-Landed since r5 (items removed from the lists, each checked in the repositories): the test-lock wrapper `test/with_s5lock.sh` with the 30-minute self-release and the lock rules in the generator README (s5-gen `ce4cb8704b`, `9f0b70924b`); the `rho_d_maxloc_fix` NaN limit in the kernel note and the tie test with three or more species that kills `maxloc_x_last_wins` and `maxloc_z_last_wins` (generator README, "Tie rule" and "Limit"; `test/s5_div1_bitwise.F90`); the HYPRE-off build fix (driver `HypreStub.cpp` and its CMake entry removed, src `fc49f96cc4`, the rewritten form of `c8e83f2b43`); Role 1's variable-density two-level case with discriminating overwrite on/off controls at 1 and 4 ranks (`617da72d85`), drafts of driver patches `0011` and `0012` with hooks and `run_mesh_dumps_check.sh` (`9442836334`, not yet run), the residual-check report of the solves (`91c75e9e49`) and the D-081 step-sequence check against single-mesh FDS (`e5164b00c6`, `9238d90e5f`); Role 2's conditions C1 to C3 (`d59803eb56`) and loop tests R2 and R3 (`8160c2cafc`); the `rad_wall_qin_zero` and `W_SURF_INDEX` fix and the wall-check hard stops, merged with `s5-four`, `s5-wall-next`, `s5-merge` and the `pvf_fvx/fvy/fvz` kernels on `s5-land` (`fd5b22dcae`, `fb990f42f6`), where `ci_checks --strict` passes (128 kernels, 111 in the golden); spec v0.4.41 with D-079 and D-080 and actions A-75 to A-77 (docs `ac04814`); the Pressure Solver Lead's sign-offs of L1211, L1207, L1220 to L1222 and L1209.
+Landed since r5 (items removed from the lists, each checked in the repositories): the test-lock wrapper `test/with_s5lock.sh` with the 30-minute self-release and the lock rules in the generator README (s5-gen `ce4cb8704b`, `9f0b70924b`); the `rho_d_maxloc_fix` NaN limit in the kernel note and the tie test with three or more species that kills `maxloc_x_last_wins` and `maxloc_z_last_wins` (generator README, "Tie rule" and "Limit"; `test/s5_div1_bitwise.F90`); the HYPRE-off build fix (driver `HypreStub.cpp` and its CMake entry removed, src `fc49f96cc4`, the rewritten form of `c8e83f2b43`); Role 1's variable-density two-level case with discriminating overwrite on/off controls at 1 and 4 ranks (`617da72d85`), drafts of driver patches `0011` and `0012` with hooks and `run_mesh_dumps_check.sh` (`9442836334`, not yet run), the residual-check report of the solves (`91c75e9e49`) and the D-081 step-sequence check against single-mesh FDS (`e5164b00c6`, `9238d90e5f`); Role 2's conditions C1 to C3 (`d59803eb56`) and loop tests R2 and R3 (`8160c2cafc`); the `rad_wall_qin_zero` and `W_SURF_INDEX` fix and the wall-check hard stops, merged with `s5-four`, `s5-wall-next`, `s5-merge` and the `pvf_fvx/fvy/fvz` kernels on `s5-land` (`fd5b22dcae`, `fb990f42f6`), where `ci_checks --strict` passes (128 kernels, 111 in the golden); spec v0.4.41 with D-079 and D-080 and actions A-75 to A-77 (docs `ac04814`); the Pressure Solver Lead's sign-offs of L1211, L1207, L1220 to L1222 and L1209. A-77 closed: `WALL_LOOP_2` host path bitwise on `dec2_obst` with gather/scatter cost recorded (docs `d1e73c1`, stage1 §7.16).
 
 Removed by D-082 and D-083 (not landed, tabled): the revised `UP-0003` with persistent scratch and the density-loop patch for L0876 (Legacy Mapper r5 item 9), their review (Species r5 item 2), the `Z_TEMP` pad review for MP5 (Species r5 item 6), and every other MP5, `UP-0001`, `UP-0002` or `UP-0003` upstream item. The D-083 two-pass GPU kernel is added (Mesh Data Loops Engineer item 1).
 
@@ -54,10 +54,10 @@ Blocked on: nothing.
 6. Offload tagging test on the test machine (`RT_TAG_OFFLOAD`; Phase 4 item; waits for GPU time).
 Blocked on: nothing for items 1 to 5.
 
-**AMReX Integration Lead. Dry risk: low (6 ready).**
-1. `WALL_LOOP_2` host path (`divg.f90:333-401`): one gather of `ZZP` and `TMP` at wall-adjacent cells per stage, loop body on the host, one scatter back; gates are bitwise equality to FDS on `dec2_obst`, gather/scatter cost per stage, and the D-064 host-side wall pass rule (D-080 (3), A-77; `amrex/wp3-generator-coverage.md` section 3.2).
+**AMReX Integration Lead. Dry risk: low (5 ready).**
+1. Follow-on after A-77: K1 scatter for `WALL_LOOP_2`, driver wire-up and device run on the test machine (not a reopen of A-77; host path closed).
 2. FASTMATH CMake pin: apply `tools/patches/cmake-fastmath-pin.patch` to the generator worktree (D-068; `amrex/ported-candidates.md` section 3).
-3. Held-out kernels: real-field runs for `rho_d_interp`, `dp_div_heat` and a host-tier result for `d_z_max` and `del_rho_d_del_z`; `rho_d_maxloc_fix` waits for the Species sign-off (`amrex/ported-candidates.md`, held out).
+3. Held-out kernels: real-field runs for `rho_d_interp`, `dp_div_heat` and a host-tier result for `d_z_max` and `del_rho_d_del_z`; `rho_d_maxloc_fix` stays out of `ported.toml` until A-76 (NS≥3 tie frequency) lands (`amrex/ported-candidates.md`, held out; Species ACCEPT-with-conditions).
 4. WP9b pieces 9b-5 and 9b-7: device launch sequence part A, hook, part B (`amrex/wp3-generator-coverage.md` section 3.2).
 5. Rule-7 macro form in `s4_omp.inc` and re-time (`amrex/s4-k2-single-source.md`; D-072 (d)).
 6. Open actions A-28, A-31, A-44, A-48, A-49, A-51, A-54 (`README.md`).
@@ -112,14 +112,14 @@ Blocked on: nothing for items 1 to 7.
 9. Follow-ups W1 to W5 from `solid/08-new-wall-kernel-review.md` section 7; O3 (L1402) uniqueness review with the Wall Loops Engineer.
 10. L1485 retirement: ready to merge once the GNU half of patch 0010 and P-3 and N-5 pass (D-077 (2), A-65). Waits for the GNU Build Chief.
 
-**Radiation Lead (loop duty). Dry risk: medium (5 ready, 3 of them loop items; after them the radiation loop pool is nearly empty: L1240, L1241 and L1244 wait on particle and cface tables or stay on the host).**
-1. Loop L1242, sweep stage 1: `BR_ILW` slot table and boundary kernels (`radiation/06-fr062-sweep-kernel-design.md` section e). In progress. Stages 2 and 3 (3D plane kernel on one box, full angle sequence) follow.
-2. Loops L1248, L1249, L1250 (`INTERPOLATE_IL`, `radi.f90:3651-3695` at the inventory pin): host path first, keeping the `ILW_OLD` copy, with a bitwise check (R1 sign-off; `radiation/02-radiation-gpu-candidates.md`).
-3. Loop L1238 (`ADD_VOLUMETRIC_HEAT_SOURCE`, `radi.f90:5098-5146`): host path with a stated gather/scatter of the touched cells (`radiation/02`, host).
+**Radiation Lead (loop duty). Dry risk: medium (setup L0825-27/L0676/L0664-65/L0006-07 confirmed host or GEOM-deferred in radiation/06 §18; land pause until Mapper FF; L1240/L1244 still wait on particle tables).**
+1. Loop L1242 sweep kernels: landed on s5-land (`664917ad50`); no new s5-gen commits until Mapper posts FF. Remaining A1 pieces classified/feature-requested only (`radiation/06` §19; `radiation/02` A1).
+2. Loops L1248, L1249, L1250, L1247, L1238, L1241: translated on s5-land (see radiation/06 §16-§17).
+3. Gate hookup for radiation kernels (`radiation/03-radiation-translation-notes.md`). Open; do not start under land pause.
 4. Follow-ups R1 to R4 from `solid/08-new-wall-kernel-review.md` section 7.
-5. Open sweep items `ILD*` and `STORE_RADIATION_TERMS`; launch latency waits for GPU time (`radiation/06` section 8).
-6. Confirm the ghost `UII`/`UIID` reader list with the V&V Lead (D-073 (b), D-077 (6)); radiation verification variants (A-50). Wait on the V&V Lead.
-7. Radiation under regrid (`radiation/04-radiation-phase4-notes.md`; FR-063). Waits on Role 3.
+5. Confirm the ghost `UII`/`UIID` reader list with the V&V Lead (D-073 (b), D-077 (6)); radiation verification variants (A-50). Wait on the V&V Lead.
+6. Radiation under regrid (`radiation/04-radiation-phase4-notes.md`; FR-063). Waits on Role 3.
+7. Setup/deferred closes confirmed: L0825-L0827 host (FR-062 exchange), L0676 host, L0664/L0665 host, L0006/L0007 GEOM deferred D-033 (`radiation/06` §18).
 
 **V&V Lead. Dry risk: low.**
 1. `run_class_tolerance` in `kernel_categories.json` and the `RUNCMP` lines of the harness (D-080 (5); `vv/dt_class_tolerance.md`).

@@ -18,7 +18,7 @@ Author role: AMR Solid Phase Lead. Docs only: nothing in `src`, in the generator
 | L1488 | 144-185 | 2.69 % | per-wall dispatcher: ten call sites, three of them with shared writes | translate as a sequence of pass kernels plus the ordered sums of `wall_sums.py`, not as one kernel | 35-52 (mostly the 1-D solve) |
 | L1489 | 192-194 | 1.37 % | lateral 1-D solve of thin obstructions (**not** what the register says, see section 17) | translate with the solve; one extra shared event | 1 (after the solve port) |
 | L1485 | 888-947 | 1.83 % | coarse-side species flux match of the `INTERPOLATED_BC` case, `EWC%NIC>1` only | **retire** in the AMR route (host abort guard); keep only if the Architect confirms `NIC>1` can occur | 0.5, or 4-5 if kept |
-| L0823 | `init.f90` 4940-5054 | 1.73 % | creation/removal of obstructions: re-types wall cells, allocates records | **host only**; the device deliverable is the table-refresh trigger | 1-2 (host/driver) |
+| L0823 | `init.f90` 4951-5065 (FireX 1fb5c300; survey 4940-5054) | 1.73 % | creation/removal of obstructions: re-types wall cells, allocates records | **host only**; the device deliverable is the table-refresh trigger | 1-2 (host/driver) |
 
 Totals: about 74-112 person-days over four roles (section 13). Critical path is the 1-D solve chain (ragged record store, generator support for fixed-size private arrays, the port itself), about 24-36 working days, independent of the other generator features.
 
@@ -267,11 +267,13 @@ Inside `CASE (INTERPOLATED_BC)` of `SURFACE_HEAT_TRANSFER`, in the branch for a 
 - **Excluded from bitwise:** `MASS_FLUX_VAR>0` (SP-R9), cases of row E with a lower-index non-thick back wall.
 - **Run discipline:** generator runs and test chains under `flock (local project directory)/src-s5gen/.s5gen.lock`, at most 4 cores.
 
-## 11. L0823 (`init.f90` 4940-5054) and L0822 (4917-4936): `REASSIGN_WALL_CELLS`
+## 11. L0823 (`init.f90` 4951-5065) and L0822 (4928-4947): `REASSIGN_WALL_CELLS`
+
+Cite revision for the ranges below: FireX `1fb5c300` / FDS-AMReX `8ad685f435` (survey `36975d7` ranges were 4940-5054 and 4917-4936; body of L0823 unchanged, +11 from earlier `init.f90` hunks; see `upstream-1fb5c300-loop-impact.md`).
 
 ### 11.1 What it does
 
-`OBSTRUCTION_LOOP: DO OBST_INDEX=1,N_OBST` skips every obstruction that is not `SCHEDULED_FOR_REMOVAL` or `SCHEDULED_FOR_CREATION`. For the rest it walks the obstruction faces in x, y, z (4958-5023) and calls the contained `GET_BOUNDARY_TYPE` (5061-5204) for each newly exposed or covered wall cell, then `REDEFINE_EDGE` (5213-5226; 5027-5052 computes an edge index and changes nothing else, so it is effectively a no-op). L0822 is the preceding loop over external wall cells with no obstruction (4917-4936), the neighbour-mesh part.
+`OBSTRUCTION_LOOP: DO OBST_INDEX=1,N_OBST` skips every obstruction that is not `SCHEDULED_FOR_REMOVAL` or `SCHEDULED_FOR_CREATION`. For the rest it walks the obstruction faces in x, y, z (4969-5034) and calls the contained `GET_BOUNDARY_TYPE` (5072-5215) for each newly exposed or covered wall cell, then `REDEFINE_EDGE` (5224-5237; 5038-5063 computes an edge index and changes nothing else, so it is effectively a no-op). L0822 is the preceding loop over external wall cells with no obstruction (4928-4947), the neighbour-mesh part.
 
 `GET_BOUNDARY_TYPE` re-types the wall cell (`BOUNDARY_TYPE`, `SURF_INDEX`, `OBST_INDEX`), flips `CELL(IC)%SOLID`, sets `B1%T_IGN`, calls `INIT_WALL_CELL` (`init.f90` 2975-3386, allocates the `ONE_D` and property records), calls `SET_DENSITY_AND_MASS_FRACTIONS_AT_WALL`, copies whole `BOUNDARY_ONE_D` derived types between meshes (5188) for burn-away (the exposed surface inherits layers and ignition time), and rewrites `OMESH(...)%WALL_SEND_BUFFER%ITEM_INDEX` (5194-5199).
 

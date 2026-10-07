@@ -88,7 +88,7 @@ Mapping to the FDS structures:
 |---|---|---|
 | incoming face buffer (read by the sweep) | `OMESH(NOM)%IL_R(NIC_R, NRA, NSB)`, read in `WALL_LOOP1` (4354-4359) | `FACE_IN(box)`: one entry per ghost cell of the box that borders another box, per angle and band |
 | outgoing face buffer (written by the sweep) | `OMESH(NOM)%IL_S(NIC_S, NRA, NSB)`, written after each angle (4818-4833) | `FACE_OUT(box)` |
-| swap | `MESH_EXCHANGE(2)`: same rank: array copy; other rank: `MPI_ISEND` of packed `IL_S` for the angle subset (`ALLOCATE_RADIATION_SEND/RECV_PKG`, main.f90:4053-4132) | one mechanism for both |
+| swap | `MESH_EXCHANGE(2)`: same rank: array copy; other rank: `MPI_ISEND` of packed `IL_S` for the angle subset (`ALLOCATE_RADIATION_SEND/RECV_PKG`, main.f90:4087-4166 at FireX `8ad685f435`; host; AMR -> FR-062 face exchange, §18) | one mechanism for both |
 | K passes | `DO ITER=1,RADIATION_ITERATIONS`, exchange after each pass when K>1 (main.f90:1095-1117), at the end of the step when K=1 (main.f90:1183-1189) | same |
 | value in a ghost cell from a neighbour of a different size | `IL(II,JJ,KK) = SUM(IL_R(NIC_MIN:NIC_MAX))/(NIC_MAX-NIC_MIN+1)` (4355-4359) | the same average gives fine-to-coarse restriction; a fine ghost reading a coarse cell is the `NIC=1` case (constant prolongation) |
 
@@ -293,24 +293,461 @@ Arithmetic rules for the kernel file: FMA contraction off (gfortran `-ffp-contra
 
 `check_sweep_drift.py` (marked blocks equal to the upstream lines at the pinned commit through the documented renames; omitted ranges pinned by hash; every statement of each sweep region is copied, omitted or glue), `docs/tools/k2_ci_check.py` and `docs/tools/kernel_lint.py --clauses-only` on `s5rad_sweep_k2.F90`. The default K2 globs do not include the new directory; CI must pass the file explicitly (or the glob must be extended; an edit of the shared tools is not mine to make).
 
-### 6. Ghost cells of UII/UIID/QR (D-073 (2)): readers to confirm
+### 6. Ghost cells of UII/UIID/QR (D-073 (2) / D-077 (6)): reader list for V&V confirmation
 
-`test/sweep_ghost_reads.py` runs `git grep` for `UII`, `UIID`, `QR` over `Source/*.f90` at the pinned commit and classifies every line; an unclassified line fails the check. Result at `bee11f0329`: whole-array statements inside `RADIATION_FVM` only feed other ghost elements; loops in `divg.f90`, `radi.f90`, `ccib.f90`, `dump.f90` (Q_DOT) are interior; the wall code reads `UII(BC%IIG,BC%JJG,BC%KKG)` (gas cell). Nine lines need the V&V Lead's confirmation:
+`test/sweep_ghost_reads.py` runs `git grep` for `UII`, `UIID`, `QR` over `Source/*.f90` at the pinned commit and classifies every line; an unclassified line fails the check. Re-run at FireX pin `bee11f0329` (2026-10-06): **77** mentioning lines; classes `N=32`, `W=14`, `I=11`, `G=1`, `V=9`, comments `-=10`; **0 UNCLASSIFIED**. Exit `GHOSTREAD OK`.
 
-1. `dump.f90:3918, 3920, 3921, 4107, 4109, 4110`: the restart (core) file writes and reads the complete `QR`, `UII`, `UIID` including the ghost layer. If the ghost layer is not reproduced, the bytes of the restart file differ there, and a restart reads them back.
-2. `dump.f90:8767, 8769`: output quantities INTEGRATED INTENSITY and RADIATION LOSS read `UII(II,JJ,KK)`, `QR(II,JJ,KK)` at a device or slice index; `CASE(16)` (absorption coefficient) clamps the index into `1..IBAR`, these two do not. Can a device or slice address the ghost layer?
-3. `dump.f90:9184`: particle device temperature reads `UII(II,JJ,KK)` at the device cell.
+**Already decided (not open):**
 
-In the single-box kernel path the ghost cells of `UIID`, `UII`, `QR` are bit-identical to the original (the test counts it). Only the box-split path may differ there.
+- Interior physics readers are interior or gas-cell: `divg.f90` / `radi.f90` `RAD_Q_SUM` / `KFST4` loops (`I`); wall `UII(BC%IIG,BC%JJG,BC%KKG)` (`G`, radi.f90:5035); whole-array `W` statements only feed other ghost elements inside `RADIATION_FVM`.
+- **Restart-file comparison is interior-only** for `QR`/`UII`/`UIID` ghost cells (D-077 (6); Architect-accepted; `vv-runs/gpu_gate/README.md` § "Rule D-073 (2)"). A ghost-only difference is a NOTE, not a FAIL. **Implementation** of the mask waits on a restart-file comparison path (none exists yet).
+
+**Nine `V` lines still need an explicit V&V Lead confirmation** so D-073 (b) / D-077 (6) / A-50 can close the "nothing reads ghost UII/UIID/QR" clause for the box-split path (which may leave those ghosts not bit-reproduced):
+
+| # | Pin `bee11f0329` | Class of read | Proposed confirmation |
+|---|---|---|---|
+| 1–6 | `dump.f90:3918,3920,3921` WRITE and `:4107,4109,4110` READ of full `QR`/`UII`/`UIID` | restart I/O (ghost bytes in the file) | Covered by D-077 (6) interior-only restart compare. Confirm: no other restart consumer requires ghost bit-identity of these three arrays. |
+| 7–8 | `dump.f90:8767` INTEGRATED INTENSITY `UII(II,JJ,KK)`; `:8769` RADIATION LOSS `QR(II,JJ,KK)` | device/slice output; unlike `CASE(16)` these do **not** clamp to `1..IBAR` | Confirm: `II,JJ,KK` for these quantities never address the ghost layer (device init / `GET_IJK` / slice index stay in `1..*BAR`, or out-of-mesh devices are refused). If a ghost address is possible, name the rule (clamp, refuse, or keep ghost bit-reproduced). |
+| 9 | `dump.f90:9184` thermocouple `UII(II,JJ,KK)` | particle/thermocouple device cell | Same as 7–8 for the device cell of `CASE(110)`. |
+
+Single-box kernel path: ghost cells of `UIID`/`UII`/`QR` stay bit-identical (sweep test `GHOST` line). Box-split path may differ there only after V&V signs the table above.
+
+**Reader-list confirmation (Radiation Lead draft, for V&V Lead to accept or amend):**
+
+1. Fields that need ghost fill for radiation **physics** (must stay bit-reproduced): none of `UII`/`UIID`/`QR` ghosts — only `IL` ghosts from `WALL_LOOP1` / face exchange (already in the sweep design).
+2. Readers of `UII`/`UIID`/`QR` ghosts: restart I/O only (handled by interior-only compare); no interior physics or wall reader; device/slice/thermocouple readers assumed interior pending V&V sign-off of rows 7–9.
+3. Who reads them: `dump.f90` restart and (if unconfirmed) gas-phase output / thermocouple; Radiation Lead owns the sweep write; V&V Lead owns the restart compare rule; Integration Lead owns any future restart-dump path that applies the mask.
 
 ### 7. Status of the stages and what is open
 
 | Stage | State |
 |---|---|
 | 1 kernels | 3D and 2D Cartesian; K2 CI and clause lint pass; drift check passes (see the commit of the kernel files) |
-| 2/3 tests | bitwise test: all six flag sets (O0, O2, O0omp, O2omp, O2omp_off, O2omp_dpd) PASS at 1 and 4 threads (gfortran), 961 cases, 0 mismatches, 0 vacuous, UIID ghost cells differ in 0 of 639 full-array compares, padding cells (outside the per-box extent) checked 166908, touched 0. Mutation run: 43 of 43 mutants killed (the 23 earlier ones, 8 padding/guard mutants, the stacked UII/QR/QR_W mutants, and the driver mutants for the QR_W condition and the internal OPEN rows). The reorder `WEIGH_CYL*RSA*IL` is bit-equivalent when `WEIGH_CYL` = 1 and is not counted as a mutant (cylindrical is out of the first release). 8 threads: gfortran 13 host and nvfortran 26.9 host PASS (961 cases). Device: nvfortran 26.9 `-mp=gpu -gpu=cc89,nofma` (RTX 4070), `OMP_TARGET_OFFLOAD=MANDATORY`, 961 cases PASS, 0 mismatches, padding untouched, ghost compares 0 differ; generated rad kernels (17) and `open_qin_spec` also PASS on the device. Build rule for the host side of nvfortran builds: `-Mnofma` and `-Mnovect` (see §8 below). `rad_gray_kfst4`: the device evaluates `TMP**4` as `(t*t)*(t*t)`, the same multiplication order as gfortran, no difference |
-| open | V&V confirmation of §6; the ILD* arrays (stage 7); registration of claim L1242 by the Legacy Mapper; measurement of launch latency before any angle batching; CC_IBM, CFACE, particle ORIENTATION, cylindrical and `STORE_RADIATION_TERMS` are not covered by the kernels |
+| 2/3 tests | bitwise test: all six flag sets (O0, O2, O0omp, O2omp, O2omp_off, O2omp_dpd) PASS at 1 and 4 threads (gfortran 14), **1246 cases in 19 groups**, 0 mismatches, 0 vacuous, UIID ghost cells differ in 0 of 1122 full-array compares, padding cells checked 295,906, touched 0; O2omp and O2omp_off also PASS at 8 threads. Mutation run: **69 of 69 mutants killed** (the 43 earlier ones plus 26 for the ILD and STORE kernels, §9.3 and §10). The reorder `WEIGH_CYL*RSA*IL` is bit-equivalent when `WEIGH_CYL` = 1 and is not counted as a mutant (cylindrical is out of the first release). Device: nvfortran 26.9 `-mp=gpu -gpu=cc89,nofma` (RTX 4070), `OMP_TARGET_OFFLOAD=MANDATORY`, 1 and 8 host threads: 1228 of 1246 cases bitwise equal; the other 18 all have `RAD_DIFF_SCHEME` 3 and are in the libm class (§9.4: 212 differing fields, at most 5632 ulp); no other difference, padding untouched, ghost compares 0 differ; the same with the host side built with and without `-Mnoflushz -Mnodaz` (§8). Not rerun for the 1246-case set: the nvfortran host-only build. Build rule for the host side of nvfortran builds: `-Mnofma -Mnovect`, and `-Mnoflushz -Mnodaz` where the data reach the denormal range (§8) |
+| D-079 (b) items | ILD* kernels and `STORE_RADIATION_TERMS` kernels: done (§9, §10). `CC_IBM`: design only (§11). Cylindrical: design only, out of the first release (§12). Launch latency: status from Integration Lead SYNTHETIC measurements (§13, cite `docs` `85b4785` stage-1 plan §7.14); ILD/STORE subset re-checked here. |
+| open | V&V confirmation of §6; registration of claims L1242/L1248/L1249/L1250/L1238 and of the `EXP` libm entry by the Legacy Mapper; V&V tolerance for scheme-3 libm class (§9.4); L1240/L1244 blocked on particle tables (§16.3); `CC_IBM` kernels (§11); real-geometry / multi-rank / ILD*/STORE at scale (§13.5) |
 
 ## 8. nvfortran build rule found in the D-077 run
 
 Host code compiled by nvfortran at `-O2` vectorizes reductions with reassociated partial sums (`SUM()` and loops of the form `X = X + A(L)`), which gfortran does not. Without `-Mnovect` the host reference differs from the device (and from gfortran) by 1 ulp in the INTERPOLATED wall average (`IL(II,JJ,KK) = sum of ILR / n`) and in the `SUM()` of the open-boundary `Q_RAD_IN` loop (L1243, radi.f90:4965-4974): 34 mismatches of 151 sweep cases and 45 of 160 `open_qin_spec` cases. The device code keeps the source order, so the device result is the ascending-order result. Rule: the host reference of an nvfortran build is compiled with `-Mnofma -Mnovect`; a bitwise claim for any summation loop is made against the ascending source order, and a build that vectorizes the reference is not a valid reference. With `-Mnovect` all suites pass at 1 and 8 threads on host and on the device.
+
+**Denormals (found in the L1248 device run, §15).** nvfortran 26.9 at `-O2` on x86 runs the host code with flush-to-zero and denormals-are-zero (`-Mflushz`, `-Mdaz` behaviour by default: a denormal operand is read as 0 and a denormal result is written as 0); `-Mnoflushz` alone keeps denormal results but still reads denormal operands as 0, only `-Mnoflushz -Mnodaz` gives IEEE gradual underflow (checked with a three-line program). The device keeps denormals in double precision (`nofma` does not change that). With denormal table entries the L1248 kernel on the device differed from the nvfortran host reference in up to 4677 of 11232 elements per case; with `-Mnoflushz -Mnodaz` on every host file all 138 cases are bitwise equal, as they are with gfortran (which keeps IEEE underflow). Rule: an nvfortran host reference is built with `-Mnofma -Mnovect -Mnoflushz -Mnodaz`. The sweep suite gives the same result with and without the two flags (its data do not reach the denormal range), so no earlier sweep result changes. Denormal test data are made from bit patterns (`transfer`), because nvfortran also flushes denormal literals.
+
+## 9. RAD_DIFF_SCHEME > 1: the ILD* kernels (D-079 (b), hand-written, FR-062)
+
+Upstream (`radi.f90` at `bee11f0329`): `RAD_DIFF_SCHEME` is 1 (STEP), 2 (DIAMOND) or 3 (EXPONENTIAL) (`read.f90:10267-10271`); `ILDX`, `ILDY`, `ILDZ` (the directional derivatives of the intensity, allocated only for `RAD_DIFF_SCHEME>1`, 3826-3829) are set to `IL` per angle before the sweep (4425-4429), used by the 3D cell body (upwind read 4533-4541, STEP branch 4621-4633, ALT branch 4635-4714 with the three weight formulas and the negative-correction loop `NEG_ITER = 1..3`), by the wall update WALL_LOOP2 (4764-4773) and by the interpolation into `IL_S` (4832-4841).
+
+### 9.1 Kernels and launch order
+
+All kernels are `bind(c)` in `s5rad_sweep_k2.F90`, with the per-box extent guard and the arrays `(0:NXM+1,0:NYM+1,0:NZM+1,NB)` of the other kernels. Exact signatures:
+
+| Kernel | Upstream lines | Signature |
+|---|---|---|
+| `s5rad_ild_init` | 4426-4428 | `(NB,NXM,NYM,NZM,BOX_IBAR,BOX_JBAR,BOX_KBAR,IL,ILDX,ILDY,ILDZ)` |
+| `s5rad_plane3d_ild` | 4529-4556, 4616, 4621-4714 | `(NB,NXM,NYM,NZM,NPLMAX,KW,JW,D,ISTEP,JSTEP,KSTEP,SOLID_PARTICLES,RAD_DIFF_SCHEME,NCELL,NRA,N,RFPI,BOX_IBAR,BOX_JBAR,BOX_KBAR,NPL,PLN,DX,DY,DZ,EXTCOE,RTE_SOURCE,CELL_INDEX,CELL_SOLID,CELL_ILW,DLX,DLY,DLZ,DLANG,RSA,IL,IL_UP,ILDX,ILDY,ILDZ)` |
+| `s5rad_wall2_ild` | 4751-4774 | `(NB,NXM,NYM,NZM,NW,NBR,NRA,NSB,N,IBND,TWO_D,RAD_DIFF_SCHEME,W_BOX,W_BTYPE,W_BR_INDEX,W_IOR,W_IIG,W_JJG,W_KKG,DLN,IL,ILDX,ILDY,ILDZ,INRAD_W,BR_ILW)` |
+| `s5rad_ils_ild` | 4831-4841 | `(NB,NXM,NYM,NZM,NICS,NRA,NSB,N,IBND,RAD_DIFF_SCHEME,ILS_BOX,IIO_S,JJO_S,KKO_S,IOR_S,IL,ILDX,ILDY,ILDZ,ILS)` |
+
+`IOR_S(NICS)` is the orientation `IOR_S` of the other-mesh record used in 4832-4841 (the table the `ILS` kernel did not need). `DLANG(NRA)` is the table `DLANG` of the upstream angle setup. `RAD_DIFF_SCHEME` is passed by value; `plane3d_ild` is valid for 1, 2 and 3 (scheme 1 takes the STEP branch 4621-4633 of the same kernel), so the host may use either `plane3d` (scheme 1, smaller argument list) or `plane3d_ild`.
+
+Dispatch (host) for `RAD_DIFF_SCHEME>1`, per angle: `cell_ilw_reset`, `wall1`, **`ild_init`**, the planes with **`plane3d_ild`** (one launch per plane as before), **`wall2_ild`** instead of `wall2`, `wall3`, `uiid_acc`, **`ils_ild`** instead of `ils`. That is one more launch per angle than scheme 1 (53 instead of 52 for 16^3 boxes). The 2D plane kernel is unchanged (below). `ild_init` is a whole-array copy and carries the per-box extents like the other whole-array kernels, so the padding rule of Addendum 1 §2 holds (the tests check the padding of `ILDX/Y/Z`).
+
+`plane3d_ild` has local arrays (`PLX(3)`, `NEGATIVE_MASK`), so it uses the loop macro `S5R_LOOP3A` (`target teams distribute parallel do collapse(3)`, host: `parallel do collapse(2)`) instead of `target teams loop`: a `loop` construct may not privatise arrays that way (K2 rule 7, `generator-howto.md`). nvfortran 26.9 accepts it. The flag `APPLY_ALT_SCHEME = RAD_DIFF_SCHEME>1` (4616; the CC_IBM clause 4617-4619 is omitted, §11) is set before the loop directive (lint rule CL-03).
+
+### 9.2 Upstream quirk reproduced, not changed (for the FDS owners)
+
+The 2D Cartesian sweep (4469-4492) and the cylindrical sweep (4431-4468) never write `ILDX/ILDY/ILDZ`. With `TWO_D` (or cylindrical) and `RAD_DIFF_SCHEME>1`, WALL_LOOP2 (4764-4773) and the `IL_S` interpolation (4832-4841) therefore read the copy of `IL` taken before the sweep (ambient or wall values), not the swept intensity. The kernels reproduce this bit for bit (the group `ild_2d` and the 2D cases of `ild_3d_band`, `ild_stacked`, `ild_zero_cos` test it, with a coverage line `ild_2d_boxes`). It looks unintended; it is the owners' call and nothing in the AMR code changes it.
+
+### 9.3 Tests and mutants
+
+The reference is the verbatim upstream sweep (now 410 lines, scheme selected at run time). New groups: `ild_3d_gray`, `ild_3d_band`, `ild_2d`, `ild_stacked` (three boxes of different extents, mixed gray/band), `ild_zero_cos` (direction cosines of exactly zero: the EXPONENTIAL optical depth is infinite for `EXTCOE>0` and zero for `EXTCOE=0`), `ild_contrast` (199 small boxes with cell optical depths up to 10 and small sources, scheme 2 and every tenth case scheme 3: cascades of negative downwind intensities in which the third iteration of the negative-correction loop changes the result; seed 19120, a one-cell box whose intensities all end clipped to 0, is skipped as vacuous and the test now names any vacuous case), and the scheme-1 angles of the existing groups that use `plane3d_ild` on every second angle. Coverage lines: DIAMOND boxes, EXPONENTIAL boxes, 2D ILD boxes, cells where the negative-correction loop binds (`ILD=0` with `IL>0`, 1505 cells at the final angle; DIAMOND 37 boxes, EXPONENTIAL 55, 2D 39, STORE 62), data that hit the `TWO_EPSILON_EB`/`TWENTY_EPSILON_EB` thresholds of the EXPONENTIAL weights (the `pos()` generator alternates 1e-300 and 1e-15 optical depths). **Surviving mutants of the interrupted round.** The earlier round ended with 3 survivors out of 69; their names were not recorded. With the present tests all 69 are killed. `neg_third_iteration_missing` (`DO NEG_ITER = 1, 2`; the old name `neg_iterations_one` was wrong) is killed only by `ild_contrast`: without that group the third iteration never changes a result and the mutant survives. That makes it a real defect the test can see, not an equivalent mutant, so it was kept and not replaced. No mutant had to be proved equivalent in this round. 26 mutants cover: missing `ild_init` (also the Z component alone), wrong weight (DIAMOND Z, EXPONENTIAL axis, small threshold, missing `HUGE_EB` guard), two instead of three negative-correction iterations (`neg_third_iteration_missing`), a mask that does not persist across iterations, a correction not applied in Z, `ILDY` taken from X, upwind read from `IL` instead of `ILD*`, regrouping of the STEP sums and of the ALT upwind sums, `wall2_ild` axis swapped or ignoring `ILD*`, `ils_ild` with a signed `IOR_S` or swapped axis, padding writes, and for the STORE kernels (§10) overwrite instead of accumulate, wrong slice, swapped factors, only one of the two arrays zeroed.
+
+### 9.4 EXP: libm class
+
+`plane3d_ild` with scheme 3 is the first sweep kernel with a libm call (`EXP`, 4660-4690). Per D-072 a libm function is bitwise only against the same libm; the device `EXP` is not the host `EXP`. Measured on the test machine's GPU in the earlier round (nvfortran 26.9, 2,000,000 arguments in [-20,0]; not repeated): 9,970 differ, maximum 1 ulp. In the sweep tests the host builds (gfortran at 1, 4 and 8 threads on the 1246-case set; the nvfortran host-only build was last run on the earlier 1047-case set) are bitwise equal to the reference, and 18 of the 1246 cases differ on the device: all 18 have `RAD_DIFF_SCHEME` 3 (3 of the 10 scheme-3 cases of `ild_3d_gray`, 5 of 8 of `ild_3d_band`, 2 of 3 of `ild_stacked`, 6 of 18 of `ild_zero_cos`, 2 of the 20 scheme-3 cases of `ild_contrast`; the 2D cases never call `EXP` and are bitwise equal), every difference is in a floating-point field, padding and counters are exact. With `-DS5_LIBM_CLASS` (device runs only) the test reports these cases as `LIBM-CLASS` with the largest ulp distance over `IL`, `UIID`, `UII`, `QR`, `QR_W`, `ILW`, `INRAD_W`, `IL_S`: **5632 ulp (about 1e-12 relative)**, 212 differing fields in 18 cases; the 1-ulp `EXP` difference is amplified by the recurrence along the sweep and by the negative-correction clipping. Rule proposed: scheme 1 and 2 are bitwise on the device; scheme 3 is bitwise on the host and in the libm class on the device, tolerance to be set by the V&V Lead (question in the report). Registry: the draft entry `[[libm]] kernel = "s5rad_plane3d_ild"`, ruling D-079, status proposed, is in `s5rad_sweep.toml` (`[meta.libm_registry]`); the shared `kernel_registry.toml` is the Legacy Mapper's file and does not have it yet (the K2 CI check passes against a copy that has it, and prints the missing entry as INFO against the shared one).
+
+SASS check of the device object (`cuobjdump -sass`, earlier round, not repeated): the `DFMA` instructions are inside the IEEE double division expansions (`__cuda_sm20_div_rn_f64_full`, reciprocal slow path, a few in `plane3d`, `plane2d`, `wall1`) and, in `plane3d_ild`, inside the inlined `EXP`; the kernel arithmetic itself is contracted nowhere (build flag `nofma`, bitwise equal to the host for every scheme-1 and scheme-2 case).
+
+## 10. STORE_RADIATION_TERMS kernels (D-079 (b), hand-written, FR-062)
+
+Upstream: `RADIATION_EMISSION` and `RADIATION_ABSORPTION` (`mesh.f90:49-50`, `0:IBP1,0:JBP1,0:KBP1`) are the diagnostic fields filled only when `STORE_RADIATION_TERMS`: zeroed at the start of the update for wide band or WSGG (3877-3880, statements 3878-3879), accumulated per band after each band (4950-4953: `RADIATION_EMISSION += KFST4_GAS`, `RADIATION_ABSORPTION += KAPPA_GAS*UIID(:,:,:,IBND)`), and assigned in the gray form after `QR` (4984-4987).
+
+| Kernel | Upstream | Host condition | Signature |
+|---|---|---|---|
+| `s5rad_emis_zero` | 3878-3879 | `STORE_RADIATION_TERMS .AND. (WIDE_BAND_MODEL .OR. WSGG_MODEL)`, once per update before the first band | `(NB,NXM,NYM,NZM,BOX_IBAR,BOX_JBAR,BOX_KBAR,RADIATION_EMISSION,RADIATION_ABSORPTION)` |
+| `s5rad_emis_wb` | 4951-4952 | `STORE_RADIATION_TERMS`, after the band is finished (after `qr_wb`) | `(NB,NXM,NYM,NZM,NS,ISL,BOX_IBAR,BOX_JBAR,BOX_KBAR,KAPPA_GAS,KFST4_GAS,UIID,RADIATION_EMISSION,RADIATION_ABSORPTION)` |
+| `s5rad_emis_gray` | 4985-4986 | `STORE_RADIATION_TERMS .AND. .NOT.(WIDE_BAND_MODEL .OR. WSGG_MODEL)`, after `qr_gray` | `(NB,NXM,NYM,NZM,BOX_IBAR,BOX_JBAR,BOX_KBAR,KAPPA_GAS,KFST4_GAS,UII,RADIATION_EMISSION,RADIATION_ABSORPTION)` |
+
+All are one-thread-per-cell, no reduction, per-box extents, padding untouched. `KAPPA_GAS` and `KFST4_GAS` in the kernel calls are the same per-band slices that `qr_wb` / `qr_gray` receive. The group `store_terms` and the `store` flag of the other groups run them with scheme 1, gray, wide band and stacked boxes; the mutants `emis_zero_missing`, `emis_zero_only_emission`, `emis_wb_overwrite`, `emis_wb_wrong_slice`, `emis_gray_swapped`, `store_flag_ignored` (driver) and the two padding mutants `pad_emis_wb`, `pad_emis_gray` kill the host-condition, zero-order, slice and padding errors. Bitwise on host and device in every flag set. Note for the driver: the band form accumulates in band order; the order of the bands is the host loop and must not be changed.
+
+## 11. CC_IBM: design (not implemented; design only until the geometry tables exist)
+
+Scope decision: host-only is not possible (the cut-cell terms sit inside the cell body), a kernel is needed, and it needs data the AMR code does not yet carry (`CCVAR`, `FCVAR`, `CUT_FACE`, `CUT_CELL`, `CFACE` with `BR_INDEX`). It is therefore a design item. No ADR is needed for the kernels themselves (same rules as D-073), but the data layout needs the Integration Lead and the geometry owner to agree to the table below; the host refuses `CC_IBM=T` until the kernels exist.
+
+### 11.1 What CC_IBM adds to the sweep (upstream lines)
+
+1. Cell body, 4561-4613: a solid cut-region cell is skipped (`CCVAR(I,J,K,CC_CGSC)==CC_SOLID`); for a cell with a cut face (`INDCF=CCVAR(I,J,K,CC_IDCF)>0`) the faces of `CUT_FACE(INDCF)` are walked in `IFACE` order: with `DLF = DOT_PRODUCT(GET_CFACE_RAD_NVEC(CFA),DLA)`, an upwind face (`DLF>0`) adds `DLF*AREA*ILW(N)` to `AILFU`, a downwind face (`DLF<0`) adds `ABS(DLF)*AREA` to `AFD`. The six Cartesian areas are scaled by the aperture `ALPHA_CF` of the face (or set to zero when the face is solid) and `VC` by `ALPHA_CC`; the cell is skipped when both `EXTCOE` and the downwind area sum are below `TWO_EPSILON_EB`.
+2. The weights: gas cut cells use the STEP form with `AILFU` and `AFD` (4616-4619 sets `APPLY_ALT_SCHEME = .FALSE.` for `CCVAR(I,J,K,CC_IDCC)>0`, so ILD* never applies there; 4623-4624 add `AFD` to `A_SUM` and `AILFU` to `AIU_SUM`).
+3. CFACE walls: `CFACE_LOOP1` (4375-4384) sets `ILW(N)` of every upwind internal CFACE from `OUTRAD_F` and `INRAD_F` before the sweep; `CFACE_LOOP2` (4791-4802) and `CFACE_LOOP3` (4803-4812) update `INRAD_F` and `ILW(N)`/`ILW(ANGLE_INC_COUNTER)` after the sweep from the intensity of the gas cell `(IIG,JJG,KKG)`. The setup of `OUTRAD_F` (4251-4274) and the extinction setup in the translated kernels (4009-4186 `IF (CC_IBM)` skips and `ALPHA_CC` scaling) are in the generated `rad_*` kernels and have their own CC_IBM clauses.
+
+### 11.2 Tables (device, built per regrid)
+
+| Table | Content | Used by |
+|---|---|---|
+| `CC_CGSC(I,J,K,IB)` int8 | solid/gas/cut flag of the cell | cell body skip |
+| `CC_CUT_START(I,J,K,IB)`, `CC_CUT_LIST(*)` | compressed list: for every cell with `CCVAR(...,CC_IDCF)>0` the offset into a per-face list, in the **upstream `IFACE` order** | `AILFU`/`AFD` sums |
+| per-list entry `CF_ID(*)` | index of the CFACE (slot in `BR_ILW` through `CF_BR_INDEX`), `CF_AREA`, `CF_NX/NY/NZ` (from `GET_CFACE_RAD_NVEC`, precomputed in the same expression order) | face sums |
+| `AP_FACTOR(face,axis)` | the six aperture factors per cell, already combined (`ALPHA_CF`, or 0 for a solid face), stored per cell as `AXU..AZD` multipliers | areas |
+| `ALPHA_CC(I,J,K,IB)` | volume factor, 1 for non-cut cells | `VC` |
+| `CELL_IS_GASCUT(I,J,K,IB)` | `CCVAR(I,J,K,CC_IDCC)>0` | STEP-only flag, 4617-4619 |
+
+The cell loop then becomes the existing `plane3d`/`plane3d_ild` cell body with an extra block: a loop over the cell's face list in list order (a sequential per-thread loop; the order of the additions is the order of the upstream loop, so the sums are bitwise, the same argument as for the wall tables), the multipliers, and the skip test. `GET_CFACE_RAD_NVEC` and `DOT_PRODUCT(...,DLA)` are evaluated per angle per face: the dot product is `NX*DLX+NY*DLY+NZ*DLZ` in the order of the intrinsic (to be pinned by the drift tool with an omit entry and a test that fixes the order for gfortran and nvfortran).
+
+### 11.3 Kernels (planned)
+
+1. `s5rad_cfaces_pre` (CFACE_LOOP1): one thread per CFACE, race-free (each CFACE has its own `ILW` slot).
+2. `s5rad_plane3d_cc` / `_cc_ild` (cell body above), one launch per plane as now; the ILD variant keeps the STEP form for gas cut cells.
+3. `s5rad_cfaces_post` (CFACE_LOOP2 and 3): one thread per CFACE: it updates its own `INRAD_F` and its own `ILW` slots; the read is `IL` of the gas cell, no two CFACES write the same element, so no atomics. The three loops of upstream are three passes; the kernel keeps the two-step order (add, then replace, then subtract) of 4799-4801.
+
+Dependencies: (a) the CFACE and cut-cell arrays must exist in the AMR geometry (not in the current fork plan), (b) CFACE `BR_INDEX` slots must join the `BR_ILW` table (doc 05 §3 rows for CFACE), (c) the generated extinction and source kernels must have their CC_IBM clauses (the translated `rad_*` kernels blank them today: a CC_IBM run is refused), (d) the omit pin for 4617-4619 in `s5rad_sweep.toml` is replaced by copy blocks. Test: the same bitwise scheme against the verbatim sweep with random cut-cell data (solid, gas, cut cells with 1 to 4 faces, apertures between 0 and 1, `DLF` of both signs and exactly zero), mutants for the face order, the sign of `DLF`, the aperture on the upwind versus downwind side, `ALPHA_CC` and the STEP-only flag.
+
+## 12. Cylindrical: design only (status unchanged)
+
+D-042 defers cylindrical in AMR mode and D-073 (5) puts it out of the first release (cylindrical meshes stay FDS-only in AMR mode); neither ruling has been changed, so nothing here is implemented, and the host refuses `CYLINDRICAL=T`. For the record, the pieces a later implementation needs: the axisymmetric sweep 4431-4468 (one plane `J=1`, `VC`, `AXU`, `AXD` from `R(I-1)`, `R(I)` and `DPHI0`, the `MODULO(N,NRP(1))` symmetric-overhang zeroing of `AYU/AYD`, no ALT scheme and no ILD* write, §9.2), the Y-ghost copy 4722-4743 for the angles that wrap around the axis (a data dependence between angles of one `IPHI` family: the angle chain of option B, closed by D-073 (1) `B=1` for cylindrical), the CYLINDRICAL branch of WALL_LOOP1 (`DLB`, the `RPI` weights) and `WEIGH_CYL` in `uiid_acc` (already an argument, fixed 1 for Cartesian). A `s5rad_plane_cyl` kernel would be 2D-like (thread space `(box,k')`, plane index along `I+K`), but the angle-to-angle Y-ghost copy forces `B=1` and a host loop in `IPHI` order; no kernel work is planned until a ruling reopens the item.
+
+## 13. Launch latency: status (D-079 (b); cite Integration Lead)
+
+### 13.1 Source of the numbers
+
+The authoritative SYNTHETIC launch-cost measurements are the Integration Lead's stage-1 harness (`stage1/rad_sweep/`, plan commit `85b4785`, `docs/amrex/stage1-gpu-spike-plan.md` §7.14), pinned to s5-gen `3814e1f893`. Inputs are synthetic gray 3D boxes (`RAD_DIFF_SCHEME = 1`), internal wall rows included, blocking launches, managed memory, test-machine GPU (RTX 4070, cc 8.9, nvfortran 26.9). Byte identity of the batched path against box-by-box and against a natural-order sweep holds on host and device (120 of 120 dump files). Those figures supersede any earlier private bench table for the same configurations.
+
+### 13.2 Per-angle cost (Integration Lead, SYNTHETIC)
+
+| boxes | cells | total per angle | notes |
+|---|---|---|---|
+| 1 of 16^3 | 4,096 | 0.361 ms | plane floor ~6.7 us |
+| 8 of 16^3 | 32,768 | 0.356 ms | launch-bound |
+| 32 of 16^3 | 131,072 | 0.423 ms | |
+| 64 of 16^3 | 262,144 | 0.574 ms | |
+| 128 of 16^3 | 524,288 | 1.018 ms | |
+| 256 of 16^3 | 1,048,576 | 2.593 ms | 2.359 ms without internal rows |
+| 512 of 16^3 | 2,097,152 | 6.316 ms | |
+| **1024 of 16^3** | **4,194,304** | **13.13 ms** | ~2 GB managed |
+| 128 of 32^3 | 4,194,304 | 13.39 ms | same cell count, different box shape |
+
+At 4M cells the launch floor is 2.7% of the time (52 × 6.7 us ≈ 0.35 ms of 13.1 ms); the cost is in the kernels. Pre/post wall kernels are about 25% of the pass at that size. Scaling from 1.05M to 4.2M cells is slightly super-linear (cause not investigated by the harness). Memory estimate: ~490 bytes/cell on this synthetic level; 4.19M cells fit in one pass on an 8 GB card.
+
+### 13.3 What the harness did not cover
+
+Real geometry (wall counts and `NPL` shapes of a production level), multi-rank (`IL_S`/`IL_R` exchange, shared `NICR`), a full 24-angle pass at 4M cells, FMA and device negative controls, cylindrical variants, and the cause of the super-linear scaling above 1M cells. Also not in that harness pin: `RAD_DIFF_SCHEME` 2/3 (ILD*), `STORE_RADIATION_TERMS`, CFACE, and `CC_IBM`.
+
+### 13.4 ILD* / STORE subset check (this work)
+
+`test/s5_sweep_bench.F90` reuses the bitwise case builder and times the full launch sequence of Addendum 1 §2–§3 (including `ild_init`, `plane3d_ild`, `wall2_ild`, `ils_ild`, `emis_*`). On the same test-machine GPU, three quiet runs, medians of the per-angle sum of blocking launch times (synthetic walls denser than the Integration Lead's generator; not a replacement for §13.2):
+
+| config | launches / angle | sum per angle (median of 3) |
+|---|---|---|
+| 8 × 16^3, scheme 1 | 52 | 0.405 ms |
+| 8 × 16^3, scheme 2 | 53 | 0.709 ms |
+| 8 × 16^3, scheme 3 | 53 | 0.944 ms |
+| 64 × 16^3, scheme 1 | 52 | 0.821 ms |
+| 64 × 16^3, scheme 2 | 53 | 1.642 ms |
+| 64 × 16^3, scheme 3 | 53 | 2.210 ms |
+
+Readings: (1) scheme-1 at 8 boxes agrees with the Integration Lead order of magnitude (0.36 ms there; the excess here tracks the denser synthetic wall set). (2) ILD* (scheme 2/3) raises the per-angle sum by about 1.7× / 2.3× at 8 boxes and 2.0× / 2.7× at 64 boxes against scheme 1: the cell body is heavier and the argument list longer. (3) At 64 boxes of 16^3 the ILD plane kernels are already compute-bound relative to the launch floor.
+
+Two measurement pitfalls that apply to any driver using managed memory: (a) first-touch warm-up of at least three angles on the same arrays; (b) no host reads of managed direction cosines or plane tables inside the angle loop (they migrate pages; keep launch parameters in host-only memory).
+
+### 13.5 What remains to measure
+
+(a) real geometry and real wall / `NPL` shapes; (b) multi-rank `IL_S`/`IL_R` exchange and shared `NICR`; (c) ILD* / `STORE` / CFACE / `CC_IBM` at 4M cells (the subset above stops at 64 boxes); (d) a full 24-angle pass at 4M cells; (e) device-resident (`omp_target_alloc`) vs managed memory; (f) the angle-batching decision (stage 8 stays closed): at the Integration Lead numbers the launch-bound region extends to about 64 boxes of 16^3 for scheme 1; above about 128 boxes the plane and wall kernels dominate; at 4M cells the launch count is irrelevant. That is a fact for the Architect to rule on, not a recommendation made here.
+
+## 14. Closing the open points of the Integration Lead's descriptor questions and of the review follow-ups
+
+The seven descriptor questions (stacked `UII`/`QR`, meaning of the `ILS` indices, `W_NIC_MIN`/`W_NIC_MAX`, internal OPEN walls, `W_RAMP_VAL`, the 2D path, the padding cost of the whole-array kernels) were answered in the stage 1 to 3 work (`UII`/`QR`/`QR_W` stacked kernels; the `ILS` indices as in §2; `W_NIC_MIN/MAX` in the `wall1` signature; the internal OPEN rows in `open_ilw_zero` via `W_BTZ`; `W_RAMP_VAL` once per angle in `wall1`; the 2D kernels; per-box extents `BOX_*BAR` so that padding is not computed). Nothing is open on them. The padding-cost question is answered by the per-box extents: the whole-array kernels loop over `BOX_IBAR/JBAR/KBAR(IB)`, and the tests check that the padding cells are untouched.
+
+Follow-ups R1 to R4 of `solid/08-new-wall-kernel-review.md` §7: R2, R3, R4 are in `05-br-ilw-table-spec.md` (row ownership, OQ-S6 `Q_RAD_IN` owner rule, `W_B1_PRESENT`). **R1** (compiler scope of the L1243 `SUM`-order claim): the claim "the ascending-order sum is the result" holds for gfortran at every flag set tested and for ifx `-O2 -fp-model=precise` (D-079 (a): 0 mismatches); it holds for nvfortran only with `-Mnovect` on the host (§8: without it 34 of 151 sweep cases and 45 of 160 `open_qin_spec` cases differ by 1 ulp from the device and from gfortran) and always on the device. The claim therefore has this scope: gfortran 13 (all flag sets), ifx `-O2 -fp-model=precise`, nvfortran 26.9 with `-Mnofma -Mnovect` (host) and on the device. A compiler or flag set outside that list needs the `open_qin_spec` test before it is used as a reference.
+
+## 15. INTERPOLATE_IL wall part (claim L1248) and L1245 note
+
+### 15.1 Scope
+
+Upstream `INTERPOLATE_IL` (`radi.f90` at `bee11f0329`): angle tables 3623-3645 (host), wall loop 3651-3662 (L1248), CFACE 3665-3676 (L1249), particles 3679-3695 (L1250), neighbour-mesh `IL_R` 3698-3713 (unclaimed). This section covers L1248 only. Code: `amrex/s4_mass/s5_gen/s5_rad_interp/`.
+
+### 15.2 Why a ping-pong
+
+Angle `N` reads the old values of other angles through `IDX(N,:)`. The upstream whole-array form keeps `ILW_OLD = BR%BAND(IBND)%ILW(:)` then writes `BR%BAND(IBND)%ILW`. On the slot table that is `BR_ILW_OLD(NBR,NRA,NSB)` allocated by the host for the call: copy then interpolate, in that order. The sum is ascending from `+0`, product grouped `(W*ILW_OLD)*RSA`, then `/RSA(N)` (same as radi.f90:3656-3660).
+
+### 15.3 Signatures
+
+```
+subroutine s5rad_interp_weights(NRA,DLANG,DLANG_OLD,IDX,W)                                 ! host (3623-3645)
+subroutine s5rad_interp_ilw_host(NW,NBR,NRA,NSB,W_BR_INDEX,IDX,W,RSA,BR_ILW)                ! host (3651-3662)
+subroutine s5rad_ilw_old_copy(NW,NBR,NRA,NSB,W_BR_INDEX,BR_ILW,BR_ILW_OLD) bind(c)          ! K2
+subroutine s5rad_ilw_interp(NW,NBR,NRA,NSB,W_BR_INDEX,IDX,W,RSA,BR_ILW_OLD,BR_ILW) bind(c)  ! K2
+```
+
+`N_INTP = 4` (line 3602). `IDX(NRA,N_INTP)`, `W(NRA,N_INTP)`. Drift: rename sets `ident`, `intp_host`, `intp_elem`; omit hashes pin CFACE, particles, `IL_R`.
+
+### 15.4 BR_ILW interface
+
+s5-wall `[policy.wall.slot_tables]` (`45389a05ec`): extent `NBR,NRA,NSB`, slot fastest, gather `W_BR_INDEX`. The generator treats the table as read-only; L1248 writes it (hand-written kernels cover the write). Driver: allocate `BR_ILW_OLD`, launch copy then interp (or call the host routine alone). Slot uniqueness: `wall_checks.check_br_index`.
+
+### 15.5 Tests (verified)
+
+138 cases in 7 groups (random, tiny_nra NRA 2–4, identity, permuted, ties, special, big); six flag sets PASS at 1 and 4 threads; 22 of 22 mutants killed (including driver `MUT_NOCOPY` / `MUT_COPY_AFTER` and FMA with `-mtune=haswell`). Device (RTX 4070, nvfortran 26.9, `OMP_TARGET_OFFLOAD=MANDATORY`, 1 and 8 threads): PASS once the host reference uses `-Mnofma -Mnovect -Mnoflushz -Mnodaz` (§8: denormals from bit patterns). Drift, K2 CI, lint, registry: PASS.
+
+### 15.6 Blocked / not owned here
+
+- CFACE loop (L1249) and particle loop (L1250): same arithmetic on `CF_BR_INDEX` / `LP_BR_INDEX`; next.
+- `IL_R` interpolation (3698-3713): device-resident under a device sweep; no owner yet (ask Legacy Mapper / Integration Lead).
+- Generator write access to `BR_ILW` and the `BR_ILW_OLD` allocation: Wall Loops Engineer / driver.
+
+### 15.7 L1245 (RADF file write, radi.f90:5044-5059)
+
+Excluded from the device plan (`loop_claims`: not planned (host)). It is **not** purely host-only in AMR mode: it needs `RF%IL_SAVE`, filled per angle by 4884-4895 inside the sweep (omitted from the sweep kernels). Options for the driver: (a) a per-angle gather kernel into a host buffer when `N_RADF>0`, or (b) refuse `N_RADF>0` in AMR mode. Also needs `TMP` on the host and a mapping of RADF `(I,J,K)` to boxes. Upstream quirks kept as-is if (a) is chosen: `IL_SAVE` keeps the last band's values and stale angles. No kernel work here.
+
+## 16. INTERPOLATE_IL CFACE/particles (L1249, L1250), ADD_VOLUMETRIC_HEAT_SOURCE (L1238), and particle-table blocks (L1240, L1244)
+
+### 16.1 L1249 / L1250 (host first)
+
+Same arithmetic as L1248 on the slot table through `CF_BR_INDEX` / `LP_BR_INDEX`. Host routines in `s5_rad_interp/`:
+
+```
+subroutine s5rad_interp_ilw_cf_host(NCF,NBR,NRA,NSB,CF_BR_INDEX,IDX,W,RSA,BR_ILW)
+subroutine s5rad_interp_ilw_lp_host(NLP,NBR,NRA,NSB,LP_BR_INDEX,LP_ORIENTATION,LP_SOLID_OR_TARGET,IDX,W,RSA,BR_ILW)
+```
+
+Particle filters are flat: `LP_SOLID_OR_TARGET(IP)/=0` and `LP_ORIENTATION(IP)>0`. Drift covers regions 3665-3676 and 3679-3695; glue for pointer aliases and the two IFs. Tests: the L1248 suite extended (138 cases; CFACE and particle slots exercised; host_cf_lp path PASS). Geometry SoA / particle SoA production tables are not required for the arithmetic test (gathers are synthesised); production `CF_BR_INDEX` joins when CFACE slots exist (doc 05).
+
+### 16.2 L1238 ADD_VOLUMETRIC_HEAT_SOURCE (host, gather/scatter)
+
+Code: `s5_rad_hrr/`. For each `INITIALIZATION` with `HRRPUV>0`: host evaluates `TIME_RAMP_FACTOR`; gather touched `(I,J,K)` by DEFAULT box or CONE; scatter MODE update onto `Q` / `KFST4_GAS`. CC_IBM cut-cell branch (5132-5140) omitted (geometry deferred). Tests: 40 cases, modes 0/1/2, box and cone, PASS. **Superseded by §17.7**: this first version is not bitwise and its test reference was not verbatim. The corrected version is on s5-land (`6ccf137752`).
+
+```
+subroutine s5rad_hrr_gather_box(...)
+subroutine s5rad_hrr_gather_cone(...)
+subroutine s5rad_hrr_scatter(IBAR,JBAR,KBAR,MODE,NTOUCH,IT,JT,KT,DELTA,CHI_R_DELTA,Q,KFST4_GAS)
+```
+
+### 16.3 L1240 / L1244 blocked (particle tables missing)
+
+- **L1240** (radi.f90:3893-3900): particle twin of L1239 (`rad_wall_qin_zero`). Needs flat particle `B1` / `SURF` gathers (`LP_B1_INDEX` or equivalent, `LPC_SURF_INDEX`, `SF_TMP_GAS_FRONT`). Not in s5-wall `[policy.wall.*]` or the generated wall tables.
+- **L1244** (radi.f90:4989-5034): particle incoming radiative flux (masked `SUM` of `BR%BAND%ILW` over the view cone, external flux ramp). Needs `LP_BR_INDEX`, `LP_B1_*`, `ORIENTATION_*`, `DLO_ORIENTATION`, and callees `EVALUATE_RAMP` / `CALC_PARTICLE_TEMP_ORIENTATION` on the host.
+
+Doc 05 question 6 keeps particle `BR` on the host until the deposition/particle design is settled. **No kernels written.** Owner: Wall Loops Engineer / particle-table owner to provide the flat gathers; then revisit.
+
+L1245 remains excluded (not planned host; see §15.7).
+
+## 17. Next round (loop_claims 670de64): L1251, L1247, L1241, L1246 and WSGG, L1234-L1237; L1238 correction
+
+All loops in this round take about 0.000% of run time in the inventory profile, so this section records dispositions and tests, not hot kernels. Lines are at `bee11f0329`.
+
+### 17.1 Inventory line offsets
+
+The inventory and loop_claims lines match the pin for 3500-3713 (L1234-L1237, L1247-L1251) and for L1238 (5098-5146). Three groups are off:
+
+| Claim | Inventory | Pin |
+|---|---|---|
+| L1240 / L1241 | 3893-3900 / 3901-3907 | particle loop 3894-3901, CFACE loop 3902-3908 (one line lower) |
+| L1246 `GET_KAPPA` | 5190-5204 | `DO N` loop 5194-5208 (function 5174-5212) |
+| L1252 `KAPPA_WSGG` | 5244-5246 | `DO NN` loop 5248-5250 |
+| L1230-L1233 `A_WSGG` | 5271-5302 | `DO MM` loops 5275-5277, 5286-5288, 5293-5295, 5300-5306 |
+
+The code in this round uses the pin lines. Drift checks assert the first statement of every copied range.
+
+### 17.2 L1251: neighbour-mesh `IL_R` interpolation (3698-3713)
+
+**Disposition: host now (FDS-mode path unchanged). AMR replacement: a ghost fill of `IL` from neighbour patches, owned by the Regrid and Multi-Level Transport Implementer (FillPatch, FR-016).** No kernel.
+
+What upstream does:
+
+- After an angle rotation, every `OMESH(NOM)%IL_R(LL,N,IBND)` is re-interpolated to the new angles with the same weights and order as L1248: copy to `IL_R_OLD`, sum ascending from `+0` of `(W*IL_R_OLD(LL,IDX))*RSA(IDX)`, then `/RSA(N)`.
+- `IL_R` holds the intensities that the neighbour mesh sent (`IL_S` → `IL_R` in `MESH_EXCHANGE`), lagged by one radiation update.
+- The sweep reads them at an `INTERPOLATED_BOUNDARY` wall: the ghost value is the mean of `IL_R(NIC_MIN:NIC_MAX,N,IBND)`, at 4357-4361. This is already copied in `s5rad_sweep_k2.F90` on a flat `ILR(NICR,NRA,NSB)`.
+
+Why no kernel now:
+
+- In AMR mode there are no `OMESH` arrays. Patch-to-patch intensity at box and level boundaries is a ghost fill of `IL`.
+- The per-element arithmetic of 3707-3709 equals that of L1248. So if the AMR design keeps a lagged ghost table, the existing `s5rad_ilw_old_copy` / `s5rad_ilw_interp` kernels (§15.3) apply unchanged with an identity gather (`W_BR_INDEX(L)=L`, `NBR=NICR`).
+- The loop order (`LL`, then band, then `I_INTP`) does not matter: every element is independent.
+
+Interface note for Role 3 (to be agreed; nothing here is implemented):
+
+1. **What is filled.** Ghost cells of `IL` per angle `N` and band `IBND`, for the boundary faces that the sweep for angle `N` treats as upwind. Values are non-negative.
+2. **When.** Upstream uses the neighbour values from the previous radiation update: lagged, because there is no iteration inside one update. Two options:
+   - (a) keep that lag: store a per-angle, per-band ghost table across radiation updates, the AMR analogue of `IL_R`;
+   - (b) fill from the current neighbour sweep. That changes the answer relative to FDS and needs an ordering of patch sweeps, so it is a design decision for Role 3 and the Integration Lead.
+3. **Angle rotation** (`ANGLE_INCREMENT` steps, `ITER==1`, after `CALCULATE_DIRECTION_COEFFICIENTS`). With option (a), the stored ghost table must be either re-interpolated (identity-gather L1248 kernels, bitwise with upstream 3702-3711) or reset. A reset is not bitwise with FDS mode.
+4. **Coarse/fine.**
+   - Upstream averages `NIC_MIN:NIC_MAX` (fine to coarse) at 4361.
+   - Coarse-to-fine spatial interpolation of `IL` and its conservation or limiter policy are Role 3's call.
+   - Non-negativity must hold after interpolation.
+5. **Layout.** `ILR(NICR,NRA,NSB)` with the ghost index fastest (same as `BR_ILW`), or `IL(i,j,k,box)` ghost cells read directly by the sweep. The sweep boundary block then changes from the `INTERPOLATED_BOUNDARY` mean to a plain ghost read. That change is the Radiation Lead's, once Role 3 picks the layout.
+
+loop_claims: L1251 `not planned (host)`, with the AMR ghost fill handed to Role 3.
+
+### 17.3 L1247: angle weights (3623-3645)
+
+Scope confirmed: 3623-3645 is exactly `s5rad_interp_weights(NRA,DLANG,DLANG_OLD,IDX,W)` (host, committed with L1248).
+
+- Every interp test case compares `IDX` and `W` bit for bit with the verbatim reference.
+- Seven weights mutants are killed: `no_floor`, `maxloc_back`, `not_normalised`, `dist_linear`, `no_mask`, `cosang_swapped`, `wsum_start`.
+- `wsum_start` (the sum starting from the first weight) survived until the `antipodal` group was added. That group has old angles near `-DLANG` with `NRA` 2-8, so the weights are small and the rounding of the `WSUM` start shows.
+
+**Closed: translated (host).** No device kernel: the routine is `O(NRA^2)` once per rotation, and `IDX`/`W` are uploaded with the other angle tables (§17.6).
+
+### 17.4 L1241: CFACE `Q_RAD_IN` zero (3902-3908)
+
+**Disposition: hand-written with a drift check, not the generator.** The generator (`s5gen.py`) has wall policies only (`[policy.wall.*]`) and no CFACE tables or sidecar policy, so a sidecar entry would not generate.
+
+The loop is the CFACE twin of `rad_wall_qin_zero` (L1239).
+
+```
+subroutine s5rad_cface_qin_zero(NCF,NSF,CF_B1_PRESENT,CF_SURF_INDEX,SF_TMP_GAS_FRONT,CF_Q_RAD_IN) bind(c)   ! K2, s5_rad_cface/
+```
+
+- Copy blocks 3902, 3904 and 3907-3908 (rename `cfqin`); glue 3903 and 3905-3906 (pointer aliases); region 3902-3908.
+- In AMR mode the CFACE tables do not exist and CC_IBM is refused, so `NCF=0`. The kernel is ready for when CFACE slots exist (doc 05).
+- Tests:
+  - 120 cases, 0 vacuous;
+  - six flag sets PASS at 1 and 4 threads;
+  - 6 of 6 mutants killed: `no_presence_test`, `strict_less`, `negative_zero_store`, `surface_by_icf`, `loop_one_short`, `ge_instead`;
+  - drift, K2 CI and lint clean.
+- Code is on s5-land (`664917ad50`).
+
+### 17.5 L1246 `GET_KAPPA`, L1252 `KAPPA_WSGG`, L1230-L1233 `A_WSGG`: host
+
+Call sites (all in `radi.f90`):
+
+- `GET_KAPPA` at 4013 (the RADCAL `KAPPA_GAS` cell loop 4005-4016);
+- `KAPPA_WSGG` at 4071;
+- `A_WSGG` at 3931 and 3949 (band setup), 4068 (WSGG `KAPPA_GAS`/`KFST4_GAS` cell loop 4051-4082) and 4243 (wall `OUTRAD_W` setup).
+
+None of these loops is a device kernel. The translated set (`rad_kernels.toml`: 3887-3893, 4099-4161, 4206-4222, 4818/4820, 4949-4983) and the sweep kernels never call them. So a device callee has no caller.
+
+**Disposition: host**, with these reasons:
+
+1. The callers run on the host. Their outputs (`KAPPA_GAS`, plus `KFST4_GAS` for WSGG) are uploaded per band per radiation update, and the K2 extinction and source kernels read them.
+2. Blockers for a future device callee:
+   - `GET_KAPPA` calls `GET_MOLECULAR_WEIGHT` / `GET_MASS_FRACTION_ALL`, uses an automatic `Y_OUT(N_SPECIES)`, an `INTENT(INOUT) Z_IN`, and `LOG`;
+   - `A_WSGG` is `RECURSIVE`, but only one level deep (`JWSGG==5` sums `MM=1..4`), so it could be unrolled;
+   - both use `**REAL(n,EB)` powers, which are libm-class `pow` calls (K2-10, a registry entry and the D-079 tolerance class);
+   - the WSGG cell loop also calls `GET_VOLUME_FRACTION` / `GET_MASS_FRACTION` and an ordered `RAD_Q_SUM` reduction.
+3. Revisit trigger: a profile of a RADCAL wide-band or WSGG case where the 4005-4016 or 4051-4082 loop, or the per-band upload, shows up. The kernel would then be the whole cell loop with these functions as device callees (generator `[[libm]]` entries), not the functions alone.
+
+loop_claims: L1246, L1252, L1230-L1233 `not planned (host)`.
+
+### 17.6 L1234-L1237: `CALCULATE_DIRECTION_COEFFICIENTS` (3510-3592)
+
+**Disposition: host setup, not planned.**
+
+Call sites:
+
+- `main.f90:383` at initialisation;
+- `main.f90:573` and `1114` on angle rotation (`ITER==1`, immediately before `INTERPOLATE_IL`).
+
+Each call is `O(NRA^2)` or less. After each call the driver uploads the angle tables:
+
+- `DLX/DLY/DLZ`, `DLN`, `DLANG`, `DLM`, `DLO_ORIENTATION`, `VIEW_ANGLE_FACTOR`, `NEAREST_RADIATION_ANGLE`;
+- and, after L1247, `IDX`/`W`.
+
+It keeps the host copies. `DLANG_OLD` stays on the host as the input of L1247.
+
+### 17.7 Correction of L1238 and strengthening of L1249/L1250 (landed on s5-land)
+
+Two defects in the version first committed with §16 (s5-gen `59ea7dbffa`, then merged to s5-land):
+
+1. `s5rad_hrr_scatter` received a precomputed `DELTA` and `CHI_R_DELTA=CHI_R*DELTA`. Upstream evaluates `CHI_R*TIME_RAMP_FACTOR*HRRPUV*VOLUME_ADJUST` left to right, so the regrouped product is not bitwise.
+2. The test reference was a restatement, not the upstream lines, so it could not catch defect 1.
+
+Corrected version (`s5_rad_hrr/`, s5-land `6ccf137752`):
+
+```
+subroutine s5rad_hrr_gather(IBAR,JBAR,KBAR,XC,YC,ZC,SHAPE,X1,X2,Y1,Y2,Z1,Z2,X0,Y0,Z0,RADIUS,HEIGHT,NTOUCH,IT,JT,KT)
+subroutine s5rad_hrr_scatter(IBAR,JBAR,KBAR,MODE,NTOUCH,IT,JT,KT,TIME_RAMP_FACTOR,HRRPUV,VOLUME_ADJUST,CHI_R,Q,KFST4_GAS)
+```
+
+- Copy blocks 5110-5121, 5141-5143 and 5122-5129, under a drift check `check_hrr_drift.py`. The CC_IBM block 5132-5140 is omitted and pinned by hash. Glue is 5105-5109 and 5144 (record loop, `HRRPUV` filter, host ramp).
+- The test builds its reference from the verbatim upstream lines (`make_hrr_tests.py`):
+  - 150 cases, with `Q` and `KFST4_GAS` compared bit for bit (ghost layer included);
+  - coverage: overlapping records, `HRRPUV<=0`, ramps, MODE 0/1/2, cone levels clipped to `RR=0`, bounds exactly on cell centres, and centres exactly on the cone surface;
+  - four host flag sets PASS at 1 and 4 threads (host only: no device code, so the offload flag sets do not apply). Re-verified after the land.
+- 12 of 12 mutants killed, including `chi_regroup`, `q_regroup`, both strict bounds, `cone_ge` and `reverse_record_order`.
+
+L1249/L1250 were committed with the L1248 suite only. They now have:
+
+- a 150-case suite (new `antipodal` group; particles skipped only by `ORIENTATION_INDEX=0`);
+- six flag sets PASS at 1 and 4 threads;
+- 31 of 31 mutants killed, 9 of them new: `cf_gather_by_icf`, `cf_inplace`, `cf_band_fixed`, `lp_no_orientation_filter`, `lp_no_class_filter`, `lp_inplace`, and the three weights mutants of §17.3.
+
+### 17.8 K2-09 in discovery mode
+
+`k2_ci_check.py` in discovery mode (`DEFAULT_K2_GLOBS`) does not list `s5_rad_sweep/`. The `[[libm]]` entry for `s5rad_plane3d_ild` (kernel_registry 374a64e) is therefore reported as stale (K2-09 WARN). The sweep test now runs discovery with `s5rad_sweep_k2.F90` added to the globs. It asserts no K2-09 for `s5rad_plane3d_ild` and no FAIL in the file; the K2-10 `EXP` finding is WAIVED by the registry entry. The shared default globs still need `s5_rad_sweep/` (tool owner). Discovery append is on s5-land (`664917ad50`); shared DEFAULT_K2_GLOBS still need the tool owner.
+
+## 18. Setup and GEOM-deferred loop closes (confirmed)
+
+Legacy Mapper claimed these in `amrex/loop_claims.csv` (docs `c4f7c7f` / pin fix `ea8a62d`). Radiation Lead confirms the dispositions below. Pins rechecked at FireX `8ad685f435`. Inventory pins for L0825-L0827 had drifted into particle unpack inside `MESH_EXCHANGE` (`PARTICLE_RECV_BUFFER` / CODE 11 near main.f90:3985-4055); use the FireX lines here, not the inventory CSV.
+
+### 18.1 L0825 / L0826 / L0827: `ALLOCATE_RADIATION_RECV_PKG` / `SEND_PKG` (host)
+
+| Claim | Routine | FireX lines | What |
+|---|---|---|---|
+| L0825 | `ALLOCATE_RADIATION_RECV_PKG` | main.f90:4092 | `DO I=1,N_REQ5` / `MPI_REQUEST_FREE` |
+| L0826 | same | main.f90:4094-4123 (AIC/LL/N nests 4104-4112) | recv buffer size + `MPI_RECV_INIT` |
+| L0827 | `ALLOCATE_RADIATION_SEND_PKG` | main.f90:4136-4163 (AIC/LL/N nests 4146-4154) | send buffer size + `MPI_SEND_INIT` |
+
+Coarse span covering both routines: main.f90:4087-4166 (task handout used 4101-4180).
+
+**Disposition: not planned (host).** MPI persistent-request setup and OMESH pack buffers. In AMR mode there is no `OMESH` radiation exchange; box-face intensity exchange is the FR-062 mechanism (`radiation/02` A2; §b face buffers). FDS-mode multi-mesh path keeps these host routines unchanged. No device kernel.
+
+### 18.2 L0676: `PACK_BOUNDARY_RADIA` (host)
+
+FireX: func.f90:5193-5218; band loop `DO NN=1,NUMBER_SPECTRAL_BANDS` at 5208-5211 (then `BR%IL` equate). Inventory pin 5143-5146 is stale.
+
+**Disposition: not planned (host).** Restart / wall `ILW` pack-unpack via `EQUATE` into `STORAGE_TYPE`. Setup and I/O path; not a radiation update kernel. Slot tables for the sweep already use flat `BR_ILW` (doc 05); this pack stays on the host for FDS-mode restart compatibility.
+
+### 18.3 L0664 / L0665: `ALLOCATE_BOUNDARY_RADIA_ARRAYS` (host)
+
+| Claim | FireX lines | What |
+|---|---|---|
+| L0664 | func.f90:4355-4358 | open-slot search `DO I=NAS,M%N_BOUNDARY_RADIA_DIM` (grow path continues 4362-4371) |
+| L0665 | func.f90:4378-4381 | band `ILW` alloc/zero; `BR%IL` init follows at 4383-4384 |
+
+Routine span: func.f90:4347-4386 (handout 4355-4385). Inventory 4351-4354 / 4374-4377 are stale by a few lines.
+
+**Disposition: not planned (host).** Storage grow and per-band init for `BOUNDARY_RADIA`. Host setup only.
+
+### 18.4 L0006 / L0007: `CCCOMPUTE_RADIATION` (GEOM deferred)
+
+| Claim | FireX lines | What |
+|---|---|---|
+| L0006 | ccib.f90:7139-7143 | no-radiation branch: cut-cell `QR = -CHI_R*Q` |
+| L0007 | ccib.f90:7147-7155 | radiation on: copy Cartesian `QR(I,J,K)` onto cut cells |
+
+**Disposition: GEOM / CC_IBM deferred (D-033).** Host until cut-face / cut-cell tables exist for AMR. Same deferral as sweep §11 (`CC_IBM` refused). No kernel now. loop_claims status remains `not planned (host)` with the D-033 note.
+
+### 18.5 Register
+
+loop_claims for L0825-L0827, L0676, L0664, L0665, L0006, L0007: `not planned (host)` confirmed; pins as above; see this section.
+
+## 19. L1242 remaining open pieces (classify / feature request only)
+
+No new `s5-gen` commits. Land pause until Legacy Mapper posts FF (s5-land at `664917ad50`). Classification of the still-open A1 rows in `radiation/02` (merged line pins; refine against FireX when a piece is taken):
+
+| Piece (radiation/02 A1) | Lines (merged) | Classification | Feature / owner request |
+|---|---|---|---|
+| Band-init whole-array fills (`KFST4_*`, `SCAEFF*`, `KAPPA_PART`) | 3914-3920 | **translatable now (fills)**; not started | none; trivial whole-array / fill rewrite already used elsewhere; do after FF open, not before |
+| Liquid-droplet `INTERPOLATE1D` per particle class | 3959-3972 | **generator feature** | assumed-shape rank-1 table callee (same blocker as L0658); request generator support or keep host per-class loop |
+| Solid-particle deposit scatter | 3981-3991 | **design (FR-062 / FR-005 (4a))** | deterministic deposition; blocked on particle tables with L1240/L1244 (§16.3) |
+| RADCAL `KAPPA_GAS` / `GET_KAPPA` | 4002-4019 | **generator feature** (aligned §17.5 host for now) | source-function callees + module tables; revisit with wide-band profile |
+| Wide-band `BLACKBODY_FRACTION` / `INTERPOLATE1D_UNIFORM` sums | 4027-4046 | **generator feature** | source-function + ordered scalar reduction (D-053) |
+| WSGG cell loop / `A_WSGG` / `KAPPA_WSGG` | 4051-4082 | **host now** (§17.5); device later needs features | recursion removal / unroll; `[[libm]]` pow; ordered reduction |
+| Condensed-species absorption | 4171-4202 | **generator feature** (same family as droplet row) | `INTERPOLATE1D` on `SPECIES_MIXTURE%R50` / `WQABS`/`WQSCA`; `CC_IBM` skip; per-species host loop acceptable until assumed-shape callee exists; was "open" in radiation/02 |
+| Wall `OUTRAD` / `INRAD_W` | 4229-4258, 4262-4280 | **generator feature** (wall tables) | ragged `BR_ILW` / `BR` alias (R1 / doc 05); partial coverage already in sweep wall kernels |
+| Wall ghost / `CELL_ILW` (`WALL_LOOP1`, CFACE twin) | 4328-4384 | **FR-062 + wall tables** | largely covered by sweep `s5rad_wall1` / `cell_ilw_*`; CFACE twin waits on geometry tables |
+| Post-sweep wall/CFACE `INRAD` updates | 4749-4812 | **generator feature** / FR-062 | wall-table features; cylindrical copy stays out (D-073 (5)) |
+
+**Not in this table (already closed or owned elsewhere):** angular sweep and `UIID`/`QR`/`UII` (FR-062 / translated); `IL_S` mesh pack (FR-062 exchange, §18.1); L1238/L1247-L1250 translated; L1240/L1244 blocked on particle tables; L1245 host; L1251 Role 3 ghost fill.
+
+**Next-work status (2026-10-06, s5-gen OPEN at `09ad2921c0`):** (1) gate hookup for radiation kernels — **partial / blocked on Integration + V&V gate owner**; remaining steps documented in `radiation/03` §10 (no Radiation `s5_rad_*` code this round). (2) ghost `UII`/`UIID` reader list — **draft confirmation in §6**; V&V Lead message drafted (do not send from here); waits V&V sign-off to close D-073 (b) / D-077 (6) / A-50 reader clause. (3) L1242 A1 remainders above: feature requests only until taken. (4) radiation under regrid (`radiation/04` / FR-063) waits on Role 3. Also still waiting: L1240/L1244 on Mesh Data particle gathers; L1251 Role 3.
