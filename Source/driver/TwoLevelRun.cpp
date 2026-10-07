@@ -73,7 +73,8 @@ std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl
 
 namespace {
 
-// Cell-centred plot Multifab per level: RHO, U, V, W (faces averaged to cells). One WriteMultiLevelPlotfile for the hierarchy.
+// Cell-centred plot Multifab: RHO, U, V, W + undivided OMEGA_Y (ω_y = Δ_z U − Δ_x W).
+// Owner viz: ω_y on mid-y xz + dark-grey mesh/AMR boxes. VORT (|ω|) stays TAG_VORT-only via ensure().
 void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, int nl, double t, int step)
 {
     amrex::Vector<amrex::MultiFab> mf(nl);
@@ -84,17 +85,34 @@ void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, int nl,
     for (int l = 0; l < nl; ++l) {
         const Level& Lv = reg.level(l);
         Fields& F = reg.fields(l);
-        mf[l].define(Lv.ba, Lv.dm, 4, 0);
+        const amrex::Periodicity per = Lv.geom.periodicity();
+        F["U"].FillBoundary(per);
+        F["W"].FillBoundary(per);
+        mf[l].define(Lv.ba, Lv.dm, 5, 0);
         amrex::MultiFab::Copy(mf[l], F["RHO"], 0, 0, 1, 0);
         amrex::Array<const amrex::MultiFab*, 3> faces{&F["U"], &F["V"], &F["W"]};
         amrex::average_face_to_cellcenter(mf[l], 1, faces);
+        const amrex::Box dom = Lv.geom.Domain();
+        const int dx_on = (dom.length(0) > 1) ? 1 : 0;
+        const int dz_on = (dom.length(2) > 1) ? 1 : 0;
+        const amrex::MultiFab& U = F["U"];
+        const amrex::MultiFab& W = F["W"];
+        for (amrex::MFIter mfi(mf[l]); mfi.isValid(); ++mfi) {
+            auto a = mf[l].array(mfi);
+            auto u = U.const_array(mfi);
+            auto w = W.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                // undivided ω_y (FDS dump.f90 vorticity without /dx)
+                a(i, j, k, 4) = dz_on * (u(i, j, k + 1) - u(i, j, k)) - dx_on * (w(i + 1, j, k) - w(i, j, k));
+            });
+        }
         pmf[l] = &mf[l];
         geom[l] = Lv.geom;
         if (l + 1 < nl) ref_ratio[l] = reg.level(l + 1).ref_ratio_from_parent;
     }
-    amrex::Vector<std::string> names{"RHO", "U", "V", "W"};
+    amrex::Vector<std::string> names{"RHO", "U", "V", "W", "OMEGA_Y"};
     amrex::WriteMultiLevelPlotfile(path, nl, pmf, names, geom, t, level_steps, ref_ratio);
-    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W cell-centred, " << nl << " level(s))\n";
+    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W,OMEGA_Y cell-centred; OMEGA_Y undivided ω_y, " << nl << " level(s))\n";
 }
 
 }  // namespace
@@ -177,10 +195,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (o.regrid_every > 0 && use_tag_vort) {
         fill_undivided_vorticity(reg, 1);   // L0 |ω| before AmrParams (auto thr needs max)
         if (o.tag_vort_auto) {
-            tag_vort_thr = 0.35 * reg.fields(0)["VORT"].max(0, 0);   // MultiFab::max is global
-            amrex::Print() << tag << ": TAG_VORT auto thr = 0.35 * max|VORT|_L0 = " << tag_vort_thr << "\n";
+            // Owner overnight: 0.45*max hugs ring core tighter than 0.35 (less fat L1).
+            tag_vort_thr = 0.45 * reg.fields(0)["VORT"].max(0, 0);   // MultiFab::max is global
+            amrex::Print() << tag << ": TAG_VORT auto thr = 0.45 * max|VORT|_L0 = " << tag_vort_thr << "\n";
         }
-        amr << ", TAG_VORT=" << std::setprecision(17) << tag_vort_thr << ", TAG_KEEP=0.8";
+        amr << ", TAG_VORT=" << std::setprecision(17) << tag_vort_thr << ", TAG_KEEP=0.85";
     } else if (o.regrid_every > 0) {
         amr << ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=0.05, TAG_KEEP=0.8";
     }

@@ -1,0 +1,35 @@
+! 3-D vortex ring, 32^3 as 4 meshes (2x2x1 of 16x16x32) for np=4.
+! IC: Rosenhead ring; per-mesh UVW slices + &CSVF (UVW_RESTART). PERIODIC_TEST=2 kept for face copy.
+! FDS UVW_INIT reads each mesh from the start of UVW_FILE — global N^3 CSV does NOT tile; use slices.
+! Owner overnight: --two-level-run --tag-vort auto --maxsize 8 --blocking 4 (tight L1); TAG_KEEP~0.85.
+! Hint: undivided |ω| peak ~ 3.92975; try --tag-vort auto or [0.9824, 1.965] (raise thr for tighter).
+! See Source/driver/notes/vortex-ring-owner-show.md.
+
+&HEAD CHID='vortex_ring_32_4m', TITLE='3-D vortex ring cold-flow, 32^3 4m, owner-show TAG_VORT adaptive' /
+
+&MESH IJK=16,16,32, XB=0,0.5,0,0.5,0,1, MPI_PROCESS=0 /
+&MESH IJK=16,16,32, XB=0.5,1,0,0.5,0,1, MPI_PROCESS=1 /
+&MESH IJK=16,16,32, XB=0,0.5,0.5,1,0,1, MPI_PROCESS=2 /
+&MESH IJK=16,16,32, XB=0.5,1,0.5,1,0,1, MPI_PROCESS=3 /
+
+&TIME T_END=2.0 /
+
+&MISC SIMULATION_MODE='DNS', STRATIFICATION=.FALSE., NOISE=.FALSE., CFL_MAX=0.25,
+      PERIODIC_TEST=2, UVW_FILE='vortex_ring_32_4m_uvw_m1.csv' /
+
+&CSVF UVWFILE='vortex_ring_32_4m_uvw_m1.csv' /
+
+&PRES VELOCITY_TOLERANCE=1.E-6, MAX_PRESSURE_ITERATIONS=100 /
+
+&RADI RADIATION=.FALSE. /
+
+&SPEC ID='BACKGROUND', BACKGROUND=.TRUE., MW=28.0, VISCOSITY=1.0E-4, DIFFUSIVITY=1.0E-4, SPECIFIC_HEAT=1.0 /
+
+&VENT PBX=0, SURF_ID='PERIODIC' /
+&VENT PBX=1, SURF_ID='PERIODIC' /
+&VENT PBY=0, SURF_ID='PERIODIC' /
+&VENT PBY=1, SURF_ID='PERIODIC' /
+&VENT PBZ=0, SURF_ID='PERIODIC' /
+&VENT PBZ=1, SURF_ID='PERIODIC' /
+
+&TAIL /

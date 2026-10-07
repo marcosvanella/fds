@@ -33,7 +33,7 @@ struct TwoLevelOptions {
     std::string plotfile;            // non-empty: WriteMultiLevelPlotfile here after the run (RHO + cell-centred U,V,W); CLI --plotfile [DIR]
     int plot_every = 0;              // CLI --plot-every N: when N>0 and plotfile set, after step s with s%N==0 write plt_<chid>_s<s> (keeps mid-regrid + final dumps)
     // TAG_VORT path (vortex-ring owner-show). NaN = keep blob TAG_SPEC_* emit when regrid_every>0.
-    // tag_vort_auto: thr = 0.35 * max|VORT| on level 0 after the first undivided-|ω| fill (before initial regrid).
+    // tag_vort_auto: thr = 0.45 * max|VORT| on level 0 after the first undivided-|ω| fill (before initial regrid); TAG_KEEP=0.85 (tight core).
     double tag_vort = std::numeric_limits<double>::quiet_NaN();
     bool tag_vort_auto = false;
 };
