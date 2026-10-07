@@ -56,34 +56,34 @@ The `Read` column: `R` the loop text was read for this list, `I` inventory entry
 Share of the whole list: the pressure and H loops are small in the model (the largest solver-side loop, L1209, is 0.008 %; the matrix and Poisson internals carry the weight and are not in scope). Prioritise by dependency (steps 2 to 4 unlock several loops each), not by share.
 
 <!-- GENERATED-BEGIN:pvh -->
-Counts over sections A to C (77 loops): blocked 12, claimed 12, needs-feature 20, test-only 6, translatable-now 2, translated 25.
+Counts over sections A to C (77 loops): blocked 6, claimed 35, needs-feature 2, test-only 6, translated 28.
 
 ### A. pres.f90, translation-eligible, non-geometry
 
 | Loop | file:lines | Routine | What | Share % | Class | Feature or blocker | Closest kernel | Owner | Read |
 |---|---|---|---|---|---|---|---|---|---|
 | L1209 | pres.f90:65-228 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson boundary arrays BXS..BZF from wall data (Neumann, Dirichlet, interpolated, open) | 0.008 | claimed | MESHES(NOM)%DX(EWC%IIO_MIN), VENTS%PRESSURE_RAMP_INDEX, EVALUATE_RAMP, synthetic-eddy arrays | wall_us_pred (wall gather); no neighbour-mesh model yet | AMR Pressure Backend Implementer | R |
-| L1210 | pres.f90:238-245 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS, cylindrical K,I nest | 0.000 | needs-feature | front end takes K,J,I nests only (same as L1392/L1393) | vflux_fvx (flux differences) | open — available | R |
+| L1210 | pres.f90:238-245 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS, cylindrical K,I nest | 0.000 | claimed | front end takes K,J,I nests only (same as L1392/L1393) | vflux_fvx (flux differences) | AMR Pressure Backend Implementer | R |
 | L1211 | pres.f90:250-260 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS (3-D, IPS 1/4/7) | 0.002 | claimed | front end accepts; no bitwise test committed | dp_kdtd (divg.f90:561-570, same flux-difference form) | AMR Pressure Backend Implementer | R |
-| L1212 | pres.f90:267-277 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 2: PRHS(J,I,K)) | 0.002 | needs-feature | layout contract: output subscript is not I+/-c | dp_kdtd with a permuted store | open — available | R |
-| L1213 | pres.f90:282-292 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 3,6: PRHS(K,J,I)) | 0.002 | needs-feature | layout contract | dp_kdtd with a permuted store | open — available | R |
-| L1214 | pres.f90:297-307 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 5: PRHS(I,K,J)) | 0.002 | needs-feature | layout contract | dp_kdtd with a permuted store | open — available | R |
+| L1212 | pres.f90:267-277 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 2: PRHS(J,I,K)) | 0.002 | claimed | layout contract: output subscript is not I+/-c | dp_kdtd with a permuted store | AMR Pressure Backend Implementer | R |
+| L1213 | pres.f90:282-292 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 3,6: PRHS(K,J,I)) | 0.002 | claimed | layout contract | dp_kdtd with a permuted store | AMR Pressure Backend Implementer | R |
+| L1214 | pres.f90:297-307 | PRESSURE_SOLVER_COMPUTE_RHS | Poisson RHS PRHS transposed (IPS 5: PRHS(I,K,J)) | 0.002 | claimed | layout contract | dp_kdtd with a permuted store | AMR Pressure Backend Implementer | R |
 | L1215 | pres.f90:394-400 | PRESSURE_SOLVER_FFT | copy PRHS to HP after the FFT solve (IPS 1,4,7) | 0.000 | claimed | front end accepts; whether the loop survives depends on the solver driver (FR-037) | vcorr_u (plain cell copy form) | AMR Pressure Backend Implementer | R |
-| L1216 | pres.f90:404-410 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 2: PRHS(J,I,K)) | 0.000 | needs-feature | layout contract | as L1215 | open — available | R |
-| L1217 | pres.f90:414-420 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 3,6) | 0.000 | needs-feature | layout contract | as L1215 | open — available | R |
-| L1218 | pres.f90:424-430 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 5) | 0.000 | needs-feature | layout contract | as L1215 | open — available | R |
-| L1219 | pres.f90:438-440 | PRESSURE_SOLVER_FFT | tunnel preconditioner: add H_BAR to HP (loop over I, section assignment) | 0.000 | needs-feature | inside !$OMP MASTER; only with TUNNEL_PRECONDITIONER | none | open — available | R |
+| L1216 | pres.f90:404-410 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 2: PRHS(J,I,K)) | 0.000 | claimed | layout contract | as L1215 | AMR Pressure Backend Implementer | R |
+| L1217 | pres.f90:414-420 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 3,6) | 0.000 | claimed | layout contract | as L1215 | AMR Pressure Backend Implementer | R |
+| L1218 | pres.f90:424-430 | PRESSURE_SOLVER_FFT | copy PRHS to HP (IPS 5) | 0.000 | claimed | layout contract | as L1215 | AMR Pressure Backend Implementer | R |
+| L1219 | pres.f90:438-440 | PRESSURE_SOLVER_FFT | tunnel preconditioner: add H_BAR to HP (loop over I, section assignment) | 0.000 | claimed | inside !$OMP MASTER; only with TUNNEL_PRECONDITIONER | none | AMR Pressure Solver Lead | R |
 | L1220 | pres.f90:450-462 | PRESSURE_SOLVER_FFT | H boundary fill in x (LBC/MBC/NBC code tests) | 0.000 | claimed | front end takes K,J,I nests only | wall_hs_bt (boundary store) | AMR Pressure Backend Implementer | R |
 | L1221 | pres.f90:466-477 | PRESSURE_SOLVER_FFT | H boundary fill in y | 0.000 | claimed | front end takes K,J,I nests only | as L1220 | AMR Pressure Backend Implementer | R |
 | L1222 | pres.f90:481-492 | PRESSURE_SOLVER_FFT | H boundary fill in z | 0.000 | claimed | front end takes K,J,I nests only | as L1220 | AMR Pressure Backend Implementer | R |
-| L1223 | pres.f90:531-537 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
-| L1224 | pres.f90:544-567 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.007 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
-| L1225 | pres.f90:576-582 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
-| L1226 | pres.f90:583-589 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
-| L1227 | pres.f90:591-596 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
-| L1206 | pres.f90:729-742 | PRESSURE_SOLVER_CHECK_RESIDUALS | CHECK_POISSON residual (diagnostic) | 0.001 | needs-feature | layout = exact: WORK8(1:IBAR,..) has no ALLOCATE line; diagnostic only | dp_kdtd | open — available | R |
+| L1223 | pres.f90:531-537 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather) | 0.000 | claimed | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | AMR Pressure Solver Lead | I |
+| L1224 | pres.f90:544-567 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.007 | claimed | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | AMR Pressure Solver Lead | I |
+| L1225 | pres.f90:576-582 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | claimed | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | AMR Pressure Solver Lead | I |
+| L1226 | pres.f90:583-589 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | claimed | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | AMR Pressure Solver Lead | I |
+| L1227 | pres.f90:591-596 | TUNNEL_POISSON_SOLVER | (inventory only: cell/face loop; wall gather; non-perfect nest (outer loop)) | 0.000 | claimed | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | AMR Pressure Solver Lead | I |
+| L1206 | pres.f90:729-742 | PRESSURE_SOLVER_CHECK_RESIDUALS | CHECK_POISSON residual (diagnostic) | 0.001 | claimed | layout = exact: WORK8(1:IBAR,..) has no ALLOCATE line; diagnostic only | dp_kdtd | AMR Pressure Solver Lead | R |
 | L1207 | pres.f90:758-764 | PRESSURE_SOLVER_CHECK_RESIDUALS | P = RHOP*(HP-KRES) over the full box | 0.000 | claimed | front end accepts; no bitwise test committed | baro_p_rrho (velo.f90:3254-3261, same formula) | AMR Pressure Backend Implementer | R |
-| L1208 | pres.f90:768-787 | PRESSURE_SOLVER_CHECK_RESIDUALS | inseparable Poisson residual (ITERATE_BAROCLINIC_TERM) | 0.001 | needs-feature | layout = exact: WORK8 view; MAXVAL/MAXLOC after the loop stay on the host | baro_fvx, cfl_max (reduction) | open — available | R |
+| L1208 | pres.f90:768-787 | PRESSURE_SOLVER_CHECK_RESIDUALS | inseparable Poisson residual (ITERATE_BAROCLINIC_TERM) | 0.001 | claimed | layout = exact: WORK8 view; MAXVAL/MAXLOC after the loop stay on the host | baro_fvx, cfl_max (reduction) | AMR Pressure Solver Lead | R |
 | L1190 | pres.f90:1686-1694 | ULMAT_SOLVE_ZONE | (inventory only: cell/face loop; wall gather; derived-type designator table; ) | 0.001 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1192 | pres.f90:1713-1720 | ULMAT_SOLVE_ZONE | (inventory only: cell/face loop; wall gather; zone table) | 0.001 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1194 | pres.f90:1782-1790 | ULMAT_SOLVE_ZONE | (inventory only: cell/face loop; wall gather; derived-type designator table; ) | 0.001 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
@@ -92,36 +92,36 @@ Counts over sections A to C (77 loops): blocked 12, claimed 12, needs-feature 20
 | L1203 | pres.f90:1923-1925 | ULMAT_SOLVE_ZONE | (inventory only: cell/face loop; non-perfect nest (outer loop)) | 0.000 | needs-feature | loop nest ['I'] at line 1923 is not a perfect K,J,I nest, nor an index loop (N) around one (collapse contract) (inventory) | zz_corr (species N outermost) | open — available | I |
 | L1204 | pres.f90:1931-1994 | ULMAT_SOLVE_ZONE | (inventory only: wall loop; wall gather; derived-type designator table; zone ) | 0.003 | blocked | needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open — available | I |
 | L1154 | pres.f90:2031-2047 | ULMAT_GET_H_REGFACES | LOG_INTWC marks, ULMAT variant (set-up) | 0.001 | needs-feature | P4; host acceptable | wall_up_ghost | open — available | I |
-| L1121 | pres.f90:4012-4026 | CHECK_UNSUPPORTED_MESH | Dirichlet-set check over meshes (set-up check) | 0.086 | blocked | mesh loop with process test; host | none | open — available | R |
+| L1121 | pres.f90:4012-4026 | CHECK_UNSUPPORTED_MESH | Dirichlet-set check over meshes (set-up check) | 0.086 | claimed | mesh loop with process test; host | none | AMR Pressure Solver Lead | R |
 | L1122 | pres.f90:4351-4356 | COPY_CCVAR_IN_HS | HS from WALL boundary type for IS_WALLT (CC_IBM helper) | 0.001 | translated | translated | kernel wall_hs_bt | - | R |
-| L1130 | pres.f90:5580-5601 | GET_H_REGFACES | LOG_INTWC marks for internal solid faces (set-up) | 0.001 | needs-feature | P4: rank-4 LOGICAL array has no table kind; host acceptable | wall_up_ghost | open — available | R |
+| L1130 | pres.f90:5580-5601 | GET_H_REGFACES | LOG_INTWC marks for internal solid faces (set-up) | 0.001 | claimed | P4: rank-4 LOGICAL array has no table kind; host acceptable | wall_up_ghost | AMR Pressure Solver Lead | R |
 
 ### B. velo.f90, H assembly, no-flux, velocity update and forcing
 
 | Loop | file:lines | Routine | What | Share % | Class | Feature or blocker | Closest kernel | Owner | Read |
 |---|---|---|---|---|---|---|---|---|---|
 | L1374 | velo.f90:619-639 | VELOCITY_FLUX | vorticity and stress tensor (VELOCITY_FLUX) | 0.079 | translated | translated | kernel vflux_vort_tau | - | R |
-| L1375 | velo.f90:649-653 | VELOCITY_FLUX | gravity components GX/GY/GZ by EVALUATE_RAMP | 0.001 | claimed | callee is a function of a ramp table (O1) | vflux_fvx host_inputs GX/GY/GZ | GPU Generator Engineer | R |
+| L1375 | velo.f90:649-653 | VELOCITY_FLUX | gravity components GX/GY/GZ by EVALUATE_RAMP | 0.001 | translated | translated | kernel vflux_gravity | GPU Generator Engineer | R |
 | L1376 | velo.f90:662-714 | VELOCITY_FLUX | (inventory only: cell/face loop; wall gather; edge tables) | 0.226 | translated | translated | kernel vflux_fvx | GPU Generator Engineer | I |
 | L1377 | velo.f90:720-772 | VELOCITY_FLUX | (inventory only: cell/face loop; wall gather; edge tables) | 0.226 | translated | translated | kernel vflux_fvy | GPU Generator Engineer | I |
 | L1378 | velo.f90:778-830 | VELOCITY_FLUX | (inventory only: cell/face loop; wall gather; edge tables) | 0.226 | translated | translated | kernel vflux_fvz | GPU Generator Engineer | I |
-| L1385 | velo.f90:896-903 | DIRECT_FORCE | DIRECT_FORCE: FVX -= RRHO*FVEC(1)*ramp*SIN_THETA | 0.011 | needs-feature | rank-1 array subscript is a constant | vcorr_u | open — available | R |
-| L1386 | velo.f90:917-924 | DIRECT_FORCE | DIRECT_FORCE: FVY update | 0.011 | needs-feature | as L1385 | vcorr_v | open — available | R |
-| L1387 | velo.f90:938-945 | DIRECT_FORCE | DIRECT_FORCE: FVZ update | 0.011 | needs-feature | as L1385 | vcorr_w | open — available | R |
-| L1379 | velo.f90:970-978 | CORIOLIS_FORCE | CORIOLIS_FORCE: cell-centred velocities UP,VP,WP | 0.016 | translatable-now | front end accepts; no bitwise test committed | up_deardorff, wall_coriolis_ghost | open — available | R |
+| L1385 | velo.f90:896-903 | DIRECT_FORCE | DIRECT_FORCE: FVX -= RRHO*FVEC(1)*ramp*SIN_THETA | 0.011 | claimed | rank-1 array subscript is a constant | vcorr_u | AMR Pressure Solver Lead | R |
+| L1386 | velo.f90:917-924 | DIRECT_FORCE | DIRECT_FORCE: FVY update | 0.011 | claimed | as L1385 | vcorr_v | AMR Pressure Solver Lead | R |
+| L1387 | velo.f90:938-945 | DIRECT_FORCE | DIRECT_FORCE: FVZ update | 0.011 | claimed | as L1385 | vcorr_w | AMR Pressure Solver Lead | R |
+| L1379 | velo.f90:970-978 | CORIOLIS_FORCE | CORIOLIS_FORCE: cell-centred velocities UP,VP,WP | 0.016 | translated | translated | kernel coriolis_up | AMR Pressure Solver Lead | R |
 | L1380 | velo.f90:981-987 | CORIOLIS_FORCE | CORIOLIS_FORCE: ghost velocities at external walls | 0.005 | translated | translated | kernel wall_coriolis_ghost | - | R |
-| L1381 | velo.f90:992-1000 | CORIOLIS_FORCE | CORIOLIS_FORCE: FVX += 2(OVEC(2)WBAR-OVEC(3)VBAR) | 0.016 | needs-feature | rank-1 array subscript is a constant, not a loop variable | vcorr_u (face-loop FVX update) | open — available | R |
-| L1382 | velo.f90:1006-1014 | CORIOLIS_FORCE | CORIOLIS_FORCE: FVY update | 0.016 | needs-feature | as L1381 | vcorr_v | open — available | R |
-| L1383 | velo.f90:1020-1028 | CORIOLIS_FORCE | CORIOLIS_FORCE: FVZ update | 0.016 | needs-feature | as L1381 | vcorr_w | open — available | R |
+| L1381 | velo.f90:992-1000 | CORIOLIS_FORCE | CORIOLIS_FORCE: FVX += 2(OVEC(2)WBAR-OVEC(3)VBAR) | 0.016 | claimed | rank-1 array subscript is a constant, not a loop variable | vcorr_u (face-loop FVX update) | AMR Pressure Solver Lead | R |
+| L1382 | velo.f90:1006-1014 | CORIOLIS_FORCE | CORIOLIS_FORCE: FVY update | 0.016 | claimed | as L1381 | vcorr_v | AMR Pressure Solver Lead | R |
+| L1383 | velo.f90:1020-1028 | CORIOLIS_FORCE | CORIOLIS_FORCE: FVZ update | 0.016 | claimed | as L1381 | vcorr_w | AMR Pressure Solver Lead | R |
 | L1388 | velo.f90:1040-1046 | MMS_VELOCITY_FLUX | manufactured-solution force in FVX (PERIODIC_TEST==7 only) | 0.315 | test-only | called only if PERIODIC_TEST==7 (velo.f90:842) | none | open — available | R |
 | L1389 | velo.f90:1048-1054 | MMS_VELOCITY_FLUX | manufactured-solution force in FVZ (PERIODIC_TEST==7 only) | 0.325 | test-only | called only if PERIODIC_TEST==7 (velo.f90:842) | none | open — available | R |
 | L1390 | velo.f90:1081-1198 | PATCH_VELOCITY_FLUX | PATCH_VELOCITY_FLUX: velocity patch forcing, three face nests | 1.270 | translated | translated | kernel pvf_fvx;pvf_fvy;pvf_fvz;pvf_fvx;pvf_fvy;pvf_fvz | GPU Mesh Data Loops Engineer | R |
-| L1391 | velo.f90:1243-1253 | VELOCITY_FLUX_CYLINDRICAL | cylindrical vorticity and stress (OMY, TXZ) | 0.026 | translatable-now | front end accepts; no bitwise test committed | vflux_vort_tau (velo.f90:619-639) | open — available | R |
+| L1391 | velo.f90:1243-1253 | VELOCITY_FLUX_CYLINDRICAL | cylindrical vorticity and stress (OMY, TXZ) | 0.026 | claimed | front end accepts; no bitwise test committed | vflux_vort_tau (velo.f90:619-639) | AMR Pressure Solver Lead | R |
 | L1392 | velo.f90:1270-1302 | VELOCITY_FLUX_CYLINDRICAL | cylindrical edge nest (K,I with J fixed) | 0.014 | claimed | front end takes K,J,I nests only (O1, deferred) | vflux_fvx | GPU Generator Engineer | I |
 | L1393 | velo.f90:1306-1337 | VELOCITY_FLUX_CYLINDRICAL | cylindrical edge nest (K,I with J fixed) | 0.014 | claimed | as L1392 | vflux_fvx | GPU Generator Engineer | I |
 | L1364 | velo.f90:1376-1400 | NO_FLUX | NO_FLUX: HP ghost value from the neighbour mesh (average over the overlap) | 0.426 | claimed | needs the exchange-buffer layout (ADR-001); the sum keeps its K,J,I order | none (new); pvf_* for the host rule | GPU Mesh Data Loops Engineer | R |
-| L1365 | velo.f90:1404-1459 | NO_FLUX | NO_FLUX: FVX/FVY/FVZ driven to zero inside obstructions (three face nests per obstruction) | 0.347 | needs-feature | outer loop over obstructions is not a K,J,I nest; overlapping obstructions write the same bits to a face (value depends on the face only), so IDEMPOTENT fits | pvf_fvx (box and SOLID mask, host launches one kernel per box), vpred_us (HP gradient form) | open — available | R |
-| L1366 | velo.f90:1463-1559 | NO_FLUX | NO_FLUX: FVX/FVY/FVZ at walls toward the specified normal velocity | 0.056 | claimed | two wall records can name one face (a thin pair writes FVX(II) from IOR=1 and from IOR=-1 of the next cell): the last wall index would win; the owner must prove or gather | wall_us_pred, wall_un_store (velo.f90:3347-3408) | GPU Mesh Data Loops Engineer | R |
+| L1365 | velo.f90:1404-1459 | NO_FLUX | NO_FLUX: FVX/FVY/FVZ driven to zero inside obstructions (three face nests per obstruction) | 0.347 | claimed | outer loop over obstructions is not a K,J,I nest; overlapping obstructions write the same bits to a face (value depends on the face only), so IDEMPOTENT fits | pvf_fvx (box and SOLID mask, host launches one kernel per box), vpred_us (HP gradient form) | AMR Pressure Solver Lead | R |
+| L1366 | velo.f90:1463-1559 | NO_FLUX | NO_FLUX: FVX/FVY/FVZ at walls toward the specified normal velocity | 0.056 | translated | translated | kernel wall_no_flux | GPU Mesh Data Loops Engineer | R |
 | L1394 | velo.f90:1603-1609 | VELOCITY_PREDICTOR | (inventory only: cell/face loop) | 0.005 | translated | translated | kernel vpred_us | - | I |
 | L1395 | velo.f90:1613-1619 | VELOCITY_PREDICTOR | (inventory only: cell/face loop) | 0.005 | translated | translated | kernel vpred_vs | - | I |
 | L1396 | velo.f90:1623-1629 | VELOCITY_PREDICTOR | (inventory only: cell/face loop) | 0.005 | translated | translated | kernel vpred_ws | - | I |

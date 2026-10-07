@@ -4,18 +4,18 @@ L0365,GPU Generator Engineer,in progress,"partly translated (rho_d_interp 133-14
 L0369,GPU Generator Engineer,in progress,partly translated; further inner nests are in the shared worktree as uncommitted sidecar entries (not counted)
 L0366,GPU Generator Engineer,in progress,uncommitted sidecar entry rho_d_maxloc_fix covers divg.f90:245-258 (not counted)
 L0381,GPU Generator Engineer,claimed,partly translated (dp_species); callee nest open
-L1375,GPU Generator Engineer,in progress,"kernel vflux_gravity (one I loop, EVALUATE_RAMP inlined over flat ramp tables, GX/GY/GZ as local_args) bitwise-tested in a private copy (test_vflux_gravity.py 46/46); not committed: waits for the s5-wall-next merge and a shared s5gen.py header fix (not counted)"
+L1375,GPU Generator Engineer,translated,kernel vflux_gravity (velo.f90:649-653; EVALUATE_RAMP inlined over flat ramp tables; one-I loop; GX/GY/GZ as local_args) landed on s5-gen eedf0c9a5f; test_vflux_gravity.py 46/46; device/control/external ramps stay host-only
 L1392,GPU Generator Engineer,claimed,"deferred: K,I nest with J fixed (O1)"
 L1393,GPU Generator Engineer,claimed,"deferred: K,I nest with J fixed (O1)"
 L1376,GPU Generator Engineer,translated,edge-table nest (vflux_fvx)
 L1377,GPU Generator Engineer,translated,edge-table nest (vflux_fvy)
 L1378,GPU Generator Engineer,translated,edge-table nest (vflux_fvz)
 L1390,GPU Mesh Data Loops Engineer,translated,PATCH_VELOCITY_FLUX three nests (pvf_fvx pvf_fvy pvf_fvz) plus the host launch rule
-L1366,GPU Mesh Data Loops Engineer,translated,NO_FLUX (VELO::NO_FLUX) landed on s5-gen tip 01e57b1e20 (48d0933579, 481da5f7d1, 01e57b1e20); test_mesh_noflux.py --quick 26/26, test_noflux_thin.py 17/17
-L1363,GPU Mesh Data Loops Engineer,claimed,O2 neighbour-mesh loop
-L1364,GPU Mesh Data Loops Engineer,claimed,O2 neighbour-mesh loop
-L1367,GPU Mesh Data Loops Engineer,claimed,O2 neighbour-mesh loop
-L1399,GPU Mesh Data Loops Engineer,claimed,O2 neighbour-mesh loop
+L1366,GPU Mesh Data Loops Engineer,translated,"NO_FLUX (VELO::NO_FLUX) landed on s5-gen tip 01e57b1e20 (48d0933579, 481da5f7d1, 01e57b1e20); test_mesh_noflux.py --quick 26/26, test_noflux_thin.py 17/17"
+L1363,GPU Mesh Data Loops Engineer,not planned (host),MATCH_VELOCITY_FLUX under D-055: same-mesh empty (only INTERPOLATED_BOUNDARY / NOM>0; EXTERNAL_GHOSTS_FILLED early return); nothing to translate for same-mesh; amrex/o2-edge-exchange-scope.md
+L1364,GPU Mesh Data Loops Engineer,not planned (host),NO_FLUX HP fill under D-055: same-mesh empty (IF NOM==0 CYCLE); OMESH refused; nothing to translate for same-mesh; amrex/o2-edge-exchange-scope.md
+L1367,GPU Mesh Data Loops Engineer,not planned (host),VELOCITY_BC normal ghost under D-055: same-mesh empty (IF EWC%NOM==0 CYCLE); OMESH refused; nothing to translate for same-mesh; amrex/o2-edge-exchange-scope.md
+L1399,GPU Mesh Data Loops Engineer,not planned (host),VISCOSITY_BC under D-055: same-mesh empty (IF EWC%NOM==0 CYCLE); OMESH refused; nothing to translate for same-mesh; amrex/o2-edge-exchange-scope.md
 L1402,GPU Wall Loops Engineer,claimed,O3 wall-subscript stores; queued after the per-surface tables
 L1359,GPU Wall Loops Engineer,claimed,SP2 ghost mirror (highest wall index wins); queued after the per-surface tables
 L0375,GPU Wall Loops Engineer,claimed,SP3 accumulation through wall subscripts (CSR gather)
@@ -32,7 +32,7 @@ L0877,GPU Mesh Data Loops Engineer,claimed,"D-083: CHECK_MASS_DENSITY species lo
 L1355,Legacy Mapper,claimed,cell-loop batch (Vreman)
 L1315,Legacy Mapper,claimed,cell-loop batch (TEST_FILTER)
 L1316,Legacy Mapper,claimed,cell-loop batch (TEST_FILTER)
-L1356,Legacy Mapper,claimed,cell-loop batch (WALE)
+L1356,GPU Wall Loops Engineer,translated,COMPUTE_VISCOSITY CASE WALE (velo.f90:256-279); generated K2 visc_wale on s5-gen 8dcb39998c (on tip 6dca8b2209; visc_wale kept through Pressure FF); D-086 libm entry; D-088 pure-shear RUNCMP maxrel 1e-10 on MU (other scenarios 1e-11); host bitwise + test_visc_wale.py; Legacy Mapper claim released
 L1321,Legacy Mapper,claimed,cell-loop batch (VARDEN_DYNSMAG)
 L0878,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
 L0865,AMR Species & Combustion Lead,translated,translatable-now cell loop; own tests; translated on s5-gen by the species and mass cell-loop kernels (see s5_markers.toml); own bitwise tests
@@ -45,12 +45,12 @@ L0608,AMR Species & Combustion Lead,translated,idempotent B1-alias marker store;
 L1488,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
 L1489,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
 L1485,AMR Solid Phase Lead,claimed,wall translation plan in docs/amrex/wall-bc-translation-plan.md
-L0823,AMR Solid Phase Lead,claimed,"host-side event code (REASSIGN_WALL_CELLS); no device kernel; table-refresh trigger is the device deliverable (wall-bc-translation-plan.md section 11); FireX 1fb5c300 re-pin init.f90:4951-5065 (body unchanged; survey 4940-5054)"
+L0823,AMR Solid Phase Lead,claimed,host-side event code (REASSIGN_WALL_CELLS); no device kernel; table-refresh trigger is the device deliverable (wall-bc-translation-plan.md section 11); FireX 1fb5c300 re-pin init.f90:4951-5065 (body unchanged; survey 4940-5054)
 L1486,AMR Solid Phase Lead,claimed,WALL_BC ghost values loop 1; wall-bc-translation-plan.md
 L1487,AMR Solid Phase Lead,claimed,WALL_BC thin-wall loop 0; wall-bc-translation-plan.md
 L1239,AMR Radiation Lead,translated,"R1 zero of Q_RAD_IN where TMP_GAS_FRONT<=0; needs the B1_PRESENT wall-table flag (radiation 00-r1-signoff); kernel rad_wall_qin_zero is already in the committed radiation sidecar; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT; line numbers re-verified radi.f90:3887-3893; Radiation Lead: done, kernel rad_wall_qin_zero (markers/rad_kernels.toml), landing with s5-wall-next"
 L1243,AMR Radiation Lead,translated,"R1 open-boundary Q_RAD_IN; blocked on the ragged BR_ILW(NRA bands wall) table; per-band temporary starting at +0; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT WITH CHANGE (per-band temporary; flat chain fails bitwise); line numbers re-verified radi.f90:4965-4974; translated by kernel wall_open_qin (radi.f90:4961-4970, per-band temporary, SUM order of the verbatim loop checked bitwise) with wall_open_qin_wl; in the s5-four kernel set"
-L1248,AMR Radiation Lead,translated,"INTERPOLATE_IL wall part radi.f90:3651-3662; host + K2 in s5_rad_interp/; 138 cases / 22 mutants; BR_ILW ping-pong; radiation/06 §15"
+L1248,AMR Radiation Lead,translated,INTERPOLATE_IL wall part radi.f90:3651-3662; host + K2 in s5_rad_interp/; 138 cases / 22 mutants; BR_ILW ping-pong; radiation/06 §15
 L1245,AMR Radiation Lead,not planned (host),"R1 RADF file write; host code; Sign-off (Radiation Lead, radiation/00-r1-signoff.md section 2): ACCEPT as host code; line numbers re-verified radi.f90:5048-5063"
 L1211,AMR Pressure Backend Implementer,in progress,"Poisson RHS PRHS, 3-D non-cylindrical IPS 1/4/7 (pres.f90:250-260). Independent CPU reference done and committed: Source/pressure_backend FdsPressureLoops (pres_compute_rhs_div), bitwise equal to the verbatim upstream loop (10 cases, 18 mutants caught) and to arrays from a real FDS run (16 files). Generator kernel entry still to be added by the generator owners: needs the exact-layout extents ITRN/JTRN/KTRN as integer arguments (amrex/pressure-loops-generator-proposal.md). IPS 2,3,5,6 (L1212-L1214) and the cylindrical branch (L1210) not covered"
 L1207,AMR Pressure Backend Implementer,in progress,P = RHOP*(HP-KRES) over the full box incl. ghost cells (pres.f90:758-764). Independent CPU reference done and committed (pres_p_from_h): bitwise equal to the verbatim loop (5 cases) and to a real FDS run (16 files). Generator probe accepts the entry as written (amrex/pressure-loops-generator-proposal.md); the kernel entry in the sidecar is left to the generator owners
@@ -65,19 +65,19 @@ L1471,AMR Solid Phase Lead,closed,"HT3D_TEMPERATURE_EXCHANGE loop 2 (wall.f90:36
 L1452,AMR Solid Phase Lead,closed,"ASSIGN_GHOST_VALUE (wall.f90:319-339): compatibility-only, skipped by agreement"
 L1272,AMR Species & Combustion Lead,translated,"SETTLING_VELOCITY (soot.f90:54-175, same lines at FDS-AMReX 8ad685f435): landed on s5-gen in fe8017c109 as kernels settle_zero, settle_vel, settle_wall_zero, settle_div (markers/soot_kernels.toml); function callee CUNNINGHAM (libm, D-070 entry), rank-2 table gathered through PRESSURE_ZONE, CYCLE of the innermost loop"
 L0397,AMR Species & Combustion Lead,translated,"DOT_PRODUCT over a table section through the generator; landed on s5-gen in 0b1284e5d7 as kernel rho_h_s_p (divg.f90:814-822 at 36975d7, 829-837 at FDS-AMReX 8ad685f435)"
-L0596,AMR Species & Combustion Lead,not planned (host),"COMBUSTION_BC fire.f90:1902-1918 under D-055: same-mesh empty (NOM==0 CYCLE); OMESH refused; nothing to translate for same-mesh; next/L0596/ANALYSIS.md; updated 2026-10-06"
-L1273,AMR Species & Combustion Lead,blocked,"SOOT_SURFACE_OXIDATION soot.f90:412-472; SM pointer + cell-major CSR + component tables; next/L1273/ANALYSIS.md; updated 2026-10-06"
+L0596,AMR Species & Combustion Lead,not planned (host),COMBUSTION_BC fire.f90:1902-1918 under D-055: same-mesh empty (NOM==0 CYCLE); OMESH refused; nothing to translate for same-mesh; next/L0596/ANALYSIS.md; updated 2026-10-06
+L1273,AMR Species & Combustion Lead,blocked,SOOT_SURFACE_OXIDATION soot.f90:412-472; SM pointer + cell-major CSR + component tables; next/L1273/ANALYSIS.md; updated 2026-10-06
 L0866,AMR Species & Combustion Lead,translated,"rank-2 PBAR_S(K,PRESSURE_ZONE) gather; landed on s5-gen in 0b1284e5d7 as kernel tmp_pbar_pred (mass.f90:570-577 at 36975d7, 576-583 at FDS-AMReX 8ad685f435)"
 L0875,AMR Species & Combustion Lead,translated,"rank-2 PBAR(K,PRESSURE_ZONE) gather; landed on s5-gen in 0b1284e5d7 as kernel tmp_pbar_corr (mass.f90:752-759 at 36975d7, 758-765 at FDS-AMReX 8ad685f435)"
-L0630,GPU Mesh Data Loops Engineer,not_planned,host path after FireX 1fb5c300: not translating new BLOCK_CELL single-cell branch or MESH_EXCHANGE 66/67; paired with L0817; func.f90:5616 divide-by-zero risk noted; upstream-1fb5c300-loop-impact.md
+L0630,GPU Mesh Data Loops Engineer,not planned (host),"BLOCK_CELL host path (D-083 / next-work r6): do not translate new single-cell consumable-obstruction branch or MESH_EXCHANGE 66/67; paired with L0817; TMP_AVG/COUNT divide-by-zero when all WALL_INDEX set; amrex/l0630-block-cell-host.md (176e80f, 2668a3c); upstream-1fb5c300-loop-impact.md"
 L0657,,translated,"MP5 not implemented in the generator (owner ruling); conflicts with the committed whole-field kernel gsfv_mp5 (markers/gsfv_field_kernels.toml on s5-gen, func.f90:1439-1453); status left as translated until the owner decides whether gsfv_mp5 is withdrawn"
-L1210,AMR Pressure Backend Implementer,not planned (retired),"Retired per pressure/09: cylindrical PRHS nest deferred in AMR mode. Backend NotBuilt for cylindrical; no translation. Confirmed no Source/pressure_backend dependency."
-L1212,AMR Pressure Backend Implementer,not planned (retired),"Retired per pressure/09 / FR-037: transposed PRHS (IPS 2). AMR natural layout only; driver stops on IPS /= 0. Confirmed no backend dependency."
-L1213,AMR Pressure Backend Implementer,not planned (retired),"Retired per pressure/09 / FR-037: transposed PRHS (IPS 3/6). Same as L1212. Confirmed no backend dependency."
-L1214,AMR Pressure Backend Implementer,not planned (retired),"Retired per pressure/09 / FR-037: transposed PRHS (IPS 5). Same as L1212. Confirmed no backend dependency."
-L1216,AMR Pressure Backend Implementer,not planned (retired),"Retired per pressure/09: transposed HP copy (IPS 2); same FR-037 reasoning as L1215. Confirmed no backend dependency."
-L1217,AMR Pressure Backend Implementer,not planned (retired),"Retired per pressure/09: transposed HP copy (IPS 3/6); same as L1216. Confirmed no backend dependency."
-L1218,AMR Pressure Backend Implementer,not planned (retired),"Retired per pressure/09: transposed HP copy (IPS 5); same as L1216. Confirmed no backend dependency."
+L1210,AMR Pressure Backend Implementer,not planned (retired),Retired per pressure/09: cylindrical PRHS nest deferred in AMR mode. Backend NotBuilt for cylindrical; no translation. Confirmed no Source/pressure_backend dependency.
+L1212,AMR Pressure Backend Implementer,not planned (retired),Retired per pressure/09 / FR-037: transposed PRHS (IPS 2). AMR natural layout only; driver stops on IPS /= 0. Confirmed no backend dependency.
+L1213,AMR Pressure Backend Implementer,not planned (retired),Retired per pressure/09 / FR-037: transposed PRHS (IPS 3/6). Same as L1212. Confirmed no backend dependency.
+L1214,AMR Pressure Backend Implementer,not planned (retired),Retired per pressure/09 / FR-037: transposed PRHS (IPS 5). Same as L1212. Confirmed no backend dependency.
+L1216,AMR Pressure Backend Implementer,not planned (retired),Retired per pressure/09: transposed HP copy (IPS 2); same FR-037 reasoning as L1215. Confirmed no backend dependency.
+L1217,AMR Pressure Backend Implementer,not planned (retired),Retired per pressure/09: transposed HP copy (IPS 3/6); same as L1216. Confirmed no backend dependency.
+L1218,AMR Pressure Backend Implementer,not planned (retired),Retired per pressure/09: transposed HP copy (IPS 5); same as L1216. Confirmed no backend dependency.
 L1219,AMR Pressure Solver Lead,not_planned,retired tunnel; charter Q4 / D-080 C2; 09-pressure-loop-dispositions.md
 L1223,AMR Pressure Solver Lead,not_planned,retired tunnel; D-080 C2; 09-pressure-loop-dispositions.md
 L1224,AMR Pressure Solver Lead,not_planned,retired tunnel; D-080 C2; 09-pressure-loop-dispositions.md
@@ -86,8 +86,8 @@ L1226,AMR Pressure Solver Lead,not_planned,retired tunnel; D-080 C2; 09-pressure
 L1227,AMR Pressure Solver Lead,not_planned,retired tunnel; D-080 C2; 09-pressure-loop-dispositions.md
 L1206,AMR Pressure Solver Lead,not_planned,host: CHECK_POISSON diagnostic only; evidence docs/pressure/09-pressure-loop-dispositions.md (a4f1311)
 L1208,AMR Pressure Solver Lead,not_planned,host: inseparable residual driving pressure iteration (BAROCLINIC on by default); host C++ translations pass bitwise incl. 214 real-FDS dumps; driver gap: multi-level branch never computes L1208 so VELOCITY_TOLERANCE/PRESSURE_TOLERANCE have no effect in refined runs; 09-pressure-loop-dispositions.md
-L1270,AMR Species & Combustion Lead,blocked,"CALC_AGGLOMERATION soot.f90:265-391 (FireX 8ad685f435); generator: ALL then DO WHILE TypeError then MAXVAL/SUM; host or hand-written; analysis work-species/handoff-s4/next/L1270/ANALYSIS.md; updated 2026-10-06"
-L0597,AMR Species & Combustion Lead,not planned (host),"chemically active cell compaction fire.f90:123-137; CELL compaction + RETURN; generator refuses CELL module var; host path; next/L0597/ANALYSIS.md; updated 2026-10-06"
+L1270,AMR Species & Combustion Lead,blocked,CALC_AGGLOMERATION soot.f90:265-391 (FireX 8ad685f435); generator: ALL then DO WHILE TypeError then MAXVAL/SUM; host or hand-written; analysis work-species/handoff-s4/next/L1270/ANALYSIS.md; updated 2026-10-06
+L0597,AMR Species & Combustion Lead,not planned (host),chemically active cell compaction fire.f90:123-137; CELL compaction + RETURN; generator refuses CELL module var; host path; next/L0597/ANALYSIS.md; updated 2026-10-06
 L1365,AMR Pressure Solver Lead,in progress,NO_FLUX FVX/FVY/FVZ; host C++ on pressure-lead-loops bitwise PASS (docs/pressure/10-pressure-loop-handout2.md); generated/sidecar waits s5-wall-next
 L1385,AMR Pressure Solver Lead,in progress,DIRECT_FORCE FVX; host C++ bitwise PASS; needs scalar FVEC(i) feature for generated; waits s5-wall-next; 10-pressure-loop-handout2.md
 L1386,AMR Pressure Solver Lead,in progress,DIRECT_FORCE FVY; as L1385
@@ -99,17 +99,17 @@ L1238,AMR Radiation Lead,translated,"ADD_VOLUMETRIC_HEAT_SOURCE host radi.f90:50
 L1249,AMR Radiation Lead,translated,"INTERPOLATE_IL CFACE host radi.f90:3665-3676; s5rad_interp_ilw_cf_host; 150-case suite x 6 flag sets, 31/31 mutants (3 cf) on s5-land 664917ad50; radiation/06 §16, §17.7"
 L1250,AMR Radiation Lead,translated,"INTERPOLATE_IL particle host radi.f90:3679-3695; s5rad_interp_ilw_lp_host; flat LP_* gathers; orientation-only skip covered; s5-land 664917ad50; radiation/06 §16, §17.7"
 L1240,AMR Radiation Lead,translated,"particle Q_RAD_IN zero radi.f90:3894-3901 at pin bee11f0329 (inventory 3893-3900); host s5rad_lp_qin_zero, verbatim copy in s5_rad_lp/s5rad_lp_host.F90 next to L1244 (bind(c) kept there), on s5-gen 313c54ef43 (K2 of b175a7386b removed: K2 file, toml row, K2 tests; simplicity rule: L1244 writes the same LP_Q_RAD_IN on the host); tables read-only from s5_part_gather (owner GPU Mesh Data Loops Engineer: 6eaad9ea70/dd02eef1c5/0185448a9c; pack asserts a71c662376); drift OK; 120 cases x 5 flag sets (4 gfortran + nvfortran -Mnofma -Mnovect -Mnoflushz -Mnodaz) x 1/4 thr PASS; 6/6 mutants (18/18 in s5_rad_lp); Wall BR-join (L1244) confirmed; Legacy Mapper review items 1-3 resolved (Mesh Data duplicate bind(c) twin dropped in s5-gen d283813c68; single definition s5rad_lp_host.F90:21); not in ported.toml (gate open); ready for ported.toml when the gate opens; radiation/06 §16.3"
-L1244,AMR Radiation Lead,translated,"solid-particle incoming flux radi.f90:4993-5038 at pin bee11f0329 (inventory/README 4989-5034); host-first s5rad_lp_qin_in (s5_rad_lp/s5rad_lp_host.F90, doc 05 Q6) on s5-gen 313c54ef43 (first landed b175a7386b); tables read-only from s5_part_gather (owner GPU Mesh Data Loops Engineer: 6eaad9ea70/dd02eef1c5/0185448a9c); BR_ILW(LP_BR_INDEX) slot-fastest join: Wall review done, join confirmed, BR_ILW stride kept (layout 45389a05ec), Mesh Data pack-time asserts a71c662376; EVALUATE_RAMP host glue; orientation ramp 5014-5030 verbatim per particle with local COS_DLO_ARR, new inputs LP_INIT_INDEX/IN_ORIENTATION_RAMP_INDEX/IN_TEMP_ORIENTATION/DLANG, 5019 pinned omit (driver calls CALC_PARTICLE_TEMP_ORIENTATION once per ramped INIT record, bitwise-equal); DLO mask hoist declined (§16.3, accepted); drift OK; 120 cases x 5 flag sets (4 gfortran + nvfortran -Mnofma -Mnovect -Mnoflushz -Mnodaz) x 1/4 thr PASS; 12/12 mutants (6 L1244 + 6 ramp; 18/18 in s5_rad_lp); not in ported.toml (gate open); ready for ported.toml when the gate opens; radiation/06 §16.3"
+L1244,AMR Radiation Lead,translated,"solid-particle incoming flux radi.f90:4993-5038 at pin bee11f0329 (inventory/README 4989-5034); host-first s5rad_lp_qin_in (s5_rad_lp/s5rad_lp_host.F90, doc 05 Q6) on s5-gen 313c54ef43 (first landed b175a7386b); tables read-only from s5_part_gather (owner GPU Mesh Data Loops Engineer: 6eaad9ea70/dd02eef1c5/0185448a9c); BR_ILW(LP_BR_INDEX) slot-fastest join: Wall review done, join confirmed, BR_ILW stride kept (layout 45389a05ec), Mesh Data pack-time asserts a71c662376; EVALUATE_RAMP host glue; orientation ramp 5014-5030 verbatim per particle with local COS_DLO_ARR, new inputs LP_INIT_INDEX/IN_ORIENTATION_RAMP_INDEX/IN_TEMP_ORIENTATION/DLANG, 5019 pinned omit (driver calls CALC_PARTICLE_TEMP_ORIENTATION once per ramped INIT record, bitwise-equal); DLO mask hoist done at s5-gen f9c9bed577 (mask once per oriented particle into local DLO_MASK(NRA), reused per band; supersedes prior decline; §16.3); drift OK; 120 cases x 5 flag sets (4 gfortran + nvfortran -Mnofma -Mnovect -Mnoflushz -Mnodaz) x 1/4 thr PASS; 12/12 mutants (6 L1244 + 6 ramp; 18/18 in s5_rad_lp); not in ported.toml (gate open); ready for ported.toml when the gate opens; radiation/06 §16.3"
 L0822,AMR Solid Phase Lead,claimed,host disposition: host-side event code (REASSIGN_WALL_CELLS companion of L0823); neighbour-mesh reads; no device kernel; FireX init.f90:4928-4947
-L0817,AMR Solid Phase Lead,claimed,"CREATE_OR_REMOVE_OBST cell reset init.f90:4889-4900; needs FR-9/10 + SPECIES_MIXTURE%ZZ0 sidecar (wall_bc FEATURE_REQUESTS); L0630 is host-path (Mesh Data not translating BLOCK_CELL); L0817 proceeds on its own when those features land"
+L0817,AMR Solid Phase Lead,claimed,CREATE_OR_REMOVE_OBST cell reset init.f90:4889-4900; needs FR-9/10 + SPECIES_MIXTURE%ZZ0 sidecar (wall_bc FEATURE_REQUESTS); L0630 is host-path (Mesh Data not translating BLOCK_CELL); L0817 proceeds on its own when those features land
 L1340,AMR Solid Phase Lead,claimed,"LEVEL_SET_SPREAD_RATE vege.f90:763-857; classify/host only until a 2-D J,I nest plus POINTER path exists (charter Q4); not a device path today"
 L1334,AMR Solid Phase Lead,claimed,"LEVEL_SET_ADVECT_FLUX x-face vege.f90:885-894; classify/host only until a 2-D nest plus POINTER path exists (function SCALAR_FACE_VALUE_LS, POINTER PHI_LS_P); not a device path today"
-L1335,AMR Solid Phase Lead,claimed,"LEVEL_SET_ADVECT_FLUX y-face vege.f90:896-905; classify/host only as L1334 (until a 2-D nest plus POINTER path exists)"
-L1336,AMR Solid Phase Lead,claimed,"LEVEL_SET_ADVECT_FLUX FLUX_LS_P vege.f90:907-914; classify/host only until a 2-D nest plus POINTER path exists (per-surface VEG_LSET_SPREAD gather); not a device path today"
-L1360,AMR Pressure Solver Lead,in progress,COMPUTE_STRAIN_RATE host C++; generated waits PRIVATE-list feature + s5-wall-next; docs/pressure/11-pressure-loop-handout3.md; 28 runs/family PASS
-L1354,AMR Pressure Solver Lead,in progress,COMPUTE_VISCOSITY CONSMAG/Deardorff host C++; generated after FF; 11-pressure-loop-handout3.md
-L1351,AMR Pressure Solver Lead,in progress,COMPUTE_VISCOSITY host C++; generated after FF; 11-pressure-loop-handout3.md
-L1379,AMR Pressure Solver Lead,in progress,CORIOLIS_FORCE UP/VP/WP host C++; generated after FF; 11-pressure-loop-handout3.md
+L1335,AMR Solid Phase Lead,claimed,LEVEL_SET_ADVECT_FLUX y-face vege.f90:896-905; classify/host only as L1334 (until a 2-D nest plus POINTER path exists)
+L1336,AMR Solid Phase Lead,claimed,LEVEL_SET_ADVECT_FLUX FLUX_LS_P vege.f90:907-914; classify/host only until a 2-D nest plus POINTER path exists (per-surface VEG_LSET_SPREAD gather); not a device path today
+L1360,AMR Pressure Solver Lead,translated,COMPUTE_STRAIN_RATE (velo.f90:413-435); generated K2 strain_rate on s5-gen 6dca8b2209 (FF onto Wall L1356 8dcb39998c); test_pressure_lead.py 36/36; golden +4 only; host C++ cross-check on pressure-lead-loops; pressure/12-pressure-generated-land.md
+L1354,AMR Pressure Solver Lead,translated,COMPUTE_VISCOSITY Deardorff MU (velo.f90:187-196); generated K2 mu_deardorff on s5-gen 6dca8b2209 (FF onto Wall L1356 8dcb39998c); test_pressure_lead.py 36/36; golden +4 only; host C++ cross-check on pressure-lead-loops; pressure/12-pressure-generated-land.md
+L1351,AMR Pressure Solver Lead,translated,COMPUTE_VISCOSITY CONSMAG MU (velo.f90:115-121); generated K2 mu_consmag on s5-gen 6dca8b2209 (FF onto Wall L1356 8dcb39998c); test_pressure_lead.py 36/36; golden +4 only; host C++ cross-check on pressure-lead-loops; pressure/12-pressure-generated-land.md
+L1379,AMR Pressure Solver Lead,translated,CORIOLIS_FORCE UP/VP/WP (velo.f90:970-978); generated K2 coriolis_up on s5-gen 6dca8b2209 (FF onto Wall L1356 8dcb39998c); test_pressure_lead.py 36/36; golden +4 only; host C++ cross-check on pressure-lead-loops; pressure/12-pressure-generated-land.md
 L1381,AMR Pressure Solver Lead,in progress,CORIOLIS host C++; generated needs constant-subscript OVEC(n) (same as FVEC for L1385-87); 11-pressure-loop-handout3.md
 L1382,AMR Pressure Solver Lead,in progress,CORIOLIS host C++; as L1381 (OVEC feature)
 L1383,AMR Pressure Solver Lead,in progress,CORIOLIS host C++; as L1381 (OVEC feature)
@@ -127,10 +127,22 @@ L1235,AMR Radiation Lead,not planned (host),CALCULATE_DIRECTION_COEFFICIENTS rad
 L1236,AMR Radiation Lead,not planned (host),CALCULATE_DIRECTION_COEFFICIENTS radi.f90:3547-3562; host setup at init (main.f90:383) and angle rotation (573/1114); driver uploads the O(NRA) angle tables after each call; radiation/06 §17.6
 L1237,AMR Radiation Lead,not planned (host),CALCULATE_DIRECTION_COEFFICIENTS radi.f90:3581-3592; host setup at init (main.f90:383) and angle rotation (573/1114); driver uploads the O(NRA) angle tables after each call; radiation/06 §17.6
 L0825,AMR Radiation Lead,not planned (host),"ALLOCATE_RADIATION_RECV_PKG MPI_REQUEST_FREE main.f90:4092 at FireX 8ad685f435 (inventory 3985 drifted into MESH_EXCHANGE particle unpack); host; AMR -> FR-062 face exchange (radiation/02, radiation/06 §18.1); confirmed"
-L0826,AMR Radiation Lead,not planned (host),"ALLOCATE_RADIATION_RECV_PKG body nests main.f90:4094-4123 (AIC/LL/N 4104-4112) at FireX 8ad685f435 (inventory 3990-4015 drifted into particle code); host/FR-062; radiation/06 §18.1; confirmed"
-L0827,AMR Radiation Lead,not planned (host),"ALLOCATE_RADIATION_SEND_PKG main.f90:4136-4163 (AIC/LL/N 4146-4154) at FireX 8ad685f435 (inventory ~4032 drifted into particle code); host/FR-062; radiation/06 §18.1; confirmed"
-L0676,AMR Radiation Lead,not planned (host),"PACK_BOUNDARY_RADIA func.f90:5193-5218 (band loop 5208-5211) at FireX 8ad685f435 (inventory 5143-5146 stale); restart/wall ILW pack; host; radiation/06 §18.2; confirmed"
-L0664,AMR Radiation Lead,not planned (host),"ALLOCATE_BOUNDARY_RADIA_ARRAYS open-slot search func.f90:4355-4358 at FireX 8ad685f435 (inventory 4351-4354 stale); setup alloc; host; radiation/06 §18.3; confirmed"
-L0665,AMR Radiation Lead,not planned (host),"ALLOCATE_BOUNDARY_RADIA_ARRAYS band ILW init func.f90:4378-4381 at FireX 8ad685f435 (inventory 4374-4377 stale); setup alloc; host; radiation/06 §18.3; confirmed"
-L0006,AMR Radiation Lead,not planned (host),"CCCOMPUTE_RADIATION ccib.f90:7139-7143 at FireX 8ad685f435; GEOM/CC_IBM deferred (D-033); host until cut-face tables; radiation/06 §18.4; confirmed"
-L0007,AMR Radiation Lead,not planned (host),"CCCOMPUTE_RADIATION ccib.f90:7147-7155 at FireX 8ad685f435; GEOM/CC_IBM deferred (D-033); host; radiation/06 §18.4; confirmed"
+L0826,AMR Radiation Lead,not planned (host),ALLOCATE_RADIATION_RECV_PKG body nests main.f90:4094-4123 (AIC/LL/N 4104-4112) at FireX 8ad685f435 (inventory 3990-4015 drifted into particle code); host/FR-062; radiation/06 §18.1; confirmed
+L0827,AMR Radiation Lead,not planned (host),ALLOCATE_RADIATION_SEND_PKG main.f90:4136-4163 (AIC/LL/N 4146-4154) at FireX 8ad685f435 (inventory ~4032 drifted into particle code); host/FR-062; radiation/06 §18.1; confirmed
+L0676,AMR Radiation Lead,not planned (host),PACK_BOUNDARY_RADIA func.f90:5193-5218 (band loop 5208-5211) at FireX 8ad685f435 (inventory 5143-5146 stale); restart/wall ILW pack; host; radiation/06 §18.2; confirmed
+L0664,AMR Radiation Lead,not planned (host),ALLOCATE_BOUNDARY_RADIA_ARRAYS open-slot search func.f90:4355-4358 at FireX 8ad685f435 (inventory 4351-4354 stale); setup alloc; host; radiation/06 §18.3; confirmed
+L0665,AMR Radiation Lead,not planned (host),ALLOCATE_BOUNDARY_RADIA_ARRAYS band ILW init func.f90:4378-4381 at FireX 8ad685f435 (inventory 4374-4377 stale); setup alloc; host; radiation/06 §18.3; confirmed
+L0006,AMR Radiation Lead,not planned (host),CCCOMPUTE_RADIATION ccib.f90:7139-7143 at FireX 8ad685f435; GEOM/CC_IBM deferred (D-033); host until cut-face tables; radiation/06 §18.4; confirmed
+L0007,AMR Radiation Lead,not planned (host),CCCOMPUTE_RADIATION ccib.f90:7147-7155 at FireX 8ad685f435; GEOM/CC_IBM deferred (D-033); host; radiation/06 §18.4; confirmed
+L1276,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1277,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1278,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1279,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1280,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1281,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1282,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1283,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1284,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1285,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1286,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
+L1287,GPU Mesh Data Loops Engineer,translated,COMPRESSION_WAVE nest; kernel cw* on s5-gen f72bd9b809; r2 bitwise O0/O2/O2omp dpd PASS
