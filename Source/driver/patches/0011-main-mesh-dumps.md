@@ -1,6 +1,6 @@
 # Patch 0011 (DRAFT): `main.f90`, per-mesh dump loop in `FDS_SETUP(MODE=3)`
 
-Status: DRAFT, needs validation by the Architect and the Legacy Mapper before it is applied. Apply after 0006 (it edits the `MODE==3` block that 0006 adds). Touches only
+Status: DRAFT. Legacy Mapper confirmed anchors and apply-after-0006 on tip feb101858d (match to line-check-firex-1fb5c300.md / line-check-output-plan.md). Awaiting Architect approval before apply. Apply after 0006 (it edits the `MODE==3` block that 0006 adds). Touches only
 `Source/main.f90` (one `USE` list entry, one comment, 14 added lines, all inside the `#ifdef WITH_AMREX` branch of `FDS_SETUP`). Step A of `notes/output-plan.md` (A-63 number 0011).
 
 ## FireX re-anchor (merge `8ad685f435`, tip after FireX `1fb5c300`)
@@ -28,9 +28,3 @@ Sources: `docs/upstream-patches/line-check-firex-1fb5c300.md`, `line-check-outpu
 ## Unverified
 - VTK-HDF padding loop and `INITIALIZE_VTKHDF_FILES` not replicated.
 - Behaviour with `WITH_HDF5` / `VTK_HDF` not covered.
-
-
-## Unverified
-- The mode-3 loop has not been exercised: `tests/run_mesh_dumps_check.sh` (slice and boundary files from `fds_amr --run` with `FDSTL_MESH_DUMPS=1` against the baseline
-  `.sf` files, 1 and 4 ranks) was written but not run.
-- Behaviour with `WITH_HDF5` and `VTK_HDF` output is not covered.

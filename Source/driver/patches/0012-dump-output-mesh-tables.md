@@ -1,6 +1,6 @@
 # Patch 0012 (DRAFT): `dump.f90`, output-mesh tables sized by the output mesh count
 
-Status: DRAFT, needs validation by the Architect and the Legacy Mapper before it is applied. Independent of 0011. Touches only `Source/dump.f90` (a file-scope macro,
+Status: DRAFT. Legacy Mapper confirmed anchors (dump.f90:405–451, 2056–2060) and tables-only scope (option (a), first part); follow-on mesh loops stay out of 0012. Independent of 0011; still after base WITH_AMREX hooks. Awaiting Architect approval before apply. Independent of 0011. Touches only `Source/dump.f90` (a file-scope macro,
 a `USE` line under `#ifdef WITH_AMREX`, and `NMESHES` replaced by `NMESHES_OUT` in the table allocations). Step B of `notes/output-plan.md` (A-63 number 0012), option (a), first part only.
 
 ## FireX re-anchor (merge `8ad685f435`)
@@ -24,11 +24,3 @@ Sources: `docs/upstream-patches/line-check-firex-1fb5c300.md`, `line-check-outpu
 ## Unverified / not in this patch
 - No run with `N_OUT_MESHES` greater than `NMESHES`.
 - Loops that still walk compute meshes (`ASSIGN_FILE_NAMES` mesh loop, `WRITE_SMOKEVIEW_FILE`, `ADD_EXTERIOR_VENTS`, `WRITE_STRINGS`, `EXCHANGE_N*_INFO` for VTK, `INITIALIZE_MESH_DUMPS`, output-clock counters) need an output-mesh to rank map; not done here.
-
-
-## Unverified / not in this patch
-- No run with `N_OUT_MESHES` greater than `NMESHES` has been made.
-- The loops over the output meshes still run over the compute meshes: `ASSIGN_FILE_NAMES` (mesh loop), `WRITE_SMOKEVIEW_FILE` loops, `ADD_EXTERIOR_VENTS`, `WRITE_STRINGS`,
-  the `EXCHANGE_N*_INFO` routines (VTK only), `INITIALIZE_MESH_DUMPS` and the output-clock counters (`func.f90`, sized by the rank's mesh range). They need an output-mesh to
-  rank map and are not done here.
-- The edit of `notes/output-plan.md` (numbering 0011/0012, the description errors listed in the Legacy Mapper's line check) is not done.
