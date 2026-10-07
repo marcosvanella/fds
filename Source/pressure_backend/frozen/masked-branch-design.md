@@ -143,6 +143,7 @@ at the end (Q1 to Q7).
   `residual_sums` / `evaluate_residual`, `CompositeSolve.cpp` residual.
 * **Tests.** `pb_masked` HYPRE rows on the six small cases vs MLMG; sealed2: two pins reported, residual excludes both; `max_pins=1` warns (singular).
 * **Status.** Built for single level. Composite masked not in this commit (Q1).
+* **D-091.** Masked single-level `Auto` → HYPRE (Architect accept; A-56). Explicit MLMG override kept.
 
 ## Open questions (Architect / Pressure Lead)
 

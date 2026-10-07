@@ -364,12 +364,12 @@ void run_selector ()
         iMultiFab cls(p.ba, p.dm, 1, 0); cls.setVal(0);
         for (MFIter mfi(cls); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); cls[mfi].setVal<RunOn::Host>(1, Box(sm, sm)); } }
         p.cell_class = &cls;
-        expect("masked cell (Solid) -> MLMG by Auto", p, pb::Status::Ok, K::MLMG, K::Auto);
+        expect("masked cell (Solid) -> HYPRE by Auto (D-091)", p, pb::Status::Ok, K::HYPRE, K::Auto);
         expect("masked cell with explicit MLMG", p, pb::Status::Ok, K::MLMG, K::MLMG);
         expect("masked cell with explicit FFT not built", p, pb::Status::NotBuilt, K::Auto, K::FFT);
         { iMultiFab bad(p.ba, p.dm, 1, 0); bad.setVal(5);
           pb::PressureProblem q = p; q.cell_class = &bad;
-          expect("cell_class code 5 invalid", q, pb::Status::InvalidInput, K::MLMG, K::Auto); }
+          expect("cell_class code 5 invalid", q, pb::Status::InvalidInput, K::HYPRE, K::Auto); }
         iMultiFab zero(p.ba, p.dm, 1, 0); zero.setVal(0);
         p.cell_class = &zero;
         expect("all-zero cell_class is unmasked", p, pb::Status::Ok, K::FFT, K::Auto); }
@@ -391,7 +391,7 @@ void run_selector ()
     {   pb::PressureProblem p = make(false, pb::BC::Neumann); MultiFab a(p.ba, p.dm, 1, 0); a.setVal(1.0);
         p.cell_coef_a = &a;
         expect("cell coefficient a not built", p, pb::Status::NotBuilt, K::Auto, K::Auto); }
-    // HYPRE (assembled-matrix backend): explicit request only, never selected by Auto; same support rules as MLMG.
+    // HYPRE: unmasked Auto never selects it; masked Auto selects HYPRE (D-091). Explicit request otherwise.
     {
         expect("explicit HYPRE request (neumann)", make(false, pb::BC::Neumann), pb::Status::Ok, K::HYPRE, K::HYPRE);
         expect("explicit HYPRE request (periodic)", make(true, pb::BC::Periodic), pb::Status::Ok, K::HYPRE, K::HYPRE);
@@ -405,6 +405,7 @@ void run_selector ()
         for (MFIter mfi(cls); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); cls[mfi].setVal<RunOn::Host>(1, Box(sm, sm)); } }
         p.cell_class = &cls;
         expect("masked cell with explicit HYPRE", p, pb::Status::Ok, K::HYPRE, K::HYPRE);
+        expect("masked cell Auto equals explicit HYPRE (D-091)", p, pb::Status::Ok, K::HYPRE, K::Auto);
         p = make(false, pb::BC::Neumann);
         iMultiFab unc(p.ba, p.dm, 1, 0); unc.setVal(1);
         for (MFIter mfi(unc); mfi.isValid(); ++mfi) { if (mfi.index() == 0) { const Box vb = mfi.validbox(); const IntVect sm = vb.smallEnd(); unc[mfi].setVal<RunOn::Host>(0, Box(sm, sm)); } }

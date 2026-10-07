@@ -115,7 +115,7 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
         s.message = "variable coefficients (masked or non-unit operator) are not built"; return s;
     }
     const bool masked = has_nonzero(p.cell_class);
-    if (masked && requested == BackendKind::FFT) { s.message = "masked cells (cell_class != 0) cannot go through FFT::Poisson (no mask in the transform); the masked branch is MLMG or HYPRE"; return s; }
+    if (masked && requested == BackendKind::FFT) { s.message = "masked cells (cell_class != 0) cannot go through FFT::Poisson (no mask in the transform); the masked branch defaults to HYPRE (D-091); explicit MLMG remains available"; return s; }
     if (masked && p.geom.Domain().numPts() >= Long(std::numeric_limits<int>::max())) {
         s.message = "masked problems with 2^31 or more cells are not built (the component labelling uses 32-bit global cell indices)"; return s;
     }
@@ -129,8 +129,15 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
             return s;
         }
     }
+    // D-091: masked single-level Auto defaults to assembled HYPRE (A-56 stairwell MLMG OOM on covering BA).
+    // Explicit BackendKind::MLMG remains available. Unmasked Auto stays FFT.
+#ifndef PB_WITH_HYPRE
+    if (masked && (requested == BackendKind::Auto || requested == BackendKind::HYPRE)) {
+        s.message = kHypreNotBuilt; return s;
+    }
+#endif
     s.ok = true;
-    s.kind = (requested == BackendKind::Auto) ? (masked ? BackendKind::MLMG : BackendKind::FFT) : requested;
+    s.kind = (requested == BackendKind::Auto) ? (masked ? BackendKind::HYPRE : BackendKind::FFT) : requested;
     return s;
 }
 

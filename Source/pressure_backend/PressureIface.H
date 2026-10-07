@@ -14,11 +14,11 @@
 //
 // Backends: FFT (single uniform level), MLMG (default for composite; single level on request), HYPRE (assembled matrix, PCG or
 // GMRES/BiCGSTAB with BoomerAMG, ADR-002 backend (H); on request only through `PressureOptions::backend =
-// BackendKind::HYPRE`, never selected by Auto). HYPRE assembles the same discrete operator as MLMG (including the
+// BackendKind::HYPRE`; Auto selects HYPRE only for a masked single level, D-091). HYPRE assembles the same discrete operator as MLMG (including the
 // coarse/fine interface treatment) into an IJ matrix, see HypreBackend.H and frozen/hypre-notes.md.
 //
-// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on FFT or composite (the masked branch is
-// single-level MLMG or assembled HYPRE; see PressureProblem::cell_class and frozen/masked-notes.md), covered cells on the single-level API, non-uniform cell widths, non-Cartesian
+// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on FFT; MLMG composite with masks (Q1: composite
+// masked is assembled HYPRE only); covered cells on the single-level API, non-uniform cell widths, non-Cartesian
 // (cylindrical, RZ) geometry, variable coefficients, a Dirichlet face in a one-cell x or z direction, anisotropic refinement ratios (except ratio 1 in a one-cell direction), ratios other than 2 and 4,
 // composite on the FFT backend, and a multi-level request through the single-level fields (`nlevels` > 1 with an
 // empty `levels`).
@@ -55,7 +55,7 @@
 namespace pb {
 
 enum class BC { Neumann, Periodic, Dirichlet };   // Dirichlet: homogeneous in M1 (values folded into the RHS)
-enum class BackendKind { Auto, FFT, MLMG, HYPRE };   // Auto never selects HYPRE
+enum class BackendKind { Auto, FFT, MLMG, HYPRE };   // Auto: unmasked→FFT; masked single-level→HYPRE (D-091); never HYPRE when unmasked
 // Message of Status::NotBuilt when BackendKind::HYPRE is requested in a build without PB_WITH_HYPRE (README.md, "Build options").
 inline constexpr const char* kHypreNotBuilt = "built without HYPRE";
 enum class Status { Ok, NotBuilt, InvalidInput, NotConverged };
@@ -107,6 +107,11 @@ struct PressureLevel {
     // constant is sum(V_l*rho*(phi - KRES)) / sum(V_l*rho) over the uncovered cells of all levels (one exact sum).
     amrex::MultiFab const* gauge_weight = nullptr;
     amrex::MultiFab const* gauge_offset = nullptr;
+    // Masked composite (D3/D4/D6): per-level cell class and Known values (same BA/DM as `ba`). Null or all-zero on every
+    // level = unmasked. With any non-zero mask the solve is assembled HYPRE only (Q1); MLMG composite masked is NotBuilt.
+    // Known (OPEN) cells may not sit on a coarse/fine face (Q2: InvalidInput).
+    amrex::iMultiFab const* cell_class = nullptr;
+    amrex::MultiFab const* known_value = nullptr;
 };
 
 class PressureWorkspace;                          // opaque, below
@@ -135,8 +140,9 @@ struct PressureProblem {
     // Masks (same BoxArray/DistributionMapping as `ba`; frozen/masked-notes.md). cell_class codes (CellClass): 0 Gas (unknown), 1 Solid
     // (OBST or gap cell: excluded, no flux through any of its faces), 2 Known (known-value cell behind a face-Dirichlet condition: not an
     // unknown, holds the face value `known_value`; the gas neighbour gets the flux 2 (g - phi)/dx^2). Null or all zero: unmasked problem
-    // (unchanged code). Masked single-level: MLMG or assembled HYPRE (D6; Auto picks MLMG); FFT and composite stay NotBuilt. Any other
-    // code: InvalidInput. uncovered: zero = covered by a finer level, NotBuilt.
+    // (unchanged code). Masked single-level: assembled HYPRE (D6/D-091; Auto picks HYPRE) or explicit MLMG. Masked composite: use
+    // PressureLevel::cell_class / known_value (this top-level field with `levels` set is InvalidInput). FFT stays NotBuilt.
+    // Any other code: InvalidInput. uncovered: zero = covered by a finer level, NotBuilt.
     amrex::iMultiFab const* cell_class = nullptr;
     amrex::iMultiFab const* uncovered = nullptr;
     // Known values g of the Known cells (same BoxArray/DistributionMapping as `ba`, one component; read on Known cells only; null = 0).
@@ -144,7 +150,7 @@ struct PressureProblem {
     amrex::MultiFab const* known_value = nullptr;
     // Driver zone ids (FDS pressure zone per cell; same BoxArray/DistributionMapping as `ba`, read on gas cells). The common layer still labels
     // the components itself (flood fill over gas-gas faces); the gauge key is (zone, component) and a component whose cells carry two zone ids
-    // is InvalidInput (D2, frozen/masked-branch-design.md). Single level only (composite: NotBuilt). Null = no zones.
+    // is InvalidInput (D2, frozen/masked-branch-design.md). Single level only for this field (composite zones: NotBuilt this version). Null = no zones.
     amrex::iMultiFab const* component_id = nullptr;
 
     // Mean removal of the right-hand side of singular components (D-067): Volume (default) or the FDS parity switch

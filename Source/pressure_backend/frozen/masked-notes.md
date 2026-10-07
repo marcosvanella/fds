@@ -110,7 +110,7 @@ Single-level only. Unknowns are gas cells: row numbering is a per-box prefix cou
 | Item | Status |
 |---|---|
 | Single level, MLMG (GMRES + V-cycle), Gas/Solid/Known classes, computed components, per-component mean removal and gauge, residual check | built and tested (`pb_masked`, `pb_masked_hallways`) |
-| FFT with masks | `NotBuilt` by design (no mask in `FFT::Poisson`); `Auto` picks MLMG for a masked single level |
+| FFT with masks | `NotBuilt` by design (no mask in `FFT::Poisson`); `Auto` picks HYPRE for a masked single level (D-091); explicit MLMG remains available |
 | HYPRE assembled backend with masks (single level) | built and tested (`pb_masked` HYPRE rows; D6: gas-only numbering, one pin per sealed component, residual excludes pins, sealed2) |
 | Composite (two or more levels) with masks | NotBuilt (design: masked-branch-design.md D3 and D4; Q1: assembled HYPRE only) |
 | Driver zone ids (`component_id`) | single level: built and tested (D2); composite: NotBuilt |
