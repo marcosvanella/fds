@@ -200,6 +200,10 @@ void apply_tag_criteria(amrex::TagBoxArray& tags, const AmrParams& p, const TagF
         c.mode = TagMode::Above; c.thr = p.tag_hrrpuv; c.base = 0.0; c.comp = 0;
         tag_cells(tags, *f.hrrpuv, nullptr, 0, covered, c);
     }
+    if (p.has_tag_vort() && f.vort) {
+        c.mode = TagMode::Above; c.thr = p.tag_vort; c.base = 0.0; c.comp = 0;
+        tag_cells(tags, *f.vort, nullptr, 0, covered, c);
+    }
 }
 
 }  // namespace fdsrt

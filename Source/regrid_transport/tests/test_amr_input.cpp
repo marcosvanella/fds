@@ -142,13 +142,14 @@ int main()
     {  // TAG_* keys (FR-011 / IR-003): unset = off; TAG_KEEP default 0.8; SPEC_ID/DIFF paired; KEEP range; regrid without criterion warns
         Report r;
         AmrParams p = parse("&AMR MAX_LEVEL=1, TAG_TMP_DIFF=5.0, TAG_TMP_ABOVE=50.0, TAG_RHO_DIFF=0.1, "
-                            "TAG_SPEC_ID='SLUG', TAG_SPEC_DIFF=0.05, TAG_HRRPUV=200.0, TAG_KEEP=0.5 /", r);
+                            "TAG_SPEC_ID='SLUG', TAG_SPEC_DIFF=0.05, TAG_HRRPUV=200.0, TAG_VORT=12.5, TAG_KEEP=0.5 /", r);
         CHECK(r.ok());
         CHECK(p.has_tag_tmp_diff() && p.tag_tmp_diff == 5.0);
         CHECK(p.has_tag_tmp_above() && p.tag_tmp_above == 50.0);
         CHECK(p.has_tag_rho_diff() && p.tag_rho_diff == 0.1);
         CHECK(p.tag_spec_id == "SLUG" && p.has_tag_spec_diff() && p.tag_spec_diff == 0.05);
         CHECK(p.has_tag_hrrpuv() && p.tag_hrrpuv == 200.0);
+        CHECK(p.has_tag_vort() && p.tag_vort == 12.5);
         CHECK(p.tag_keep == 0.5 && p.has_any_tag_criterion());
         Report r0;
         AmrParams p0 = parse("&AMR MAX_LEVEL=1 /", r0);
@@ -173,8 +174,8 @@ int main()
         parse("&AMR MAX_LEVEL=0, REGRID_INTERVAL=4 /", r6);
         CHECK(r6.ok());   // MAX_LEVEL=0: no criterion required
         Report r7;
-        parse("&AMR MAX_LEVEL=1, TAG_VORT=1 /", r7);
-        CHECK(r7.has_error_containing("unknown parameter TAG_VORT"));
+        AmrParams p7 = parse("&AMR MAX_LEVEL=1, TAG_VORT=1 /", r7);
+        CHECK(r7.ok() && p7.has_tag_vort() && p7.tag_vort == 1.0 && p7.has_any_tag_criterion());
     }
     std::printf("test_amr_input: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;

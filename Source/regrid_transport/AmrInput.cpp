@@ -210,7 +210,7 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
     AmrParams p;
     const std::vector<std::string> keys = {"MAX_LEVEL", "REF_RATIO", "REGRID_INTERVAL", "BLOCKING_FACTOR", "MAX_GRID_SIZE", "N_ERROR_BUF",
                                            "N_PROPER", "GRID_EFF", "OUTPUT_LEVEL_CAP", "VELOCITY_TRANSFER", "POST_REGRID_PROJECTION",
-                                           "TAG_TMP_DIFF", "TAG_TMP_ABOVE", "TAG_RHO_DIFF", "TAG_SPEC_ID", "TAG_SPEC_DIFF", "TAG_HRRPUV", "TAG_KEEP"};
+                                           "TAG_TMP_DIFF", "TAG_TMP_ABOVE", "TAG_RHO_DIFF", "TAG_SPEC_ID", "TAG_SPEC_DIFF", "TAG_HRRPUV", "TAG_VORT", "TAG_KEEP"};
     int n_amr = 0;
     for (const auto& g : scan_namelists(text)) {
         if (g.name == "AMR") {
@@ -254,6 +254,7 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
             get_string(g, "TAG_SPEC_ID", p.tag_spec_id, rep);
             get_opt_double(g, "TAG_SPEC_DIFF", p.tag_spec_diff, rep);
             get_opt_double(g, "TAG_HRRPUV", p.tag_hrrpuv, rep);
+            get_opt_double(g, "TAG_VORT", p.tag_vort, rep);
             if (g.values.count("TAG_KEEP")) get_double(g, "TAG_KEEP", p.tag_keep, rep);
         } else if (g.name == "MISC") {
             auto es = g.values.find("EXACT_SUMS");   // the FDS reader owns &MISC; only this one logical is looked at, and it has no effect here
