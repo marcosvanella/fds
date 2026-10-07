@@ -131,5 +131,6 @@ against a uniform-fine solve on the fine region converges at 1.9 to 2.1.
 ## Masked composite
 
 Inhomogeneous OPEN (S6): composite `fold_boundary_data` + `pb_comp_bcdata` — see `s6-open-inhomogeneous.md`.
+Item 5 masked product: `pb_comp_masked_4rank_3level` (full-fine 3-level nest, Auto→HYPRE; no 3-level partial-fine masked).
 
 **Built** product path (D-092): Auto → assembled HYPRE (Q1; see masked-branch-design.md D3/D4/D6). MLMG composite with masks is NotBuilt. Known on C/F is InvalidInput (Q2). `face_gradient_composite`+mask is NotBuilt.

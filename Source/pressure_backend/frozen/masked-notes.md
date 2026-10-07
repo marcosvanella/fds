@@ -112,7 +112,7 @@ Single-level only. Unknowns are gas cells: row numbering is a per-box prefix cou
 | Single level, MLMG (GMRES + V-cycle), Gas/Solid/Known classes, computed components, per-component mean removal and gauge, residual check | built and tested (`pb_masked`, `pb_masked_hallways`) |
 | FFT with masks | `NotBuilt` by design (no mask in `FFT::Poisson`); `Auto` picks HYPRE for a masked single level (D-091); explicit MLMG remains available |
 | HYPRE assembled backend with masks (single level) | built and tested (`pb_masked` HYPRE rows; D6: gas-only numbering, one pin per sealed component, residual excludes pins, sealed2) |
-| Composite (two or more levels) with masks | **Built** (D-092 product): Auto → assembled HYPRE (Q1; D3/D4/D6); MLMG composite masked NotBuilt; Known on C/F → InvalidInput (Q2); `face_gradient_composite`+mask NotBuilt; `pb_comp_masked` |
+| Composite (two or more levels) with masks | **Built** (D-092 product): Auto → assembled HYPRE (Q1; D3/D4/D6); MLMG composite masked NotBuilt; Known on C/F → InvalidInput (Q2); `face_gradient_composite`+mask NotBuilt; `pb_comp_masked`, `pb_comp_masked_4rank_3level` (full-fine nest only) |
 | Driver zone ids (`component_id`) | single level: built and tested (D2); composite: NotBuilt |
 | Pinned class, covered cells on the single-level API | NotBuilt |
 | Component labelling cost | cached in the workspace (D1); stairwell 18.8 M cells: 10 to 18 rounds, 1.0 to 1.8 s on a miss |

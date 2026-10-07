@@ -1,6 +1,6 @@
 # S6: OPEN / inhomogeneous Poisson (Role 2)
 
-Architect priority (preempts 4-rank/3-level item 5; that item is **parked**).
+Architect order after D-092/S6 ACCEPT. Item 5 (4-rank/3-level composite-masked) resumed separately.
 
 ## Already built (single-level)
 
@@ -49,8 +49,21 @@ To clear floor INERT + five OPEN on two-level vortex without abort, Role 1 must:
 
 Partial-face OPEN / Known pad remains the masked path (Q2/Q6); domain-face OPEN is this fold path.
 
+
+## Role 1: fold call site (pattern)
+
+Copy the cold-flow harness (`mode=comp_bcdata` / `pb_comp_bcdata` in `harness/composite_modes.cpp`):
+
+1. Fill `p.bc[face_index(d,side)]` (OPEN→`Dirichlet`, INERT impermeable→`Neumann`, PERIODIC→`Periodic`). Floor INERT + five OPEN is `bcfaces=DD,DD,ND`.
+2. Put FDS `BXS..BZF` into `pb::BoundaryData` (`constant[f]` or `value[f]` MultFab). Signs: header comment on `fold_boundary_data` / table above.
+3. Single-level: `fold_boundary_data(p, bd, *rhs_mf, &msg)` then `solve_pressure(p, o)`.
+4. Composite: `std::vector<BoundaryData> bds{bd};` (or one entry per level), `std::vector<MultiFab*> rhs_levels` pointing at each level rhs, then `fold_boundary_data(p, bds, rhs_levels, &msg)` then `solve_pressure(p, o, ws)`.
+5. Drop the TimeLoop inhomogeneous `die` only after (3)/(4) are wired.
+
+Do not edit TimeLoop from Role 2; this note is the hand-off.
+
 ## Out of scope here
 
 - `face_gradient_composite`+mask (later).
 - Changing Role 1 TimeLoop `die` (report only).
-- Next-work item 5 (4-rank / multi-box fine / ≥3 levels): **parked**.
+- Item 5 resumed under Architect order after this ACCEPT (separate tip).

@@ -84,7 +84,7 @@ struct Cfg {
     int n = 32;                    // coarse cells per refined direction
     int nlev = 2;
     int ratio = 2;
-    bool full = false;             // level 1 covers the whole domain
+    bool full = false;             // every fine level covers its parent entirely (full-fine nest; nlev>=3 OK)
     bool plane2d = false;          // one cell in y (ratio 1 in y)
     pb::BC bc = pb::BC::Neumann;
     std::array<pb::BC,3> bcd = {pb::BC::Neumann, pb::BC::Neumann, pb::BC::Neumann};   // per direction (set from bc, or bcs3 for a neumann/periodic mix)
@@ -178,7 +178,7 @@ Hier build_hier (Cfg const& c, int dmkind)
         Box lev;
         if (l == 0) { lev = dl; }
         else {
-            if (l == 1 && c.full) { patch = prev_patch; }
+            if (c.full) { patch = prev_patch; }  // full-fine: every fine level covers parent
             else if (l == 1 && c.layout == 1) {
                 IntVect lo = prev_patch.smallEnd(), hi = prev_patch.bigEnd();
                 for (int d = 0; d < 3; ++d) { if (d == hd) { continue; } hi[d] = lo[d] + (hi[d] - lo[d] + 1)/2 - 1; }
@@ -1692,6 +1692,69 @@ void run_comp_masked (ParmParse& pp)
     int ratio = 2; pp.query("ratio", ratio);
     double tol_rel = 1e-10; pp.query("tol_rel", tol_rel);
     std::string beq = "hypre"; pp.query("backend", beq);
+    int nlev_req = 2; pp.query("nlev", nlev_req);
+
+    // ---- Item 5 product path: 3-level full-fine masked, Auto→HYPRE (D-092); multi-box finest ----
+    // Harness Cfg::full covers every fine level (no L1↔L2 partial C/F). Solid on finest only.
+    // No 3-level partial-fine masked invented (would be a design fork → Pressure Lead).
+    if (nlev_req >= 3) {
+        int dmk = 2; pp.query("dmkind", dmk);
+        Cfg c; c.n = n; c.nlev = 3; c.ratio = ratio; c.mgs = mgs; c.full = true; c.set_bc(pb::BC::Dirichlet);
+        Hier h = build_hier(c, dmk);
+        pb::PressureProblem p = make_problem(c, h);
+        std::vector<std::unique_ptr<iMultiFab>> cls(3);
+        for (int l = 0; l < 3; ++l) {
+            cls[l] = std::make_unique<iMultiFab>(h.ba[l], h.dm[l], 1, 0);
+            cls[l]->setVal(pb::CellGas);
+            p.levels[l].cell_class = cls[l].get();
+        }
+        IntVect sc(2, 2, 2);
+        for (MFIter mfi(*cls[2]); mfi.isValid(); ++mfi) {
+            if (mfi.validbox().contains(sc)) { cls[2]->array(mfi)(sc[0], sc[1], sc[2]) = pb::CellSolid; }
+        }
+        for (int l = 0; l < 3; ++l) {
+            h.rhs[l]->setVal(0.0); h.phi[l]->setVal(0.0);
+            auto const dx = h.geom[l].CellSizeArray();
+            auto const plo = h.geom[l].ProbLoArray();
+            for (MFIter mfi(*h.rhs[l]); mfi.isValid(); ++mfi) {
+                auto const& rr = h.rhs[l]->array(mfi);
+                auto const& cl = cls[l]->const_array(mfi);
+                auto const& u = h.unc[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (u(i,j,k) == 0 || cl(i,j,k) != pb::CellGas) { return; }
+                    const Real x = plo[0] + (i + Real(0.5))*dx[0];
+                    const Real y = plo[1] + (j + Real(0.5))*dx[1];
+                    const Real z = plo[2] + (k + Real(0.5))*dx[2];
+                    const Real pi = Real(3.14159265358979323846);
+                    const Real ph = std::sin(pi*x)*std::sin(pi*y)*std::sin(pi*z);
+                    rr(i,j,k) = Real(-3)*pi*pi*ph;
+                });
+            }
+        }
+        pb::PressureOptions o;
+        o.tol_rel = tol_rel; o.residual_tol = 1e-8; o.verbose = 0;
+        o.backend = (beq == "mlmg") ? pb::BackendKind::MLMG
+                  : (beq == "hypre") ? pb::BackendKind::HYPRE : pb::BackendKind::Auto;
+        pb::PressureWorkspace ws;
+        pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+        const Long nboxes_f = h.ba[2].size();
+        Print() << std::setprecision(6) << "COMP_MASKED_3LEV n=" << n << " nlev=3 full=1 nboxes_fine=" << nboxes_f
+                << " nranks=" << ParallelDescriptor::NProcs()
+                << " status=" << pb::to_string(r.status) << " backend=" << r.backend
+                << " iters=" << r.backend_status.iterations
+                << " true_rel2=" << r.residual_rel2
+                << " residual_ok=" << (r.residual_ok ? 1 : 0)
+                << " msg=\"" << r.message << "\"\n";
+        if (o.backend == pb::BackendKind::MLMG) {
+            ccheck(r.status == pb::Status::NotBuilt, "3-level masked MLMG is NotBuilt");
+            return;
+        }
+        ccheck(r.status == pb::Status::Ok, "3-level full-fine masked solve Ok");
+        ccheck(r.backend == "HYPRE", "3-level masked → HYPRE (D-092 Auto/explicit)");
+        ccheck(r.residual_checked && r.residual_ok, "3-level masked residual ok");
+        ccheck(nboxes_f > 1, "3-level masked fine level multi-box");
+        return;
+    }
 
     // Dirichlet outer (nonsingular corridor) + a sealed solid pocket fully inside the fine patch (D4).
     Cfg c; c.n = n; c.nlev = 2; c.ratio = ratio; c.mgs = mgs; c.full = true; c.set_bc(pb::BC::Dirichlet);
@@ -1710,7 +1773,6 @@ void run_comp_masked (ParmParse& pp)
         for (MFIter mfi(*cls[1]); mfi.isValid(); ++mfi) {
             if (mfi.validbox().contains(sc)) { cls[1]->array(mfi)(sc[0], sc[1], sc[2]) = pb::CellSolid; }
         }
-        // Coarse class all Gas (covered; no rows). Fine carries the mask.
     }
     // Manufactured RHS: L of a smooth Dirichlet-compatible field on gas cells; 0 on solid.
     for (int l = 0; l < 2; ++l) {
@@ -1727,7 +1789,6 @@ void run_comp_masked (ParmParse& pp)
                 const Real x = plo[0] + (i + Real(0.5))*dx[0];
                 const Real y = plo[1] + (j + Real(0.5))*dx[1];
                 const Real z = plo[2] + (k + Real(0.5))*dx[2];
-                // phi = sin(pi x) sin(pi y) sin(pi z) → L phi = -3 pi^2 phi
                 const Real pi = Real(3.14159265358979323846);
                 const Real ph = std::sin(pi*x)*std::sin(pi*y)*std::sin(pi*z);
                 r(i,j,k) = Real(-3)*pi*pi*ph;
@@ -1770,7 +1831,6 @@ void run_comp_masked (ParmParse& pp)
             clsc[l]->setVal(pb::CellGas);
             pc.levels[l].cell_class = clsc[l].get();
         }
-        // Solid at coarse (1,1,1): outside middle fine patch for n=16 (patch ~[4,11]).
         IntVect sc(1, 1, 1);
         for (MFIter mfi(*clsc[0]); mfi.isValid(); ++mfi) {
             if (mfi.validbox().contains(sc)) { clsc[0]->array(mfi)(1,1,1) = pb::CellSolid; }
@@ -1825,7 +1885,6 @@ void run_comp_masked (ParmParse& pp)
             p2.levels[l].cell_class = cls2[l].get();
             p2.levels[l].known_value = kn2[l].get();
         }
-        // Mark a fine cell on the coarse/fine interface as Known: take a fine cell whose neighbour is outside the fine BA.
         BoxArray const& fba = h2.ba[1];
         bool set = false;
         for (int b = 0; b < static_cast<int>(fba.size()) && !set; ++b) {
@@ -1834,8 +1893,8 @@ void run_comp_masked (ParmParse& pp)
             for (int j = bx.smallEnd(1); j <= bx.bigEnd(1) && !set; ++j)
             for (int i = bx.smallEnd(0); i <= bx.bigEnd(0) && !set; ++i) {
                 for (int d = 0; d < 3 && !set; ++d) for (int s = 0; s < 2 && !set; ++s) {
-                    IntVect n(i,j,k); n[d] += s ? 1 : -1;
-                    if (!fba.contains(n)) {
+                    IntVect nv(i,j,k); nv[d] += s ? 1 : -1;
+                    if (!fba.contains(nv)) {
                         for (MFIter mfi(*cls2[1]); mfi.isValid(); ++mfi) {
                             if (mfi.validbox().contains(IntVect(i,j,k))) {
                                 cls2[1]->array(mfi)(i,j,k) = pb::CellKnown;

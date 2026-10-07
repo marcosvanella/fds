@@ -440,6 +440,7 @@ def comp4r3():
     c, u = comp_lines(out); print(lines(out, "COMP")[0]); print(lines(out, "UNIFORM")[0])
     boxes = [int(x) for x in c["nboxes"].split(",")]
     ok(c["status"] == "Ok" and float(c["true_rel2"]) <= EPS_COMP, f"np=4 nlev=3: Ok, true residual {c['true_rel2']}")
+    ok(len(boxes) == 3, f"nlev=3 reports three box counts nboxes={boxes}")
     ok(boxes[-1] > 1, f"fine level multi-box nboxes={boxes}")
     ok(float(u["comp_fine_err_l2"]) < float(u["uni_coarse_err_l2"]), "np=4 nlev=3: fine error below uniform coarse")
     out1 = comp_run(1, out=pre1, uniform=0, **base)
@@ -1011,6 +1012,26 @@ def masked():
     ok(m and (kv(m[0])["nwarn"] != "0" or kv(m[0])["residual_ok"] == "0" or "status=NotConverged" in m[0]),
        f"masked HYPRE sealed2 max_pins=1 remove_mean=0: singular leftover warns or fails [{m[0] if m else out[-300:]}]")
 
+
+def compmasked4r3():
+    """Item 5: 4-rank, 3-level full-fine composite-masked product (Auto→HYPRE). Multi-box fine.
+    No 3-level partial-fine masked (design fork → PL)."""
+    # n=8 mgs=4 → L2 32^3 /4 → 512 boxes is heavy; n=8 mgs=8 → L2 32^3 /8 → 64 boxes
+    rc, out = run(4, mode="comp_masked", n=8, nlev=3, ratio=2, mgs=8, backend="auto", dmkind=2)
+    print(out)
+    ok(rc == 0, "comp_masked 4rank 3lev Auto: harness checks")
+    m = lines(out, "COMP_MASKED_3LEV")
+    ok(m, "COMP_MASKED_3LEV line present")
+    if m:
+        k = kv(m[0])
+        ok(k["status"] == "Ok" and k["backend"] == "HYPRE", f"3lev masked Auto→HYPRE Ok [{m[0]}]")
+        ok(int(k["nboxes_fine"]) > 1, f"fine multi-box [{m[0]}]")
+        ok(int(k["nranks"]) == 4, f"nranks=4 [{m[0]}]")
+    # MLMG NotBuilt on same layout
+    rc2, out2 = run(4, mode="comp_masked", n=8, nlev=3, ratio=2, mgs=8, backend="mlmg", dmkind=2)
+    print(out2)
+    ok(rc2 == 0, "comp_masked 4rank 3lev MLMG NotBuilt check")
+
 def compmasked():
     """Composite masked (Q1 HYPRE, Q2 Known-on-C/F InvalidInput, unmasked regression)."""
     for beq in ("hypre", "auto", "mlmg"):
@@ -1082,7 +1103,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compmasked": compmasked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
