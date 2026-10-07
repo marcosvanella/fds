@@ -119,6 +119,8 @@ public:
     Fields(const Level0& l0, int nscalars, const std::vector<std::string>& names = {});
 
     bool has(const std::string& name) const { return m_mf.count(name) > 0; }
+    // Allocate a registered FieldSpec name if missing (e.g. VORT aux for TAG_VORT). No-op if already present.
+    void ensure(const std::string& name);
     amrex::MultiFab& operator[](const std::string& name);
     const amrex::MultiFab& operator[](const std::string& name) const;
     const FieldSpec& spec(const std::string& name) const;

@@ -288,7 +288,8 @@ struct TimeLoop::Impl {
         chk(IP[12], "TUNNEL_PRECONDITIONER"); chk(IP[13] != 1, "pressure solver other than FFT"); chk(IP[14], "CYLINDRICAL"); chk(IP[15], "particle drag");
         // D-089: FREEZE_VELOCITY (IP[18]) allowed in AMR TimeLoop for cold-flow / passive-scalar adaptive demos; reacting-flow production must not depend on freeze.
         chk(IP[16], "SOLID_HEAT_TRANSFER_3D"); chk(IP[17] > 0, "Lagrangian particles"); chk(IP[19], "SOLID_PHASE_ONLY");
-        chk(IP[22], "MPI particle exchange"); chk(IP[23], "obstruction mass exchange"); chk(IP[24] > 0, "agglomeration"); chk(IP[25], "INIT_HRRPUV");
+        chk(IP[22], "MPI particle exchange"); chk(IP[23], "obstruction mass exchange"); chk(IP[24] > 0, "agglomeration");
+        // D-090: INIT_HRRPUV (IP[25]) allowed for manufactured-HRR / TAG_HRRPUV gates (R4-T2); reactions (IP[9]) stay refused.
         chk(IP[26], "TERRAIN_CASE"); chk(IP[27], "READ_EXTERNAL"); chk(IP[28], "SYNTHETIC_EDDY_METHOD");
         if (!bad.empty()) {
             std::string s;

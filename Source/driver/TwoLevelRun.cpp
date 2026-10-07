@@ -22,6 +22,7 @@
 #include "TimeLoopWiring.H"
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
+extern "C" int fds_find_tracked_species(const char* name);  // fds_mesh_query.f90; 0-based ZZ index or -1
 
 namespace fdsamr {
 
@@ -175,6 +176,16 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
     };
     core.set_data_transfer(&tr);
+    // D-090: map TAG_SPEC_ID -> ZZ component before set_tag_fields (no hardcode). Abort if the name is unknown.
+    int zz_comp_tag = 0;
+    if (!ap.tag_spec_id.empty()) {
+        const int idx = fds_find_tracked_species(ap.tag_spec_id.c_str());
+        if (idx < 0) {
+            amrex::Abort("D-090: TAG_SPEC_ID='" + ap.tag_spec_id + "' is not a tracked species or tracer (SPECIES_MIXTURE%ID)");
+        }
+        zz_comp_tag = idx;
+        amrex::Print() << tag << ": TAG_SPEC_ID='" << ap.tag_spec_id << "' -> ZZ component " << zz_comp_tag << "\n";
+    }
     // Registry fields for ErrorEst TAG_* (preferred when AmrParams has a criterion). Fallback nested set_tag_function for static.
     core.set_tag_fields([&](int lev) {
         Fields& F = reg.fields(lev);
@@ -185,10 +196,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         if (F.has("ZZ")) {
             F["ZZ"].FillBoundary(per);
             f.zz = &F["ZZ"];
-            // FDS ZZ: BACKGROUND first when declared first; TRACER is comp 1 for blob_16_l0 (2 tracked).
-            f.zz_comp = (F["ZZ"].nComp() > 1) ? 1 : 0;
+            f.zz_comp = zz_comp_tag;   // D-090: from TAG_SPEC_ID via fds_find_tracked_species
         }
+        // D-090: TAG_HRRPUV field — HRRPUV if registered, else FDS Q (W/m3; thr×1000 in apply_tag_criteria)
         if (F.has("HRRPUV")) f.hrrpuv = &F["HRRPUV"];
+        else if (F.has("Q")) f.hrrpuv = &F["Q"];
         for (int d = 0; d < 3; ++d) f.dirs[d] = (dom.length(d) == 1) ? 0 : 1;
         return f;
     });

@@ -37,10 +37,11 @@ const std::vector<FieldSpec> kTable = {
     {"FVX",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :543 (cell-shaped momentum flux terms)
     {"FVY",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :544
     {"FVZ",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :545
+    {"VORT",   Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // driver aux: undivided |ω| for TAG_VORT (not an FDS mesh array)
 };
 
 const std::vector<std::string> kDefault = {"RHO", "RHOS", "TMP", "ZZ", "ZZS", "U", "V", "W", "US", "VS", "WS",
-                                           "H", "HS", "KRES", "D", "DS", "DDDT", "MU", "RSUM", "FVX", "FVY", "FVZ"};
+                                           "H", "HS", "KRES", "D", "DS", "DDDT", "MU", "RSUM", "Q", "FVX", "FVY", "FVZ"};
 
 // Per-box scratch: stays in Fortran/side data of the shim (S3), never a MultiFab (p1-findings section 3).
 const char* const kScratch[] = {"FX", "FY", "FZ", "ADV_FX", "ADV_FY", "ADV_FZ", "DIF_FX", "DIF_FY", "DIF_FZ",
@@ -146,6 +147,19 @@ std::vector<std::string> Fields::names() const
     std::vector<std::string> v;
     for (const auto& kv : m_mf) v.push_back(kv.first);
     return v;
+}
+
+
+void Fields::ensure(const std::string& name)
+{
+    if (has(name)) return;
+    const FieldSpec* s = find_field(name);
+    if (s == nullptr) amrex::Abort("Fields::ensure: '" + name + "' is not a registered field");
+    amrex::BoxArray ba = m_l0.ba;
+    if (s->stag != Stag::Cell) ba.surroundingNodes(static_cast<int>(s->stag) - 1);
+    auto mf = std::make_unique<amrex::MultiFab>(ba, m_l0.dm, s->ncomp(m_ns), amrex::IntVect(s->ng));
+    mf->setVal(0.0);
+    m_mf[name] = std::move(mf);
 }
 
 }  // namespace fdsamr
