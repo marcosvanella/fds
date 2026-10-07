@@ -162,7 +162,7 @@ pinned, including on a hierarchy (lowest-index uncovered cell of the coarsest le
 the checked value is the full residual, as before. The warning text gives the pin-excluded value, the full value, the pin row and the tolerance;
 with `verbose >= 2` a `PRESSURE INFO` line logs the full residual, the non-pin residual (2-norm and max) and the pin row for every solve.
 
-`residual_floor` = 10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with ||A|| = 4 sum_d 1/dx_d^2 (finest level, directions with more than one cell;
+`residual_floor` = 10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with ||A|| = 4 sum_d 1/dx_d^2 (directions with more than one cell; composite: level-wise, see frozen/residual-notes.md;
 round-off size of a floating-point residual) is computed for singular and non-singular components and is the lower bound of `residual_limit`
 (next section). Extra quantities, reported and never warned on: `residual_rel2_mr` (mean-removed), `residual_backward` = ||r_nopin||_2 / (||b||_2 + ||A|| ||H||_2) (normwise backward error; 1.5e-16 to 4.5e-16 here, one to four times 2^-53).
 
@@ -195,7 +195,7 @@ residuals equal to the build before this change on 34x18x32 Neumann, periodic an
 
 Implemented in `evaluate_residual` (common layer; single level and composite, every backend):
 
-    residual_floor = 10 * 2^-53 * ||A|| * ||H||_2 / ||b||_2          ||A|| = 4 sum_d 1/dx_d^2 (finest level, directions of more than one cell)
+    residual_floor = 10 * 2^-53 * ||A|| * ||H||_2 / ||b||_2          ||A|| = 4 sum_d 1/dx_d^2 (single level); composite: level-wise (residual-notes.md)
     residual_limit = max(residual_tol, residual_floor)                residual_tol = 1e-12 by default
     warn iff residual_check > residual_limit                          residual_check = non-pin residual (full residual when no pin was applied)
 

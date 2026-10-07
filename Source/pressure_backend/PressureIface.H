@@ -277,9 +277,10 @@ struct PressureResult {
     // Extra (residual_floor enters the limit; the others are informational):
     //   residual_rel2_mr       ||r - mean(r)||_2 / ||b||_2, exact weighted mean of r (equals the raw value for singular components
     //                          with a mean-free b: the mean of r is round-off; equals residual_rel2 when not singular)
-    //   residual_floor         10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with ||A|| = 4 sum_d 1/dx_d^2 (finest level, directions of more than
-    //                          one cell): the round-off size of a floating-point residual; set for singular and non-singular components
-    //                          alike and used as the lower bound of residual_limit
+    //   residual_floor         10 * 2^-53 * ||A|| ||H||_2 / ||b||_2 with ||A|| = 4 sum_d 1/dx_d^2 (directions of more than one cell;
+    //                          single level: that grid; composite: level-wise ||A||_l weighted like ||H||_2, E3 / A-72): the round-off
+    //                          size of a floating-point residual; set for singular and non-singular components alike and used as the
+    //                          lower bound of residual_limit
     //   residual_backward      ||r_nopin||_2 / (||b||_2 + ||A|| ||H||_2): normwise backward error
     double residual_rel2_nopin = 0.0;
     double residual_relmax_nopin = 0.0;
