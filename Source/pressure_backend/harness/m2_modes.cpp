@@ -716,8 +716,10 @@ void run_masked (ParmParse& pp)
     std::string out; pp.query("out", out);
     double tol = 1.0e-12; pp.query("tol_rel", tol);
     int max_iter = 200; pp.query("max_iter", max_iter);
+    int zones = 0; pp.query("zones", zones);      // D2: 1 zone id = (k > slab) (follows the slab), 2 zone id = (2i >= nx) (cuts components)
+    int cache = 0; pp.query("cache", cache);      // D1/D8: repeat the solve in the same workspace (same, new known values, changed mask)
     S1 s = make_s1(n, bcs, mgs);
-    iMultiFab cls(s.ba, s.dm, 1, 0);
+    iMultiFab cls(s.ba, s.dm, 1, 0), zid(s.ba, s.dm, 1, 0);
     MultiFab kv(s.ba, s.dm, 1, 0), rhs(s.ba, s.dm, 1, 0), phi(s.ba, s.dm, 1, 1), rho(s.ba, s.dm, 1, 0), kres(s.ba, s.dm, 1, 0);
     for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
         auto const& c = cls.array(mfi);
@@ -746,16 +748,24 @@ void run_masked (ParmParse& pp)
     p.cell_class = &cls;
     p.known_value = &kv;
     if (gauge_rho) { p.gauge_weight = &rho; p.gauge_offset = &kres; }
+    if (zones) {
+        for (MFIter mfi(zid); mfi.isValid(); ++mfi) {
+            auto const& z = zid.array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { z(i,j,k) = (zones == 1) ? int(k > slab) : int(2*i >= n[0]); });
+        }
+        p.component_id = &zid;
+    }
     pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9;   // the rhs is deliberately incompatible
     o.backend = (be == "fft") ? pb::BackendKind::FFT : (be == "hypre") ? pb::BackendKind::HYPRE : (be == "mlmg") ? pb::BackendKind::MLMG : pb::BackendKind::Auto;
     o.tol_rel = tol; o.max_iter = max_iter;
     pb::ComponentMap cm = pb::label_components(p);
-    pb::PressureResult r = pb::solve_pressure(p, o);
+    pb::PressureWorkspace ws;
+    pb::PressureResult r = pb::solve_pressure(p, o, &ws);
     Print() << std::setprecision(8) << "MASKED status=" << pb::to_string(r.status) << " backend=" << (r.backend.empty() ? std::string("none") : r.backend)
             << " iters=" << r.backend_status.iterations << " ncomp=" << r.components.size() << " residual_ok=" << int(r.residual_ok) << " nwarn=" << r.warnings.size()
             << " true_rel2=" << r.residual_rel2 << " limit=" << r.residual_limit << " msg=[" << r.message << "]\n";
     for (auto const& c : r.components) {
-        Print() << std::setprecision(17) << "MASKEDCOMP id=" << c.id << " singular=" << int(c.singular) << " ncells=" << c.ncells << " pin=" << c.pin[0] << "," << c.pin[1] << "," << c.pin[2]
+        Print() << std::setprecision(17) << "MASKEDCOMP id=" << c.id << " singular=" << int(c.singular) << " ncells=" << c.ncells << " pin=" << c.pin[0] << "," << c.pin[1] << "," << c.pin[2] << " zone=" << c.zone
                 << " removed_mean=" << c.removed_mean << " gauge_shift=" << c.gauge_shift << "\n";
     }
     if (r.status == pb::Status::Ok || r.status == pb::Status::NotConverged) {
@@ -773,6 +783,26 @@ void run_masked (ParmParse& pp)
         ParallelDescriptor::ReduceRealMax(e_solid); ParallelDescriptor::ReduceRealMax(e_known);
         mcheck(e_solid == 0.0 && e_known == 0.0, "masked: H is 0 on Solid cells and g on Known cells");
     }
+    if (cache && r.status == pb::Status::Ok) {
+        // D1: same mask -> cache hit and bitwise the same H; D8: new known values, same mask -> hit, H follows g; changed mask -> miss.
+        MultiFab h1(s.ba, s.dm, 1, 0), d(s.ba, s.dm, 1, 0);
+        MultiFab::Copy(h1, phi, 0, 0, 1, 0);
+        auto dev = [&] () { MultiFab::Copy(d, phi, 0, 0, 1, 0); MultiFab::Subtract(d, h1, 0, 0, 1, 0); return d.norm0(0); };
+        phi.setVal(0.0); pb::PressureResult r2 = pb::solve_pressure(p, o, &ws); const Real dev2 = dev();
+        kv.mult(2.0); kv.plus(0.1, 0, 1);
+        phi.setVal(0.0); pb::PressureResult r3 = pb::solve_pressure(p, o, &ws); const Real dev3 = dev();
+        for (MFIter mfi(cls); mfi.isValid(); ++mfi) {
+            if (!mfi.validbox().contains(IntVect(0))) { continue; }
+            auto& c0 = cls.array(mfi)(0,0,0); c0 = (c0 == pb::CellGas) ? int(pb::CellSolid) : int(pb::CellGas);
+        }
+        phi.setVal(0.0); pb::PressureResult r4 = pb::solve_pressure(p, o, &ws);
+        Print() << std::setprecision(6) << "MASKCACHE hit=" << r.mask_cache_hit << "," << r2.mask_cache_hit << "," << r3.mask_cache_hit << "," << r4.mask_cache_hit
+                << " dev2=" << dev2 << " dev3=" << dev3 << " rounds=" << r.mask_label_rounds << " label_s=" << r.mask_label_seconds
+                << " lookup_s=" << r.mask_label_lookup_seconds << "," << r2.mask_label_lookup_seconds << " status4=" << pb::to_string(r4.status) << "\n";
+        mcheck(!r.mask_cache_hit && r2.mask_cache_hit && dev2 == 0.0, "D1: second solve on the same mask hits the label cache, H bitwise identical");
+        mcheck(r3.mask_cache_hit && (known_frac == 0.0 || dev3 > 1e-6), "D8: new known values on the same mask: cache hit, H follows g (known_value is never cached)");
+        mcheck(!r4.mask_cache_hit && r4.status == pb::Status::Ok, "D1: a changed mask misses the cache and relabels");
+    }
     if (!out.empty()) {
         MultiFab clsd(s.ba, s.dm, 1, 0), lab(s.ba, s.dm, 1, 0);
         for (MFIter mfi(clsd); mfi.isValid(); ++mfi) {
@@ -789,6 +819,80 @@ void run_masked (ParmParse& pp)
     }
 }
 
+// --------------------------------------------------------------------------------------------------------------
+// mode=masked_geo (A-71 D1, D7): the doc 06 section 8 geometries through the product API with a PressureWorkspace. case=hallways
+// (Pressure_Solver/hallways.fds, 128x64x64, dx 0.0625, the one-cell OPEN slab as Known cells) or case=stairwell (stairwell.fds union,
+// 192x177x552, dx 0.1: the 11 meshes moved up one y layer, whose vent cells i 12..21, k 0..19 are Known = the OPEN vent of the low-y
+// face); cutk = z planes turned Solid (doc 06: three components). Covering BoxArray (mgs), Solid outside the gas boxes, all faces
+// Neumann, smooth RHS, g = 0.37. nsolve solves (the first labels, the rest hit the cache); solve=0 labels only. Prints MASKGEO lines.
+// --------------------------------------------------------------------------------------------------------------
+void run_masked_geo (ParmParse& pp)
+{
+    std::string cas = "hallways"; pp.query("case", cas);
+    int mgs = 32, nsolve = 2, solve = 1, max_iter = 200; double tol = 1.0e-12;
+    pp.query("mgs", mgs); pp.query("nsolve", nsolve); pp.query("solve", solve); pp.query("max_iter", max_iter); pp.query("tol_rel", tol);
+    std::vector<int> cutk; pp.queryarr("cutk", cutk);
+    Box dom; Real dx; std::vector<Box> gas, known;
+    if (cas == "hallways") {
+        dom = Box(IntVect(0), IntVect(127,63,63)); dx = 0.0625;
+        gas = {Box(IntVect(0,0,0), IntVect(47,15,15)), Box(IntVect(48,0,0), IntVect(63,63,15)), Box(IntVect(64,48,0), IntVect(127,63,15)),
+               Box(IntVect(112,48,16), IntVect(127,63,63)), Box(IntVect(48,48,48), IntVect(111,63,63))};
+        known = {Box(IntVect(47,48,48), IntVect(47,63,63))};
+    } else {
+        dom = Box(IntVect(0), IntVect(191,176,551)); dx = 0.1;
+        struct M { int I, J, K; double x0, y0, z0; };
+        const M ms[] = {{59,27,178, 3.5,5.1,7.5}, {70,37,35, 1.1,4.9,25.3}, {54,37,22, 1.1,4.9,28.8}, {61,26,95, 0.0,0.0,-23.9},
+                        {61,26,95, 0.0,0.0,-14.4}, {61,26,95, 0.0,0.0,-4.9}, {17,81,30, 6.4,-1.3,-23.9}, {49,173,30, -5.2,-7.0,-23.9},
+                        {76,51,34, 6.1,-0.8,0.0}, {82,78,29, 0.3,0.0,4.6}, {67,77,30, -0.3,2.6,-23.9}};
+        for (auto const& m : ms) {
+            const IntVect lo(int(std::lround((m.x0+5.2)/0.1)), 1 + int(std::lround((m.y0+7.0)/0.1)), int(std::lround((m.z0+23.9)/0.1)));
+            gas.push_back(Box(lo, lo + IntVect(m.I-1, m.J-1, m.K-1)));
+        }
+        known = {Box(IntVect(12,0,0), IntVect(21,0,19))};
+    }
+    RealBox rb({0.,0.,0.}, {dx*dom.length(0), dx*dom.length(1), dx*dom.length(2)});
+    pb::PressureProblem p;
+    p.geom = Geometry(dom, rb, CoordSys::cartesian, Array<int,3>{0,0,0});
+    p.ba = BoxArray(dom); p.ba.maxSize(mgs); p.dm = DistributionMapping(p.ba);
+    iMultiFab cls(p.ba, p.dm, 1, 0);
+    MultiFab kv(p.ba, p.dm, 1, 0), rhs(p.ba, p.dm, 1, 0), phi(p.ba, p.dm, 1, 1);
+    kv.setVal(0.37); phi.setVal(0.0);
+    const Real L = dx * dom.length(2);
+    for (MFIter mfi(cls); mfi.isValid(); ++mfi) {
+        auto const& c = cls.array(mfi); auto const& r = rhs.array(mfi);
+        const Box vb = mfi.validbox();
+        amrex::LoopOnCpu(vb, [&] (int i, int j, int k) { c(i,j,k) = pb::CellSolid; r(i,j,k) = smooth_rhs((i+0.5)*dx/L, (j+0.5)*dx/L, (k+0.5)*dx/L); });
+        for (auto const& b : gas) { amrex::LoopOnCpu(vb & b, [&] (int i, int j, int k) { c(i,j,k) = pb::CellGas; }); }
+        for (auto const& b : known) { amrex::LoopOnCpu(vb & b, [&] (int i, int j, int k) { c(i,j,k) = pb::CellKnown; }); }
+        for (int kc : cutk) { amrex::LoopOnCpu(vb & Box(IntVect(0,0,kc), IntVect(dom.bigEnd(0), dom.bigEnd(1), kc)), [&] (int i, int j, int k) { c(i,j,k) = pb::CellSolid; }); }
+    }
+    p.cell_class = &cls; p.known_value = &kv; p.rhs = &rhs; p.phi = &phi;
+    pb::PressureOptions o; o.verbose = 0; o.removed_mean_warn = 1.0e9; o.tol_rel = tol; o.max_iter = max_iter;
+    pb::PressureWorkspace ws;
+    if (!solve) {
+        pb::ComponentMap cm = pb::label_components(p);
+        int ns = 0; for (auto const& c : cm.comps) { ns += c.singular; }
+        Print() << std::setprecision(5) << "MASKGEO case=" << cas << " mgs=" << mgs << " nboxes=" << p.ba.size() << " ncells=" << dom.numPts()
+                << " ncomp=" << cm.comps.size() << " nsealed=" << ns << " rounds=" << cm.rounds << " label_s=" << cm.seconds << " solve=0\n";
+        return;
+    }
+    for (int it = 0; it < nsolve; ++it) {
+        phi.setVal(0.0);
+        const double t0 = amrex::second();
+        pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+        double wall = amrex::second() - t0; ParallelDescriptor::ReduceRealMax(wall);
+        Long ngas = 0; int ns = 0; for (auto const& c : r.components) { ngas += c.ncells; ns += c.singular; }
+        Print() << std::setprecision(5) << "MASKGEO case=" << cas << " mgs=" << mgs << " nboxes=" << p.ba.size() << " ncells=" << dom.numPts()
+                << " ngas=" << ngas << " ncomp=" << r.components.size() << " nsealed=" << ns << " rounds=" << r.mask_label_rounds
+                << " label_s=" << r.mask_label_seconds << " lookup_s=" << r.mask_label_lookup_seconds << " hit=" << r.mask_cache_hit
+                << " status=" << pb::to_string(r.status) << " iters=" << r.backend_status.iterations << " wall_s=" << wall
+                << " check=" << r.residual_check << " limit=" << r.residual_limit << " ok=" << r.residual_ok << "\n";
+        mcheck(r.status == pb::Status::Ok && r.residual_ok, "masked_geo " + cas + ": status Ok, residual within the limit");
+        mcheck(r.backend_status.iterations <= int(0.95 * max_iter), "masked_geo " + cas + ": iterations not within 5% of the cap (D7)");
+        mcheck(r.mask_cache_hit == (it > 0), "masked_geo " + cas + ": labels built by the first solve, cached afterwards (D1)");
+    }
+}
+
 int run_m2_mode (std::string const& mode, ParmParse& pp)
 {
     if (mode == "trigger1") { run_trigger1(pp); }
@@ -799,6 +903,7 @@ int run_m2_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "fftraw") { run_fftraw(pp); }
     else if (mode == "bcmap") { run_bcmap(pp); }
     else if (mode == "masked") { run_masked(pp); }
+    else if (mode == "masked_geo") { run_masked_geo(pp); }
     else { return -1; }
     return g_m2fail;
 }

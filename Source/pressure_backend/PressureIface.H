@@ -142,7 +142,9 @@ struct PressureProblem {
     // Known values g of the Known cells (same BoxArray/DistributionMapping as `ba`, one component; read on Known cells only; null = 0).
     // On return phi holds g on Known cells and 0 on Solid cells.
     amrex::MultiFab const* known_value = nullptr;
-    // Driver-supplied component ids: the common layer labels components itself (flood fill over gas-gas faces); non-null is NotBuilt.
+    // Driver zone ids (FDS pressure zone per cell; same BoxArray/DistributionMapping as `ba`, read on gas cells). The common layer still labels
+    // the components itself (flood fill over gas-gas faces); the gauge key is (zone, component) and a component whose cells carry two zone ids
+    // is InvalidInput (D2, frozen/masked-branch-design.md). Single level only (composite: NotBuilt). Null = no zones.
     amrex::iMultiFab const* component_id = nullptr;
 
     // Mean removal of the right-hand side of singular components (D-067): Volume (default) or the FDS parity switch
@@ -232,6 +234,7 @@ struct ComponentInfo {
     bool singular = false;
     amrex::Long ncells = 0;
     amrex::IntVect pin{0};                        // lowest global index cell; recorded, not applied by MLMG/FFT
+    int zone = -1;                                // driver zone id (PressureProblem::component_id); -1 = no zones given
     double removed_mean = 0.0;                    // mean actually subtracted from the RHS (0 when at round-off)
     double removed_rel = 0.0;                     // |measured mean| relative to rms of the RHS (component); drives the diagnostic
     double gauge_shift = 0.0;                     // weighted mean (of H - gauge_offset) removed from H after the solve

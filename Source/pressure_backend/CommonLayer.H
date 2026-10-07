@@ -39,6 +39,9 @@ std::uint64_t class_content_hash (PressureProblem const& p);
 // cells and -1 on Solid and Known cells; ids are ordered by the lowest global index of the component, which is its pin cell; a
 // component is singular unless a gas cell of it touches a domain Dirichlet face or a Known cell. The pin is always recorded.
 ComponentMap label_components (PressureProblem const& p, bool record_pin = true);
+// D2: zone id (PressureProblem::component_id) of every component; a component whose gas cells carry two zone ids is an error (returned
+// message; empty = ok). Sets ComponentInfo::zone. Collective.
+std::string assign_zones (amrex::iMultiFab const& zone, ComponentMap& cm);
 
 // Which zero mode of the right-hand side is removed when cell volumes vary: `MeanKind` (PressureIface.H). The solved
 // system is the unit operator L (cell-centred 7-point, uniform cells), or, for a future non-uniform mesh, the

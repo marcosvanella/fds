@@ -1,7 +1,8 @@
 # Masked branch of the common layer (A-68, FR-037 masked branch): design and status
 
 Scope of this version: **single level, MLMG backend** (built and tested, see the measured results below). The FFT backend cannot take masks (the selector says so), HYPRE and the composite
-paths still return `NotBuilt` for masks (status table at the end).
+paths still return `NotBuilt` for masks (status table at the end). Design decisions D1 to D8 of the review (docs/pressure/08 section 3.2),
+including the rules for the composite and HYPRE masked branches: `masked-branch-design.md`.
 
 ## Why it is needed
 
@@ -36,8 +37,8 @@ Algorithm: label = global x-fastest index of the cell, repeated sweeps of "label
 exchange, until no label changes (global reduction); the surviving minimum is the lowest global index of the component, which is also its
 **pin cell** (recorded, not applied by MLMG). Ids are the ranks of these minima in increasing order, so they do not depend on the
 decomposition. A component is **singular** unless one of its gas cells touches a domain Dirichlet face (after `effective_bc`) or a Known
-cell. Non-gas cells get label -1 (excluded from every sum). Driver-supplied `component_id` stays `NotBuilt` (only the computed partition
-exists; the driver's zone ids can be added by mapping them onto the computed components when a case needs it).
+cell. Non-gas cells get label -1 (excluded from every sum). The labels are cached in the workspace keyed on the mask (D1). Driver zone ids
+(`component_id`) are mapped onto the computed components; a component spanning two zones is `InvalidInput` (D2).
 
 ## Mean removal, gauge, residual (D-067, per component, gas cells only)
 
@@ -75,41 +76,39 @@ returned `H` to raw files; `tests/pb_test.py masked` builds the dense matrix wit
 (least squares with the constant removed for sealed ones) and compares per component: solution to 1e-9 (up to the gauge), component count,
 singular flags, per-component mean of the mean-removed right-hand side and of `H`.
 
-## Measured results (ctest `pb_masked`, 12x10x8 cells, 1/2/3 ranks)
+## Measured results (ctest `pb_masked`, 12x10x8 cells, 1/2/3 ranks; iterations of the GMRES solve, D7)
 
-Six cases (sealed slab, Dirichlet face with a slab, Known cells, periodic wrap with the rho-weighted gauge, random solids with one periodic
+Residual and error columns are from the V-cycle version (now 1.7e-13 to 7.1e-13 true residual). Six cases (sealed slab, Dirichlet face with a slab, Known cells, periodic wrap with the rho-weighted gauge, random solids with one periodic
 direction, Dirichlet on x) all pass against the independent dense reference:
 
 | case | components | iterations | true residual / limit | solution error vs dense |
 |---|---|---|---|---|
-| sealed, solid slab | 2 sealed | 31 | 4.3e-13 / 1e-12 | 3.4e-12 |
-| slab, Dirichlet z-high | 1 sealed + 1 open | 38 | 6.9e-13 / 1e-12 | 5.2e-12 |
-| slab + Known cells | 5 | 39 | 5.2e-13 / 1.1e-12 | 3.9e-12 |
-| periodic x,y, Known cells, rho gauge | 3 | 13 | 1.2e-13 / 1.5e-12 | 5.2e-13 |
-| random solids, periodic y, rho gauge | 1 | 41 | 5.6e-13 / 1.9e-12 | 5.8e-12 |
-| Dirichlet x-low, slab | 2 | 199 | 7.7e-13 / 1e-12 | 1.3e-12 |
+| sealed, solid slab | 2 sealed | 9 | 4.3e-13 / 1e-12 | 3.4e-12 |
+| slab, Dirichlet z-high | 1 sealed + 1 open | 10 | 6.9e-13 / 1e-12 | 5.2e-12 |
+| slab + Known cells | 5 | 9 | 5.2e-13 / 1.1e-12 | 3.9e-12 |
+| periodic x,y, Known cells, rho gauge | 3 | 7 | 1.2e-13 / 1.5e-12 | 5.2e-13 |
+| random solids, periodic y, rho gauge | 1 | 9 | 5.6e-13 / 1.9e-12 | 5.8e-12 |
+| Dirichlet x-low, slab | 2 | 12 | 7.7e-13 / 1e-12 | 1.3e-12 |
 
 Labels, singular flags, cell counts and the removed mean agree exactly with the reference; the returned `H` and the labels are identical on
 1, 2 and 3 ranks (to 1e-9 for `H`); the gauge sum is below 1e-12 (volume-weighted `H` for the default, `rho (H - KRES)` for the weighted gauge);
 `H` is exactly 0 on Solid cells and exactly `g` on Known cells; a loose-tolerance negative control warns; masked + FFT is `NotBuilt`.
 
-Multigrid quality (honest): with 10 % random solids the iteration count is 13 to 40 against about 10 without a mask; a Dirichlet face with a slab can need 100 to 200
-iterations (the last row hits 199 of the default 200). Averaged coefficients leak on the
-coarse levels, so the masked solve uses 8 pre/post smoothing sweeps and a BiCGStab+CG bottom solver (plain BiCGStab stalled on two sealed
-components). The relative tolerance is scaled by `|rhs|_inf / |s|_inf` so that MLMG's own norm and the common-layer residual mean the same
-when Known terms dominate `s`. Isolated sealed cells (no gas neighbour, no Dirichlet face) get an identity row and `H = 0` before the gauge.
-A 50 % random-solid case (27 components) converges in 57 iterations; 30 % solids with Known cells in 111 (both checked by hand, not in ctest).
-The slowest tested configuration is the Dirichlet x face with a slab (199 of 200 iterations): a masked problem with a Dirichlet face and a thin
-slab may need a larger `max_iter`; a Krylov outer loop around the V-cycle or the HYPRE masked path would be the remedy.
+Multigrid quality: averaged coefficients leak on the masked coarse levels. The V-cycle solve alone (8+8 sweeps, BiCGStab+CG bottom) needed
+13 to 199 iterations here and did not converge in 1000 on hallways. The masked solve is now GMRES (`GMRESMLMG`) with one V-cycle (8+8
+sweeps, smoother bottom) as preconditioner: 7 to 12 iterations on these cases and 11 on hallways (0.52 M cells) for `max_grid_size` 16 to
+64. The tolerance is mapped once to GMRES's L2 norm of `s` (`tol |rhs|_2 / |s|_2` when Known terms dominate `s`); the common-layer true
+residual decides. Isolated sealed cells (no gas neighbour, no Dirichlet face) get an identity row and `H = 0` before the gauge.
+`pb_masked` fails when a run uses more than 95 % of the cap; `pb_masked_hallways` (label `long`) runs hallways (masked-branch-design.md D7).
 
 ## Status (what is built and what is not)
 
 | Item | Status |
 |---|---|
-| Single level, MLMG, Gas/Solid/Known classes, computed components, per-component mean removal and gauge, residual check | built and tested (`pb_masked`) |
+| Single level, MLMG (GMRES + V-cycle), Gas/Solid/Known classes, computed components, per-component mean removal and gauge, residual check | built and tested (`pb_masked`, `pb_masked_hallways`) |
 | FFT with masks | `NotBuilt` by design (no mask in `FFT::Poisson`); `Auto` picks MLMG for a masked single level |
-| HYPRE assembled backend with masks | NotBuilt (next: rows of Solid and Known cells replaced by identity, Known neighbours moved to the right-hand side, the same system as above) |
-| Composite (two or more levels) with masks | NotBuilt (components would have to be found on the composite graph) |
-| Driver-supplied `component_id` | NotBuilt (computed components only) |
+| HYPRE assembled backend with masks | NotBuilt (design: masked-branch-design.md D6, gas-cell rows only and one pin per sealed component) |
+| Composite (two or more levels) with masks | NotBuilt (design: masked-branch-design.md D3 and D4) |
+| Driver zone ids (`component_id`) | single level: built and tested (D2); composite: NotBuilt |
 | Pinned class, covered cells on the single-level API | NotBuilt |
-| Component labelling cost | one flood fill per solve (no cache yet); fine for tests, a workspace cache keyed on the mask is the obvious next step for runs with many solves per step |
+| Component labelling cost | cached in the workspace (D1); stairwell 18.8 M cells: 10 to 18 rounds, 1.0 to 1.8 s on a miss |

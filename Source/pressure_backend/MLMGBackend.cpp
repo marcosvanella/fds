@@ -4,6 +4,7 @@
 #include "PressureBackend.H"
 #include "CommonLayer.H"
 
+#include <AMReX_GMRES_MLMG.H>
 #include <AMReX_MLABecLaplacian.H>
 #include <AMReX_MLMG.H>
 #include <AMReX_MLPoisson.H>
@@ -109,34 +110,22 @@ BackendStatus solve_masked (PressureProblem const& p, PressureOptions const& o, 
     }
     mlab.setLevelBC(0, &phi);
     MLMG mlmg(mlab);
-    // Averaged coefficients make the coarse levels of a masked problem poor approximations: smooth harder and use BiCGStab+CG as the
-    // bottom solver (plain BiCGStab stalls on sealed multi-component systems whose coarse operator couples the components).
+    // D7: averaged coefficients make the coarse levels of a masked problem poor approximations, so a plain V-cycle iteration can need
+    // ~200 cycles (Dirichlet face plus a thin slab). GMRES with one V-cycle (8+8 sweeps, smoother bottom: a fixed linear preconditioner)
+    // per iteration recovers the convergence. GMRES judges its own 2-norm residual against ||s||_2, so the caller's tol_rel, defined on
+    // ||rhs||_2 by the common layer, is retargeted by ||rhs||_2/||s||_2 when the Known terms make s larger.
     mlmg.setPreSmooth(8);
     mlmg.setPostSmooth(8);
-    mlmg.setBottomSolver(MLMG::BottomSolver::bicgcg);
     mlmg.setVerbose(0);
-    mlmg.setMaxIter(o.max_iter);
-    mlmg.setConvergenceNormType(MLMGNormType::bnorm);
-    mlmg.setThrowException(true);
+    GMRESMLMG gm(mlmg);
+    gm.setMaxIters(o.max_iter);
+    const Real ns = s.norm2(), nr = rhs.norm2();
+    const Real rel = (ns > Real(0) && nr > Real(0) && nr < ns) ? Real(o.tol_rel) * nr / ns : Real(o.tol_rel);
+    gm.solve(phi, s, rel, Real(0));
     BackendStatus st;
-    // MLMG measures the residual against |s|_inf, which contains the Known-cell terms 2 g/dx^2; the common layer measures against |rhs|.
-    // Scale the relative tolerance so that both mean the same thing. E1's half-tol factor is for the unmasked path (max-norm vs 2-norm
-    // mismatch on smooth data); here the nr/ns retarget already maps the caller's tol_rel onto |s|, and stacking 0.5 on top can exhaust
-    // the default 200 V-cycles on multi-component Dirichlet-masked cases whose true residual is already inside the product limit.
-    Real rel = Real(o.tol_rel);
-    {
-        const Real ns = s.norm0(), nr = rhs.norm0();
-        if (ns > Real(0) && nr > Real(0) && nr < ns) { rel *= nr / ns; }
-    }
-    try {
-        mlmg.solve({&phi}, {&s}, Real(rel), Real(0.0));
-        st.converged = true;
-    } catch (std::exception const&) {
-        st.converged = false;
-    }
-    st.iterations = mlmg.getNumIters();
-    const Real b0 = mlmg.getInitRHS();
-    st.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
+    st.converged = (gm.getGMRES().getStatus() == 0);
+    st.iterations = gm.getNumIters();
+    st.own_residual = (ns > Real(0)) ? gm.getResidualNorm() / ns : gm.getResidualNorm();
     return st;
 }
 

@@ -113,7 +113,6 @@ Selection select_backend (PressureProblem const& p, BackendKind requested)
     if (p.cell_coef_a || p.face_coef_b[0] || p.face_coef_b[1] || p.face_coef_b[2]) {
         s.message = "variable coefficients (masked or non-unit operator) are not built"; return s;
     }
-    if (p.component_id) { s.message = "driver-supplied component ids are not built (masked branch)"; return s; }
     const bool masked = has_nonzero(p.cell_class);
     if (masked && requested == BackendKind::FFT) { s.message = "masked cells (cell_class != 0) cannot go through FFT::Poisson (no mask in the transform); the masked branch is MLMG"; return s; }
     if (masked && requested == BackendKind::HYPRE) { s.message = "masked cells with the HYPRE backend are not built (the masked branch is single-level MLMG; frozen/masked-notes.md)"; return s; }
@@ -212,7 +211,8 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
 
     const Real vol = p.geom.CellSize(0) * p.geom.CellSize(1) * p.geom.CellSize(2);
     const bool masked = is_masked(p);
-    ComponentMap cm;
+    ComponentMap cm_own;
+    ComponentMap* cmp = &cm_own;
     if (masked && ws) {
         // D1: component labels, singular flags and pins are cached in the workspace keyed on (mask content, layout).
         const double t_lk = amrex::second();
@@ -225,21 +225,26 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
             M.hash = hsh; M.dom = p.geom.Domain(); M.bc = p.bc; M.ba = p.ba; M.dm = p.dm; M.valid = true;
         }
         ws->note_mask(hit);
-        cm.label.define(p.ba, p.dm, 1, 0);
-        iMultiFab::Copy(cm.label, M.cm.label, 0, 0, 1, 0);
-        cm.comps = M.cm.comps; cm.rounds = M.cm.rounds; cm.seconds = M.cm.seconds;
+        // Used in place (no label copy); reset the per-solve fields that remove_mean / apply_gauge fill in.
+        for (auto& c : M.cm.comps) { c.removed_mean = c.removed_rel = c.gauge_shift = 0.0; }
+        cmp = &M.cm;
         R.mask_cache_hit = hit;
         double lk = amrex::second() - t_lk; ParallelDescriptor::ReduceRealMax(lk);
         R.mask_label_lookup_seconds = lk;
     } else {
         const double t_lk = amrex::second();
-        cm = label_components(p, full);
+        cm_own = label_components(p, full);
         double lk = amrex::second() - t_lk; ParallelDescriptor::ReduceRealMax(lk);
         R.mask_label_lookup_seconds = masked ? lk : 0.0;
     }
+    ComponentMap& cm = *cmp;
     R.mask_label_rounds = cm.rounds; R.mask_label_seconds = cm.seconds;
 
     if (masked && cm.comps.empty()) { return fail(Status::InvalidInput, "masked problem without a gas cell"); }
+    if (p.component_id) {   // D2: the gauge key is (zone, component); a component may not span two zones
+        const std::string zbad = assign_zones(*p.component_id, cm);
+        if (!zbad.empty()) { return fail(Status::InvalidInput, zbad); }
+    }
     MultiFab b(p.ba, p.dm, 1, 0);
     MultiFab::Copy(b, *p.rhs, 0, 0, 1, 0);
     if (masked) {   // the right-hand side of Solid and Known cells is not part of the problem (label < 0): zero it, so norms and sums see gas cells only

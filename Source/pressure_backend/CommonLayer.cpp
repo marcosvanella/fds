@@ -207,6 +207,30 @@ std::uint64_t class_content_hash (PressureProblem const& p)
     return g;
 }
 
+std::string assign_zones (iMultiFab const& zone, ComponentMap& cm)
+{
+    const int nc = static_cast<int>(cm.comps.size());
+    std::vector<int> lo(nc, std::numeric_limits<int>::max()), hi(nc, std::numeric_limits<int>::min());
+    for (MFIter mfi(cm.label); mfi.isValid(); ++mfi) {
+        auto const& l = cm.label.const_array(mfi);
+        auto const& z = zone.const_array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+            const int c = l(i,j,k);
+            if (c >= 0) { lo[c] = std::min(lo[c], z(i,j,k)); hi[c] = std::max(hi[c], z(i,j,k)); }
+        });
+    }
+    ParallelDescriptor::ReduceIntMin(lo.data(), nc);
+    ParallelDescriptor::ReduceIntMax(hi.data(), nc);
+    for (int c = 0; c < nc; ++c) {
+        if (lo[c] != hi[c]) {
+            return "component " + std::to_string(c) + " spans zones " + std::to_string(lo[c]) + " and " + std::to_string(hi[c]) +
+                   " (one connected gas region is one Poisson problem with one background pressure; D2)";
+        }
+        cm.comps[c].zone = lo[c];
+    }
+    return "";
+}
+
 ComponentMap label_components (PressureProblem const& p, bool record_pin)
 {
     if (is_masked(p)) { return label_components_masked(p); }

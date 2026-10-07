@@ -885,6 +885,7 @@ def masked():
             m = lines(out, "MASKED"); comps = lines(out, "MASKEDCOMP")
             ok(rc == 0 and len(m) >= 1 and "status=Ok" in m[0], f"masked {tag} np={np_}: harness status Ok and exact checks (solid 0, known g) pass [{m[0] if m else out[-300:]}]")
             kvm = kv(m[0]); ok(kvm["residual_ok"] == "1" and kvm["nwarn"] == "0", f"masked {tag} np={np_}: no residual warning (true_rel2={kvm['true_rel2']}, limit={kvm['limit']}, iters={kvm['iters']})")
+            ok(int(kvm["iters"]) <= 0.95*200, f"masked {tag} np={np_}: {kvm['iters']} iterations, not within 5% of the cap 200 (D7)")
             res[np_] = (pre, [kv(c) for c in comps])
         pre, comps = res[1]
         cls = read_field(pre + "_class.bin", " ".join(map(str, n))).astype(int)
@@ -930,6 +931,22 @@ def masked():
     m = lines(out, "MASKED"); ok(rc == 0 and m and kv(m[0])["nwarn"] != "0", f"masked negative control (tol_rel 1e-3, max_iter 3) warns [{m[0] if m else ''}]")
     rc, out = run(1, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,ND", slab=3, solid_frac=0.1, seed=2, mgs=8, backend="fft")
     m = lines(out, "MASKED"); ok(m and "status=NotBuilt" in m[0], f"masked + FFT is NotBuilt [{m[0] if m else out[-200:]}]")
+    # D1/D8: label cache in the workspace (hit, bitwise H; known values not cached; changed mask relabels), 1 and 3 ranks (checks in the harness)
+    for np_ in (1, 3):
+        rc, out = run(np_, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,ND", slab=3, solid_frac=0.1, known_frac=0.3, seed=3, mgs=4, cache=1)
+        c = lines(out, "MASKCACHE"); ok(rc == 0 and len(c) == 1, f"masked cache np={np_}: D1/D8 checks pass [{c[0] if c else out[-300:]}]")
+    # D2: zone ids. Zones that follow the slab: two components, one zone each; a zone boundary through a component: InvalidInput.
+    rc, out = run(2, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,NN", slab=3, solid_frac=0.0, seed=1, mgs=6, zones=1)
+    z = [kv(c)["zone"] for c in lines(out, "MASKEDCOMP")]; ok(rc == 0 and z == ["0", "1"], f"masked zones along the slab: components carry zones {z}")
+    rc, out = run(2, mode="masked", n_cell="12 10 8", bcpairs="NN,NN,NN", slab=3, solid_frac=0.0, seed=1, mgs=6, zones=2)
+    m = lines(out, "MASKED"); ok(m and "status=InvalidInput" in m[0] and "spans zones" in m[0], f"masked zone boundary through a component: InvalidInput [{m[0] if m else out[-200:]}]")
+
+def maskedgeo():
+    """D1/D7 at scale: the doc 06 hallways (Known OPEN slab) through the product masked path at two max_grid_size; iterations not within
+    5% of the cap, labels cached on the second solve (checks in the harness). Long."""
+    for mgs in (32, 64):
+        rc, out = run(2, mode="masked_geo", case="hallways", mgs=mgs); print(out)
+        g = lines(out, "MASKGEO"); ok(rc == 0 and len(g) == 2, f"masked_geo hallways mgs={mgs}: harness checks pass [{g[-1] if g else out[-300:]}]")
 
 
 # ---- E1/E2/R6: MLMG default tolerance, gauge-independent residual verdict, large-N HYPRE (docs/pressure/08 section 4.2) ----
@@ -985,7 +1002,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "masked": masked, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "masked": masked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
