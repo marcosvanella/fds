@@ -18710,16 +18710,23 @@ ENDDO
 END SUBROUTINE CC_GRID_APPEND_CUT_CELL_EXTERNAL_FACES
 
 SUBROUTINE CC_GRID_BUILD_REGULAR_GCELL_HALO(NM,N_LAYER,N_REG,REG_IJK,REG_LAYER)
+USE GEOMETRY_FUNCTIONS, ONLY: SEARCH_OTHER_MESHES
 ! Build a deterministic regular-cell halo around active cut GCELL hosts. Distance is measured
-! on the Cartesian six-neighbor graph; cut hosts are layer zero and are not added to REG_IJK.
+! on the Cartesian six-neighbor graph, including across conforming mesh interfaces.
 INTEGER, INTENT(IN) :: NM,N_LAYER
 INTEGER, INTENT(OUT) :: N_REG
 INTEGER, ALLOCATABLE, INTENT(OUT), DIMENSION(:) :: REG_LAYER
 INTEGER, ALLOCATABLE, INTENT(OUT), DIMENSION(:,:) :: REG_IJK
 
-TYPE(MESH_TYPE), POINTER :: M
-INTEGER :: ICC,JCC,I,J,K,IN,JN,KN,AX,SGN,LEVEL,P,IJK_N(IAXIS:KAXIS)
+TYPE(MESH_TYPE), POINTER :: M,MO
+TYPE(WALL_TYPE), POINTER :: WC
+TYPE(EXTERNAL_WALL_TYPE), POINTER :: EWC
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+INTEGER :: ICC,JCC,I,J,K,IN,JN,KN,AX,SGN,LEVEL,P,IW,IIO,JJO,KKO,NOM3,I3,J3,K3,DIST
+INTEGER :: IJK_N(IAXIS:KAXIS)
 INTEGER, ALLOCATABLE, DIMENSION(:,:,:) :: HALO_LEVEL
+LOGICAL :: NEAR
+REAL(EB) :: XX,YY,ZZ,EPS
 
 M=>MESHES(NM)
 N_REG=0
@@ -18739,6 +18746,72 @@ DO ICC=1,M%N_CUTCELL_MESH
       EXIT
    ENDDO
 ENDDO
+! A conforming neighbour cut is a layer-0 source. Straight across is layer 1. One cell in,
+! beside that cell, or one face into a third mesh at a corner, is layer 2.
+DO IW=1,M%N_EXTERNAL_WALL_CELLS
+   WC => M%WALL(IW)
+   IF (WC%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY .OR. WC%BC_INDEX<1) CYCLE
+   EWC => M%EXTERNAL_WALL(IW)
+   IF (EWC%NOM<1 .OR. EWC%NOM==NM) CYCLE
+   IF (EWC%NIC/=1 .OR. ABS(EWC%AREA_RATIO-1._EB)>1.E-10_EB) CYCLE
+   MO => MESHES(EWC%NOM)
+   IF (.NOT.ALLOCATED(MO%CCVAR)) CYCLE
+   BC => M%BOUNDARY_COORD(WC%BC_INDEX)
+   I=BC%IIG; J=BC%JJG; K=BC%KKG
+   IF (I<1 .OR. I>M%IBAR .OR. J<1 .OR. J>M%JBAR .OR. K<1 .OR. K>M%KBAR) CYCLE
+   IF (HALO_LEVEL(I,J,K)==0) CYCLE
+   IJK_N = (/I,J,K/)
+   IF (.NOT.CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,IJK_N)) CYCLE
+   IIO=EWC%IIO_MIN; JJO=EWC%JJO_MIN; KKO=EWC%KKO_MIN
+   IF (IIO<1 .OR. IIO>MO%IBAR .OR. JJO<1 .OR. JJO>MO%JBAR .OR. KKO<1 .OR. KKO>MO%KBAR) CYCLE
+   IF (MO%CCVAR(IIO,JJO,KKO,CC_IDCC)>0) THEN
+      DIST=1
+   ELSE
+      NEAR=.FALSE.
+      DO AX=IAXIS,KAXIS
+         DO SGN=-1,1,2
+            IN=IIO; JN=JJO; KN=KKO
+            SELECT CASE(AX)
+            CASE(IAXIS); IN=IIO+SGN
+            CASE(JAXIS); JN=JJO+SGN
+            CASE(KAXIS); KN=KKO+SGN
+            END SELECT
+            IF (IN>=1 .AND. IN<=MO%IBAR .AND. JN>=1 .AND. JN<=MO%JBAR .AND. KN>=1 .AND. KN<=MO%KBAR) THEN
+               IF (MO%CCVAR(IN,JN,KN,CC_IDCC)>0) NEAR=.TRUE.
+            ELSEIF (ALLOCATED(MO%X) .AND. ALLOCATED(MO%Y) .AND. ALLOCATED(MO%Z) .AND. &
+                    ALLOCATED(MO%XC) .AND. ALLOCATED(MO%YC) .AND. ALLOCATED(MO%ZC)) THEN
+               XX=MO%XC(IIO); YY=MO%YC(JJO); ZZ=MO%ZC(KKO)
+               SELECT CASE(AX)
+               CASE(IAXIS)
+                  EPS=1.E-4_EB*MO%DX(IIO)
+                  IF (SGN>0) XX=MO%X(IIO)+EPS
+                  IF (SGN<0) XX=MO%X(IIO-1)-EPS
+               CASE(JAXIS)
+                  EPS=1.E-4_EB*MO%DY(JJO)
+                  IF (SGN>0) YY=MO%Y(JJO)+EPS
+                  IF (SGN<0) YY=MO%Y(JJO-1)-EPS
+               CASE(KAXIS)
+                  EPS=1.E-4_EB*MO%DZ(KKO)
+                  IF (SGN>0) ZZ=MO%Z(KKO)+EPS
+                  IF (SGN<0) ZZ=MO%Z(KKO-1)-EPS
+               END SELECT
+               CALL SEARCH_OTHER_MESHES(XX,YY,ZZ,NOM3,I3,J3,K3)
+               IF (NOM3>=1) THEN
+                  IF (NOM3/=EWC%NOM .AND. ALLOCATED(MESHES(NOM3)%CCVAR)) THEN
+                     IF (I3>=1 .AND. I3<=MESHES(NOM3)%IBAR .AND. J3>=1 .AND. J3<=MESHES(NOM3)%JBAR .AND. &
+                         K3>=1 .AND. K3<=MESHES(NOM3)%KBAR) THEN
+                        IF (MESHES(NOM3)%CCVAR(I3,J3,K3,CC_IDCC)>0) NEAR=.TRUE.
+                     ENDIF
+                  ENDIF
+               ENDIF
+            ENDIF
+         ENDDO
+      ENDDO
+      IF (.NOT.NEAR) CYCLE
+      DIST=2
+   ENDIF
+   IF (HALO_LEVEL(I,J,K)<0 .OR. DIST<HALO_LEVEL(I,J,K)) HALO_LEVEL(I,J,K)=DIST
+ENDDO
 DO LEVEL=1,N_LAYER
    DO K=1,M%KBAR
       DO J=1,M%JBAR
@@ -18753,7 +18826,7 @@ DO LEVEL=1,N_LAYER
                   CASE(KAXIS); KN=K+SGN
                   END SELECT
                   IF (IN<1 .OR. IN>M%IBAR .OR. JN<1 .OR. JN>M%JBAR .OR. KN<1 .OR. KN>M%KBAR) CYCLE
-                  IF (HALO_LEVEL(IN,JN,KN)>=0) CYCLE
+                  IF (HALO_LEVEL(IN,JN,KN)>=0 .AND. HALO_LEVEL(IN,JN,KN)<=LEVEL) CYCLE
                   IJK_N = (/IN,JN,KN/)
                   IF (.NOT.CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,IJK_N)) CYCLE
                   HALO_LEVEL(IN,JN,KN)=LEVEL
@@ -18819,24 +18892,12 @@ ENDDO
 END SUBROUTINE CC_GRID_COLLECT_COUPLING_NBR_IJK
 
 SUBROUTINE CC_GRID_BUILD_GCELLS
-! Build the mesh-owned GCELL storage in SoA form from the stabilized cut-cell mesh.
-! Each surviving CUT_CELL(ICC)%JCC becomes one cut GCELL. At identity scope regular
-! GCELLs are selected by a deterministic face-neighbor halo around active cut hosts.
+! Build mesh-owned GCELLs: one per active cut piece, plus a two-layer face-neighbor halo.
 
-INTEGER :: NM, NS, ICC, JCC, IG, ICAND, N_CAND, N_CUT, N_REG, N_CUT_GHOST, N_REG_GHOST, I, J, K
-INTEGER :: IW, NOM, IIO, JJO, KKO
-INTEGER :: IJK_REG(IAXIS:KAXIS)
-LOGICAL :: NEIGHBOR_HAS_CUT
+INTEGER :: NM, ICC, JCC, IG, ICAND, N_CUT, N_REG, N_CUT_GHOST, N_REG_GHOST, I, J, K
 TYPE(MESH_TYPE), POINTER :: M
-TYPE(WALL_TYPE), POINTER :: WC
-TYPE(EXTERNAL_WALL_TYPE), POINTER :: EWC
-TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
-INTEGER, ALLOCATABLE, DIMENSION(:) :: CAND_NM,CAND_CELL_TYPE,CAND_ICC,CAND_JCC,CAND_CHILD_IFACE,CAND_MASTER_IFC, &
-                                      CAND_WALL_IW,CAND_CONN_AXIS,CAND_OWNER_NM,CAND_OWNER_CELL_TYPE,CAND_OWNER_ICC, &
-                                      CAND_OWNER_JCC
 INTEGER, ALLOCATABLE, DIMENSION(:) :: REG_LAYER
-INTEGER, ALLOCATABLE, DIMENSION(:,:) :: CAND_IJK,CAND_OWNER_IJK,REG_IJK,REG_GHOST_IJK
-REAL(EB), ALLOCATABLE, DIMENSION(:) :: CAND_CONN_AREA
+INTEGER, ALLOCATABLE, DIMENSION(:,:) :: REG_IJK,REG_GHOST_IJK
 
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL POINT_TO_MESH(NM)
@@ -18895,72 +18956,14 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ENDDO
    ENDIF
 
-   ! Identity scope owns a deterministic face-neighbor halo around the cut region. Higher scopes
-   ! retain the merge-candidate inventory until agglomeration is moved behind its own topology module.
+   ! Regular GCELLs are the two-layer face-neighbor halo of the cut cells, at every scope.
    N_REG = 0
    IF (ALLOCATED(REG_IJK)) DEALLOCATE(REG_IJK)
    IF (ALLOCATED(REG_LAYER)) DEALLOCATE(REG_LAYER)
-   IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE<=CC_CV_SCOPE_IDENTITY) THEN
-      CALL CC_GRID_BUILD_REGULAR_GCELL_HALO(NM,CC_FV_GCELL_HALO_LAYERS,N_REG,REG_IJK,REG_LAYER)
-   ELSE
-      DO NS=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-         IF (.NOT.ALLOCATED(MESHES(NS)%CUT_CELL)) CYCLE
-         DO ICC=1,MESHES(NS)%N_CUTCELL_MESH
-            DO JCC=1,MESHES(NS)%CUT_CELL(ICC)%NCELL
-               IF (.NOT.CC_GRID_CUT_PIECE_IS_ACTIVE(NS,ICC,JCC)) CYCLE
-               CALL CC_GRID_GET_ALL_CV_MERGE_CANDIDATES_FOR_CUT_PIECE(NS,ICC,JCC,N_CAND,CAND_NM,CAND_CELL_TYPE,CAND_IJK, &
-                                                                      CAND_ICC,CAND_JCC,CAND_CHILD_IFACE,CAND_MASTER_IFC, &
-                                                                      CAND_WALL_IW,CAND_CONN_AXIS,CAND_CONN_AREA, &
-                                                                      CAND_OWNER_NM,CAND_OWNER_CELL_TYPE,CAND_OWNER_IJK, &
-                                                                      CAND_OWNER_ICC,CAND_OWNER_JCC)
-               DO ICAND=1,N_CAND
-                  IF (CAND_OWNER_NM(ICAND) /= NM) CYCLE
-                  IF (CAND_OWNER_CELL_TYPE(ICAND) /= CC_GCELL_REG) CYCLE
-                  IF (.NOT.CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,CAND_OWNER_IJK(IAXIS:KAXIS,ICAND))) CYCLE
-                  CALL CC_GRID_APPEND_UNIQUE_REGULAR_GCELL(N_REG,REG_IJK,CAND_OWNER_IJK(IAXIS:KAXIS,ICAND))
-               ENDDO
-               IF (ALLOCATED(CAND_NM)) &
-                  DEALLOCATE(CAND_NM,CAND_CELL_TYPE,CAND_ICC,CAND_JCC,CAND_CHILD_IFACE,CAND_MASTER_IFC,CAND_WALL_IW, &
-                             CAND_CONN_AXIS,CAND_OWNER_NM,CAND_OWNER_CELL_TYPE,CAND_OWNER_ICC,CAND_OWNER_JCC)
-               IF (ALLOCATED(CAND_IJK)) DEALLOCATE(CAND_IJK)
-               IF (ALLOCATED(CAND_OWNER_IJK)) DEALLOCATE(CAND_OWNER_IJK)
-               IF (ALLOCATED(CAND_CONN_AREA)) DEALLOCATE(CAND_CONN_AREA)
-            ENDDO
-         ENDDO
-      ENDDO
-      ! Neighbor CCVAR is populated globally; NM's WALL exists because this mesh is owned.
-      DO IW=1,M%N_EXTERNAL_WALL_CELLS
-         WC => M%WALL(IW)
-         IF (WC%BOUNDARY_TYPE /= INTERPOLATED_BOUNDARY) CYCLE
-         IF (WC%BC_INDEX < 1) CYCLE
-         EWC => M%EXTERNAL_WALL(IW)
-         NOM = EWC%NOM
-         IF (NOM < 1 .OR. NOM == NM) CYCLE
-         IF (.NOT.ALLOCATED(MESHES(NOM)%CCVAR)) CYCLE
-         BC => M%BOUNDARY_COORD(WC%BC_INDEX)
-         IJK_REG = (/ BC%IIG, BC%JJG, BC%KKG /)
-         IF (.NOT.CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,IJK_REG)) CYCLE
-         NEIGHBOR_HAS_CUT = .FALSE.
-         DO KKO=EWC%KKO_MIN,EWC%KKO_MAX
-            DO JJO=EWC%JJO_MIN,EWC%JJO_MAX
-               DO IIO=EWC%IIO_MIN,EWC%IIO_MAX
-                  IF (MESHES(NOM)%CCVAR(IIO,JJO,KKO,CC_IDCC) > 0) NEIGHBOR_HAS_CUT = .TRUE.
-               ENDDO
-            ENDDO
-         ENDDO
-         IF (.NOT.NEIGHBOR_HAS_CUT) CYCLE
-         CALL CC_GRID_APPEND_UNIQUE_REGULAR_GCELL(N_REG,REG_IJK,IJK_REG)
-      ENDDO
-      IF (N_REG>0) THEN
-         ALLOCATE(REG_LAYER(1:N_REG))
-         REG_LAYER=1
-      ENDIF
-   ENDIF
+   CALL CC_GRID_BUILD_REGULAR_GCELL_HALO(NM,CC_FV_GCELL_HALO_LAYERS,N_REG,REG_IJK,REG_LAYER)
 
    N_REG_GHOST = 0
-   IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE<=CC_CV_SCOPE_IDENTITY) THEN
-      CALL CC_GRID_COLLECT_COUPLING_NBR_IJK(NM,N_REG,REG_IJK,N_REG_GHOST,REG_GHOST_IJK)
-   ENDIF
+   CALL CC_GRID_COLLECT_COUPLING_NBR_IJK(NM,N_REG,REG_IJK,N_REG_GHOST,REG_GHOST_IJK)
 
    M%FV%GCELL%N_CUT = N_CUT
    M%FV%GCELL%N_REG = N_REG
@@ -19791,10 +19794,8 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                ENDIF
                IF (SKIP_FACE) CYCLE
 
-               ! An unresolved gas neighbor inside this mesh is not a physical boundary: it is the
-               ! structured Cartesian row immediately outside the configured identity-scope FV halo.
-               IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE<=CC_CV_SCOPE_IDENTITY .AND. IG_N==0 .AND. &
-                   F_KIND(IF_)==CC_FACE_KIND_GAS .AND. F_NBR_TYPE(IF_)==CC_GCELL_REG) THEN
+               ! An unresolved gas neighbor inside this mesh is the Cartesian row just outside the FV halo.
+               IF (IG_N==0 .AND. F_KIND(IF_)==CC_FACE_KIND_GAS .AND. F_NBR_TYPE(IF_)==CC_GCELL_REG) THEN
                   IF (CC_GRID_REGULAR_GCELL_CANDIDATE_IS_VALID(NM,F_NBR_IJK(IAXIS:KAXIS,IF_))) &
                      F_KIND(IF_)=CC_FACE_KIND_COUPLING
                ENDIF
