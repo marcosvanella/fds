@@ -1,6 +1,6 @@
-# Patch 0011 (DRAFT): `main.f90`, per-mesh dump loop in `FDS_SETUP(MODE=3)`
+# Patch 0011: `main.f90`, per-mesh dump loop in `FDS_SETUP(MODE=3)`
 
-Status: DRAFT. Legacy Mapper confirmed anchors and apply-after-0006 on tip feb101858d (match to line-check-firex-1fb5c300.md / line-check-output-plan.md). Awaiting Architect approval before apply. Apply after 0006 (it edits the `MODE==3` block that 0006 adds). Touches only
+Status: APPLIED (Architect + Legacy Mapper approval). Left `OUT_MESH_DUMPS` / `N_OUT_MESHES` at their defaults (mesh dumps off; output tables sized by `NMESHES`). Order: after 0006; 0007–0009 do not conflict; no driver 0010.
 `Source/main.f90` (one `USE` list entry, one comment, 14 added lines, all inside the `#ifdef WITH_AMREX` branch of `FDS_SETUP`). Step A of `notes/output-plan.md` (A-63 number 0011).
 
 ## FireX re-anchor (merge `8ad685f435`, tip after FireX `1fb5c300`)
@@ -19,11 +19,17 @@ Sources: `docs/upstream-patches/line-check-firex-1fb5c300.md`, `line-check-outpu
   `FDSTL_MESH_DUMPS` is set and the FDS writers are available.
 - Not replicated: the VTK-HDF padding loop and `INITIALIZE_VTKHDF_FILES` of `MAIN_LOOP`, and `IF (CTRL_STOP_STATUS) STOP_STATUS = CTRL_STOP`.
 
+## Applied
+On the FDS-AMReX tree after FireX merge tip `8ad685f435` (order: after 0006; 0007–0009 do not conflict; no driver 0010). `OUT_MESH_DUMPS` remains default-off.
+
 ## Evidence (re-checked after FireX)
 - `patch -p1 --dry-run` clean on merge tip `8ad685f435` / current HEAD (no offset).
 - Preprocessed `main.f90` with `WITH_AMREX` undefined identical to the unpatched file.
 - `USE_AMREX=OFF` bitwise (`check_off_bitwise.sh` on a `git archive` with 0011+0012): `shunn3_32` 1 rank PASS (16 files), `shunn3_4mesh_32` 4 ranks PASS (47 files).
 - `USE_AMREX=ON` with the patch applied: `tests/run_mesh_dumps_check.sh` PASS — `shunn3_32` np1: 24 slice/boundary files, sizes match, 18 bitwise equal to the baseline; `shunn3_4mesh_32` np4: 80 files, sizes match (content not gated on multi-mesh; driver fields are not bitwise after a full run).
+
+- Applied: `patch -p1` clean; `OUT_MESH_DUMPS` default `.FALSE.`.
+- `run_mesh_dumps_check.sh` after apply: `shunn3_32` np1 PASS (24 files, 18 bitwise); `shunn3_4mesh_32` np4 PASS (80 files, list+size; content not gated).
 
 ## Unverified
 - VTK-HDF padding loop and `INITIALIZE_VTKHDF_FILES` not replicated.

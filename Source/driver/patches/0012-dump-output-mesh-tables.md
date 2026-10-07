@@ -1,6 +1,6 @@
-# Patch 0012 (DRAFT): `dump.f90`, output-mesh tables sized by the output mesh count
+# Patch 0012: `dump.f90`, output-mesh tables sized by the output mesh count
 
-Status: DRAFT. Legacy Mapper confirmed anchors (dump.f90:405–451, 2056–2060) and tables-only scope (option (a), first part); follow-on mesh loops stay out of 0012. Independent of 0011; still after base WITH_AMREX hooks. Awaiting Architect approval before apply. Independent of 0011. Touches only `Source/dump.f90` (a file-scope macro,
+Status: APPLIED (Architect + Legacy Mapper approval). Left `OUT_MESH_DUMPS` / `N_OUT_MESHES` at their defaults (mesh dumps off; output tables sized by `NMESHES`). Order: after 0006; 0007–0009 do not conflict; no driver 0010.
 a `USE` line under `#ifdef WITH_AMREX`, and `NMESHES` replaced by `NMESHES_OUT` in the table allocations). Step B of `notes/output-plan.md` (A-63 number 0012), option (a), first part only.
 
 ## FireX re-anchor (merge `8ad685f435`)
@@ -15,11 +15,17 @@ Sources: `docs/upstream-patches/line-check-firex-1fb5c300.md`, `line-check-outpu
 - Insertion points in `dump.f90`: the file-scope macro before `MODULE DUMP`; the `USE` line after `USE COMP_FUNCTIONS`; the allocations of `ASSIGN_FILE_NAMES` (`FN_*`/`LU_*`
   from `FN_XYZ` to the VTK file names, 35 lines); the `XLEVEL/YLEVEL/ZLEVEL` allocations in `WRITE_SMOKEVIEW_FILE`.
 
+## Applied
+On the FDS-AMReX tree after FireX merge tip `8ad685f435` (order: after 0006; 0007–0009 do not conflict; no driver 0010). `OUT_MESH_DUMPS` remains default-off.
+
 ## Evidence (re-checked after FireX)
 - `patch -p1 --dry-run` clean on merge tip `8ad685f435` / current HEAD (no offset); dump.f90:405-451 and 2056-2060 unchanged by FireX.
 - Preprocessed `dump.f90` with `WITH_AMREX` undefined identical to the unpatched file apart from comments/blanks.
 - `USE_AMREX=OFF` bitwise with 0011+0012: `shunn3_32` 1 rank PASS (16 files), `shunn3_4mesh_32` 4 ranks PASS (47 files).
 - `USE_AMREX=ON` with the patch applied: builds; mesh-dump check above exercises the mode-3 loop (0011) with default `N_OUT_MESHES=0` (tables stay `NMESHES`).
+
+- Applied with 0011; default `N_OUT_MESHES=0` (tables sized by `NMESHES`).
+- Mesh-dumps check after apply: see 0011 note.
 
 ## Unverified / not in this patch
 - No run with `N_OUT_MESHES` greater than `NMESHES`.
