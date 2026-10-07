@@ -70,6 +70,8 @@ public:
     LevelRegistry& registry() { return *m_reg; }
     // Levels that advance() steps: those with an FDS binding. 1 until fine-level FDS MESH_TYPE objects exist; the registry may hold more levels (layout, Fields, SideData).
     int num_levels() const;
+    // Finest FDS-bound level index (0 when only level 0 is bound). Role 3 mid-regrid: unbind from this down to 1.
+    int finest_bound() const { return num_levels() - 1; }
     // ---- S12 level binding. bind_level(lev): the registry level `lev` (made by LevelRegistry::make_level, data filled by the transfer) gets FDS fine-box mesh objects (BUILD_FINE_BOX of
     // fds_fine_level.f90, patch 0007 DRAFT), views onto its Fields (FDS_FINE_B_SET_VIEW), a BcStep (ext_ghost on) and the clip scratch; afterwards every per-level stage entry point and the
     // flux hooks accept `lev` (FDS mesh number of box i is fds0 + i + 1 > NMESHES). Levels are bound in order; only the top bound level can be rebound (call it again after a regrid that remade it,

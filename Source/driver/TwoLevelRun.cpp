@@ -17,6 +17,8 @@
 #include "PressureBackendSolver.H"
 #include "RegistryTransfer.H"
 #include "RegridAmrCore.H"
+#include <AMReX_MultiFabUtil.H>
+#include <AMReX_PlotFileUtil.H>
 #include "TimeLoopWiring.H"
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
@@ -68,6 +70,35 @@ std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl
 
 }  // namespace
 
+namespace {
+
+// Cell-centred plot Multifab per level: RHO, U, V, W (faces averaged to cells). One WriteMultiLevelPlotfile for the hierarchy.
+void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, int nl, double t, int step)
+{
+    amrex::Vector<amrex::MultiFab> mf(nl);
+    amrex::Vector<const amrex::MultiFab*> pmf(nl);
+    amrex::Vector<amrex::Geometry> geom(nl);
+    amrex::Vector<int> level_steps(nl, step);
+    amrex::Vector<amrex::IntVect> ref_ratio(std::max(nl - 1, 0));
+    for (int l = 0; l < nl; ++l) {
+        const Level& Lv = reg.level(l);
+        Fields& F = reg.fields(l);
+        mf[l].define(Lv.ba, Lv.dm, 4, 0);
+        amrex::MultiFab::Copy(mf[l], F["RHO"], 0, 0, 1, 0);
+        amrex::Array<const amrex::MultiFab*, 3> faces{&F["U"], &F["V"], &F["W"]};
+        amrex::average_face_to_cellcenter(mf[l], 1, faces);
+        pmf[l] = &mf[l];
+        geom[l] = Lv.geom;
+        if (l + 1 < nl) ref_ratio[l] = reg.level(l + 1).ref_ratio_from_parent;
+    }
+    amrex::Vector<std::string> names{"RHO", "U", "V", "W"};
+    amrex::WriteMultiLevelPlotfile(path, nl, pmf, names, geom, t, level_steps, ref_ratio);
+    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W cell-centred, " << nl << " level(s))\n";
+}
+
+}  // namespace
+
+
 int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLevelOptions& o)
 {
     int fails = 0;
@@ -99,7 +130,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     std::ostringstream amr;
     amr << "&AMR MAX_LEVEL=" << o.max_level << ", REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize
-        << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=0, POST_REGRID_PROJECTION='" << o.projection << "' /\n";
+        << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "' /\n";
     amr << std::setprecision(17) << "&AMR_REGION XB=";
     for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
     amr << ", LEVEL=" << o.max_level << " /\n";
@@ -262,29 +293,61 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel\n"); }
     double worst_mass = 0.0, worst_div = 0.0;
     std::vector<double> bylev;
+    int nl_now = nl;
     for (int s = 1; s <= o.steps; ++s) {
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
-        const std::vector<double> m = composite_mass(reg, nl, ns);
+        // Mid-run adaptive regrid (Role 3 call shape): gate on AmrParams.regrid_interval; unbind top-down via finest_bound;
+        // regrid_dynamic brackets LevelListener — do NOT call reg.begin_regrid/end_regrid here.
+        {
+            const int ri = core.amr_params().regrid_interval;
+            if (ri > 0 && s % ri == 0) {
+                const int fb = loop.finest_bound();
+                for (int l = fb; l >= 1; --l) loop.unbind_level(l);
+                const bool changed = core.regrid_dynamic(loop.time());
+                const int finest = core.finestLevel();
+                bool rebound = false;
+                for (int l = 1; l <= finest; ++l) { loop.bind_level(l); rebound = true; }
+                if (finest >= 1) {
+                    fdsrt::install_cf_ghost_hooks(loop, finest, fdsrt::ThermoProvider(), &cfs);
+                    loop.set_flux_overwrite(o.overwrite);
+                }
+                if (changed || rebound) loop.prime_levels();
+                nl_now = finest + 1;
+                amrex::Print() << tag << " mid-regrid after step " << s << " t " << loop.time()
+                               << " changed " << changed << " finest " << finest
+                               << " boxes L1 " << (finest >= 1 ? reg.level(1).ba.size() : 0) << "\n";
+                // Mid-run dump shares the same write helper (Architect: regrid dump path).
+                if (!o.plotfile.empty()) {
+                    const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
+                    write_rho_vel_plotfile(plt, reg, nl_now, loop.time(), loop.icyc());
+                }
+            }
+        }
+        const std::vector<double> m = composite_mass(reg, nl_now, ns);
         const double dm = (m[0] - m0[0]) / m0[0];
-        std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl);
+        std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl_now);
         const double dv = fdsrt::composite_divergence_error(lv, &bylev);
         worst_mass = std::max(worst_mass, std::abs(dm));
         worst_div = std::max(worst_div, dv);
         const double dts = loop.steps().empty() ? 0.0 : loop.steps().back().dt;
         if (lf) {
             std::fprintf(lf, "%d,%.9g,%.9g,%.17g,%.6e,%.6e", s, loop.time(), dts, m[0], dm, dv);
-            for (int l = 0; l < nl; ++l) std::fprintf(lf, ",%.6e", l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
+            for (int l = 0; l < nl_now; ++l) std::fprintf(lf, ",%.6e", l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
             std::fprintf(lf, ",%.3e\n", loop.composite_report().removed_rel);
         }
         if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps)) {
             amrex::Print() << tag << " step " << s << " t " << loop.time() << " dt " << dts << " composite mass change " << dm << " max|div u - D| " << dv;
-            for (int l = 0; l < nl; ++l) amrex::Print() << " L" << l << " " << (l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
+            for (int l = 0; l < nl_now; ++l) amrex::Print() << " L" << l << " " << (l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
             amrex::Print() << "\n";
         }
     }
     if (lf) std::fclose(lf);
     loop.write_perf();
-    const std::vector<double> m1 = composite_mass(reg, nl, ns);
+    if (!o.plotfile.empty() && fails == 0) {
+        const std::string plt = o.plotfile + "/plt_" + o.chid + "_final";
+        write_rho_vel_plotfile(plt, reg, loop.num_levels(), loop.time(), loop.icyc());
+    }
+    const std::vector<double> m1 = composite_mass(reg, loop.num_levels(), ns);
     const fdsamr::TimeLoop::CompositeReport& cr = loop.composite_report();
     amrex::Print() << tag << " RESULT steps " << loop.steps().size() << " composite mass " << m0[0] << " -> " << m1[0] << " relative change " << (m1[0] - m0[0]) / m0[0] << " (worst over steps " << worst_mass << ")\n";
     for (int n = 0; n < ns; ++n)

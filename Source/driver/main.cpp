@@ -200,7 +200,7 @@ int main(int argc, char** argv)
 #endif
             if (argc > 2 && std::strcmp(argv[2], "--two-level-run") == 0) {
                 // --two-level-run [--levels N] [--steps N] [--patch i0 i1 k0 k1] [--patch2 i0 i1 k0 k1] [--ratio R] [--maxsize M] [--blocking B]
-                //   [--projection ON|AUTO|OFF] [--no-overwrite] [--bind-only] [--exact-zone-sums] [--outdir D] [--chid C]: S14 / D-053 (N levels = max_level+1, default 2)
+                //   [--projection ON|AUTO|OFF] [--no-overwrite] [--bind-only] [--regrid-every N] [--plotfile [DIR]] [--exact-zone-sums] [--outdir D] [--chid C]: S14 / D-053 (N levels = max_level+1, default 2)
                 fdsamr::TwoLevelOptions to;
                 fdsamr::RunOptions ro;
                 ro.quiet = true;
@@ -215,6 +215,11 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--projection") == 0 && i + 1 < argc) to.projection = argv[++i];
                     else if (std::strcmp(argv[i], "--no-overwrite") == 0) to.overwrite = false;
                     else if (std::strcmp(argv[i], "--bind-only") == 0) to.bind_only = true;
+                    else if (std::strcmp(argv[i], "--regrid-every") == 0 && i + 1 < argc) to.regrid_every = std::atoi(argv[++i]);
+                    else if (std::strcmp(argv[i], "--plotfile") == 0) {
+                        if (i + 1 < argc && argv[i + 1][0] != '-') to.plotfile = argv[++i];
+                        else to.plotfile = to.outdir;   // --plotfile alone: write under --outdir
+                    }
                     else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
                     else if (std::strcmp(argv[i], "--stage-boundary-test") == 0) to.boundary_test = (i + 1 < argc && std::strcmp(argv[i + 1], "legacy") == 0) ? (++i, 2) : 1;
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) { to.outdir = argv[++i]; ro.outdir = to.outdir; }
