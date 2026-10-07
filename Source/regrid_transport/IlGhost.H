@@ -37,11 +37,17 @@ struct IlGhostTable {
     std::vector<int> nic_min, nic_max;        // per wall, 1-based positions; nic_max = nic_min - 1 when no box covers the ghost cell (not an interpolated wall)
     std::vector<int> ils_box, iio, jjo, kko;  // per position: sender box (1-based) and sender cell in the sender's own 1-based index space
     std::vector<int> pair_lo;                 // pair p covers positions pair_lo[p] .. pair_lo[p+1]-1 (0-based); one more entry than pairs
+    std::vector<int> pair_recv;               // 0-based receiver box of pair p (sender = ils_box[pair_lo[p]] - 1)
     int nicr() const { return static_cast<int>(ils_box.size()); }
 };
 
 // L1251 entry point. ratio[l] = refinement ratio from level l to level l+1 (per direction, 1 in a single-cell direction).
 IlGhostTable build_il_ghost_table(const std::vector<IlBox>& boxes, const std::vector<amrex::IntVect>& ratio, const std::vector<IlWall>& walls);
+
+// Multi-rank ILS→ILR exchange. Layout (ghost-fastest, matches test_il_ghost / FDS): index = ll + nicr * (n + nra * ibnd).
+// Each pair_lo slab is one message (full NRA×NSB); direction sender-box rank → receiver-box rank. Same-rank pairs: memcpy the slabs.
+// box_rank[b] = owning rank of box b (size = number of boxes). Pack of swept angles into ILS is the caller's job; this only copies ILS into ILR.
+void exchange_il_ghost(const IlGhostTable& t, const int* box_rank, int nra, int nsb, double* ils, double* ilr);
 
 }  // namespace fdsrt
 

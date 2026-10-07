@@ -173,6 +173,7 @@ if (BUILD_TESTING)
         add_executable(test_il_ghost tests/test_il_ghost.cpp)
         target_link_libraries(test_il_ghost PRIVATE fds_regrid_transport_amrex)
         add_test(NAME regrid_transport_il_ghost COMMAND test_il_ghost)
+        add_test(NAME regrid_transport_il_ghost_np2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:test_il_ghost>)
         add_test(NAME regrid_transport_regrid_core_ranks COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_regrid_rank_check.sh $<TARGET_FILE:test_regrid_core> ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG})
         set_tests_properties(regrid_transport_regrid_core regrid_transport_regrid_core_np4 regrid_transport_regrid_core_ranks PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=1")   # one thread per rank: the test is small and oversubscribed threads only slow it
 

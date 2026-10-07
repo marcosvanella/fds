@@ -2,10 +2,12 @@
 // main.f90:2191-2254). Per case: every box-face ghost cell is a wall; the table's sender cells must equal the FDS cells in the FDS order; values are
 // packed as s5rad_ils does, copied ILS -> ILR (the lag), and the s5rad_wall1 mean must equal the FDS mean of IL_R bitwise. Plus pair contiguity,
 // NIC counts (coarse <- fine: tangential ratio product, fine <- coarse: 1), non-negativity, and the level search order on full (overlapping) levels.
+// Also exchange_il_ghost: 1-rank same-rank slab copy and 2-rank MPI pair slabs (bitwise ILS→ILR on the receiver).
 #include "IlGhost.H"
 
 #include <AMReX.H>
 #include <AMReX_Loop.H>
+#include <AMReX_ParallelDescriptor.H>
 
 #include <cmath>
 #include <cstdio>
@@ -133,6 +135,7 @@ void run(const Case& c, int expect_pairs)
     // pairs: contiguous, one sender box each, ascending (receiver, sender); walls of a pair consecutive in caller order
     const int np = static_cast<int>(t.pair_lo.size()) - 1;
     check(np == expect_pairs && t.pair_lo.front() == 0 && t.pair_lo.back() == nicr, "pair count and cover");
+    check(static_cast<int>(t.pair_recv.size()) == np, "pair_recv size");
     std::vector<int> recv(nicr, -1);
     for (int w = 0; w < nw; ++w)
         for (int ll = t.nic_min[w] - 1; ll < t.nic_max[w]; ++ll) recv[ll] = walls[w].box;
@@ -140,6 +143,7 @@ void run(const Case& c, int expect_pairs)
     for (int p = 0; p < np; ++p) {
         const std::pair<int, int> key(recv[t.pair_lo[p]], t.ils_box[t.pair_lo[p]]);
         check(prev < key, "pairs ascending (receiver, sender)");
+        check(t.pair_recv[p] == key.first, "pair_recv matches receiver");
         for (int ll = t.pair_lo[p]; ll < t.pair_lo[p + 1]; ++ll) check(recv[ll] == key.first && t.ils_box[ll] == key.second, "one pair per range");
         prev = key;
     }
@@ -151,7 +155,51 @@ void run(const Case& c, int expect_pairs)
         lastw = w;
         last = t.nic_max[w];
     }
-    std::printf("%-28s walls %4d interpolated %4d NICR %4d pairs %2d\n", c.name, nw, nint, nicr, np);
+    if (amrex::ParallelDescriptor::IOProcessor())
+        std::printf("%-28s walls %4d interpolated %4d NICR %4d pairs %2d\n", c.name, nw, nint, nicr, np);
+}
+
+// Two equal-level boxes sharing an x-face. NProcs==1: both on rank 0 (same-rank memcpy). NProcs>=2: box 0 on rank 0, box 1 on rank 1 (MPI).
+void run_exchange()
+{
+    using B = amrex::Box;
+    using I = amrex::IntVect;
+    const int me = amrex::ParallelDescriptor::MyProc();
+    const int nprocs = amrex::ParallelDescriptor::NProcs();
+    const std::vector<IlBox> boxes = {{0, B(I(0, 0, 0), I(3, 3, 3))}, {0, B(I(4, 0, 0), I(7, 3, 3))}};
+    std::vector<IlWall> walls;
+    for (int j = 0; j <= 3; ++j)
+        for (int k = 0; k <= 3; ++k) {
+            walls.push_back({0, -1, I(4, j, k)});
+            walls.push_back({1, 1, I(3, j, k)});
+        }
+    const IlGhostTable t = build_il_ghost_table(boxes, {}, walls);
+    const int nicr = t.nicr(), nra = 2, nsb = 2, np = static_cast<int>(t.pair_lo.size()) - 1;
+    check(np == 2 && nicr == 32, "exchange geometry: 2 pairs, 32 positions");
+    const int box_rank[2] = {0, nprocs > 1 ? 1 : 0};
+
+    std::vector<double> ils(static_cast<size_t>(nicr) * nra * nsb, -1.0), ilr(static_cast<size_t>(nicr) * nra * nsb, -2.0);
+    for (int p = 0; p < np; ++p) {
+        if (box_rank[t.ils_box[t.pair_lo[p]] - 1] != me) continue;
+        for (int ib = 0; ib < nsb; ++ib)
+            for (int n = 0; n < nra; ++n)
+                for (int ll = t.pair_lo[p]; ll < t.pair_lo[p + 1]; ++ll)
+                    ils[ll + nicr * (n + nra * ib)] = 1000.0 * ll + 10.0 * n + ib + 0.25;
+    }
+    exchange_il_ghost(t, box_rank, nra, nsb, ils.data(), ilr.data());
+    int nchk = 0;
+    for (int p = 0; p < np; ++p) {
+        if (box_rank[t.pair_recv[p]] != me) continue;
+        for (int ib = 0; ib < nsb; ++ib)
+            for (int n = 0; n < nra; ++n)
+                for (int ll = t.pair_lo[p]; ll < t.pair_lo[p + 1]; ++ll) {
+                    const double expect = 1000.0 * ll + 10.0 * n + ib + 0.25;
+                    check(ilr[ll + nicr * (n + nra * ib)] == expect, "exchange ILR matches sender ILS bitwise");
+                    ++nchk;
+                }
+    }
+    if (amrex::ParallelDescriptor::IOProcessor())
+        std::printf("exchange %-20s pairs %d checked %d (nprocs %d)\n", nprocs > 1 ? "2-rank MPI" : "1-rank same-rank", np, nchk, nprocs);
 }
 }  // namespace
 
@@ -161,26 +209,33 @@ int main(int argc, char* argv[])
     {
         using B = amrex::Box;
         using I = amrex::IntVect;
-        // equal level, three boxes; the low y face of box 2 spans boxes 0 and 1 (interleaved senders in caller order)
-        run({"equal level 3D", {{0, B(I(0, 0, 0), I(3, 2, 1))}, {0, B(I(4, 0, 0), I(7, 2, 1))}, {0, B(I(0, 3, 0), I(7, 4, 1))}}, {}}, 6);
-        // coarse/fine ratio 2: coarse | fine | coarse along x
-        run({"coarse/fine 3D ratio 2", {{0, B(I(0, 0, 0), I(3, 3, 3))}, {1, B(I(8, 0, 0), I(11, 7, 7))}, {0, B(I(6, 0, 0), I(7, 3, 3))}}, {I(2)}}, 4);
-        // 2D (one cell in y), ratio (4,1,4): coarse | fine along x, a coarse box above the fine one in z
-        run({"coarse/fine 2D ratio 4", {{0, B(I(0, 0, 0), I(3, 0, 3))}, {1, B(I(16, 0, 0), I(23, 0, 15))}, {0, B(I(4, 0, 4), I(5, 0, 5))}}, {I(4, 1, 4)}}, 4);
-        // two levels, ratio 2 then 3 (level 2 inside level 1 tiling): coarse | level-1 | level-2 along x
-        run({"three levels ratio 2,3", {{0, B(I(0, 0, 0), I(1, 1, 1))}, {1, B(I(4, 0, 0), I(5, 3, 3))}, {2, B(I(18, 0, 0), I(23, 11, 11))}}, {I(2), I(3)}}, 4);
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            // equal level, three boxes; the low y face of box 2 spans boxes 0 and 1 (interleaved senders in caller order)
+            run({"equal level 3D", {{0, B(I(0, 0, 0), I(3, 2, 1))}, {0, B(I(4, 0, 0), I(7, 2, 1))}, {0, B(I(0, 3, 0), I(7, 4, 1))}}, {}}, 6);
+            // coarse/fine ratio 2: coarse | fine | coarse along x
+            run({"coarse/fine 3D ratio 2", {{0, B(I(0, 0, 0), I(3, 3, 3))}, {1, B(I(8, 0, 0), I(11, 7, 7))}, {0, B(I(6, 0, 0), I(7, 3, 3))}}, {I(2)}}, 4);
+            // 2D (one cell in y), ratio (4,1,4): coarse | fine along x, a coarse box above the fine one in z
+            run({"coarse/fine 2D ratio 4", {{0, B(I(0, 0, 0), I(3, 0, 3))}, {1, B(I(16, 0, 0), I(23, 0, 15))}, {0, B(I(4, 0, 4), I(5, 0, 5))}}, {I(4, 1, 4)}}, 4);
+            // two levels, ratio 2 then 3 (level 2 inside level 1 tiling): coarse | level-1 | level-2 along x
+            run({"three levels ratio 2,3", {{0, B(I(0, 0, 0), I(1, 1, 1))}, {1, B(I(4, 0, 0), I(5, 3, 3))}, {2, B(I(18, 0, 0), I(23, 11, 11))}}, {I(2), I(3)}}, 4);
 
-        // full levels (coarse under fine): a box takes its ghost from its own level first, then the coarser one, never from the finer one
-        const std::vector<IlBox> full = {{0, B(I(0, 0, 0), I(3, 3, 3))}, {0, B(I(4, 0, 0), I(7, 3, 3))}, {1, B(I(6, 0, 0), I(9, 7, 7))}};
-        const std::vector<IlWall> fw = {{0, -1, I(4, 1, 1)}, {2, 1, I(5, 3, 2)}, {2, -1, I(10, 3, 2)}, {2, -2, I(7, 8, 2)}};
-        const IlGhostTable ft = build_il_ghost_table(full, {I(2)}, fw);
-        check(ft.nic_min[0] == ft.nic_max[0] && ft.ils_box[ft.nic_min[0] - 1] == 2 && ft.iio[ft.nic_min[0] - 1] == 1, "full levels: coarse wall from the coarse neighbour");
-        check(ft.nic_min[1] == ft.nic_max[1] && ft.ils_box[ft.nic_min[1] - 1] == 1 && ft.iio[ft.nic_min[1] - 1] == 3 && ft.jjo[ft.nic_min[1] - 1] == 2,
-              "full levels: fine wall from the containing coarse cell");
-        check(ft.nic_min[2] == ft.nic_max[2] && ft.ils_box[ft.nic_min[2] - 1] == 2 && ft.iio[ft.nic_min[2] - 1] == 2, "full levels: fine wall, other coarse box");
-        check(ft.nic_max[3] == ft.nic_min[3] - 1, "full levels: outside the domain, no neighbour");
+            // full levels (coarse under fine): a box takes its ghost from its own level first, then the coarser one, never from the finer one
+            const std::vector<IlBox> full = {{0, B(I(0, 0, 0), I(3, 3, 3))}, {0, B(I(4, 0, 0), I(7, 3, 3))}, {1, B(I(6, 0, 0), I(9, 7, 7))}};
+            const std::vector<IlWall> fw = {{0, -1, I(4, 1, 1)}, {2, 1, I(5, 3, 2)}, {2, -1, I(10, 3, 2)}, {2, -2, I(7, 8, 2)}};
+            const IlGhostTable ft = build_il_ghost_table(full, {I(2)}, fw);
+            check(ft.nic_min[0] == ft.nic_max[0] && ft.ils_box[ft.nic_min[0] - 1] == 2 && ft.iio[ft.nic_min[0] - 1] == 1, "full levels: coarse wall from the coarse neighbour");
+            check(ft.nic_min[1] == ft.nic_max[1] && ft.ils_box[ft.nic_min[1] - 1] == 1 && ft.iio[ft.nic_min[1] - 1] == 3 && ft.jjo[ft.nic_min[1] - 1] == 2,
+                  "full levels: fine wall from the containing coarse cell");
+            check(ft.nic_min[2] == ft.nic_max[2] && ft.ils_box[ft.nic_min[2] - 1] == 2 && ft.iio[ft.nic_min[2] - 1] == 2, "full levels: fine wall, other coarse box");
+            check(ft.nic_max[3] == ft.nic_min[3] - 1, "full levels: outside the domain, no neighbour");
+        }
+        run_exchange();
+        amrex::ParallelDescriptor::ReduceIntSum(fails);
+        amrex::ParallelDescriptor::ReduceIntSum(checks);
+        if (amrex::ParallelDescriptor::IOProcessor())
+            std::printf("test_il_ghost: %d checks, %d failed\n", checks, fails);
     }
+    const int rc = fails == 0 ? 0 : 1;
     amrex::Finalize();
-    std::printf("test_il_ghost: %d checks, %d failed\n", checks, fails);
-    return fails == 0 ? 0 : 1;
+    return rc;
 }

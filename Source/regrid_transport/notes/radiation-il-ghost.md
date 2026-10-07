@@ -45,9 +45,14 @@ The AMR replacement of FDS's neighbour-mesh intensities `IL_S`/`IL_R` (docs radi
   - the full-level search order.
 - Result: 7370 checks, 0 failed. Negative control: cutting the wrong fine layer gives 660 failures.
 
+## Multi-rank exchange (written)
+- API: `fdsrt::exchange_il_ghost(t, box_rank, nra, nsb, ils, ilr)`. Layout ghost-fastest: `index = ll + nicr * (n + nra * ibnd)`.
+- Global NICR / `W_NIC_*` / `pair_lo` from `build_il_ghost_table` on every rank; `pair_recv[p]` is the 0-based receiver box (sender = `ils_box[pair_lo[p]] - 1`). No row remap.
+- Ranks that own a sender or receiver box allocate full `ILS`/`ILR(NICR,NRA,NSB)`; untouched rows may stay undefined.
+- Each message = one `pair_lo[p]..pair_lo[p+1]-1` slab over all `(NRA,NSB)`, packed contiguous (nplane segments of length `hi-lo`). Direction: sender-box rank → receiver-box rank into the matching `ILR` slab. AMReX `ParallelDescriptor` Asend/Arecv.
+- Same-rank pairs: `memcpy` those slabs. Pack of swept angles into `ILS` is the caller's job; exchange only copies packed `ILS` into `ILR`. Full `(NRA,NSB)` so unswept angles keep prior `ILS`. No pointer swap.
+- Host check: `test_il_ghost` (1-rank same-rank copy + existing 7370-check); `regrid_transport_il_ghost_np2` (2 ranks, one box each).
+
 ## Not done here (interface)
-- **Multi-rank exchange.** Each `pair_lo` range, over all (`N`, `IBND`), is the one-way message from the sender box's rank to the receiver box's rank. It is packed as `(range, NRA, NSB)`, contiguous.
-  - The MPI send and receive are not written. They need the sweep host's box-to-rank layout of `ILS`/`ILR` (all boxes on every rank, or rank-local rows), which is the Radiation Lead's choice.
-  - On one rank, the whole-array copy above is the exchange.
 - **Wall list.** The full wall list and its `W_BTYPE = INTERPOLATED_BOUNDARY` marking stay with the sweep host's wall table. A wall is interpolated exactly when its range is non-empty.
 - **Which boxes are swept** (a composite tiling or full levels) is the Radiation Lead's call. The table supports both.
