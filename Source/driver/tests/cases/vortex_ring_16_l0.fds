@@ -1,0 +1,29 @@
+! 3-D vortex ring, level-0 only (driver --two-level-run grows fine via TAG_VORT).
+! IC: Rosenhead Biot-Savart ring (see make_vortex_ring_case.py). Self-advecting (no FREEZE_VELOCITY).
+! UVW_FILE + PERIODIC_TEST=2 (same path as csmag_32 / make_periodic_case.py).
+! Hint: undivided |ω| peak ~ 7.8595; try --tag-vort auto or --tag-vort in [1.965, 3.93].
+! See Source/driver/notes/vortex-ring-owner-show.md.
+
+&HEAD CHID='vortex_ring_16_l0', TITLE='3-D vortex ring cold-flow, 16^3, owner-show TAG_VORT adaptive' /
+
+&MESH IJK=16,16,16, XB=0.0,1,0.0,1,0.0,1 /
+
+&TIME T_END=2.0 /
+
+&MISC SIMULATION_MODE='DNS', STRATIFICATION=.FALSE., NOISE=.FALSE., CFL_MAX=0.25,
+      PERIODIC_TEST=2, UVW_FILE='vortex_ring_16_uvw.csv' /
+
+&PRES VELOCITY_TOLERANCE=1.E-6, MAX_PRESSURE_ITERATIONS=100 /
+
+&RADI RADIATION=.FALSE. /
+
+&SPEC ID='BACKGROUND', BACKGROUND=.TRUE., MW=28.0, VISCOSITY=1.0E-4, DIFFUSIVITY=1.0E-4, SPECIFIC_HEAT=1.0 /
+
+&VENT PBX=0, SURF_ID='PERIODIC' /
+&VENT PBX=1, SURF_ID='PERIODIC' /
+&VENT PBY=0, SURF_ID='PERIODIC' /
+&VENT PBY=1, SURF_ID='PERIODIC' /
+&VENT PBZ=0, SURF_ID='PERIODIC' /
+&VENT PBZ=1, SURF_ID='PERIODIC' /
+
+&TAIL /

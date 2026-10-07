@@ -100,6 +100,45 @@ void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, int nl,
 }  // namespace
 
 
+
+namespace {
+
+// Cell-centred undivided |ω| from face U,V,W (FDS dump.f90 vorticity without /dx).
+// ωx = (W_{j+1}-W_j) - (V_{k+1}-V_k), cyclic. Thin directions contribute 0.
+void fill_undivided_vorticity(LevelRegistry& reg, int nl)
+{
+    for (int l = 0; l < nl; ++l) {
+        Fields& F = reg.fields(l);
+        F.ensure("VORT");
+        const amrex::Periodicity per = reg.level(l).geom.periodicity();
+        F["U"].FillBoundary(per);
+        F["V"].FillBoundary(per);
+        F["W"].FillBoundary(per);
+        const amrex::Box dom = reg.level(l).geom.Domain();
+        const int dx_on = (dom.length(0) > 1) ? 1 : 0;
+        const int dy_on = (dom.length(1) > 1) ? 1 : 0;
+        const int dz_on = (dom.length(2) > 1) ? 1 : 0;
+        amrex::MultiFab& Vo = F["VORT"];
+        const amrex::MultiFab& U = F["U"];
+        const amrex::MultiFab& V = F["V"];
+        const amrex::MultiFab& W = F["W"];
+        for (amrex::MFIter mfi(Vo); mfi.isValid(); ++mfi) {
+            auto vo = Vo.array(mfi);
+            auto u = U.const_array(mfi);
+            auto v = V.const_array(mfi);
+            auto w = W.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                const double ox = dy_on * (w(i, j + 1, k) - w(i, j, k)) - dz_on * (v(i, j, k + 1) - v(i, j, k));
+                const double oy = dz_on * (u(i, j, k + 1) - u(i, j, k)) - dx_on * (w(i + 1, j, k) - w(i, j, k));
+                const double oz = dx_on * (v(i + 1, j, k) - v(i, j, k)) - dy_on * (u(i, j + 1, k) - u(i, j, k));
+                vo(i, j, k) = std::sqrt(ox * ox + oy * oy + oz * oz);
+            });
+        }
+    }
+}
+
+}  // namespace
+
 int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLevelOptions& o)
 {
     int fails = 0;
@@ -132,11 +171,27 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     std::ostringstream amr;
     amr << "&AMR MAX_LEVEL=" << o.max_level << ", REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize
         << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "'";
-    // Adaptive: TAG_* so ErrorEst follows the tracer; static (regrid_every==0) keeps nested set_tag_function only.
-    if (o.regrid_every > 0) amr << ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=0.05, TAG_KEEP=0.8";
+    // Adaptive TAG_*: vortex-ring TAG_VORT path, else blob TAG_SPEC_*. Static (regrid_every==0) uses nested set_tag_function only.
+    const bool use_tag_vort = o.tag_vort_auto || !std::isnan(o.tag_vort);
+    double tag_vort_thr = o.tag_vort;
+    if (o.regrid_every > 0 && use_tag_vort) {
+        fill_undivided_vorticity(reg, 1);   // L0 |ω| before AmrParams (auto thr needs max)
+        if (o.tag_vort_auto) {
+            tag_vort_thr = 0.35 * reg.fields(0)["VORT"].max(0, 0);   // MultiFab::max is global
+            amrex::Print() << tag << ": TAG_VORT auto thr = 0.35 * max|VORT|_L0 = " << tag_vort_thr << "\n";
+        }
+        amr << ", TAG_VORT=" << std::setprecision(17) << tag_vort_thr << ", TAG_KEEP=0.8";
+    } else if (o.regrid_every > 0) {
+        amr << ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=0.05, TAG_KEEP=0.8";
+    }
     amr << " /\n";
+    // Vortex adaptive: whole-domain refinable region so the ring can leave the static patch.
     amr << std::setprecision(17) << "&AMR_REGION XB=";
-    for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
+    if (use_tag_vort) {
+        for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) << "," << l0.geom.ProbHi(d) << (d < 2 ? "," : "");
+    } else {
+        for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
+    }
     amr << ", LEVEL=" << o.max_level << " /\n";
     fdsrt::Report rep;
     fdsrt::AmrParams ap = fdsrt::parse_amr_params(amr.str(), rep);
@@ -201,6 +256,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         // D-090: TAG_HRRPUV field — HRRPUV if registered, else FDS Q (W/m3; thr×1000 in apply_tag_criteria)
         if (F.has("HRRPUV")) f.hrrpuv = &F["HRRPUV"];
         else if (F.has("Q")) f.hrrpuv = &F["Q"];
+        if (F.has("VORT")) { F["VORT"].FillBoundary(per); f.vort = &F["VORT"]; }
         for (int d = 0; d < 3; ++d) f.dirs[d] = (dom.length(d) == 1) ? 0 : 1;
         return f;
     });
@@ -234,6 +290,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     fdsrt::install_post_regrid_projection(core, reg, pst);   // D-063: the hook of RegridAmrCore::regrid_dynamic
     // One AmrCore::regrid grows at most one new fine level; repeat until max_level (or stuck).
     for (int pass = 0; pass < o.max_level; ++pass) {
+        if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
         core.regrid_dynamic(0.0);
         if (core.finestLevel() >= o.max_level) break;
         if (pass > 0 && !core.last_outcome().changed) break;
@@ -335,6 +392,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             if (ri > 0 && s % ri == 0) {
                 const int fb = loop.finest_bound();
                 for (int l = fb; l >= 1; --l) loop.unbind_level(l);
+                if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
                 const bool changed = core.regrid_dynamic(loop.time());
                 const int finest = core.finestLevel();
                 bool rebound = false;
