@@ -1472,6 +1472,8 @@ struct TimeLoop::Impl {
         stage_raw("c_prevflux", {"RHOS", "US", "VS", "WS", "MU", "KRES", "H", "HS", "ZZS", "TMP", "RHO"});
         for_levels([&](int) { s_vflux(false); });
         stage("c_vflux", {"FVX", "FVZ"});
+        // WP1b / 7.13b: edge tables + vorticity/stress work arrays right after VELOCITY_FLUX (corrector); FDSTL_STAGES=<icyc>
+        stage_scratch("c_vfluxE", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"DS", 3}, {"FVX", 3}, {"FVY", 3}, {"FVZ", 3}, {"ED_OMEGA", 2}, {"ED_TAU", 2}, {"CE_EDGE_INDEX", 4}});
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
@@ -1579,7 +1581,7 @@ struct TimeLoop::Impl {
         }
     }
 
-    // Diagnostic (FDSTL_STAGES=<icyc>): Fortran-side scratch arrays that are not registered (FX FY FZ, WORK1..9, SWORK1..4, DEL_RHO_D_DEL_Z), the mesh metrics and the species tables,
+    // Diagnostic (FDSTL_STAGES=<icyc>): Fortran-side scratch arrays that are not registered (FX FY FZ, WORK1..9, SWORK1..4, DEL_RHO_D_DEL_Z, CE_EDGE_INDEX, ED_OMEGA, ED_TAU), the mesh metrics and the species tables,
     // read through fds_k_xfer (mode 3) with the box's own allocation bounds. One file per box and array: scr_<tag>_<name>_b<box>.bin = int32 header[16] {rank, lb[4], ub[4], 0..}
     // followed by float64 data (first index fastest); the tables and metrics are written once per run under the tag "static" (box 0 only for the tables).
     void stage_scratch(const char* tag, std::initializer_list<std::pair<const char*, int>> names, bool tables = false)
