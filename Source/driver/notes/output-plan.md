@@ -22,24 +22,25 @@ G = global (reductions over meshes and ranks), R = restart.
 | `ADD_EXTERIOR_VENTS` | dump.f90:2831 (2843) | S | adds exterior `VENT`s per mesh for the `.smv` | follows the output mesh set | with 0012 |
 | `WRITE_STL_FILE` | dump.f90:1575 (1615, 1627) | S | geometry output, mesh loop | unchanged (geometry, level 0) | none |
 | `INITIALIZE_DIAGNOSTIC_FILE` | dump.f90:3037 (3085, 3091, 3782) | S | `.out` header per mesh | level-0 meshes (diagnostics are not output meshes) | none |
-| `EXCHANGE_NSLICE_INFO`, `EXCHANGE_NPATCH_INFO`, `EXCHANGE_NOBST_INFO` | main.f90:4872, 5007, 4794 | S | MPI exchange of per-mesh slice, boundary-patch and OBST counts for the **VTK** output (not the `.smv`) | output meshes | patch 0012 |
+| `EXCHANGE_NSLICE_INFO`, `EXCHANGE_NPATCH_INFO`, `EXCHANGE_NOBST_INFO` | main.f90:4906, 5041, 4828 | S | MPI exchange of per-mesh slice, boundary-patch and OBST counts for the **VTK** output (not the `.smv`) | output meshes | patch 0012 |
 | `INITIALIZE_OUTPUT_CLOCKS`, `SET_OUTPUT_CLOCK` | func.f90:432, 496 | S | `SLCF_COUNTER(NM)`, `BNDF_COUNTER`, ... allocated over the rank's mesh range (`LOWER_MESH_INDEX:UPPER_MESH_INDEX`), not `1:NMESHES` | output meshes | patch 0012 |
 | `INITIALIZE_MESH_DUMPS(NM)`, `INITIALIZE_GLOBAL_DUMPS` | dump.f90:963, 627 | S | opens and headers the per-mesh files | output meshes | patch 0012 |
-| `MPI_INITIALIZATION_CHORES` | main.f90:1334 | S | per-mesh MPI tables (`PROCESS`, counts) | compute meshes; only the output exchange routines above change | none |
+| `MPI_INITIALIZATION_CHORES` | main.f90:1337 | S | per-mesh MPI tables (`PROCESS`, counts) | compute meshes; only the output exchange routines above change | none |
 | `DUMP_MESH_OUTPUTS` | dump.f90:77 | P | per mesh `NM`: clocks `*_COUNTER(NM)`, calls the writers below | the writers run on a filled output mesh (D8 stage 1) | patch 0011 (call it in mode 3) |
 | `DUMP_SLCF` (+ `DUMP_SLICE_GEOM`, `DUMP_SLICE_GEOM_DATA`, `DUMP_CFACES_GEOM`), `DUMP_SLCF_VTK` | dump.f90:6746, 6261, 6399, 6326, 7323 | P | slice files per mesh; `AMR_LEVEL` slice quantity (D2) to add | output mesh | none for level 0 |
 | `DUMP_BNDF` (+ `_VTKHDF`) | dump.f90:11950, 12177 | P | boundary files per mesh from `WALL` records | D5: patches of the output mesh from the owning wall faces | with the output-mesh builder |
 | `DUMP_SMOKE3D`, `GET_SMOKE3D_QQ`, `_VTKHDF` | dump.f90:5052, 5117, 5175 | P | per mesh, soot/HRRPUV fields | output mesh | none for level 0 |
-| `DUMP_ISOF`; the `_uvw_t*`, `_tmp_t*`, `_spec_t*` CSV dumps (`DUMP_UVW`, `DUMP_TMP`, `DUMP_SPEC`), `DUMP_MMS`, `SANDIA_OUT` | dump.f90:4860; calls in 77-287 | P | per mesh, file names carry `NM` | output mesh (verification dumps; level 0 only) | none for level 0 |
+| `DUMP_ISOF`; the `_uvw_t*`, `_tmp_t*`, `_spec_t*` CSV dumps (`DUMP_UVW`, `DUMP_TMP`, `DUMP_SPEC`), `DUMP_MMS` | dump.f90:4860; calls in 77-287 | P | per mesh, file names carry `NM` | output mesh (verification dumps; level 0 only) | none for level 0 |
+| `SANDIA_OUT` | turb.f90:2412 (PUBLIC turb.f90:24; call dump.f90:282 via `USE TURBULENCE`) | P | Sandia verification dump per mesh | output mesh (verification; level 0 only) | none for level 0 |
 | `DUMP_PART`, `DUMP_PART_VTKHDF` | dump.f90:4496, 4622 (loops 4654, 4743) | P | particles per mesh | D4: particle goes to the output mesh that contains it | later (particles refused at fine boxes) |
 | `DUMP_PROF` | dump.f90:11362 | P | one file per profile (`FN_PROF(N_PROF)`), each call acts only on profiles whose `PF%MESH` equals `NM` | level 0 | none |
 | `DUMP_RESTART`, `READ_RESTART` | dump.f90:3871 (4017), 4058 (4250) | R | one restart file per mesh, `MESHES(NM)` fields | restart of a hierarchy is a separate item (not in ADR-004) | out of scope, report |
 | `UPDATE_DEVICES_1/2`, `DUMP_DEVICES`, `UPDATE_HRR`, `UPDATE_MASS`, `DUMP_HRR`, `DUMP_MASS` | dump.f90:7772, 8338, 11155, 11637, 11873, 11830, 11929 | G | per-mesh sums then MPI sums (`EXCHANGE_GLOBAL_OUTPUTS`) | D6: composite grid, uncovered cells, D-028 exact sums (`ExactSum.H`), ties to lowest global key | driver side, section 4 |
-| `WRITE_DIAGNOSTICS`, `EXCHANGE_DIAGNOSTICS` | dump.f90:4315 (4386, 4461), main.f90:4347 | G | CFL/divergence extrema per mesh (`MESHES(NM)%CFL`...) | level 0 plus level > 0 extrema (needs the fine boxes' `CFL`, `DIVMX`) | with the fine-level stepping |
-| `WRITE_STRINGS` | main.f90:4231 (loops 4245, 4269) | S/P | `.smv`/string buffer exchange over the rank's meshes | follows the output mesh set | with 0012 |
+| `WRITE_DIAGNOSTICS`, `EXCHANGE_DIAGNOSTICS` | dump.f90:4315 (4386, 4461), main.f90:4381 | G | CFL/divergence extrema per mesh (`MESHES(NM)%CFL`...) | level 0 plus level > 0 extrema (needs the fine boxes' `CFL`, `DIVMX`) | with the fine-level stepping |
+| `WRITE_STRINGS` | main.f90:4265 (send loop 4279; `DO NOM=2,NMESHES` 4303) | S/P | `.smv`/string buffer exchange over the rank's meshes | follows the output mesh set | with 0012 |
 | `INITIALIZE_VTKHDF_FILES` (+ `INITIALIZE_VTKHDF_SLCF` etc.) | vtkf.f90:1327 (loops over `NMESHES`) | S | VTK-HDF file init; `NMESHES` loops | output meshes when VTK is on | with 0012; needs `WITH_HDF5` |
 | `DUMP_GEOM`, `DUMP_HVAC`, `DUMP_CONTROLS` | dump.f90:12538, 11535, 11334 | G | global | unchanged | none |
-| `INITIALIZE_BACK_WALL_EXCHANGE`, `ZONE_BOUNDARY_EXCHANGE`, `INITIALIZE_PRESSURE_ZONES`, `INITIALIZE_MESH_EXCHANGE_1` | main.f90:2410, 2907, 2679, 2132 | not output | mesh loops of the exchange set-up | not output routines; listed because they size by `NMESHES` | none |
+| `INITIALIZE_BACK_WALL_EXCHANGE`, `ZONE_BOUNDARY_EXCHANGE`, `INITIALIZE_PRESSURE_ZONES`, `INITIALIZE_MESH_EXCHANGE_1` | main.f90:2410, 2907, 2679, 2135 | not output | mesh loops of the exchange set-up | not output routines; listed because they size by `NMESHES` | none |
 
 Per-mesh state that the writers read: `MESHES(NM)` fields (`RHO`, `ZZ`, `TMP`, `U`, `V`, `W`, `H`, `D`, `MU`, `Q`, `KRES`, `RSUM`...), the `WALL` records, `CELL`/`IBLANK`, plus module arrays indexed by `NM`:
 `*_COUNTER(NM)`, `*_CLOCK`, `FN_*/LU_*(.,NM)`, `PROCESS(NM)`, `M%N_SLCF`; `N_BNDF` and `N_SMOKE3D` are global (data.f90), not `MESH_TYPE` fields... Anything indexed by the mesh number must exist for the output mesh numbers (section 3).
