@@ -104,3 +104,24 @@ Legend. **Rebuild**: recompute from the new mesh; nothing to carry. **Transfer**
 - **Random rotation vs regrid.** `INTERPOLATE_IL` assumes the old angle set and the new one, then rewrites `ILW` and `IL_R`. A regrid in the same step as a new cycle must run the interpolation on the old data before the transfer, or fill after it. Choose one and test it.
 - **Periodic self-coupling (Q7).** Whether `IL_S` self-coupling across a periodic boundary works through the generic exchange.
 - **Output (Q5).** `RADF` and Smokeview/VTK on refined levels are outputs of `QR` and `UII`; no regrid state of their own.
+
+---
+
+## Part 3. FR-063 draft (radiation under regrid) — 2026-10-06
+
+Status: **thin draft**. Architect: item 6 unblocked in principle now that L1251 multi-rank is green (`build_il_ghost_table` `cdb0e8d45d` + `exchange_il_ghost` `b3e1a08275`). Live FR-063 work remains gated on Integration's device `rad_*` driver / gate hookup (same gate as radiation/03 §10); no production AMReX radiation host to exercise regrid fills yet.
+
+### What L1251 unlocked
+- Index tables rebuild once per regrid: `fdsrt::build_il_ghost_table` (Part 2 row: rebuild `OMESH`-equivalent connectivity).
+- Face intensity lag after each radiation update / K-pass: `fdsrt::exchange_il_ghost` (Part 2 row: `IL_S`/`IL_R` rebuild layout + fill by §1.4). Call order in `radiation/06` §17.2.
+- Mean of fine→coarse stays in `s5rad_wall1`; no Radiation remapping.
+
+### Still open before a full FR-063 implementation note
+1. New-face fill policy after regrid (§1.4): upwind interior then coarse; never zero — needs the AMReX host that owns boxes.
+2. `UPDATE_ALL_ANGLES` once after regrid (§1.4 / Part 2 order step 6).
+3. Wall `ILW` / `BR_ILW` transfer with the wall table (Wall + Solid); Radiation only consumes flat slots.
+4. Random rotation vs regrid ordering (open item above).
+5. Device gate: until `rad_*` launches exist, FR-063 stays host-doc + Role 3 table/exchange only.
+
+### Next Radiation step when the gate opens
+Wire Integration's AMReX radiation host to the §17.2 call order (stub already in `s5rad_sweep_host.F90`); add a two-level regrid host check that rebuilds the IlGhost table and exchanges once; then fill new faces per §1.4.

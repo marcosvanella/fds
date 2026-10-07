@@ -181,3 +181,53 @@ If the Integration Lead prefers one entry per kernel, repeat the same note; the 
 1. `amrex/ported-candidates.md` section 2, "Not candidates": the six `gsfv_*` kernels have device runs (Forms A and B above); they are now candidates, ACCEPT.
 2. `check_device_logs.py` `SETS` label for `gsfv_field` still says "NO device run on record" and the gate README "Device-tier gaps" paragraph does not mention the `ULP` line now on record (section 6): gate-owner text to refresh.
 3. `tools/device_runs.toml` already lists the stage-1 gsfv run (stage1 repo 9715a9e); the map shows a device run for all six.
+
+## 10. Seventeen `rad_*` kernels (Radiation Lead ask; tip s5-gen `25aad430b9`; docs patch `e3d241d`)
+
+Kernels (17, both `[[device_run]]` and `[[ported]]` blocks of `docs/tools/patches/ported-rad-proposed.toml`):
+`rad_extcoe`, `rad_uiiold_wb`, `rad_uiiold_gray`, `rad_rte_source`, `rad_uiid_wb`, `rad_uiid_gray`, `rad_qr_wb`, `rad_qrw_wb`, `rad_qr_gray`, `rad_qrw_gray`, `rad_emis_wb`, `rad_abs_wb`, `rad_uii_sum`, `rad_thin_kfst4`, `rad_corr_kfst4`, `rad_gray_kfst4`, `rad_wall_qin_zero`.
+
+D-085 scheme-3 (`s5rad_plane3d_ild`, maxulp 8192) is separate and already ratified; it is not part of this bitwise SET.
+
+### 10.1 What I checked (V&V, 2026-10-06)
+
+1. **Device logs (tip `25aad430b9`).** Unpacked `scratch/devrad_logs_25aad.tgz` (refreshed extract under `scratch/devrad_logs_extract/logs/`; the previous extract content was the older pre-fix `dcada34a2e` run with DIFF/IN noise and must not be used). All four bitwise files (`bitwise_{dflt,dpd}_{smoke,big}.txt`): **17/17 BITWISE EQUAL**, 0 DIFF, 0 IN mismatches; nvfortran-host REF vs gfortran REF: none. `check_device_logs.py --logs-only` on those four files: **PASS** (18 passing lines, 0 failing each). Spot-check `rad_gray_kfst4` (integer `TMP**4`): big REF/GEN `2F3F57E4408AB2D5 87CE5BCCF856BF5F` (matches the proposed note); smoke REF/GEN equal; IN non-zero on both sizes. Soft harness `COVERAGE: too few non-vacuous cases` lines appear on several kernels; the BITWISE / KERNEL PASS lines and IN match still hold.
+2. **Kernel list.** The 17 names in both proposed blocks match each other and match the 17 EQUAL lines in every bitwise file (set equality).
+3. **`ci_checks.sh --strict` on `src-s5gen` at `25aad430b9`.** Production **PASS**: k2_ci_check PASS, kernel_lint PASS, zone_sum_order PASS (ZS-05 `s5rad_wall1` **approved** waiver), port_kernel_map PASS (self-check PASS). Prior FAIL on `s5gen_rad_wall_qin_zero` / `W_SURF_INDEX` (K2-03 / CL-07) is **cleared**. The stale OPEN CONDITION paragraph in the live `tools/ported.toml` header still names that FAIL; Integration may drop it when convenient (V&V does not edit live `ported.toml`).
+4. **Host smoke.** Radiation claim (docs `e3d241d` / `radiation/03`): box gfortran smoke 8×6×4 17/17 REF=GEN. Not re-run here; consistent with the device host-gen==ref True lines on all 17.
+5. **"Real fields" vs SYNTHETIC.** Proposed note says SYNTHETIC meshes and "Not claiming real-field / FDS-truth overlay." Live `ported.toml` precedent: real-field dumps are the primary evidence for velocity/gsfv entries; synthetic appears as (a) partial inputs (`rho_d_dzd`: ZZ/TMP real, `RHO_D` synthetic — "Device coverage only"), (b) branch coverage (`cfl_max` / `div_extrema` rounds 4–7 hash), (c) secondary Form A hash evidence alongside gsfv real calls. **No existing `[[ported]]` entry uses a pure synthetic hash-driver run as its sole primary real-field substitute.** `device_runs.toml` already records synthetic rounds 4–7 hash runs as on-record device coverage for kernels that also have real-field stage-1 evidence in `ported.toml`.
+
+### 10.2 Decision
+
+| Kernel (all 17) | Decision | Reason |
+|---|---|---|
+| each `rad_*` listed above | **ACCEPT-WITH-LIMITS** | Device hash driver bitwise green (smoke+big, dflt+dpd); owner reviewed; `ci_checks --strict` green. Evidence class is **SYNTHETIC** `mkdev_rad` hash meshes only — same class as gate Form A / rounds 4–7 hash coverage, **not** D-072 (c) real-field / FDS-truth overlay. |
+
+**Co-sign (D-072 (c) / D-077):** yes, for `[[ported]]` land **with the scope-limited note below**. Integration may land `[[device_run]]` immediately (on-record synthetic hash). Real FDS case overlay remains an open follow-up (recommended; not a blocker for this limited co-sign).
+
+Limits to carry in the note:
+- SYNTHETIC meshes only (integer RNG / hash driver); no FDS dump / truth overlay claimed.
+- Build uses `mem:managed` (bring-up aid; BF-06 class — same as other hash-driver evidence).
+- Soft non-vacuity / coverage warnings in the GPU logs; bitwise EQUAL and IN match still hold.
+- One GPU (RTX 4070 Test machine, cc 8.9), two grids (8×6×4, 24×20×16), two directive builds (dflt, dpd).
+
+### 10.3 Exact recommended `ported.toml` / proposed-patch wording
+
+```
+[[ported]]
+kernels = ["rad_extcoe", "rad_uiiold_wb", "rad_uiiold_gray", "rad_rte_source", "rad_uiid_wb",
+           "rad_uiid_gray", "rad_qr_wb", "rad_qrw_wb", "rad_qr_gray", "rad_qrw_gray",
+           "rad_emis_wb", "rad_abs_wb", "rad_uii_sum", "rad_thin_kfst4", "rad_corr_kfst4",
+           "rad_gray_kfst4", "rad_wall_qin_zero"]
+reviewed_by = "AMR Radiation Lead (device hash green at s5-gen 25aad430b9); V&V Lead co-sign D-072 (c) ACCEPT-WITH-LIMITS (docs/vv/ported-review.md section 10; docs/vv/rad_device_d072c.md)"
+set_by = "AMReX Integration Lead"
+note = "Bitwise class. Device hash driver gpu/mkdev_rad.py (s5-gen 25aad430b9): device GEN == gfortran REF and IN equal (dflt and dpd) on SYNTHETIC smoke 8x6x4 and big 24x20x16 (RTX 4070, nvfortran 26.9, cc89,nofma,mem:managed); check_device_logs --logs-only PASS; rad_gray_kfst4 integer TMP**4 bitwise EQUAL (big REF/GEN 2F3F57E4408AB2D5 87CE5BCCF856BF5F). Host smoke REF=GEN 17/17; ci_checks --strict production PASS (ZS-05 s5rad_wall1 approved waiver; prior rad_wall_qin_zero W_SURF_INDEX FAIL cleared). SCOPE LIMIT: SYNTHETIC hash meshes only — same evidence class as gate Form A / rounds 4-7 hash coverage; NOT claiming real-field / FDS-truth overlay (open follow-up). D-085 scheme-3 is separate."
+```
+
+Recommended `[[device_run]]` note (Integration may land now): keep the proposed block; optional clarify "SYNTHETIC mkdev_rad hash meshes; V&V verified logs 25aad (docs/vv/ported-review.md §10)".
+
+### 10.4 Files written (docs only; Integration owns live maps)
+
+- This section (append to `docs/vv/ported-review.md`).
+- `docs/vv/rad_device_d072c.md` (short co-sign record).
+- Updated recommended wording in `docs/tools/patches/ported-rad-proposed.toml` (`reviewed_by` / `note` co-signed). Live `tools/ported.toml` / `tools/device_runs.toml` **not** edited.

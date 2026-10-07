@@ -170,7 +170,7 @@ The survey numbers (36975d7) for L1239, L1243, L1245, L1248 are 3886-3892, 4961-
 
 ## 10. Gate hookup status (radiation/03; open under next-work)
 
-Status at docs HEAD when written: **partial / blocked on Integration Lead and V&V gate owner**. No further Radiation-owned code is required under `s5_rad_*` for the host hookup; the remaining steps are registration, pin update, and a device driver that Radiation does not own alone.
+Status: **device tier GREEN for the 17 `rad_*` kernels** (smoke + big, dflt+dpd). Host gate steps green; `SWEEP_PIN` bumped; `ci_checks` production PASS. Final proposed rows in `tools/patches/ported-rad-proposed.toml` — Integration lands into live `ported.toml` / `device_runs.toml` after V&V co-sign (D-072 (c)).
 
 ### Already hooked (host)
 
@@ -178,25 +178,32 @@ Status at docs HEAD when written: **partial / blocked on Integration Lead and V&
 |---|---|---|
 | RESULT line format for the 17 `rad_*` kernels (+ L1243 `SPEC`) | this file, § "Result lines for the V&V gate"; `test/run_rad.sh` | one `KERNEL <name> PASS\|FAIL cases=N mismatches=M vacuous=V` per kernel per flag set, then `RESULT: PASS\|FAIL` |
 | Host gate steps | `vv-runs/gpu_gate/README.md` (repo `4539634`) | `drift_rad` (`test_mesh_rad.py`), `bitwise_rad` (`run_rad.sh`, reads the `KERNEL` lines), `mutants_rad` (`test_mesh_rad.py --mutants`) |
-| Sweep host gate steps | same README; `SWEEP_PIN` in `gate.py` | `drift_sweep`, `bitwise_sweep`; pin still `3814e1f893` / 961 cases / 12 groups / padding 166908 (D-079 era). Current sweep suite is larger (1246 cases / 19 groups at the Radiation evidence in `radiation/06` §7); the pin must be updated by the gate owner after review |
+| Sweep host gate steps | same README; `SWEEP_PIN` in `gate.py` | `drift_sweep`, `bitwise_sweep`; pin **`d054f283f0`** / 1246 cases / 19 groups (V&V bump 2026-10-06) |
 | Sweep kernel descriptors and angle-loop launch order | `radiation/06` Addendum 1 §2–§3 | Integration Lead's box-batched launch layer owns the host loop over bands/updates/angles/planes (D-073 (f), D-077 (6)); SYNTHETIC evidence in stage-1 plan §7.14, docs `85b4785`, pinned s5-gen `3814e1f893` |
 
 Shared-file requests that are still not Radiation's to make (see §8): `new_builder` / merge of `markers/rad_kernels.toml`, F2008 parse, ragged `BR_ILW`, `B1_PRESENT`. Those affect generation quality, not the host gate wiring above.
 
 ### Still open (owners outside Radiation Lead alone)
 
-1. **Device driver for the 17 `rad_*` kernels.** `gpu_gate/README.md` lists the `rad` group as "pending a driver" (no device-tier log; category bitwise; watch `rad_gray_kfst4` `TMP**4` on first device run). Owner: Integration Lead / gate device-driver work (same class as rounds 4–7). Radiation supplies the host harness and RESULT lines; does not invent a second driver without Integration.
-2. **`SWEEP_PIN` update** in `vv-runs/gpu_gate/gate.py` from `3814e1f893` (961/12) to a reviewed commit of the present sweep suite (1246 cases / 19 groups, ILD*/STORE included). Gate owner after Radiation evidence review (`radiation/06` §7, §9–§10).
-3. **`tools/ci_checks.sh --strict` green.** Still cited open in `tools/ported.toml` / D-077: `s5gen_rad_wall_qin_zero` / `W_SURF_INDEX` device-address list (K2-03 / CL-07). Owner: Generator / Wall Loops (shared `markers/` / `generated/`; Radiation must not edit those). Blocks any `ported.toml` radiation entry under D-072 (c).
-4. **`ported.toml` / device-run overlay for radiation.** Integration Lead sets ported after V&V review of device evidence (D-072 (c), D-077 (3)). Not started; blocked on (1) and (3).
-5. **Interior-only restart comparison mask** for `QR`/`UII`/`UIID` ghost cells: agreed (D-077 (6); `gpu_gate/README.md` § "Rule D-073 (2)"); **not implemented** until a restart-file comparison path exists. See `radiation/06` §6 and the V&V confirmation draft.
+1. **Device driver for the 17 `rad_*` kernels — GREEN after harness fix.** Integration `gpu/mkdev_rad.py` + `devrad_*.sh` at `s5-gen` `25aad430b9` (IN folds every real input; multi-`rnd()` split in `s5_rad_tutil.F90` + `mkdev_rad.py`). Radiation re-staged and re-ran; **no second driver**. Host smoke (box gfortran) `8x6x4`: 17/17 REF=GEN. Test machine RTX 4070 (nvfortran 26.9, `cc89,nofma,mem:managed`): smoke `8x6x4` and big `24x20x16`, **dflt+dpd → 17/17 BITWISE EQUAL, 0 DIFF, 0 IN mismatches**; `check_device_logs.py --logs-only` PASS all four. `rad_gray_kfst4` (`TMP**4`): BITWISE EQUAL on both sizes (no leftover FP gap). Prior DIFF/IN noise was input-stream drift; cleared by the fix. Logs: test machine `devrad_stage/logs`; box `scratch/devrad_logs_25aad.tgz`.
+2. **`SWEEP_PIN` update** — **done** by V&V: `d054f283f0` (1246/19). D-085 scheme-3 `maxulp<=8192` for `s5rad_plane3d_ild` **landed** in `vv-runs/gpu_gate/kernel_categories.json` (confirmed; separate from the bitwise `rad_*` SET).
+3. **`tools/ci_checks.sh` production PASS.** Green at docs tip (ZS-05 `s5rad_wall1` waived; fresh `rad_k2` includes `W_SURF_INDEX`). Stale K2-03/CL-07 note in `tools/ported.toml` header can be cleared by Integration when convenient.
+4. **`ported.toml` / device-run overlay for radiation.** Final rows ready in `tools/patches/ported-rad-proposed.toml`. **Ask Integration to merge** into live `tools/device_runs.toml` + `tools/ported.toml` after V&V co-sign (D-072 (c)). Host L1238/L1240/L1241/L1243/L1247–L1250/L1244 and sweep `s5rad_*` are **not** in that block (separate evidence paths; sweep already has device evidence under its own pin).
+5. **Interior-only restart comparison mask** for `QR`/`UII`/`UIID` ghost cells: agreed (D-077 (6); `gpu_gate/README.md` § "Rule D-073 (2)"); **not implemented** until a restart-file comparison path exists. See `radiation/06` §6.
 
 ### What Radiation will not do here
 
-- Edit `s5gen.py`, `markers/`, `generated/`, or `vv-runs/gpu_gate/gate.py` (other owners).
-- Claim gate hookup "done" while (1)–(3) are open.
-- Start FR-063 regrid work (waits Role 3) or L1240/L1244 (waits Mesh Data particle gathers) or L1251 (Role 3 ghost fill).
+- Edit `s5gen.py`, `markers/`, `generated/`, `vv-runs/gpu_gate/gate.py`, or Integration-owned `tools/ported.toml` / `tools/device_runs.toml`.
+- Invent a second `rad_*` device driver; Integration owns harness tweaks.
+- Edit live Integration-owned `tools/ported.toml` / `tools/device_runs.toml` (final rows stay in `tools/patches/ported-rad-proposed.toml` until Integration merges).
+- Start FR-063 live AMReX exchange wiring beyond the documented L1251 call contract (waits Integration launch layer).
 
-**Next recommended action:** Integration Lead (or gate device-driver owner) schedule the `rad_*` device driver; V&V Lead confirm the ghost reader list (§6 of `radiation/06`) and, when ready, bump `SWEEP_PIN` after reviewing the 1246-case evidence.
+**Next recommended action:** Integration merge `tools/patches/ported-rad-proposed.toml` into live `device_runs.toml` + `ported.toml` after V&V co-sign (D-072 (c)). Device evidence is green; no leftover DIFF.
 
-**Update 2026-10-06:** V&V bumped `SWEEP_PIN` to `d054f283f0`; ghost reader list co-signed (`radiation/06` §6). Scheme-3 device limit `maxulp<=8192` for `s5rad_plane3d_ild` ratified by Architect D-085 (LIBM-CLASS; schemes 1-2 stay bitwise); Integration encoding. ZS-05 `s5rad_wall1` waiver accepted by Integration (serial ascending sum into a uniquely owned ghost element).
+**Update 2026-10-06:** V&V bumped `SWEEP_PIN` to `d054f283f0`; ghost reader list co-signed (`radiation/06` §6). Scheme-3 device limit `maxulp<=8192` for `s5rad_plane3d_ild` ratified by Architect D-085 (LIBM-CLASS; schemes 1-2 stay bitwise); Integration encoding confirmed in `kernel_categories.json`. ZS-05 `s5rad_wall1` waiver accepted by Integration (serial ascending sum into a uniquely owned ghost element).
+**Update 2026-10-06 (evening):** V&V D-072 (c) co-sign **ACCEPT-WITH-LIMITS** for the 17 `rad_*` at s5-gen `25aad430b9` (docs `fc75dc6`). Device evidence: smoke+big dflt+dpd 17/17 EQUAL on RTX 4070; `rad_gray_kfst4` EQUAL. Scope: synthetic `mkdev_rad` hash meshes only (Form A / rounds 4–7 class); real-field / FDS-truth overlay stays open follow-up, not a ported blocker. Integration may land `[[ported]]`; `[[device_run]]` already at docs `40e1e13287`. Integration landed `[[ported]]` at docs `d9d074b` (51 total); `ci_checks` PASS; local only.
+
+
+**Update 2026-10-06:** Radiation exercised Integration `mkdev_rad` on box + RTX 4070 at `dcada34a2e`; harness shape accepted; tweak ask filed (IN fold + RNG split).
+
+**Update 2026-10-06:** Re-ran after Integration tip `25aad430b9`. Test machine smoke+big dflt+dpd **17/17 EQUAL, 0 DIFF, 0 IN mismatch**; `rad_gray_kfst4` EQUAL. Final proposed rows ready; ask Integration to land (see `tools/patches/ported-rad-proposed.toml`).

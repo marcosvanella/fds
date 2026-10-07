@@ -64,9 +64,9 @@ Work classes:
 | Owner | Holds |
 |---|---|
 | GPU Generator Engineer | Periodic-step cell loops, reductions and CYCLE handling, function callees, edge tables (L1376 to L1378 done; L1375 EVALUATE_RAMP open; L1392 and L1393 deferred), the DIVERGENCE_PART_1 nests (L0365, L0369, L0366, L0381 and the routine as a whole), the exact fixed-point sum switch (Decision B in `generator-decisions.md`). |
-| Legacy Mapper | The partly translated nests (L0880, L0401, L0877), the S2 package (L0880, L0401, L0882, L0403, L0398), L0876 and L0877, the pointer, array-constructor and alias machinery, golden signatures and the manifest, `port_merge_check`, and the cell-loop batch L1355 (Vreman), L1315 and L1316 (TEST_FILTER), L1356 (WALE), L1321. |
-| GPU Wall Loops Engineer | Wall hooks and tables, the CSR family, NEAR_SURFACE_GAS_VARIABLES per-surface tables, L1402, L1359, L0375, L1358. |
-| GPU Mesh Data Loops Engineer | Neighbour-mesh (T4): L1366 translated; L1363/L1364/L1367/L1399 not planned (host) under D-055 (same-mesh empty; `o2-edge-exchange-scope.md`); `s5_gsfv*` and `s5_pvf` builders (L1390 done). |
+| Legacy Mapper | The partly translated nests (L0880, L0401), the S2 package (L0880, L0401, L0882, L0403, L0398), the pointer, array-constructor and alias machinery, golden signatures and the manifest, `port_merge_check`, and the cell-loop batch L1355 (Vreman), L1315 and L1316 (TEST_FILTER), L1321. (L1356 WALE released to GPU Wall Loops Engineer; L0876/L0877 released to GPU Mesh Data Loops Engineer under D-083.) |
+| GPU Wall Loops Engineer | Wall hooks and tables, the CSR family, NEAR_SURFACE_GAS_VARIABLES per-surface tables, L1402, L1359, L0375, L1358; **L1356** WALE (`visc_wale`). |
+| GPU Mesh Data Loops Engineer | Neighbour-mesh (T4): L1366 translated; L1363/L1364/L1367/L1399 not planned (host) under D-055 (same-mesh empty; `o2-edge-exchange-scope.md`); `s5_gsfv*` and `s5_pvf` builders (L1390 done); D-083 hand-written K2 `s5_clip_gather` for **L0876** and **L0877** (s5-gen `08f6016e28`; not markers-sidecar). |
 | AMR Solid Phase Lead | SP4 scratch-sum reference and tests (see wall split), then L0394 and L0405 as CSR consumers. |
 | AMR Pressure Solver Lead, AMR Species & Combustion Lead, AMR Radiation Lead | Proposed owners of the open loops of their domains. They own nothing until they claim. |
 
@@ -78,7 +78,7 @@ Interpretation used for the registers: where a routine is owned as a whole (DIVE
 |---|---|
 | AMR Solid Phase Lead | The SP4 scratch-sum reference and its tests (`wall_sums.py`, `test_wall_sums.py`): OBSTRUCTION%MASS and the gas-cell D_SOURCE and M_DOT_PPP sums, added in ascending wall index with no atomics. The WALL_BC loops **L1486**, **L1487**, **L1488**, **L1489** (see the plan in `wall-bc-translation-plan.md`). **L0394** and **L0405** were released: the GPU Wall Loops Engineer translated them (`wall_bc_dp`, `wall_spec_adv2`). |
 | GPU Wall Loops Engineer | The CSR family itself, **L1402**, **L1359**, **L0375**, **L1358**, **L0394**, **L0405**. |
-| Legacy Mapper | The S2 package (**L0880**, **L0401**, **L0882**, **L0403**, **L0398**) and **L0876** and **L0877**. |
+| Legacy Mapper | The S2 package (**L0880**, **L0401**, **L0882**, **L0403**, **L0398**). (**L0876** / **L0877** moved to GPU Mesh Data Loops Engineer under D-083.) |
 
 L1488, L1489, L1486, L1487 (WALL_BC) are not translated; they depend on the SP4 reference and on callee flattening (T3). L1485 (`SURFACE_HEAT_TRANSFER` NIC>1) is **not planned (retired)** in the AMR route (host abort guard, patch 0010; D-065 Q1 / A-65). L1489 is the lateral thin-wall 1-D solve (wall.f90:192-194); `CALC_DEPOSITION` and `CALC_HVAC_BC` are called in L1488 (wall.f90:173, 178). L0823 and L0822 (`REASSIGN_WALL_CELLS`) are host-side.
 
@@ -119,13 +119,14 @@ The register (`loop_claims.csv`) carries the domain-lead verdicts below in the n
 
 | Loops | Lead | Verdict | Source |
 |---|---|---|---|
-| L0877, L0876 | Species & Combustion | patch UP-0003 accept (L0877); second patch for the density loop requested (L0876); clip gather prototype accept with three conditions | `combustion/02-signoffs-patch0003-gather-mp5.md`, sections "Patch UP-0003" and "Clip gather prototype" |
-| L0401, L0398 | Species & Combustion | patches UP-0001 and UP-0002 (MP5 `Z_TEMP` pad) accept with a physics note | same file, section "MP5 Z_TEMP pad" |
-| L1239 | Radiation | accept | `radiation/00-r1-signoff.md`, section 2 |
+| L0877, L0876 | Species & Combustion | clip gather prototype accept with three conditions; D-083 device ACCEPT-with-conditions then CLEARANCE YES (hand-written K2 on s5-gen `08f6016e28`) | `combustion/02` ("Clip gather prototype"); `combustion/05-signoff-check-mass-density-d083.md`; CLEARANCE docs `126662fc8f` |
+| L1272, L0866, L0875, L0397 | Species & Combustion | host ACCEPT (generator path; gfortran bitwise) | `combustion/06-host-review-l1272-l0866-l0875-l0397.md` (docs `3e98931`) |
+| L0401, L0398 | Species & Combustion | patches UP-0001 and UP-0002 (MP5 `Z_TEMP` pad) accept with a physics note | `combustion/02`, section "MP5 Z_TEMP pad" |
+| L1239 | Radiation | accept | `radiation/00-r1-signoff.md`, section 2 (pasted on R1 in `blocked-loop-families.md`) |
 | L1243, L1248 | Radiation | accept with change | same |
 | L1245 | Radiation | accept (host code) | same |
 
-The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr062-sweep-kernel-design.md`) hold specifications and open review questions, not verdicts, so nothing is recorded from them.
+Family-level Radiation R1 sign-off text from `radiation/00-r1-signoff.md` §2 is applied on the R1 **Sign-off** line in `blocked-loop-families.md`. The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr062-sweep-kernel-design.md`) hold specifications and open review questions, not additional verdicts.
 
 ## 5. Ranking caveats
 
@@ -140,14 +141,14 @@ The other radiation documents (`radiation/03`, `05-br-ilw-table-spec.md`, `06-fr
 
 | Status | Loops | Modelled share (% of total time) |
 |---|---|---|
-| claimed | 32 | 16.942 |
+| claimed | 30 | 14.376 |
 | in progress | 11 | 10.508 |
 | not planned (host) | 11 | 2.957 |
 | not planned (retired) | 9 | 1.838 |
 | not planned (test-only) | 9 | 1.836 |
 | open | 54 | 2.308 |
 | translated | 104 | 12.787 |
-| translated on a branch (merge pending) | 1 | 0.001 |
+| translated on a branch (merge pending) | 3 | 2.567 |
 
 ### Counts by work class
 
@@ -212,7 +213,7 @@ Columns: `Loop` is the survey id (sidecar and marker id) with `file:first-last` 
 | 2 | L0401 | divg.f90:995-1088 | SPECIES_ADVECTION_PART_1_NEW | 3.260 | species/combustion | wall gather; pointer scratch/array constructors; function callees (GET_SCALAR_FACE_VALUE_PT); Z_TEMP pad of the fourth element | MP5 wall element (upstream patch) | claimed | claimed | Legacy Mapper | - | I |
 | 3 | L1488 | wall.f90:144-185 | WALL_BC | 2.688 | wall/BC | wall gather; function callees (SURFACE_HEAT_TRANSFER, CALCULATE_ZZ_F, ...); ragged per-wall table (BOUNDARY_ONE_D); scratch-sum reference (OBSTRUCTION%MASS, D_SOURCE) | callee flatten (T3) | claimed | claimed | AMR Solid Phase Lead | - | I |
 | 4 | L0369 | divg.f90:287-421 | DIVERGENCE_PART_1 | 2.399 | other | species loop N outermost; cell loop nests | generator gap | in progress | claimed | GPU Generator Engineer | - | R |
-| 5 | L0877 | mass.f90:868-939 | CHECK_MASS_DENSITY | 1.967 | mass | species loop N outermost; scatter into 7 cells (two-pass gather in source order); CYCLE; integer max-reduction CLIP_RHO_ZZ(N) | race-uniqueness | claimed | claimed | GPU Mesh Data Loops Engineer | - | I |
+| 5 | L0877 | mass.f90:868-939 | CHECK_MASS_DENSITY | 1.967 | mass | species loop N outermost; scatter into 7 cells (two-pass gather in source order); CYCLE; integer max-reduction CLIP_RHO_ZZ(N) | race-uniqueness | translated on a branch (merge pending) | claimed | GPU Mesh Data Loops Engineer | - | I |
 | 6 | L1485 | wall.f90:888-947 | SURFACE_HEAT_TRANSFER | 1.832 | solid phase | wall gather; neighbour-mesh (OMESH copies through EWC%IIO_MIN..KKO_MAX); ragged per-wall table | neighbour mesh (T4) | not planned (retired) | claimed | AMR Solid Phase Lead | - | I |
 | 7 | L0823 | init.f90:4940-5054 | REASSIGN_WALL_CELLS | 1.727 | solid phase | host-side event code (burn-away, control-driven creation or removal); allocation and derived-type copies | host-side event code | claimed | host-side | AMR Solid Phase Lead | - | I |
 | 8 | L0381 | divg.f90:640-660 | DIVERGENCE_PART_1 | 1.491 | other | species loop N outermost; function callees (SPECIES_ADVECTION_PART_2, GET_SENSIBLE_ENTHALPY_Z); guarded call SET_EXIMRHOZZLIM_3D | generator gap | claimed | claimed | GPU Generator Engineer | - | R |
@@ -222,7 +223,7 @@ Columns: `Loop` is the survey id (sidecar and marker id) with `file:first-last` 
 | 12 | L1367 | velo.f90:1858-1897 | VELOCITY_BC | 0.795 | wall/BC | wall gather; neighbour-mesh (OMESH US/VS/WS) | neighbour mesh (T4) | not planned (host) | claimed | GPU Mesh Data Loops Engineer | - | I |
 | 13 | L1399 | velo.f90:514-550 | VISCOSITY_BC | 0.710 | wall/BC | wall gather; neighbour-mesh (OMESH MU) | neighbour mesh (T4) | not planned (host) | claimed | GPU Mesh Data Loops Engineer | - | I |
 | 14 | L0384 | divg.f90:696-716 | DIVERGENCE_PART_1 | 0.658 | other | species inner loop; source function (VD2D_MMS_Z_SRC); pointer SM | test-only | not planned (test-only) | test-only | GPU Generator Engineer | - | R |
-| 15 | L0876 | mass.f90:799-849 | CHECK_MASS_DENSITY | 0.599 | mass | K,J nest; scatter into 7 cells (two-pass gather) | race-uniqueness | claimed | claimed | GPU Mesh Data Loops Engineer | - | I |
+| 15 | L0876 | mass.f90:799-849 | CHECK_MASS_DENSITY | 0.599 | mass | K,J nest; scatter into 7 cells (two-pass gather) | race-uniqueness | translated on a branch (merge pending) | claimed | GPU Mesh Data Loops Engineer | - | I |
 | 16 | L1305 | turb.f90:1796-1861 | SYNTHETIC_TURBULENCE | 0.572 | velocity | cell/face loop; non-perfect nest (outer loop) | table needed | open | needs-feature | open — available | - | I |
 | 17 | L1470 | wall.f90:3635-3677 | HT3D_TEMPERATURE_EXCHANGE | 0.500 | solid phase | wall gather; ragged per-wall table (BOUNDARY_THR_D); store into TMP | neighbour mesh (T4) | open | claimed | AMR Solid Phase Lead | - | I |
 | 18 | L1471 | wall.f90:3681-3717 | HT3D_TEMPERATURE_EXCHANGE | 0.465 | solid phase | wall gather; ragged per-wall table (BOUNDARY_THR_D) | neighbour mesh (T4) | open | claimed | AMR Solid Phase Lead | - | I |
@@ -342,10 +343,10 @@ Columns: `Loop` is the survey id (sidecar and marker id) with `file:first-last` 
 Scope: `species.f90` and the combustion modules (the survey records no loop there), `fire.f90` (two eligible loops, L0596 and L0608; five more are geometry-deferred), `soot.f90` (L1272 and L1273 eligible; one geometry-deferred), `mass.f90`, and the species parts of `divg.f90` (the S2, S3, S4 loops and the CHECK_MASS_DENSITY gather pieces). Proposed owner of every open loop in this section: **AMR Species & Combustion Lead**, working in own files and own tests only; they message the owner of a loop or a function before any shared commit (`shared:` rule above). The loops already claimed stay with the owners shown.
 
 How the families map to this section (details and sign-offs in `blocked-loop-families.md`):
-- **S1** (CHECK_MASS_DENSITY scatter, L0877 and L0876): the scatter writes one cell and its six neighbours, so it stays on the host until the two-pass gather exists. The pieces: pass 1, per source cell, stores the seven contributions; pass 2, per target cell, adds them in the serial source order `(I,J,K-1)`, `(I,J-1,K)`, `(I-1,J,K)`, self, `(I+1,J,K)`, `(I,J+1,K)`, `(I,J,K+1)`, interior targets only, with the same `SUM(MASS_N)` order; `CLIP_RHO_ZZ(N)` becomes an integer max-reduction; the test must compile host and gather with matching no-FMA flags. L0877 and L0876 are held by the Legacy Mapper (wall split above). The pieces that are already translated (`delta_rho_zz_zero`, `rho_zz_clip_assign`) count; the scatter credit is not claimed.
+- **S1** (CHECK_MASS_DENSITY scatter, L0877 and L0876): D-083 CLOSED — hand-written K2 two-pass gather on s5-gen `08f6016e28` (`s5_clip_gather`; not markers-sidecar). Owner: **GPU Mesh Data Loops Engineer**. Species CLEARANCE docs `126662fc8f`; Integration `[[ported]]` restored docs `b46f6d0`; `ci_checks --strict` PASS. The gather adds in the serial source order `(I,J,K-1)`, `(I,J-1,K)`, `(I-1,J,K)`, self, `(I+1,J,K)`, `(I,J+1,K)`, `(I,J,K+1)`, interior targets only, with the same `SUM(MASS_N)` order; clip-gather conditions from `combustion/02` still apply. Earlier translated pieces (`delta_rho_zz_zero`, `rho_zz_clip_assign`) remain. This is **not** host-blocked S1 any more.
 - **S2** (wall nests with pointer scratch and array constructors: L0880, L0401, L0882, L0403, L0398): the Legacy Mapper's package. The four finished mass-flux wall nests cover the L0880 and L0882 parts; the divergence-side nests L0401 and L0403 reuse the same nests and need the fourth `Z_TEMP` element padded with 0 (MP5 bit tests wait for upstream patches UP-0001 and UP-0002).
 - **S3** (wall scatter into `U_DOT_DEL_RHO_*`, cell loops reading `CELL%WALL_INDEX`: L0398, L0399, L0405, L0406): L0398 stays with the Legacy Mapper; L0405 is translated by the GPU Wall Loops Engineer (`wall_spec_adv2`); L0399 and L0406 are open and need the six-flag mask table (`WALL_INDEX`), which exists as a `cell_int` table on the s5-wall branch and is not merged.
-- **S4** (SETTLING_VELOCITY, L1272): open, needs a per-species table and a split into three kernels.
+- **S4** (SETTLING_VELOCITY, L1272): translated on s5-gen (`fe8017c109`, settle_* kernels); host ACCEPT in `combustion/06` (docs `3e98931`). Companion host translations L0866 / L0875 / L0397 also ACCEPTed there (`tmp_pbar_*`, `rho_h_s_p`).
 - Plain cell loops of `mass.f90` and `divg.f90` (L0865, L0874, L0872, L0879, L0878, L0881, L0402): the front end accepts them; what is missing is the sidecar entry and the bitwise test.
 - Test-only: L0861 and L0870 (`IF (PERIODIC_TEST==7)`, guards at `mass.f90:483` and `mass.f90:665`) and L0384 (`divg.f90:693`).
 - Not in this section: the DIVERGENCE_PART_1 nests (L0365, L0369, L0366, L0381) belong to the GPU Generator Engineer even though they handle species.
@@ -361,8 +362,8 @@ Classification of each loop (translatable-now / needs-feature / blocked / claime
 | Loop | file:lines | Routine | Share % | Features / blocker | Closest kernel | Status | Owner / proposed |
 |---|---|---|---|---|---|---|---|
 | L0401 | divg.f90:995-1088 | SPECIES_ADVECTION_PART_1_NEW | 3.260 | wall gather; pointer scratch/array constructors; function callees (GET_SCALAR_FACE_VALUE_PT); Z_TEMP pad of the fourth element / kernels rho_z_p_divg and spec_wall_zz are committed; the MP5 limiter reads a fourth wall element that the upstream wall nest leaves unset, so the bitwise claim for MP5 waits for upstream patc | gsfv_*, rho_z_p_divg | claimed | Legacy Mapper |
-| L0877 | mass.f90:868-939 | CHECK_MASS_DENSITY | 1.967 | species loop N outermost; scatter into 7 cells (two-pass gather in source order); CYCLE; integer max-reduction CLIP_RHO_ZZ(N) / S1: the scatter stays on the host until the two-pass gather exists | rho_zz_clip_assign, delta_rho_zz_zero | claimed | GPU Mesh Data Loops Engineer |
-| L0876 | mass.f90:799-849 | CHECK_MASS_DENSITY | 0.599 | K,J nest; scatter into 7 cells (two-pass gather) / S1 | rho_zz_clip_assign | claimed | GPU Mesh Data Loops Engineer |
+| L0877 | mass.f90:868-939 | CHECK_MASS_DENSITY | 1.967 | species loop N outermost; scatter into 7 cells (two-pass gather in source order); CYCLE; integer max-reduction CLIP_RHO_ZZ(N) / S1: D-083 hand-written K2 two-pass landed (s5_clip_gather on s5-gen 08f6016e28; not markers-sidecar) | rho_zz_clip_assign, delta_rho_zz_zero | translated on a branch (merge pending) | GPU Mesh Data Loops Engineer |
+| L0876 | mass.f90:799-849 | CHECK_MASS_DENSITY | 0.599 | K,J nest; scatter into 7 cells (two-pass gather) / S1: D-083 hand-written K2 two-pass landed (s5_clip_gather; not markers-sidecar) | rho_zz_clip_assign | translated on a branch (merge pending) | GPU Mesh Data Loops Engineer |
 | L0398 | divg.f90:835-939 | ENTHALPY_ADVECTION_NEW | 0.260 | wall gather; pointer scratch/array constructors; CSR cell-to-wall gather (ascending IW); pointer remap U_TEMP=>U_WORK / S2 and S3: accumulate through the wall gas-cell subscript | gsfv_*, CSR family (not built) | claimed | Legacy Mapper |
 | L0596 | fire.f90:1902-1918 | COMBUSTION_BC | 0.002 | wall loop; wall gather; neighbour-mesh; derived-type designator table / needs neighbour-mesh or ragged per-wall data (inventory) | none (new); pvf_* shows the host launch rule | not planned (host) | AMR Species & Combustion Lead |
 | L1273 | soot.f90:412-472 | SOOT_SURFACE_OXIDATION | 0.002 | wall loop; wall gather; pointer alias / needs neighbour-mesh or ragged per-wall data (inventory) | wall_up_ghost, wall_us_pred | open | AMR Species & Combustion Lead |

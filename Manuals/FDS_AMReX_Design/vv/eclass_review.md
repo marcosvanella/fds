@@ -1,114 +1,97 @@
-# V&V review: draft E_class table (D-077 / S1 host forced-flip survey)
+# V&V review: E_class package (D-077 / S1 host forced-flip survey) — re-verify
 
-Reviewer: AMR V&V Lead (executor). Subject: Solid Phase Lead draft in
-`src-s5sp` / branch `s5-wall-sp` commit `92136ff50a`
-(`amrex/s4_mass/s5_gen/README_solve_capture.md` §8c).
+Reviewer: AMR V&V Lead (executor). Subject: Solid Phase Lead revised package in
+`src-s5sp` / branch `s5-wall-sp` commit `73f1bdd6db`
+(`amrex/s4_mass/s5_gen/README_solve_capture.md` §8c — predicate form).
 Solid Phase tree was not edited. This note is docs-only.
+
+Prior review (NEED RE-RUN) was against tip `92136ff50a` / docs commit `6169b3c`.
 
 ## Verdict
 
-**NEED RE-RUN** before co-signing `E_class` as the Level B bound under D-077 (1) V3.
+**INTERIM CO-SIGN** of the P1-densified predicate `E_class` table in §8c at
+`73f1bdd6db`, **with the limits stated below**.
 
-The draft table numbers match the committed JSON and regenerate from
-`solve_flip_survey.py table`. The under-estimation caveat is already in the
-README. That is enough to treat the draft as verified *survey evidence*, not
-enough to sign it as `E_class`.
+This is **not** a final co-sign of `E_class` for the device-tier flip-budget
+gate. Final co-sign waits until full P2 (`N≥50` per (class, sign) on every case
+of S) is folded into S and the predicate table is regenerated.
+
+### What is signed (interim)
+
+- Predicate form: `E_class(c, q) = 2 × max |Delta_cf(q)|` over survey S
+  (`test/data/flip_survey_*.json`), quantities
+  {node TMP, TMP_F, Q_CON_F, Q_RAD_IN, Q_RAD_OUT, layer mass}.
+- Empirical Level B numbers for D1 / D2 / D5a / D5b as printed by
+  `solve_flip_survey.py table` at this tip (byte-match README §8c).
+- Derived Level B labeling: D3 = M_DOT / Y_O2 bound (survey supporting only);
+  D4 = 1e-4 K extraction tolerance (no S1 flip hook); delamination / burn-away
+  = rate-only / no Level B (D-077 A3).
+- Q_RAD_IN exercised on derived `back_wall_test_short` (T_END=5 s): max
+  |dQ_RAD_IN| = 8.2×10⁻⁹ W/m² on the flipped wall; cross-wall leak ≤1.5×10⁻³
+  reported and **excluded** from Delta_cf (radiation coupling).
+- Caveats retained: sample ≠ census for D1/D5a; SOLID_PHASE_ONLY on all but
+  back_wall; under-estimation possible outside surveyed calls; E_class(Q_RAD_IN)
+  rests on one derived case and three flips.
+
+### What is not signed
+
+- Final device-tier `E_class` until full P2 lands (Solid’s own ask; V&V agrees).
+- Any claim that P2 slices already move (or bound) the maxima — delivered P2
+  seed-7 slices do not move maxima and are incomplete.
+- Gas-coupled amplification beyond the documented cross-wall leak on back_wall.
 
 ## Verification performed
 
 | Check | Result |
 |---|---|
-| Commit `92136ff50a` on `s5-wall-sp` | Present; HEAD message matches (5 cases, 492 flips, DRAFT E_class) |
-| Files present | `README_solve_capture.md`, `solve_flip_survey.py`, `test/test_solve_flip.py`, five `test/data/flip_survey_*.json` |
-| Regenerated table from JSON | Byte-identical to README §8c summary and per-case rows |
-| Totals | 492 flipped records; 129,555 applicable (call,sign) pairs (~129.5k) |
-| Class maxima | D1 7.39 / 5.1 / 33.9 / 605 (shrink_swell +1); D2 9.22 / 5.93 / 748 (shrink_swell −1); D3 node 0.037 K (TMP_F 0.0576); D5a 2.71e-4 K; D5b 8.15e-4 K |
-| Q_RAD_IN | Every effect field 0 across all 1,476 imm/max/end samples |
-| Cross-wall leak | 0 on every flip |
-| `test_solve_flip.py --no-live` | **63/63 PASS**. Claimed 68/68 includes the 5 live tests that need `vv-runs/solve-capture/fds_flip` (absent here; SKIP). Offline suite is green. |
+| Commit `73f1bdd6db` on `s5-wall-sp` | Present; HEAD = `73f1bdd6dbd4194a45d7df45a96d45db0ed4ac79`; message matches (“predicate form, densification, README §8c”) |
+| JSON inventory | 17 files `test/data/flip_survey_*.json` (incl. densification, census, back_wall t5/r2/p2, a_fo p2/r2/d1n500/d5a*, kc d5an100) |
+| Regenerated table | `/usr/bin/python3 solve_flip_survey.py table test/data/flip_survey_*.json` — three output tables **byte-identical** to README §8c predicate / class-maxima / per-case rows |
+| Fired counts | D1 **1471** (≥1000); D2 **900** (full census); D5a **1011** (≥1000); D5b **1462** (full census); D3 **40** supporting only |
+| Applicable pools | D1 66884; D2 900; D5a 92200; D5b 1462; D3 509 |
+| Predicate E_class (spot) | D1: node TMP 17.5, TMP_F 12.7, Q_CON_F 67.8, Q_RAD_IN 1.64e-08, Q_RAD_OUT 1.51e+03, mass 1.71e-05 (shrink_swell +1). Matches 2× class maxima. |
+| Q_RAD_IN case | `flip_survey_back_wall_test_short_t5.json`: `max_q_rad_in` ≈ 1.20×10⁴ W/m² (quantity exercised); three D1 +1 flips at seq 3601 / 10801 / 18000; max \|dQ_RAD_IN\| = **8.20×10⁻⁹**; leaks 1.45×10⁻³ / 9.56×10⁻⁴ / 0 — matches §8c; leak not in Delta_cf |
+| P2 schedule | §8c: slices seed 7 delivered (a_fo D1/D5a; back_wall D1); **explicit written schedule** — P2 N≥50/(class,sign) on every case of S before first device-tier gate, then fold and regenerate. States V&V will not final-sign on P1-only. |
+| Level B labels | D1/D2/D5 empirical; D3/D4 derived; delam/burn-away rate-only — present in predicate table and caveats |
+| SOLID_PHASE_ONLY + leak caveat | Stated; radiation leak excluded from Delta_cf |
+| Under-estimation notes | Kept (sample ≠ census for D1/D5a; Q_RAD_IN thin; D5a flat-table zeros) |
+| `test/test_solve_flip.py --no-live` | **68/68 PASS** (offline suite green; live binary not required for this check) |
 
-Draft-summary rounding: "2.7e-4" / "8e-4" match 0.000271 / 0.000815. D3 "max dTMP 0.037 K" is the node max; TMP_F max is 0.0576 K (in the table, omitted from the short summary).
+## Prior gaps (from tip `92136ff50a`) — disposition
 
-## What D-077 / solid/09 requires for a signed E_class
+| # | Prior gap | Status |
+|---|---|---|
+| 1 | No predicate-form E_class (= 2 × max \|Δ_cf\|) | **CLOSED** |
+| 2 | Sample density <1000 where pool allows (D1, D5a) | **CLOSED** (D1 1471, D5a 1011; D2/D5b census) |
+| 3 | P2 missing — no final co-sign on P1-only | **OPEN for final**; **satisfied for interim** via delivered slices + written schedule before device gate |
+| 4 | Q_RAD_IN never exercised | **CLOSED** (back_wall_test_short T_END=5) |
+| 5 | D4 derived OK if stated | **CLOSED** (stated) |
+| 6 | D3 derived-input OK as supporting; Level B lean derived | **CLOSED** (stated) |
+| 7 | SOLID_PHASE_ONLY must be stated | **CLOSED** (+ radiation-leak caveat) |
 
-From `solid/09-flip-budget-gate.md` §7 and D-077 (1) V3:
+## Remaining open before FINAL co-sign
 
-- Forced-flip survey on the host over **P1 and P2**.
-- Prefer calls with **near-threshold** decisions; **at least 1000 calls per class where reachable**.
-- `E_class` = **twice the largest observed** `Delta_cf`, signed by Solid Phase Lead and V&V Lead.
-- Until signed, flips of that class are recorded and the class has **no PASS**.
-- D3 / D4 / layer-removal / renoding-check use **derived** Level B bounds where the code supplies them; empirical `E_class` is for D1, remesh-ratio / cell-count (D2), and D5.
+1. **Full P2:** N≥50 per (class, sign) on every case of S, fold into S, regenerate
+   predicate table; V&V re-verifies numbers and offline tests, then final co-sign
+   (or delta list).
+2. Optional hardening (not blocking interim): thicken Q_RAD_IN evidence beyond
+   three D1 flips on one derived short case; keep under-estimation caveat until
+   P2 is in.
 
-V1–V4 (Clopper-Pearson gate, exposed distinct-input denominator, Level A/B, P2 carries gate if P1 short with exposure-tag coverage) are already ratified; this review is only about signing `E_class`.
+## Exact ask remaining for Solid Phase Lead
 
-## Gaps blocking co-sign
+Complete the scheduled P2 before the first device-tier flip-budget gate run:
+`run CASE --p2 --seed S` with N≥50 per (class, sign) on every case of S, merge
+into the survey JSON set, regenerate §8c, and ping V&V for final re-verify.
+Until then, treat this interim co-sign as authorizing use of the P1 predicate
+numbers as the **working** Level B bound for host/planning work only — **not**
+as a PASS for the device-tier gate.
 
-1. **No predicate-form `E_class`.** The draft reports maxima. It does not propose
-   `E_class = 2 × max_observed` per (class, quantity), nor name which quantities
-   enter Level B (node TMP, TMP_F, Q_CON_F, Q_RAD_IN, Q_RAD_OUT, layer mass).
+## Interim status of this package
 
-2. **Sample density below the §7 bar.** Fired flips: D1 112, D2 70, D3 40,
-   D5a 190, D5b 80. No class reaches 1000 where the pool allows it (D1 48,884
-   applicable; D5a 77,800). Evenly spaced picks over-weight quiet late-time
-   conduction calls; the README already says maxima may be under-estimated.
-   (Complete censuses are fine where the pool is tiny: D2 −1 = 30/30 tagged
-   calls; D1 −1 on both shrink_swell cases = 1/1 each.)
-
-3. **P2 missing.** Survey is five host cases only (three pinned, two derived,
-   one survey-short of kc). No random corpus. solid/09 requires P1 and P2
-   before `E_class` is signed for the device gate.
-
-4. **Q_RAD_IN never exercised.** All cases are `SOLID_PHASE_ONLY`; Q_RAD_IN
-   effect is identically 0. No Level B statement on Q_RAD_IN is possible.
-   Need at least one case with radiation in (e.g. `back_wall_test`, or another
-   pinned wall case with non-zero `B1%Q_RAD_IN`).
-
-5. **D4 not in the empirical table (acceptable if stated).** D4 has a derived
-   bound (1e-4 K) and no flip hooks in S1. That is fine under §7 *if* the signed
-   package says D4 Level B = derived, not empirical. Delamination / burn-away
-   remain rate-only (D-077 A3).
-
-6. **D3 only on a derived, non-pinned input** (`shrink_swell_o2`). Acceptable as
-   supplemental empirical evidence; Level B for D3 should lean on the derived
-   M_DOT / Y_O2 bound, with the survey as supporting.
-
-7. **SOLID_PHASE_ONLY / no gas feedback.** Survey measures solid-propagated
-   effect on one wall. That matches a host Delta_cf survey of the wall solve,
-   but must be stated on the signed bound (no claim about gas-coupled
-   amplification).
-
-## Exact ask for the Solid Phase Lead
-
-Please deliver a revised package (same worktree / follow-up commit on
-`s5-wall-sp` is fine; V&V will not edit that tree) that:
-
-1. **States `E_class` in predicate form** for each empirical class (D1, D2
-   remesh/cell-count, D5a, D5b): for each tracked quantity,
-   `E_class(qty) = 2 × max |Delta_cf(qty)|` over the survey that will be signed,
-   with the under-estimation caveat retained until sample density meets item 3.
-2. **Adds ≥1 case with non-zero Q_RAD_IN** and reports dQ_RAD_IN (and leak) for
-   it; if still zero after a radiation case, say so with evidence.
-3. **Raises sample density** toward ≥1000 fired flips per class where the
-   applicable pool allows (priority: D1, D5a). Prefer near-threshold picks
-   (TMP_RATIO near k+0.5, REMESH_RATIO near 1, TMP near integer for D5) over
-   uniform late-time spacing. Keep full census where the pool is smaller than
-   1000.
-4. **Adds a P2 (random) forced-flip slice**, or a written schedule that P2 is
-   completed and folded into `E_class` before the first device-tier gate run
-   (V&V will not co-sign a final `E_class` on P1-only).
-5. **Labels Level B sources:** D3/D4 derived; D1/D2/D5 empirical; delamination
-   and burn-away rate-only / no Level B.
-6. **Keeps** the existing acknowledgements: sample ≠ census, Q_RAD_IN gap until
-   item 2, SOLID_PHASE_ONLY, D3 derived-input, flat-table D5a zeros.
-
-After that package lands, V&V will re-verify numbers from JSON, re-run
-`test_solve_flip.py` (live if `fds_flip` is present), and co-sign or return
-with a short delta list.
-
-## Interim status of this draft
-
-- **Accepted as:** verified S1 host survey evidence at `92136ff50a` (492 flips,
-  maxima and caveats as in README §8c).
-- **Not accepted as:** signed Level B `E_class` under D-077 (1) V3.
-- Device-tier flip-budget gate: classes without a signed `E_class` (or a
-  derived Level B bound) have **no PASS** for Level B until the re-run lands.
+- **Accepted as (interim):** predicate-form Level B `E_class` for D1/D2/D5a/D5b
+  (empirical) and labeled derived bounds for D3/D4 / rate-only delam/burn-away,
+  at Solid tip `73f1bdd6db`, with Q_RAD_IN exercised and densification meeting
+  the ≥1000 / census bar.
+- **Not accepted as:** final signed `E_class` for the device-tier flip-budget
+  gate under D-077 (1) V3 / solid/09 §7 until full P2 is folded in.

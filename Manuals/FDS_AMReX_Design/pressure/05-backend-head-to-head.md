@@ -1,8 +1,8 @@
-# 05. Masked single-level pressure solve: MLMG vs assembled HYPRE (A-56). PARTIAL
+# 05. Masked single-level pressure solve: MLMG vs assembled HYPRE (A-56)
 
-> **PARTIAL. Stopped early by a budget pause.** The numbers below are real measurements. The comparison is not finished. See "Not yet measured".
+> Study-harness CPU and GPU tables below stand. The section "Product masked path (A-68)" closes the product-level masked comparison that was blocked until single-level assembled HYPRE landed. Composite masked remains NotBuilt.
 >
-> **Update:** the section "1M-unknown CPU head-to-head" adds a single-level CPU comparison at about 1M unknowns and a recommended default backend.
+> **Update:** the section "1M-unknown CPU head-to-head" adds a single-level CPU comparison at about 1M unknowns and a recommended default backend for the study harness.
 
 ## Setup
 
@@ -435,26 +435,67 @@ Clock is the mean over the pinned cores; entries are min / median / max. Package
 - **Recommendation update (solve phase only):** MLMG with the FDS bottom (Mf) remains the CPU default for open domains, and H is needed for sealed or pure-Neumann domains. On the GPU H is the faster solver in all three cases, but it needs a separate assembly path and has a much higher setup cost when the mesh changes. The earlier setup-cost argument for Mf still stands for regridding, so the choice on GPU depends on how often the grid changes.
 
 
-## Not yet measured
+## Product masked path (A-68): single-level MLMG vs assembled HYPRE
 
-Done in the sections above: the 1e-10 hallways comparison, first-solve times, per-rank memory, the true-residual-matched stop, GPU-readiness analysis, a recommended default (single level, CPU), and the solve-only CPU and GPU runs with FFT (before and after the power-profile change).
+Blocked until the product assembled-HYPRE masked branch landed (`ccac6cabe2`: gas-only row numbering, one pin identity row per sealed component, residual check excludes every pin). Composite masked stays `NotBuilt` (design Q1: assembled HYPRE only when built). Role 2 unit checks `pb_masked` (including HYPRE rows and sealed2 two-pin / `max_pins=1` negative control) and `pb_masked_hallways` PASS on the tip.
 
-Still open:
+### Method
 
-- **The stairwell with the mask and all-gap boxes dropped (`ba=drop`).** This is the case A-56 asked for. It has now run, as a single open component and as a three-component split, with Mf and H on 1, 4 and 8 CPU ranks and 1 GPU rank: see doc 06, section 8. Repeats and the 1e-12 tolerance are still open.
-- Stairwell repeats 2 and 3, the stairwell at a 1e-12 tolerance, and Mf and H on the stairwell at 1 rank.
-- The HYPRE PCG gap between its recursive and true residuals seen on the stairwell (1.6e-10 for a 1e-10 request). It did not reproduce anywhere else.
-- Iteration counts with an RHS built the way FDS builds it (all hallways runs use the synthetic zero-mean RHS).
-- **Composite multilevel solves.** Everything here is single level, for both backends.
-- **Repeats.** The solve-only tables are single runs of 200 timed solves; there is no run-to-run spread beyond the p90 within a run.
-- **GPU scaling and larger sizes.** Only 1 GPU rank at about 1M unknowns was run. Multi-GPU runs, larger grids (where the GPU advantage should grow and FFT's disadvantage shrink), and GPU memory use at scale are untested.
-- **GPU MLMG bottom-solver alternatives** (AMReX's own bottom solver instead of the HYPRE bottom) and GPU BoomerAMG variants (aggressive coarsening, multipass or two-stage interpolation, Chebyshev or two-stage Gauss-Seidel smoothing) were not tried; only one GPU option set was used.
-- Setup cost on the GPU was measured only as a side note (0.07 to 0.5 s).
-- The pure-Neumann mms at 1 and 16 ranks and with repeats (one 8-rank run only, in the setup-and-solve section), plus a fix for MLMG's pin-limited level-0 coarsening on sealed domains (sealD Mf is 3 to 6 times slower than H on both CPU and GPU).
-- Plain MLMG with the default bottom (M) in the full matrices (probed only).
-- A per-core view of the clocks for 1-rank runs (the sampler followed one core; the rank may hop between performance cores).
-- An FFT case on hallways is not meaningful (thin winding corridor covering about 14% of its bounding box) and was not run by design.
+- **Product tip:** pressure backend at `ccac6cabe2`, harness rebuild against AMReX 26.09 and HYPRE v2.32.0-24. Private scratch driver (same geometries as `mode=masked_geo`) calls `solve_pressure` with `backend=mlmg` then `backend=hypre`; no product sources edited.
+- **Machine:** shared machine, CPU only, `OMP_NUM_THREADS=1`, 1 and 2 MPI ranks (`--oversubscribe`). No product GPU build was available for this tip; study-harness GPU numbers stay in the sections above and in doc 06 §8.
+- **Operator:** product masked common layer (Gas / Solid / Known). OPEN vent cells are Known. Covering BoxArray (product single-level API requires a domain-covering BA; `ba=drop` is `InvalidInput` there).
+- **Product MLMG** is GMRES preconditioned by one V-cycle (8+8 sweeps, smoother bottom), not the study Mf route (MLMG with a HYPRE bottom). Product HYPRE is PCG + BoomerAMG on gas rows only.
+- **Stopping:** product size-scaled residual check (`residual_ok`); hallways at `tol_rel=1e-12`, stairwell at `1e-10`. Agreement: gauge-free relative L2 of H on gas cells against the first backend.
 
-## How to resume
+### Hallways (`Pressure_Solver/hallways.fds`, 128×64×64, dx = 0.0625, 73,728 gas cells, mgs = 32)
 
-Rerun the remaining blocks of `h2h_matrix.sh` (from the `stairU` 1-rank Mf/H runs onward, then `stairD`) on at most 4 cores. The harness asserts that `ba=union` has no sealed component. Then add the GPU notes and the recommendation.
+Open: one OPEN Known slab, one non-singular component. Sealed: vent removed, one sealed component (HYPRE reports `npin=1`). Median of the re-solves after the first pass (nsolve = 3). CMP is HYPRE against MLMG.
+
+| Case | Backend | Ranks | Iterations | First (s) | Re-solve (s) | True rel. L2 (nopin) | hypre_rows / pins | vs MLMG rel L2 |
+|---|---|---|---|---|---|---|---|---|
+| open | MLMG | 1 | 11 | 1.91 | 2.40 | 1.2e-11 | 0 / 0 | — |
+| open | HYPRE | 1 | 26 | 0.42 | 0.155 | 2.0e-11 | 73728 / 0 | 7.3e-15 |
+| open | MLMG | 2 | 11 | 0.81 | 0.783 | 1.2e-11 | 0 / 0 | — |
+| open | HYPRE | 2 | 26 | 0.24 | 0.091 | 2.0e-11 | 73728 / 0 | 1.1e-13 |
+| sealed | MLMG | 1 | 9 | 1.26 | 1.20 | 5.2e-13 | 0 / 0 | — |
+| sealed | HYPRE | 1 | 25 | 0.40 | 0.153 | 1.9e-12 | 73728 / 1 | 9.8e-14 |
+| sealed | MLMG | 2 | 9 | 0.67 | 0.682 | 5.2e-13 | 0 / 0 | — |
+| sealed | HYPRE | 2 | 24 | 0.24 | 0.088 | 1.9e-12 | 73728 / 1 | 1.9e-14 |
+
+Every run `status=Ok` and `residual_ok`. HYPRE re-solves about 8 to 15 times faster than product MLMG on this geometry. Solutions agree to about 1e-13 or better (far below eps_H).
+
+### Stairwell product path (covering BA, mgs = 64, 1 rank, nsolve = 2, tol 1e-10)
+
+Geometry as `masked_geo case=stairwell`: union of 11 meshes on 192×177×552, OPEN Known pad on the low-y face. Product MLMG on the covering BA was killed by the OS (out of memory on a 15 GB box): MLMG keeps identity rows on every Solid/Known cell (~18.8 M cells). Assembled HYPRE stores gas rows only (~1.64 M) and fits.
+
+| Case | Backend | Iterations | First (s) | Re-solve (s) | True rel. L2 (nopin) | ngas / ncomp / pins | residual_ok |
+|---|---|---|---|---|---|---|---|
+| open (no cut) | HYPRE | 29 | 15.6 | 7.47 | 3.3e-11 | 1,637,828 / 1 / 0 | yes |
+| three components (`cutk=60 190`) | HYPRE | 29 | 16.1 | 8.84 | 4.4e-11 | 1,634,656 / 3 / 2 | yes |
+
+Study-harness Mf vs H on the same three-component geometry with `ba=drop` (CPU and GPU) remains in doc 06 §8; those rows are not product API.
+
+### Recommendation: masked single-level default
+
+**On the product API, make assembled HYPRE the default for a masked single level. Keep product MLMG available, but do not prefer it for masked production cases.**
+
+1. **Agreement.** Product HYPRE and product MLMG match on hallways to ~1e-13 relative L2 on gas cells; both pass the size-scaled residual check. Role 2 `pb_masked` also matches HYPRE to MLMG against the dense reference.
+2. **Solve cost.** On hallways, product HYPRE re-solves 8 to 15 times faster than product MLMG (GMRES + V-cycle). That is the reverse of the study-harness open-hallways ordering, where Mf used a HYPRE bottom; the product masked MLMG path does not.
+3. **Memory / large sparse layouts.** Stairwell covering BA: HYPRE runs; product MLMG does not fit in 15 GB. Prefer HYPRE whenever the covering BA is much larger than the gas set.
+4. **Sealed components.** HYPRE applies one pin row per sealed component and excludes pins from the residual check (D6); sealed hallways and the three-component stairwell both converge with the expected pin counts.
+5. **Unmasked default unchanged.** For box domains without masks, the study recommendation stands: Mf default, H as the alternate (and H for sealed/pure-Neumann when MLMG cannot coarsen). FFT remains the fast path only when legal (no masks).
+6. **Composite masked.** Still `NotBuilt`. No product recommendation there until the assembled-HYPRE composite masked branch exists.
+
+### GPU note (product masked)
+
+No product GPU run in this close-out (no CUDA product build of the tip on the development machine). Study-harness GPU solve-only tables above and doc 06 §8 still apply to the FDS-style operator: on the owner-provided NVIDIA test machine, assembled H was 4 to 5 times the best CPU H and beat Mf on every masked/open/sealed case. Re-measure product masked HYPRE on GPU when a device build of the tip exists.
+
+## Still open (out of scope for this close-out)
+
+- **Composite multilevel with masks** — product `NotBuilt` (blocker for A-56 composite-masked rows).
+- Iteration counts with an FDS-built RHS (all product and study masked rows use a synthetic RHS).
+- Study-harness stairwell at 1e-12 and further repeats beyond doc 06 §8.
+- Product masked GPU; multi-GPU; larger-than-1M GPU scaling.
+- GPU BoomerAMG / MLMG-bottom variants (study analysis only).
+- Plain MLMG default bottom (M) in the full study matrices (probed only).
+- An FFT case on hallways is not meaningful and was not run by design.

@@ -244,3 +244,38 @@ Source: Role 2 design note at FDS commit `9df6235181` (`Source/pressure_backend/
 | Q2 | **ACCEPT** | Refuse Known/OPEN on C/F in v1 (`InvalidInput`); regrid keeps vents inside one level. Known cells hold dummy `phi=0`; reading them in a C/F stencil corrupts the gas flux (D3). Gap-face OPEN (FR-037 / doc 04 §1.3) is level-0 mask interior, not C/F. Straddling vents is a later regrid policy, not a first composite need. |
 | Q3 | **ACCEPT** | UGLMAT puts the OPEN value on the face (linear ghost). Matrix: `+2*BIJ` on the diagonal (`pres.f90:4707`); RHS: `-2*IDX*AF*BCV` with `BCV=BXS/…` (`pres.f90:1657`); post-solve ghost `HP=-HP_gas+2*B` (`pres.f90:3529-3539`). Matches backend `Known` / β=2 and doc 04 §2(a2). Close the `[VERIFY]` at doc 04:200. |
 | Q6 | **ACCEPT** | Partial-face OPEN: driver pads one Known/Solid halo layer (as `masked_geo case=stairwell`); no per-cell face-type array. Domain faces keep one BC type (FR-037 / AMReX); pad reuses the existing mask path (prefetch-friendly, single-direction messaging). Per-cell face types add a conditional on every face (D-084). UGLMAT's per-wall OPEN is already encoded by Known cells behind the face, not by a second face-type field. |
+
+
+## 11. A-72 E3 re-check (D-087; src `1a7df20fbca404fd9328778070604ced65a6e2c9`)
+
+Re-check of Role 2's response to §8.1 CHANGE. Formula in `CompositeSolve.cpp`: `S.anorm = min(2.0 * anorm_eff, A_finest)` with `anorm_eff` from the same volume-weighted `exact_sum_multi` as before (weight `vol[l]*A_l^2`); shared `operator_anorm` in `CommonLayer.H` (D-084). No `max(old,new)`, no bare ×10, no H-only heuristic as the sole floor (cap by `A_finest`). One deterministic reduction; no extra copies.
+
+**Re-run** (`(local workspace)/pb-build-r2g`, Release, 2 ranks, `OMP_NUM_THREADS=1`, 2026-10-06):
+
+| Test | Result |
+|---|---|
+| `pb_resid_e3_worst` Neu 3lev r4 n=32 HYPRE | check 1.565e-12, floor/limit 5.187e-12, ok=1, margin ~3.31 |
+| `pb_resid_e3_worst` Per 3lev r4 n=32 HYPRE | check 9.996e-13, floor/limit 2.353e-12, ok=1, margin ~2.35 |
+| `pb_resid_e3_near` Neu 3lev r4 | check 1.012e-11, floor/limit 5.187e-12, ok=0 warn (~2×limit; below old 3.94e-11) |
+| `pb_resid_e1_mlmg` smoke | PASS |
+
+Floor ≪ old worst 3.94e-11 (~7.6× lower on Neu). Glance: C1 whole-extent every code, C2 tunnel out of `HFillOptions`, thinned `r4r5`+`FIXTURES_REQUIRED`, E1 `polish_tgt = max(0.5*tol_rel, residual_tol)` match prior CHANGE requests; E3 is the gate.
+
+**Verdict: ACCEPT** — close A-72 E3 / D-087. Architect: C2 converter refusal still Role 3 under D-080(6); no further E3 change.
+
+## 12. A-68 D6 review: single-level masked HYPRE (src `ccac6cabe201434b97753af32fe4c561d32780c7`)
+
+Review of Role 2 product path for assembled HYPRE on masked single-level problems (D6; A-71 Q1 keeps composite masked NotBuilt / HYPRE-only later). Read: `HypreBackend.cpp` `MaskedHypre`, `CommonLayer` multi-pin `residual_sums`, `BackendStatus::pins`, selector, `frozen/masked-notes.md` + `masked-branch-design.md` D6. Yardstick: docs 04/06, §3.2 D6, §10 Q1.
+
+| Check | Finding |
+|---|---|
+| Gas-only rows | Per-box prefix count over Gas; Solid/Known have no row; Solid/Known faces coeff 0; Known neighbours `+2 g / dx^2` on RHS (same discrete system as masked MLMG) |
+| Pins / sealed | One identity pin row per sealed `ComponentInfo::pin`; `max_pins` test hook; columns to pin dropped from other rows (same pattern as unmasked HYPRE) |
+| Residual | `residual_sums` / composite exclude every listed pin; singular check uses nopin residual |
+| Selector / Q1 | Masked+HYPRE allowed; FFT still refused; composite masked still `NotBuilt` |
+| D-084 | Separate `MaskedHypre` is justified (gas-only numbering ≠ identity-Solid/Known); Krylov/AMG setup duplicates unmasked (non-blocking) |
+| Tests | `pb_masked` HYPRE vs MLMG (gauge-free rel L2 < 1e-9), sealed2 `npin=2`, `max_pins=1`+`remove_mean=0` warns; hallways (MLMG D7) PASS |
+
+**Re-run** (`(local workspace)/pb-build-r2g`, Release, 2 ranks, `OMP_NUM_THREADS=1`, 2026-10-06): `pb_masked` PASS (8.9 s); `pb_masked_hallways` PASS (3.8 s). Sample: sealed2 `npin=2`, nopin within limit; HYPRE vs MLMG worst ~1e-12; max_pins neg control `residual_ok=0 nwarn=1`.
+
+**Verdict: ACCEPT** — close A-68 D6 single-level masked HYPRE. Composite masked remains NotBuilt pending D3/D4 under Q1.

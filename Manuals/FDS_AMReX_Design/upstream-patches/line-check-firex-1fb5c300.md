@@ -59,3 +59,45 @@ Checked at `8ad685f435`; agree with `docs/next-work.md` (r6) and `docs/amrex/ups
 
 - Prior checks: `line-check-0010-0011.md` (pre-FireX), `line-check-output-plan.md` (FireX delta section added there).
 - README target lines for 0010 and UP-0011 updated for this merge.
+
+## Mapper tip re-check (2026-10-06 ET)
+
+FDS-AMReX src tip at re-check: `315ced11efc5` (dispatch tip was `2b7cb601d9`; +1 pressure_backend D-091). Compared survey pin `36975d765f`, merge `8ad685f435`, and tip.
+
+### Loop DO anchors (inventory / register loops)
+
+Survey `file:lines` in `loop_work_list.csv` remain the 36975d7 pins (regen `--check` PASS against that pin). Tip bodies for the loops below match `8ad685f435` line-for-line at the known post-merge starts:
+
+| Key | Survey (36975d7) | Tip / 8ad685 start | Tip DO match |
+|---|---|---|---|
+| L0630 | func.f90:5509 | 5581 | yes (`DO K=K1,K2`) |
+| L0677 | func.f90:5183 | 5248 | yes |
+| L0817 | init.f90:4878 | 4889 | yes |
+| L0822 | init.f90:4917 | 4928 | yes |
+| L0823 | init.f90:4940 | 4951 | yes |
+| L0876 | mass.f90:799 | 805 | yes |
+| L0877 | mass.f90:868 | 874 | yes |
+| L0866 | mass.f90:570 | 576 | yes |
+| L0875 | mass.f90:752 | 758 | yes |
+| L0397 | divg.f90:814 | 829 | yes |
+| L1272 | soot.f90:54 | 54 | yes (unchanged) |
+| L1242 | radi.f90:3912 | 3913 | yes (`BAND_LOOP`) |
+| L1239 | radi.f90:3886 | 3887 | yes |
+| L1243 | radi.f90:4961 | 4965 | yes |
+| L1248 | radi.f90:3651 | 3651 | yes |
+| L1356 | velo.f90:256-279 | **265-288** | yes at tip; **+9** vs survey (Vreman nest grew before WALE; same at 8ad685) |
+
+No new Source/ drift between `8ad685f435` and tip for `mass.f90`, `radi.f90`, `soot.f90`, `divg.f90`, `velo.f90`, `func.f90`, `init.f90`, `pres.f90`. Tip `main.f90` differs from `8ad685f435` (16 insertions): MODE==3 now includes the patch-0011 `OUT_MESH_DUMPS` dump loop (already on tip).
+
+### UP-0011 / 0012 / output-plan
+
+- Prior dry-apply table above (vs `8ad685f435`) still the reference for patch hunks.
+- Tip `PRESSURE_SOLVER_COMPUTE_RHS` call is now **main.f90:1740** (was 1726 unpatched at 8ad685); further MAIN_LOOP drift from tip work, not FireX. Do not mass-rewrite the 8ad685 table; re-dry-apply before any tip land of UP-0011.
+- Intel Rel+Dbg on tip/`8ad685`: **PASS** — `vv-runs/upstream-patch-validation/intel/UP-0011-tip8ad685-rel-dbg.md`.
+- GNU stock Debug finding: **CLOSED PASS** — `UP-0011-gnu-debug-validation.md` (no unused `FN`). Do not re-open.
+- `gpu_candidate_loops.csv` radi L1239 already at 3887-3893; L1242/L1243 still survey ranges (intentional; tip starts +1 / +4 as in R1 sign-off).
+- Combustion/radiation register citations for L0876/L0877/L1272/L0866/L0875/L0397/L1242 checked against tip DO starts above; no citation rewrite needed beyond the register refresh.
+
+### Headline
+
+**Mostly clean.** Known survey→tip shifts unchanged from the 8ad685 impact note; only new tip note is L1356 at 265-288 and MAIN_LOOP/UP-0011 call-site drift to ~1740. No inventory pin rewrite.

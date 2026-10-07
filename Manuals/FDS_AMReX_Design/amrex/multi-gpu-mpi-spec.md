@@ -311,6 +311,10 @@ The class for kernel-level GPU vs CPU parity is an open question (§8).
 | L-12 | `AMReX_OMP=ON` + CUDA build | the build links; threaded host sections run | results bitwise identical to `AMReX_OMP=OFF` at fixed thread count (FR-005 (i), (iv)); no oversubscription warning with the async thread counted | same (build also possible on the development machine, compile only) |
 | L-9 | Abnormal termination under MPS | one rank aborts (`amrex::Abort`) | the other ranks and the MPS server recover or are restarted cleanly; procedure documented | same |
 
+
+
+**L-10 / A-44 provisional (test machine, short gate; not a full matrix).** Hardware: one NVIDIA GeForce RTX 4070 Test-machine GPU (cc 8.9, 8 GB), 24 host cores. **C2 (MPS) skipped:** `nvidia-cuda-mps-control` is present, but MPS is not supported on GeForce/consumer GPUs (NVIDIA product split); daemon not started. **C1 vs C3 proxy (RUN):** existing stage-1 K2 launch probe (`stage1/launch/lm_probe`, T5): 20 small-grid blocking K2 launches on one GPU — 1 host thread 25.1 ms; 2 host threads (20 launches each, distinct buffers) 26.0 ms; 3 host threads 39.4 ms (ideal serial 2×/3× would be ~50/75 ms). Reading: two host threads issuing K2 almost fully overlap on this GPU; a third adds contention. This is not an FDS step-time matrix and does not pick the NFR-047 default; it unblocks the device/test machine gate with one short measured table. Full C1/C3a/C3b with async output and a production tiny case remain open.
+
 ### 7.2 Needs multi-GPU or multi-node hardware
 
 | ID | Test | Checks | Pass criterion | Hardware |

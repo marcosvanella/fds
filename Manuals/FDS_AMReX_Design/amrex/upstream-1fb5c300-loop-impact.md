@@ -196,3 +196,11 @@ Wall-list variants (no `lines`, follow their base kernel): `wall_uvw_interp_wl` 
   - L0401 and L0398 are claimed by the Legacy Mapper. The note "MP5 not implemented in the generator (owner ruling)" was appended; status unchanged.
   - L0657 (`GET_SCALAR_FACE_VALUE` MP5 nest, `func.f90:1439-1453`) is unclaimed, but the committed whole-field kernel `gsfv_mp5` on s5-gen already translates it. A row with the ruling note was added and the status left as `translated`, not `closed-owner-ruling`, until the owner decides whether `gsfv_mp5` is withdrawn.
 - No body-changed loop is claimed, so no active claim was touched by the hold.
+
+## Mapper tip re-check (2026-10-06)
+
+Re-checked against FDS-AMReX tip `315ced11efc5` (merge `8ad685f435` still the FireX land). Survey pins and the §1 tip ranges for L0630/L0677/L0817/L0822/L0823 still hold. Additional tip notes (no inventory rewrite):
+
+- **L1356** WALE nest is `velo.f90:265-288` at tip/8ad685 (survey `256-279`); work-list survey pin unchanged.
+- Species/radiation register loops (L0876/L0877/L1272/L0866/L0875/L0397/L1242 and R1 walls) match the tip DO starts already cited in claims (`mass` +6/+6, `divg` +15, `radi` +1/+4).
+- UP-0011 Intel Rel+Dbg PASS; GNU Debug CLOSED; tip `main.f90` has further MAIN_LOOP drift (RHS call ~1740) and already carries the 0011 MODE==3 dump loop. Details: `upstream-patches/line-check-firex-1fb5c300.md` § Mapper tip re-check.

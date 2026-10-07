@@ -4,7 +4,7 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 
 ## 1. State of `tools/ported.toml`
 
-**28 kernels are set** (7 `[[ported]]` entries), aligned with the V&V Lead's review (`vv/ported-review.md`, sections 3 to 9). `reviewed_by` says that the V&V Lead reviewed the device runs and the ulp gate; the Architect co-signed the list as it stands (D-077), with the V&V Lead as reviewer of record in place of the kernel owner (D-072 (c)). `set_by` is the Integration Lead. `port_kernel_map.py --strict` accepts all entries (self-check PASS, no PM-08 finding).
+**51 kernels are set** (9 `[[ported]]` entries), aligned with the V&V Lead's review (`vv/ported-review.md`, sections 3 to 10), plus D-083 `s5clip_*`. `reviewed_by` says that the V&V Lead reviewed the device runs and the ulp gate; the Architect co-signed the list as it stands (D-077), with the V&V Lead as reviewer of record in place of the kernel owner (D-072 (c)). `set_by` is the Integration Lead. `port_kernel_map.py --strict` accepts all entries (self-check PASS, no PM-08 finding).
 
 | Entry | Kernels | Class | Device evidence as reviewed |
 |---|---|---|---|
@@ -15,7 +15,8 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 | 5 | `rho_d_dzd`, `h_rho_d_dzd` | bitwise | device coverage only: ZZ and TMP real, `RHO_D` and `D_Z` synthetic, no FDS truth; host gate PASS |
 | 6 | `cfl_wall_max`, `ulp_gate_passed = true` | libm, 2 ulp | gate `ULP` lines PASS: real 32 walls max 1 ulp (only 19 distinct real values), SYNTHETIC 20,000 walls max 2 ulp; the 2 ulp bound is measured for this toolchain, not a guarantee |
 | 7 | `gsfv_central`, `gsfv_godunov`, `gsfv_superbee`, `gsfv_minmod`, `gsfv_charm`, `gsfv_mp5` (6) | bitwise | two device runs on record: stage-1 harness on 1,296 REAL `GET_SCALAR_FACE_VALUE` calls (`shunn3_32`, `dec2_obst`, `csmag_32`; stage1 9715a9e, plan 7.13c, docs 22d7552): device = serial = 4 threads, byte-identical in 7,776 of 7,776 kernel runs, bit-equal to FDS on 1,920,768 of 1,920,768 box cells; and the gate device driver (SYNTHETIC inputs, hash form). Limits: negative `A` with a varying scalar only in `dec2_obst`; `csmag_32` scalar uniform; the one-face callee `GET_SCALAR_FACE_VALUE_PT` is not covered; the caller must pass the address of element (0,0,0). Reviewed and accepted in `vv/ported-review.md` section 9 |
-
+| 8 | `s5clip_density_gather/apply`, `s5clip_species_gather/apply`, `s5clip_species_one`, `s5clip_renorm` (6) | bitwise | D-083; see `tools/ported.toml` |
+| 9 | 17 `rad_*` (`rad_extcoe` … `rad_wall_qin_zero`) | bitwise | `mkdev_rad` SYNTHETIC meshes at `25aad430b9`; V&V co-sign D-072 (c) ACCEPT-WITH-LIMITS (`ported-review.md` §10) |
 
 **Held out, not in `ported.toml`:**
 - `d_z_max`, `del_rho_d_del_z`: the review accepts them as device coverage (synthetic `RHO_D` and `D_Z`) on the stated condition that the gate's host tier shows a result for both. The latest quick run has no result line for either, so the condition is unmet and they are held out until it is.
@@ -23,8 +24,9 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 - WP1 non-wall and wall kernels (266 and 76 arrays): held until the kernels are named with their truth status and the run is repeated with the device outputs kept (the earlier device outputs were removed, so the reviewer could not re-compare them).
 
 **Open conditions of D-072 (c):**
-- `tools/ci_checks.sh --strict` must be green as ruled. It is not: `k2_ci_check` (K2-03) and `kernel_lint` (CL-07) fail on `s5gen_rad_wall_qin_zero` (`W_SURF_INDEX` missing from the device-address list). Until that is fixed the entries stand for the map only.
+- `tools/ci_checks.sh --strict` is green on `src-s5gen` at `25aad430b9` (ZS-05 `s5rad_wall1` approved waiver; prior `rad_wall_qin_zero` / `W_SURF_INDEX` FAIL cleared). Stale OPEN CONDITION removed from the live `ported.toml` header.
 - The reviewer substitution (V&V Lead in place of the kernel owner) is settled by D-077; nothing open.
+- 17 `rad_*`: ACCEPT-WITH-LIMITS — SYNTHETIC `mkdev_rad` hash only; real-field / FDS-truth overlay remains open follow-up (not claimed).
 
 ## 2. Evidence (kernel-map names; run on the cc 8.9 test-machine GPU unless stated)
 
@@ -40,13 +42,14 @@ Owner: AMReX Integration Lead. Status: v0.2. This file records which kernels `to
 
 Not set: loops without a kernel or marker, and the held-out kernels above. (An earlier version of this file listed the six `gsfv_*` kernels as "no device run"; that was wrong, two device runs are on record, see entry 7 and `tools/device_runs.toml`.)
 
-## 3. Fast-math pin (D-068): check on a scratch copy
+## 3. Fast-math pin (D-068): applied on the generator worktree
 
-The pin patch (`tools/patches/cmake-fastmath-pin.patch`) edits the generator worktree (`amrex/s4_mass/CMakeLists.txt`, `s4d/CMakeLists.txt`, `s5_gen/gpu/CMakeLists.txt`, and two new files under `amrex/cmake/`). That worktree belongs to the generator branch, so the patch was **not** applied there; it applies cleanly (`git apply --check`) and was checked on a scratch copy of the tree (run):
+The pin patch (`tools/patches/cmake-fastmath-pin.patch`) is **applied** on the generator worktree (`s5-gen`). Commit `3546f746a7` (author a dedicated project identity): new `amrex/cmake/AMReXCudaPin.cmake` and `amrex/cmake/amrex-cuda-gpu.cmake`; `include` + `amrex_cuda_fastmath_check()` in `amrex/s4_mass/CMakeLists.txt`, `amrex/s4_mass/s4d/CMakeLists.txt`, and `amrex/s4_mass/s5_gen/gpu/CMakeLists.txt`. Reverse-apply of the patch is clean against that tree. Local only; not pushed.
+
+Scratch-copy check that preceded the apply (still valid as evidence of the pin effect):
 
 - `kernel_lint.py --strict` on the unpatched tree: BF-05 FAIL, BF-07 FAIL.
-- Same on the patched scratch copy: BF-05 NOTE ("D-068 pin found: FORCE-OFF in amrex/cmake/AMReXCudaPin.cmake, failing guard in the same file"); BF-07 no finding (pass). The tool reported 1 remaining FAIL, which is the CL-07 finding of the radiation golden named in section 1.
-- `k2_ci_check.py --strict` (patched or not): 2 FAIL, both K2-03 on `s5gen_rad_wall_qin_zero`, `W_SURF_INDEX`.
+- Same on the patched tree: BF-05 NOTE ("D-068 pin found: FORCE-OFF in amrex/cmake/AMReXCudaPin.cmake, failing guard in the same file"); BF-07 no finding (pass).
 - `zone_sum_order.py --strict`: PASS. `port_kernel_map.py --strict`: self-check PASS.
 
-Remaining step for BF-05 and BF-07: the owner of the generator worktree applies the patch there (`git apply` from the worktree root).
+GNU verify **PASS** on s5-gen tip `dcada34a2e` (pin `3546f746a7` ancestor): BF-05 NOTE + BF-07 pass; configure ON→FATAL_ERROR. Evidence: `vv-runs/d068-fastmath-pin/RESULT.md`. A separate K2-03 / CL-07 finding on an older `s5gen_rad_wall_qin_zero` golden is not part of the pin; a fresh `rad_k2.F90` from `markers/rad_kernels.toml` at this tip passes `k2_ci_check` and `kernel_lint` (device-address list includes `W_SURF_INDEX`).

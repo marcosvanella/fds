@@ -421,7 +421,7 @@ D-042 defers cylindrical in AMR mode and D-073 (5) puts it out of the first rele
 
 ### 13.1 Source of the numbers
 
-The authoritative SYNTHETIC launch-cost measurements are the Integration Lead's stage-1 harness (`stage1/rad_sweep/`, plan commit `85b4785`, `docs/amrex/stage1-gpu-spike-plan.md` §7.14), pinned to s5-gen `3814e1f893`. Inputs are synthetic gray 3D boxes (`RAD_DIFF_SCHEME = 1`), internal wall rows included, blocking launches, managed memory, test-machine GPU (RTX 4070, cc 8.9, nvfortran 26.9). Byte identity of the batched path against box-by-box and against a natural-order sweep holds on host and device (120 of 120 dump files). Those figures supersede any earlier private bench table for the same configurations.
+The authoritative SYNTHETIC launch-cost measurements are the Integration Lead's stage-1 harness (`stage1/rad_sweep/`, `docs/amrex/stage1-gpu-spike-plan.md` §7.14), re-pinned to s5-gen `d054f283f0` (ILD*/STORE tip; scheme-1 launch costs re-run, unchanged within ~2% vs prior pin `3814e1f893`). Inputs are synthetic gray 3D boxes (`RAD_DIFF_SCHEME = 1`), internal wall rows included, blocking launches, managed memory, test-machine GPU (RTX 4070, cc 8.9, nvfortran 26.9). Byte identity of the batched path against box-by-box and against a natural-order sweep holds on host and device (120 of 120 dump files). Those figures supersede any earlier private bench table for the same configurations.
 
 ### 13.2 Per-angle cost (Integration Lead, SYNTHETIC)
 
@@ -563,7 +563,7 @@ The code in this round uses the pin lines. Drift checks assert the first stateme
 
 ### 17.2 L1251: neighbour-mesh `IL_R` interpolation (3698-3713)
 
-**Disposition: host now (FDS-mode path unchanged). AMR replacement: Role 3 lagged `ILR` ghost table (`fdsrt::build_il_ghost_table`), no Radiation kernel.** Sweep contract unchanged: `s5rad_ils` packs, whole-array `ILS→ILR` lag copy, `s5rad_wall1` reads the mean of `ILR(W_NIC_MIN:W_NIC_MAX,N,IBND)`.
+**Disposition: host now (FDS-mode path unchanged). AMR replacement: Role 3 lagged `ILR` ghost table (`fdsrt::build_il_ghost_table` + `fdsrt::exchange_il_ghost`), no Radiation kernel.** Sweep contract unchanged: `s5rad_ils` packs; AMR lag via `exchange_il_ghost` (FDS-mode / single-box harness: whole-array `ILS→ILR` copy); `s5rad_wall1` reads the mean of `ILR(W_NIC_MIN:W_NIC_MAX,N,IBND)`.
 
 What upstream does:
 
@@ -588,13 +588,13 @@ Delivered on FireX `cdb0e8d45d` (`IlGhost.H`/`.cpp`, `notes/radiation-il-ghost.m
 | Raw lagged fill; mean stays in `s5rad_wall1` | table fills no value; test packs as `s5rad_ils`, copies `ILS→ILR`, checks wall1 mean == FDS mean bitwise | **Accept** |
 | Lag = whole-array `ILS→ILR` (not pointer swap) | notes: unswept angles under `ANGLE_INCREMENT>1` keep old values | **Accept** |
 | Equal-level bitwise; c/f ratios 2 and 4; three-level | `test_il_ghost`: 7370 checks, 0 failed; wrong-layer mutant 660 failures | **Accept** |
-| Multi-rank send/recv | not written; waits on Radiation row-distribution choice (below) | **Open (Role 3)** |
+| Multi-rank send/recv | `fdsrt::exchange_il_ghost` @ `b3e1a08275`; `regrid_transport_il_ghost` 7521/0 + `regrid_transport_il_ghost_np2` 7522/0 bitwise | **Green (Role 3)** |
 
-**Review verdict: accept** the entry point and host test. No Radiation `s5_rad_*` change required. Remaining: multi-rank exchange (Role 3 implements; Radiation choice below).
+**Review verdict: accept** the entry point and host test. Multi-rank send/recv delivered by Role 3 at `b3e1a08275` (below). No Radiation kernel change; host call contract + stub in `s5rad_sweep_host.F90`.
 
-#### Multi-rank ILS/ILR distribution choice (Radiation → Role 3)
+#### Multi-rank ILS/ILR distribution choice (Radiation → Role 3) — **implemented green**
 
-**Choice: global NICR indices, pair-contiguous one-way slabs.**
+**Choice: global NICR indices, pair-contiguous one-way slabs** (published earlier; Role 3 landed it).
 
 1. Keep the global position numbering from `build_il_ghost_table` (FDS `IIO_R` order). `W_NIC_MIN`/`W_NIC_MAX` passed to `s5rad_wall1` / `s5rad_ils` are those global 1-based indices on every rank — no remapping, so equal-level bitwise is unchanged.
 2. Each radiation rank that owns any box appearing as sender or receiver allocates `ILS(NICR,NRA,NSB)` and `ILR(NICR,NRA,NSB)` (ghost index fastest). Rows this rank never touches may stay undefined; kernels only read `W_NIC_*` ranges of walls on local boxes and write `ILS` rows for local sender packs.
@@ -602,7 +602,33 @@ Delivered on FireX `cdb0e8d45d` (`IlGhost.H`/`.cpp`, `notes/radiation-il-ghost.m
 4. Timing: after each radiation update's pack of swept `(N,IBND)` into `ILS`, exchange/copy the full `(NRA,NSB)` for every pair range (unswept angles keep prior `ILS` values — the FDS lag). Do not pointer-swap.
 5. Rejected alternatives: rank-local renumbering of `LL` (breaks bitwise / remaps `W_NIC_*`); per-angle messages (extra sync, worse than one slab per neighbour pair per update).
 
-loop_claims: L1251 `not planned (host)`, AMR table owned by Role 3; Radiation accepted `cdb0e8d45d` and published the multi-rank choice above.
+**Role 3 delivery (`b3e1a08275`):** `fdsrt::exchange_il_ghost(t, box_rank, nra, nsb, ils, ilr)` in `IlGhost.H`/`.cpp`; `pair_recv` on the table; AMReX `ParallelDescriptor` Asend/Arecv for cross-rank pair slabs; same-rank `memcpy` of those slabs. Host checks: `regrid_transport_il_ghost` 7521/0; `regrid_transport_il_ghost_np2` 7522/0 bitwise. Notes: `Source/regrid_transport/notes/radiation-il-ghost.md`.
+
+#### Host call contract (Radiation → Integration / AMReX driver)
+
+Production AMReX radiation host is not yet linked for a live call (still blocked on Integration `rad_*` device driver / gate). Call order is fixed here and mirrored as a stub comment in `s5_rad_sweep/s5rad_sweep_host.F90`. Single-box / FDS-mode sweep bitwise tests are unchanged (they keep the whole-array `ILS→ILR` lag and do not link IlGhost).
+
+**Entry points (Role 3):**
+- Once per regrid: `fdsrt::build_il_ghost_table(boxes, ratio, walls)` → `IlGhostTable t` (`cdb0e8d45d`).
+- Per radiation update / K-pass, **after** all `s5rad_ils` packs of that pass and **before** the next pass's `s5rad_wall1` reads `ILR`: `fdsrt::exchange_il_ghost(t, box_rank, NRA, NSB, ILS, ILR)` (`b3e1a08275`).
+
+**Call order:**
+```
+regrid:     t = build_il_ghost_table(...)
+radiation update / K-pass:
+  DO IBND / DO N (angle subset):
+    ... s5rad_wall1 (reads ILR from prior exchange) ...
+    ... plane sweep ...
+    s5rad_ils   ! pack ILS(:,N,IBND) only
+  ENDDO
+  exchange_il_ghost(t, box_rank, NRA, NSB, ILS, ILR)
+  ! replaces whole-array ILS→ILR lag; same-rank slabs memcpy; cross-rank pair slabs MPI
+  ! do NOT pointer-swap; do NOT re-mean (mean stays in s5rad_wall1)
+```
+
+Radiation does not duplicate Role 3's mean or remapping. FDS-mode multi-mesh path keeps host `MESH_EXCHANGE` unchanged.
+
+loop_claims: L1251 `not planned (host)`, AMR table+exchange owned by Role 3; Radiation accepted `cdb0e8d45d` + `b3e1a08275`; host call order documented §17.2 + `s5rad_sweep_host` stub.
 
 ### 17.3 L1247: angle weights (3623-3645)
 
@@ -767,4 +793,4 @@ No new `s5-gen` commits. Land pause until Legacy Mapper posts FF (s5-land at `66
 
 **Not in this table (already closed or owned elsewhere):** angular sweep and `UIID`/`QR`/`UII` (FR-062 / translated); `IL_S` mesh pack (FR-062 exchange, §18.1); L1238/L1247-L1250/L1240/L1244 translated; L1245 host; L1251 Role 3 ghost fill.
 
-**Next-work status (2026-10-06):** (1) gate hookup — partial / blocked on Integration device `rad_*` driver + `ported.toml`; host steps in `radiation/03` §10. (2) ghost `UII`/`UIID` reader list — **closed** (V&V co-sign; R-D073b-out (A)). (3) L1242 A1 remainders: feature requests only until taken. (4) solid/08 R1–R4 — **closed** on Radiation (`05` + §14). (5) L1251 — Role 3 entry `build_il_ghost_table` at `cdb0e8d45d` **accepted** (§17.2); multi-rank pair-contiguous choice published; Role 3 implements send/recv. (6) FR-063 regrid still waits on Role 3 beyond L1251.
+**Next-work status (2026-10-06):** (1) gate hookup — partial / blocked on Integration device `rad_*` driver + `ported.toml`; host steps in `radiation/03` §10. (2) ghost `UII`/`UIID` reader list — **closed** (V&V co-sign; R-D073b-out (A)). (3) L1242 A1 remainders: feature requests only until taken. (4) solid/08 R1–R4 — **closed** on Radiation (`05` + §14). (5) L1251 — **multi-rank green**: `build_il_ghost_table` (`cdb0e8d45d`) + `exchange_il_ghost` (`b3e1a08275`); host call order in §17.2 + `s5rad_sweep_host` stub; live AMReX link waits Integration driver. (6) FR-063 regrid — unblocked in principle by L1251 green; short draft in `radiation/04`; live work still gated on device `rad_*` driver.
