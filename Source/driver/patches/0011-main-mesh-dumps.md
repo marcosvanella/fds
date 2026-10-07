@@ -1,7 +1,14 @@
 # Patch 0011 (DRAFT): `main.f90`, per-mesh dump loop in `FDS_SETUP(MODE=3)`
 
-Status: DRAFT, needs validation by the Build Chiefs and the Architect before it is applied. Apply after 0006 (it edits the `MODE==3` block that 0006 adds). Touches only
-`Source/main.f90` (one `USE` list entry, one comment, 14 added lines, all inside the `#ifdef WITH_AMREX` branch of `FDS_SETUP`). Step A of `notes/output-plan.md`.
+Status: DRAFT, needs validation by the Architect and the Legacy Mapper before it is applied. Apply after 0006 (it edits the `MODE==3` block that 0006 adds). Touches only
+`Source/main.f90` (one `USE` list entry, one comment, 14 added lines, all inside the `#ifdef WITH_AMREX` branch of `FDS_SETUP`). Step A of `notes/output-plan.md` (A-63 number 0011).
+
+## FireX re-anchor (merge `8ad685f435`, tip after FireX `1fb5c300`)
+`patch -p1 --dry-run` applies clean on the merged tree (no offset). Insertion points:
+- `USE` list: main.f90:15 (`USE FDS_AMREX_HOOKS, ONLY: ...`, add `OUT_MESH_DUMPS`)
+- Insert: main.f90:131-132, between `CALL UPDATE_CONTROLS(...)` and `CALL DUMP_GLOBAL_OUTPUTS` inside `MODE==3`
+- MAIN_LOOP reference dump loop: main.f90:1219-1228 (`N_WRITTEN=0`, five `WROTE_*`, `DUMP_MESH_OUTPUTS` at 1226; was 1216-1225 before the merge)
+Sources: `docs/upstream-patches/line-check-firex-1fb5c300.md`, `line-check-output-plan.md`.
 
 ## What it does
 - Insertion point: the `MODE==3` block, between `CALL UPDATE_CONTROLS(T,DT,CTRL_STOP_STATUS,.FALSE.)` and `CALL DUMP_GLOBAL_OUTPUTS`; `OUT_MESH_DUMPS` is added to the
@@ -12,12 +19,16 @@ Status: DRAFT, needs validation by the Build Chiefs and the Architect before it 
   `FDSTL_MESH_DUMPS` is set and the FDS writers are available.
 - Not replicated: the VTK-HDF padding loop and `INITIALIZE_VTKHDF_FILES` of `MAIN_LOOP`, and `IF (CTRL_STOP_STATUS) STOP_STATUS = CTRL_STOP`.
 
-## Evidence
-- `patch -p1 --dry-run` passes on the committed tree.
-- Preprocessed `main.f90` with `WITH_AMREX` undefined (with and without `WITH_HDF5`) is identical to the unpatched file.
-- `USE_AMREX=OFF`, `git archive` of HEAD with 0011 and 0012 applied, `tests/check_off_bitwise.sh`: `shunn3_32` 1 rank PASS (16 files bitwise identical to the baseline),
-  `shunn3_4mesh_32` 4 ranks PASS (47 files).
-- `USE_AMREX=ON`: the patched tree (0011 and 0012) compiled and linked, and the driver ran with it.
+## Evidence (re-checked after FireX)
+- `patch -p1 --dry-run` clean on merge tip `8ad685f435` / current HEAD (no offset).
+- Preprocessed `main.f90` with `WITH_AMREX` undefined identical to the unpatched file.
+- `USE_AMREX=OFF` bitwise (`check_off_bitwise.sh` on a `git archive` with 0011+0012): `shunn3_32` 1 rank PASS (16 files), `shunn3_4mesh_32` 4 ranks PASS (47 files).
+- `USE_AMREX=ON` with the patch applied: `tests/run_mesh_dumps_check.sh` PASS — `shunn3_32` np1: 24 slice/boundary files, sizes match, 18 bitwise equal to the baseline; `shunn3_4mesh_32` np4: 80 files, sizes match (content not gated on multi-mesh; driver fields are not bitwise after a full run).
+
+## Unverified
+- VTK-HDF padding loop and `INITIALIZE_VTKHDF_FILES` not replicated.
+- Behaviour with `WITH_HDF5` / `VTK_HDF` not covered.
+
 
 ## Unverified
 - The mode-3 loop has not been exercised: `tests/run_mesh_dumps_check.sh` (slice and boundary files from `fds_amr --run` with `FDSTL_MESH_DUMPS=1` against the baseline
