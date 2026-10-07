@@ -30,10 +30,10 @@ the next finer level's BoxArray coarsened by its `ref_ratio`. `solve_pressure(p,
 (valid cells; covered coarse cells = average-down of the fine solution) and the composite true residual on the uncovered cells.
 The workspace (`PressureWorkspace::rebuild`, D-058) holds the hierarchy-dependent setup so repeated solves on one hierarchy do not
 rebuild it. `face_gradient_composite` returns face-centred dphi/dn per level with the coarse faces at C/F faces replaced by the
-average of the fine gradients. Only MLMG does composite; unsupported requests are `NotBuilt` (see the header and
+average of the fine gradients. Unmasked composite defaults to MLMG; composite+mask defaults to assembled HYPRE under `Auto` (D-092); MLMG composite+mask and `face_gradient_composite`+mask stay `NotBuilt` (see the header and
 `frozen/composite-notes.md`).
 
-Selector: FFT only on one level with no masked or covered cells; a masked single level (`cell_class` Gas/Solid/Known, `known_value`) goes to HYPRE under `Auto` (D-091; explicit MLMG remains), FFT with a mask is `NotBuilt`, see frozen/masked-notes.md; any per-face mix of Neumann, Dirichlet and periodic
+Selector: FFT only on one level with no masked or covered cells; a masked single level (`cell_class` Gas/Solid/Known, `known_value`) goes to HYPRE under `Auto` (D-091; explicit MLMG remains); composite+mask under `Auto` is HYPRE (D-092; MLMG composite+mask NotBuilt); FFT with a mask is `NotBuilt`, see frozen/masked-notes.md; any per-face mix of Neumann, Dirichlet and periodic
 faces (each direction: PP, NN, DD, ND, DN), see frozen/m2-notes.md. MLMG on request for the same problems. A Dirichlet face in a one-cell x or z
 direction, variable-coefficient, non-uniform cell widths, cylindrical, and multi-level requests through the single-level fields return `Status::NotBuilt` with a message; `phi` is left untouched.
 

@@ -130,4 +130,4 @@ against a uniform-fine solve on the fine region converges at 1.9 to 2.1.
 
 ## Masked composite
 
-Assembled HYPRE only (Q1; see masked-branch-design.md D3/D4/D6). MLMG composite with masks is NotBuilt. Known on C/F is InvalidInput (Q2).
+**Built** product path (D-092): Auto → assembled HYPRE (Q1; see masked-branch-design.md D3/D4/D6). MLMG composite with masks is NotBuilt. Known on C/F is InvalidInput (Q2). `face_gradient_composite`+mask is NotBuilt.

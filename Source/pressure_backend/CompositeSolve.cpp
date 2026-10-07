@@ -274,7 +274,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     }
     s.ok = true;
     if (requested == BackendKind::HYPRE) { s.kind = BackendKind::HYPRE; }
-    else if (requested == BackendKind::Auto && composite_is_masked(p)) { s.kind = BackendKind::HYPRE; }
+    else if (requested == BackendKind::Auto && composite_is_masked(p)) { s.kind = BackendKind::HYPRE; }  // D-092 product: Auto → HYPRE
     else { s.kind = BackendKind::MLMG; }
     return s;
 }

@@ -14,7 +14,7 @@
 //
 // Backends: FFT (single uniform level), MLMG (default for composite; single level on request), HYPRE (assembled matrix, PCG or
 // GMRES/BiCGSTAB with BoomerAMG, ADR-002 backend (H); on request only through `PressureOptions::backend =
-// BackendKind::HYPRE`; Auto selects HYPRE only for a masked single level, D-091). HYPRE assembles the same discrete operator as MLMG (including the
+// BackendKind::HYPRE`; Auto selects HYPRE for a masked single level (D-091) and for composite+mask (D-092); unmasked Auto never picks HYPRE). HYPRE assembles the same discrete operator as MLMG (including the
 // coarse/fine interface treatment) into an IJ matrix, see HypreBackend.H and frozen/hypre-notes.md.
 //
 // Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on FFT; MLMG composite with masks (Q1: composite
@@ -55,7 +55,7 @@
 namespace pb {
 
 enum class BC { Neumann, Periodic, Dirichlet };   // Dirichlet: homogeneous in M1 (values folded into the RHS)
-enum class BackendKind { Auto, FFT, MLMG, HYPRE };   // Auto: unmasked→FFT; masked single-level→HYPRE (D-091); never HYPRE when unmasked
+enum class BackendKind { Auto, FFT, MLMG, HYPRE };   // Auto: unmasked single→FFT, unmasked composite→MLMG; masked single→HYPRE (D-091); composite+mask→HYPRE (D-092)
 // Message of Status::NotBuilt when BackendKind::HYPRE is requested in a build without PB_WITH_HYPRE (README.md, "Build options").
 inline constexpr const char* kHypreNotBuilt = "built without HYPRE";
 enum class Status { Ok, NotBuilt, InvalidInput, NotConverged };
@@ -108,7 +108,7 @@ struct PressureLevel {
     amrex::MultiFab const* gauge_weight = nullptr;
     amrex::MultiFab const* gauge_offset = nullptr;
     // Masked composite (D3/D4/D6): per-level cell class and Known values (same BA/DM as `ba`). Null or all-zero on every
-    // level = unmasked. With any non-zero mask the solve is assembled HYPRE only (Q1); MLMG composite masked is NotBuilt.
+    // level = unmasked. With any non-zero mask the solve is assembled HYPRE only (Q1/D-092 product Built); MLMG composite masked is NotBuilt.
     // Known (OPEN) cells may not sit on a coarse/fine face (Q2: InvalidInput).
     amrex::iMultiFab const* cell_class = nullptr;
     amrex::MultiFab const* known_value = nullptr;

@@ -143,6 +143,7 @@ Composite masked is built on assembled HYPRE (D3, D4, D6; Q1). MLMG composite ma
 * **Tests.** `pb_masked` HYPRE rows on the six small cases vs MLMG; sealed2: two pins reported, residual excludes both; `max_pins=1` warns (singular).
 * **Status.** Built for single level and composite (multi-pin constructor on `HypreSystem`).
 * **D-091.** Masked single-level `Auto` → HYPRE (Architect accept; A-56). Explicit MLMG override kept.
+* **D-092.** Product composite-masked is **Built**: `Auto` → assembled HYPRE (Architect). MLMG composite+mask stays NotBuilt; Known-on-C/F InvalidInput; `face_gradient_composite`+mask NotBuilt. Unmasked Mf default and D-091 unchanged.
 
 ## Closed decisions (Q1–Q6) and remaining open
 
@@ -161,4 +162,4 @@ Composite masked is built on assembled HYPRE (D3, D4, D6; Q1). MLMG composite ma
 * **Evidence (`pb_comp_masked`, n=16, ratio=2, Dirichlet):**
   * full-fine + one fine Solid: Ok, 19 iters, residual_check 4.0e-12 / limit 1e-8
   * partial-fine corridor + Solid at uncovered coarse (1,1,1): Ok, 18 iters, residual_check 8.2e-12 / limit 1e-8
-* **Product.** Composite masked remains assembled-HYPRE only (Q1); MLMG composite+mask stays NotBuilt. Pressure Lead sign-off still required before treating partial-fine as the product default path.
+* **Product (D-092).** Composite masked is **Built** (Auto → assembled HYPRE). MLMG composite+mask stays NotBuilt; Known-on-C/F InvalidInput; `face_gradient_composite`+mask NotBuilt.
