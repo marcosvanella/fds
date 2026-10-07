@@ -1,7 +1,10 @@
 // TagOps.cpp: see TagOps.H.
 #include "TagOps.H"
 
+#include <AMReX_Geometry.H>
+#include <AMReX_Loop.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <AMReX_Periodicity.H>
 
 // rt_tag_kernels.F90 writes the literal 2 (RT_TAG_SET): AMReX's buffer() only grows from tags equal to TagBox::SET
 static_assert(amrex::TagBox::SET == 2 && amrex::TagBox::CLEAR == 0, "TagBox values assumed by rt_tag_kernels.F90");
@@ -139,6 +142,46 @@ long clip_tags_to_boxes(amrex::TagBoxArray& tags, const std::vector<amrex::Box>&
         }
     }
     return before - count_tags(tags);
+}
+
+
+void buffer_tags(amrex::TagBoxArray& tags, int nbuf, const amrex::Geometry& geom)
+{
+    if (nbuf <= 0) return;
+    const amrex::IntVect ng(nbuf);
+    amrex::TagBoxArray tmp(tags.boxArray(), tags.DistributionMap(), ng);  // ctor fills CLEAR
+    for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi) {
+        tmp[mfi].copy<amrex::RunOn::Host>(tags[mfi], mfi.validbox());
+    }
+    tmp.FillBoundary(geom.periodicity());
+    for (amrex::MFIter mfi(tmp); mfi.isValid(); ++mfi) {
+        const amrex::Box vb = mfi.validbox();
+        auto const a = tmp.const_array(mfi);
+        auto dest = tags.array(mfi);
+        // Grow from every SET in the fab (valid + ghosts after FillBoundary) into the valid box as BUF; keep SET as SET.
+        amrex::BaseFab<char> grown(vb, 1);
+        grown.setVal<amrex::RunOn::Host>(amrex::TagBox::CLEAR);
+        auto g = grown.array();
+        amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
+            if (a(i, j, k) == amrex::TagBox::SET) g(i, j, k) = amrex::TagBox::SET;
+        });
+        const amrex::Box fab = mfi.fabbox();
+        amrex::LoopOnCpu(fab, [&](int i, int j, int k) {
+            if (a(i, j, k) != amrex::TagBox::SET) return;
+            for (int kk = k - nbuf; kk <= k + nbuf; ++kk) {
+                for (int jj = j - nbuf; jj <= j + nbuf; ++jj) {
+                    for (int ii = i - nbuf; ii <= i + nbuf; ++ii) {
+                        if (!vb.contains(amrex::IntVect(ii, jj, kk))) continue;
+                        if (g(ii, jj, kk) == amrex::TagBox::CLEAR) g(ii, jj, kk) = amrex::TagBox::BUF;
+                    }
+                }
+            }
+        });
+        amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
+            if (g(i, j, k) == amrex::TagBox::SET) dest(i, j, k) = amrex::TagBox::SET;
+            else if (g(i, j, k) == amrex::TagBox::BUF) dest(i, j, k) = amrex::TagBox::BUF;
+        });
+    }
 }
 
 amrex::iMultiFab make_covered_mask(const amrex::BoxArray& ba, const amrex::DistributionMapping& dm, const amrex::BoxArray& fine_ba, const amrex::IntVect& ratio)

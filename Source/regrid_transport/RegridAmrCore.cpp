@@ -33,7 +33,9 @@ amrex::AmrInfo make_amr_info(const Hierarchy& h, const AmrParams& p)
         const Level& L = h.levels[l];
         info.blocking_factor.push_back(amrex::IntVect(L.blocking_factor[0], L.blocking_factor[1], L.blocking_factor[2]));
         info.max_grid_size.push_back(amrex::IntVect(L.max_grid_size[0], L.max_grid_size[1], L.max_grid_size[2]));
-        info.n_error_buf.push_back(amrex::IntVect(p.n_error_buf));
+        // D-080: AMReX TagBoxArray::buffer drops edge/corner cells across box boundaries; we buffer in ErrorEst (buffer_tags)
+        // and keep N_ERROR_BUF semantics for the single-box case. Pass 0 here so AMReX does not double-grow.
+        info.n_error_buf.push_back(amrex::IntVect(0));
         if (l < h.max_level) {
             const IVec& r = h.levels[l + 1].ref_from_parent;
             info.ref_ratio.push_back(amrex::IntVect(r[0], r[1], r[2]));
@@ -47,8 +49,16 @@ amrex::AmrInfo make_amr_info(const Hierarchy& h, const AmrParams& p)
 }
 
 RegridAmrCore::RegridAmrCore(const Hierarchy& h, const AmrParams& p)
-    : amrex::AmrCore(make_level0_geometry(h), make_amr_info(h, p)), h_(h), post_mode_(p.post_regrid_projection)
+    : amrex::AmrCore(make_level0_geometry(h), make_amr_info(h, p)), h_(h), n_error_buf_(p.n_error_buf),
+      post_mode_(p.post_regrid_projection)
 {
+}
+
+void RegridAmrCore::set_use_amrex_tag_buffer(bool use)
+{
+    own_tag_buffer_ = !use;
+    const amrex::IntVect v(use ? n_error_buf_ : 0);
+    for (int l = 0; l <= max_level; ++l) this->AmrInfo::n_error_buf[l] = v;
 }
 
 LevelLayout RegridAmrCore::layout(int level) const
@@ -144,7 +154,10 @@ void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time
         reported_discard_[lev] = true;
         amrex::Print() << "AMR: " << removed << " tagged cell(s) on level " << lev << " lie outside the refinable region and were discarded (reported once per level)\n";
     }
-    stats_.tags_set[lev] += count_tags(tags);
+    stats_.tags_set[lev] += count_tags(tags);   // criterion + forced + clip (not the buffer cells; same as before D-080)
+    // D-080: complete tag buffer across box boundaries (AMReX's path is incomplete at edges/corners). When own_tag_buffer_ is
+    // false, AMReX TagBoxArray::buffer runs instead (n_error_buf restored by set_use_amrex_tag_buffer).
+    if (own_tag_buffer_ && n_error_buf_ > 0) buffer_tags(tags, n_error_buf_, Geom(lev));
 }
 
 void RegridAmrCore::ManualTagsPlacement(int lev, amrex::TagBoxArray& tags, const amrex::Vector<amrex::IntVect>& bf_lev)

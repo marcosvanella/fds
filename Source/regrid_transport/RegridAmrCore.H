@@ -63,6 +63,11 @@ public:
     void set_tag_function(TagFn f) { tag_fn_ = std::move(f); }
     void set_data_transfer(LevelDataTransfer* t) { transfer_ = t; }
 
+    // D-080: by default we buffer tags ourselves (ghost exchange + dilation) and pass n_error_buf = 0 to AMReX so it does not
+    // double-grow. set_use_amrex_tag_buffer(true) restores AMReX TagBoxArray::buffer (incomplete across box edges; negative-control only).
+    void set_use_amrex_tag_buffer(bool use);
+    int tag_buffer_width() const { return n_error_buf_; }
+
     // t = 0: level 0 is given (the driver's meshes; `level0_dm` its mapping, default AMReX mapping); finer levels are built one at a time: tag the finest
     // level, make the next one (make_level + fill_initial_level), repeat until MAX_LEVEL or no tags; then transfer.hierarchy_done(true).
     void init_from_tags(LevelListener& listener, amrex::Real time, bool notify_level0 = false, const DmFn& dm_fn = DmFn(),
@@ -112,6 +117,8 @@ private:
     amrex::DistributionMapping level0_dm_;
     bool have_level0_dm_ = false;
     RegridStats stats_;
+    int n_error_buf_ = 1;                 // &AMR N_ERROR_BUF (semantics unchanged; applied in ErrorEst via buffer_tags)
+    bool own_tag_buffer_ = true;          // false = AMReX TagBoxArray::buffer path (negative control)
     PostRegridProjection post_mode_ = PostRegridProjection::Auto;
     PostRegridHook post_hook_;
     RegridOutcome last_outcome_;

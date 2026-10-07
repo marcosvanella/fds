@@ -8,7 +8,9 @@
 //   (b) proper nesting: the level l+1 grids coarsened and grown by N_PROPER (clipped to the domain) lie inside the level l grids;
 //   (c) every grid box has sides <= MAX_GRID_SIZE and a lower corner and size that are multiples of the blocking factor (the level-0 boxes of the input excepted);
 //   (d) the blob cells (value above the threshold) of the next regrid time lie on the finest level (blob speed below the buffer).
-// Negative controls: N_ERROR_BUF = 0 fails (a) while the same assertion is made with the nominal buffer; a hierarchy built with N_PROPER = 1 fails (b) when checked with N_PROPER = 12.
+// Negative controls: N_ERROR_BUF = 0 fails (a) while the same assertion is made with the nominal buffer; AMReX TagBoxArray::buffer (no own exchange) loses edge/corner cells across
+// box boundaries (missing > 0); a hierarchy built with N_PROPER = 1 fails (b) when checked with N_PROPER = 12.
+// D-080: the own buffer path asserts ZERO lost cells (the 5e-4 tolerance is withdrawn); single-box reference stays at missing == 0.
 // Prints one line per case; exit code 0 = pass.
 #include <AMReX.H>
 #include <AMReX_BoxIterator.H>
@@ -158,7 +160,7 @@ void check_state(const RegridAmrCore& core, const std::vector<std::vector<amrex:
     }
 }
 
-Result run(int max_level, int ratio, int bf, int mgs, int nbuf, int nproper, int check_nbuf, int check_nproper, double v, int ncyc, int nm = 2)
+Result run(int max_level, int ratio, int bf, int mgs, int nbuf, int nproper, int check_nbuf, int check_nproper, double v, int ncyc, int nm = 2, bool amrex_buf = false)
 {
     Result r;
     Report rep;
@@ -178,6 +180,7 @@ Result run(int max_level, int ratio, int bf, int mgs, int nbuf, int nproper, int
     CHECK_MSG(ok && rep.ok(), "hierarchy for the large case (8 meshes of 32^3)");
     if (!ok) return r;
     RegridAmrCore core(h, p);
+    if (amrex_buf) core.set_use_amrex_tag_buffer(true);   // negative control: AMReX path (incomplete across box edges)
     Store st(core, v);
     core.set_data_transfer(&st);
     std::vector<std::vector<amrex::IntVect>> tags(4);
@@ -243,21 +246,21 @@ int main(int, char** argv)
         if (io) std::printf("  L1 64^3 in 8 meshes, 3 levels ratio 2: finest %d, cells per level %ld/%ld/%ld, boxes %ld, tagged %ld, buffer cells required %ld missing %ld, nesting boxes %ld bad %ld, grid-size/BF violations %ld, feature off finest %ld, regrids that changed level 1 %d of 6\n",
                            a.finest, a.cells_l[0], a.cells_l[1], a.cells_l[2], a.boxes, a.tagged, a.required, a.missing, a.nest_cells, a.nest_bad, a.grid_bad, a.feature_uncovered, a.regrids_changed);
         CHECK_MSG(a.finest == 2 && a.tagged > 1000 && a.required > a.tagged, "L1: three levels, tags and buffer cells exist (finest " + std::to_string(a.finest) + ")");
-        // Finding (AMReX TagBoxArray::buffer across level-l box boundaries): the dilation is complete inside every box and along each axis, but cells at the edges/corners of the dilation cube
-        // that lie in another box than the tagged cell are not tagged. On a single-box level 0 (L3) none is missing. The assertion is therefore: nothing missing in the tagged cell's own box,
-        // nothing missing along an axis, and the lost fraction small.
-        CHECK_MSG(a.missing_same == 0 && a.missing_axis == 0, "L1 (a): the 3-cell buffer is complete inside every box and along every axis, missing there " + std::to_string(a.missing_same) + "/" + std::to_string(a.missing_axis));
-        CHECK_MSG(a.missing < 5e-4 * a.required, "L1 (a): buffer cells lost at box edges/corners (AMReX, see comment) " + std::to_string(a.missing) + " of " + std::to_string(a.required));
+        // D-080: own buffer with ghost exchange; assert ZERO lost cells (5e-4 withdrawn). Single-box reference (L1s) also has missing == 0.
+        CHECK_MSG(a.missing == 0 && a.missing_same == 0 && a.missing_axis == 0, "L1 (a): 3-cell buffer complete (incl. edges/corners across boxes), missing " + std::to_string(a.missing) + " of " + std::to_string(a.required));
         CHECK_MSG(a.nest_bad == 0 && a.nest_cells > 0, "L1 (b): proper nesting (N_PROPER 1) of every grid, violations " + std::to_string(a.nest_bad));
         CHECK_MSG(a.grid_bad == 0 && a.boxes > 8, "L1 (c): MAX_GRID_SIZE 32 and BLOCKING_FACTOR 8 on every fine grid, violations " + std::to_string(a.grid_bad));
         CHECK_MSG(a.feature_uncovered == 0, "L1 (d): the blob of the next regrid time is on the finest level, missing " + std::to_string(a.feature_uncovered));
         CHECK_MSG(a.regrids_changed >= 3, "L1: the hierarchy follows the blob across the mesh faces (level 1 changed in " + std::to_string(a.regrids_changed) + " of 6 regrids)");
+        const Result a1 = run(2, 2, 8, 32, 3, 1, 3, 1, 0.75 / 64.0, 6, 1);   // single-box reference, same ratio-2 case
+        if (io) std::printf("  L1s 64^3 in 1 mesh, 3 levels ratio 2: tagged %ld, buffer cells required %ld missing %ld\n", a1.tagged, a1.required, a1.missing);
+        CHECK_MSG(a1.missing == 0 && a1.required > 1000, "L1s: single-box reference has a complete 3-cell buffer, missing " + std::to_string(a1.missing));
 
         const Result b = run(1, 4, 4, 32, 2, 1, 2, 1, 0.75 / 64.0, 6);
         if (io) std::printf("  L2 64^3 in 8 meshes, 2 levels ratio 4: finest %d, cells per level %ld/%ld, boxes %ld, tagged %ld, buffer cells required %ld missing %ld, nesting boxes %ld bad %ld, grid-size/BF violations %ld, feature off finest %ld\n",
                            b.finest, b.cells_l[0], b.cells_l[1], b.boxes, b.tagged, b.required, b.missing, b.nest_cells, b.nest_bad, b.grid_bad, b.feature_uncovered);
         CHECK_MSG(b.finest == 1 && b.tagged > 500, "L2: two levels with tags");
-        CHECK_MSG(b.missing_same == 0 && b.missing_axis == 0 && b.missing < 5e-4 * b.required && b.nest_bad == 0 && b.grid_bad == 0 && b.feature_uncovered == 0, "L2: buffer (as L1), nesting, grid sizes, feature coverage clean");
+        CHECK_MSG(b.missing == 0 && b.missing_same == 0 && b.missing_axis == 0 && b.nest_bad == 0 && b.grid_bad == 0 && b.feature_uncovered == 0, "L2: buffer complete (zero lost), nesting, grid sizes, feature coverage clean");
 
         // control: the same ratio-4 case with ONE level-0 box (64^3): the buffer is complete on level 0
         const Result c = run(1, 4, 4, 32, 2, 1, 2, 1, 0.75 / 64.0, 6, 1);
@@ -266,6 +269,9 @@ int main(int, char** argv)
         const Result n1 = run(2, 2, 8, 32, 0, 1, 3, 1, 0.75 / 64.0, 6);
         CHECK_MSG(c.missing == 0 && c.required > 1000000, "L3: with one level-0 box the 2-cell buffer is complete, missing " + std::to_string(c.missing));
         CHECK_MSG(n1.missing_same > 0, "negative control: N_ERROR_BUF = 0 but checked against 3 cells: the buffer assertion fails (missing in own box " + std::to_string(n1.missing_same) + ")");
+        const Result n_amrex = run(2, 2, 8, 32, 3, 1, 3, 1, 0.75 / 64.0, 6, 2, true);   // AMReX buffer path on 8 boxes
+        if (io) std::printf("  neg AMReX buffer on 8 boxes: missing %ld of %ld (must be > 0)\n", n_amrex.missing, n_amrex.required);
+        CHECK_MSG(n_amrex.missing > 0, "negative control: AMReX TagBoxArray::buffer loses edge/corner cells across boxes (missing " + std::to_string(n_amrex.missing) + ")");
         const Result n2 = run(2, 2, 8, 32, 3, 1, 3, 12, 0.75 / 64.0, 6);
         CHECK_MSG(n2.nest_bad > 0, "negative control: N_PROPER = 1 checked against 12: the nesting assertion fails (bad boxes " + std::to_string(n2.nest_bad) + ")");
     }

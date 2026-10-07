@@ -7,12 +7,14 @@
 //   clip_tags_to_boxes: remove tags outside the allowed boxes (the refinable region of IR-008) and return how many were removed
 //   count_tags       : number of tags set (valid cells, summed over ranks)
 //   make_covered_mask: 1 on the cells of a level that lie under the next finer level (input of the hysteresis)
-// The tag buffer (N_ERROR_BUF) and proper nesting are done by AmrCore itself when it builds the grids (AmrMesh::MakeNewGrids).
+// The tag buffer (N_ERROR_BUF) is done here (buffer_tags: ghost exchange then Chebyshev dilation) so it is complete across box
+// boundaries (D-080); AmrCore is given n_error_buf = 0 so its own buffer does not double-grow. Proper nesting stays with AmrMesh.
 #ifndef FDSRT_TAGOPS_H_
 #define FDSRT_TAGOPS_H_
 
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
+#include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_TagBox.H>
@@ -47,6 +49,12 @@ void tag_boxes(amrex::TagBoxArray& tags, const std::vector<amrex::Box>& boxes);
 long clip_tags_to_boxes(amrex::TagBoxArray& tags, const std::vector<amrex::Box>& allowed);
 
 long count_tags(const amrex::TagBoxArray& tags);
+
+// Grow every TagBox::SET cell by `nbuf` cells (Chebyshev, all directions including edges and corners) into TagBox::BUF.
+// Uses a temporary TagBoxArray with `nbuf` ghost cells, FillBoundary with `geom` periodicity, then dilation; writes back into
+// the valid cells of `tags`. With nbuf <= 0 this is a no-op. Matches the single-box behaviour of AMReX TagBoxArray::buffer and
+// also covers cells across box and rank boundaries (D-080 / D-053).
+void buffer_tags(amrex::TagBoxArray& tags, int nbuf, const amrex::Geometry& geom);
 
 // Mask on (ba, dm): 1 where the cell is covered by `fine_ba` coarsened by `ratio`, else 0.
 amrex::iMultiFab make_covered_mask(const amrex::BoxArray& ba, const amrex::DistributionMapping& dm, const amrex::BoxArray& fine_ba, const amrex::IntVect& ratio);
