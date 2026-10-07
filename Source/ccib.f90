@@ -28889,7 +28889,7 @@ SUBROUTINE NUMBER_FV_SCALAR_CVS_SAME_MESH(NM)
 ! Number the implicit cut-cell scalar region from the SET_CVS_3D same-mesh map. The legacy
 ! CCVAR/CUT_CELL mirrors remain authoritative to downstream staggered face-linking kernels.
 INTEGER, INTENT(IN) :: NM
-INTEGER :: ICV,IG,IUNK,I,J,K,ICC,JCC,INGH,JNGH,KNGH
+INTEGER :: ICV,IG,IUNK,I,J,K,ICC,JCC
 TYPE(MESH_TYPE), POINTER :: MFV
 TYPE(CC_FV_TYPE), POINTER :: FV
 
@@ -28915,21 +28915,6 @@ DO IG=1,FV%GCELL%N_INT
    ENDIF
 ENDDO
 
-! Retain the legacy implicit-region halo: regular neighbors that are not represented by a GCELL
-! still require scalar unknowns and can bound an external face of an FV control volume.
-DO ICC=1,MFV%N_CUTCELL_MESH
-   I=MFV%CUT_CELL(ICC)%IJK(IAXIS); J=MFV%CUT_CELL(ICC)%IJK(JAXIS); K=MFV%CUT_CELL(ICC)%IJK(KAXIS)
-   DO KNGH=MAX(1,K-1),MIN(MFV%KBAR,K+1)
-      DO JNGH=MAX(1,J-1),MIN(MFV%JBAR,J+1)
-         DO INGH=MAX(1,I-1),MIN(MFV%IBAR,I+1)
-            IF (MFV%CCVAR(INGH,JNGH,KNGH,CC_CGSC)/=CC_GASPHASE .OR. MFV%CCVAR(INGH,JNGH,KNGH,CC_UNKZ)>0) CYCLE
-            IF (MFV%CELL(MFV%CELL_INDEX(INGH,JNGH,KNGH))%SOLID) CYCLE
-            NUNKZ_LOC(NM)=NUNKZ_LOC(NM)+1
-            MFV%CCVAR(INGH,JNGH,KNGH,CC_UNKZ)=NUNKZ_LOC(NM)
-         ENDDO
-      ENDDO
-   ENDDO
-ENDDO
 
 END SUBROUTINE NUMBER_FV_SCALAR_CVS_SAME_MESH
 
