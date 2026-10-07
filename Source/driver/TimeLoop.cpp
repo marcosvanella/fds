@@ -20,6 +20,8 @@
 #include <AMReX_Utility.H>
 
 #include <algorithm>
+#include <vector>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +29,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <string>
 #include <initializer_list>
 
 #include "ExactSum.H"
@@ -98,6 +101,7 @@ void fds_p_noflux(double dt, int nm, int zero);
 void fds_p_rhs(double t, double dt, int nm);
 void fds_p_get_prhs(int nm, double* buf);
 void fds_p_bmax(int nm, const int* flags, double* v);
+void fds_p_get_bcface(int nm, int face, double* buf, long nexpect, int* ierr);
 void fds_p_h_ghost(int nm, int pred, const int* flags);
 void fds_p_resid(int nm);
 void fds_p_velerr(double dt, int nm);
@@ -845,6 +849,140 @@ struct TimeLoop::Impl {
         level0_rhs_and_check();
         solve_level0(pred, F);
     }
+
+    // FDS face order 0..5 (xlo,xhi,ylo,yhi,zlo,zhi) -> pb::face_index(dir,side) = side*3+dir
+    static int fds_face_to_pb(int f) { return (f % 2) * 3 + (f / 2); }
+
+    // Pack FDS BXS..BZF of level-0 meshes into 6 cell-centred MultiFabs on lv's BA (domain-face layers).
+    // Periodic pb faces stay zero (fold rejects data on Periodic).
+    void pack_l0_boundary_mfs(std::array<std::unique_ptr<amrex::MultiFab>, 6>& out)
+    {
+        for (int f = 0; f < 6; ++f) {
+            out[f].reset(new amrex::MultiFab(l0.ba, l0.dm, 1, 0));
+            out[f]->setVal(0.0);
+        }
+        for (int bi = 0; bi < nbox; ++bi) {
+            if (!local(bi)) continue;
+            const int nm = bi + 1;
+            int fl[6];
+            physical_flags(bi, fl);
+            const int ibar = mip[16 * bi + 0], jbar = mip[16 * bi + 1], kbar = mip[16 * bi + 2];
+            const amrex::Box vb = l0.ba[bi];
+            const int i0 = vb.smallEnd(0), j0 = vb.smallEnd(1), k0 = vb.smallEnd(2);
+            for (int ff = 0; ff < 6; ++ff) {
+                if (!fl[ff]) continue;
+                const int pb_f = fds_face_to_pb(ff);
+                if (static_cast<pb::BC>(bc_type[pb_f]) == pb::BC::Periodic) continue;
+                const int d = ff / 2;
+                long nexpect = 0;
+                if (d == 0) nexpect = (long)jbar * (long)kbar;
+                else if (d == 1) nexpect = (long)ibar * (long)kbar;
+                else nexpect = (long)ibar * (long)jbar;
+                std::vector<double> buf((std::size_t)nexpect);
+                int ierr = 0;
+                fds_p_get_bcface(nm, ff, buf.data(), nexpect, &ierr);
+                if (ierr != 0) die(std::string("fds_p_get_bcface face=") + std::to_string(ff) + " ierr=" + std::to_string(ierr));
+                // write into the fab that owns this box
+                for (amrex::MFIter mfi(*out[pb_f]); mfi.isValid(); ++mfi) {
+                    if (mfi.index() != bi) continue;
+                    auto a = out[pb_f]->array(mfi);
+                    int n = 0;
+                    if (d == 0) {
+                        const int i = (ff % 2 == 0) ? vb.smallEnd(0) : vb.bigEnd(0);
+                        for (int kk = 0; kk < kbar; ++kk)
+                            for (int jj = 0; jj < jbar; ++jj) a(i, j0 + jj, k0 + kk) = buf[n++];
+                    } else if (d == 1) {
+                        const int j = (ff % 2 == 0) ? vb.smallEnd(1) : vb.bigEnd(1);
+                        for (int kk = 0; kk < kbar; ++kk)
+                            for (int ii = 0; ii < ibar; ++ii) a(i0 + ii, j, k0 + kk) = buf[n++];
+                    } else {
+                        const int k = (ff % 2 == 0) ? vb.smallEnd(2) : vb.bigEnd(2);
+                        for (int jj = 0; jj < jbar; ++jj)
+                            for (int ii = 0; ii < ibar; ++ii) a(i0 + ii, j0 + jj, k) = buf[n++];
+                    }
+                }
+            }
+        }
+    }
+
+    // Inject L0 face MultiFab onto a fine-level MultiFab (piecewise-constant via coarsened ParallelCopy).
+    void inject_bd_to_level(const amrex::MultiFab& l0mf, amrex::MultiFab& fine, const amrex::IntVect& ratio)
+    {
+        fine.setVal(0.0);
+        if (ratio == amrex::IntVect(1)) {
+            fine.ParallelCopy(l0mf);
+            return;
+        }
+        amrex::BoxArray cba = fine.boxArray();
+        cba.coarsen(ratio);
+        amrex::MultiFab ctmp(cba, fine.DistributionMap(), 1, 0);
+        ctmp.setVal(0.0);
+        ctmp.ParallelCopy(l0mf);
+        for (amrex::MFIter mfi(fine); mfi.isValid(); ++mfi) {
+            auto fa = fine.array(mfi);
+            auto ca = ctmp.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                fa(i, j, k) = ca(amrex::coarsen(i, ratio[0]), amrex::coarsen(j, ratio[1]), amrex::coarsen(k, ratio[2]));
+            });
+        }
+    }
+
+    // Build BoundaryData (+ owned MultiFabs) for one level from L0-packed face MFs; skip Periodic faces.
+    pb::BoundaryData make_bd_for_level(const Level& lv, const std::array<std::unique_ptr<amrex::MultiFab>, 6>& l0bd,
+                                       std::array<std::unique_ptr<amrex::MultiFab>, 6>& owned)
+    {
+        pb::BoundaryData bd;
+        const amrex::IntVect ratio = (&lv == &l0) ? amrex::IntVect(1) : lv.ref_ratio_from_parent;
+        // For levels > 1, ratio_from_parent is only relative to parent; inject stepwise from L0 index space:
+        // use cumulative ref from geom Domain vs l0 Domain length.
+        amrex::IntVect rL0(1);
+        if (&lv != &l0) {
+            const amrex::Box d0 = l0.geom.Domain(), df = lv.geom.Domain();
+            for (int d = 0; d < 3; ++d) {
+                const int n0 = d0.length(d), nf = df.length(d);
+                rL0[d] = (n0 > 0) ? (nf / n0) : 1;
+            }
+        }
+        for (int f = 0; f < 6; ++f) {
+            if (static_cast<pb::BC>(bc_type[f]) == pb::BC::Periodic) {
+                bd.value[f] = nullptr;
+                bd.constant[f] = 0.0;
+                continue;
+            }
+            owned[f].reset(new amrex::MultiFab(lv.ba, lv.dm, 1, 0));
+            inject_bd_to_level(*l0bd[f], *owned[f], rL0);
+            bd.value[f] = owned[f].get();
+            bd.constant[f] = 0.0;
+        }
+        return bd;
+    }
+
+    void fold_then_solve_level0(pb::PressureProblem& p, pb::PressureOptions& o)
+    {
+        std::array<std::unique_ptr<amrex::MultiFab>, 6> l0bd;
+        pack_l0_boundary_mfs(l0bd);
+        std::array<std::unique_ptr<amrex::MultiFab>, 6> owned;
+        pb::BoundaryData bd = make_bd_for_level(l0, l0bd, owned);
+        std::string msg;
+        const pb::Status fs = pb::fold_boundary_data(p, bd, *rhs, &msg);
+        if (fs != pb::Status::Ok) die(std::string("fold_boundary_data(single): ") + pb::to_string(fs) + ": " + msg);
+    }
+
+    void fold_composite(pb::PressureProblem& p, std::vector<amrex::MultiFab*>& rhs_levels)
+    {
+        std::array<std::unique_ptr<amrex::MultiFab>, 6> l0bd;
+        pack_l0_boundary_mfs(l0bd);
+        const int nl = static_cast<int>(p.levels.size());
+        std::vector<pb::BoundaryData> bds(nl);
+        // keep owned MFs alive for the fold call
+        std::vector<std::array<std::unique_ptr<amrex::MultiFab>, 6>> owned(nl);
+        for (int l = 0; l < nl; ++l) bds[l] = make_bd_for_level(*lc[l].lev, l0bd, owned[l]);
+        std::string msg;
+        const pb::Status fs = pb::fold_boundary_data(p, bds, rhs_levels, &msg);
+        if (fs != pb::Status::Ok) die(std::string("fold_boundary_data(composite): ") + pb::to_string(fs) + ": " + msg);
+        (void)owned;
+    }
+
     // PRHS of the level-0 boxes (as FDS computed it, fds_p_rhs) into `rhs`, and the check that the Poisson boundary data are homogeneous (every solve)
     void level0_rhs_and_check()
     {
@@ -859,8 +997,8 @@ struct TimeLoop::Impl {
                 for (int j = 0; j < ny; ++j)
                     for (int i = 0; i < nx; ++i) a(vb.smallEnd(0) + i, vb.smallEnd(1) + j, vb.smallEnd(2) + k) = buf[i + nx * (j + static_cast<std::size_t>(ny) * k)];
         }
-        // boundary data of the Poisson problem must be homogeneous on the faces that are solved (S5 scope); checked every solve
-        {
+        // S6: inhomogeneous BXS..BZF are folded into rhs before solve_pressure (fold_boundary_data). No die.
+        if (std::getenv("FDSTL_PBV")) {
             double bm = 0.0;
             for (int i = 0; i < nbox; ++i) {
                 if (!local(i)) continue;
@@ -872,7 +1010,7 @@ struct TimeLoop::Impl {
                 for (double x : v) bm = std::max(bm, x);
             }
             all_max(bm);
-            if (bm > 0.0) die("inhomogeneous Poisson boundary data (BXS..BZF /= 0): needs the S6 pressure interface extension (see notes/pressure-iface-review.md)");
+            if (bm > 0.0) amrex::Print() << "  [pb] inhomogeneous BXS..BZF max|·|=" << bm << " (fold before solve)\n";
         }
     }
     void solve_level0(bool pred, Fields& F)
@@ -887,6 +1025,7 @@ struct TimeLoop::Impl {
         o.verbose = std::getenv("FDSTL_PBV") ? 1 : 0;
         o.check_residual = std::getenv("FDSTL_PBV") != nullptr;
         phi->setVal(0.0);
+        fold_then_solve_level0(p, o);
         const pb::PressureResult r = pb::solve_pressure(p, o);
         if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("pressure interface: ") + pb::to_string(r.status) + ": " + r.message);
         if (std::getenv("FDSTL_PBV")) { amrex::Print() << "  [pb] backend=" << r.backend << " res_rel2=" << r.residual_rel2 << " relmax=" << r.residual_relmax << " residual_check=" << r.residual_check << " residual_limit=" << r.residual_limit << " residual_floor=" << r.residual_floor << " ok=" << r.residual_ok << " rhs max=" << rhs->norminf(0) << " phi max=" << phi->norminf(0); for (auto& c : r.components) amrex::Print() << " removed_mean=" << c.removed_mean << " rel=" << c.removed_rel; for (auto& w : r.warnings) amrex::Print() << " W:" << w; amrex::Print() << "\n"; }
@@ -1043,6 +1182,11 @@ struct TimeLoop::Impl {
         o.verbose = std::getenv("FDSTL_PBV") ? 1 : 0;
         o.check_residual = std::getenv("FDSTL_PBV") != nullptr || std::getenv("FDSTL_PBCHECK") != nullptr;   // the size-scaled residual check of Role 2 (residual_limit = max(residual_tol, residual_floor))
         o.trigger = pb::SolveRoutine;
+        {
+            std::vector<amrex::MultiFab*> rhs_levels(nl);
+            for (int l = 0; l < nl; ++l) rhs_levels[l] = p.levels[l].rhs;
+            fold_composite(p, rhs_levels);
+        }
         const pb::PressureResult r = pb::solve_pressure(p, o, pws.get());
         if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("composite pressure solve: ") + pb::to_string(r.status) + ": " + r.message);
         ++crep.solves;
