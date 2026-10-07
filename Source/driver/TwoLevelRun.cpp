@@ -444,7 +444,14 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         worst_mass = std::max(worst_mass, std::abs(dm));
         worst_div = std::max(worst_div, dv);
         const double dts = loop.steps().empty() ? 0.0 : loop.steps().back().dt;
+        // CLIP_MASS / CLIP_CELLS (P3-C11/C12): every dump step when P3-C01 CSV path is active (emit zeros too).
         if (lf) {
+            const int ntr = l0.dom.n_tracked;
+            for (int l = 0; l < nl_now; ++l)
+                for (int n = 1; n <= ntr; ++n) {
+                    amrex::Print() << "CLIP_MASS N=" << n << " L=" << l << " mass=" << std::setprecision(17) << loop.clip_mass(n, l) << "\n";
+                    amrex::Print() << "CLIP_CELLS N=" << n << " L=" << l << " count=" << loop.clip_cells(n, l) << "\n";
+                }
             std::fprintf(lf, "%d,%.9g,%.9g,%.17g,%.6e,%.6e", s, loop.time(), dts, m[0], dm, dv);
             for (int l = 0; l < nl_now; ++l) std::fprintf(lf, ",%.6e", l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
             std::fprintf(lf, ",%.3e\n", loop.composite_report().removed_rel);

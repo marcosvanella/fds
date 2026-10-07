@@ -134,6 +134,9 @@ public:
     int icyc() const { return m_icyc; }
     const std::vector<StepRecord>& steps() const { return m_steps; }
     void set_rho_limits(double rmin, double rmax) { m_rmin = rmin; m_rmax = rmax; }
+    // P3-C11/C12 clip budget (pred+corr into one step). N 1-based tracked species; L 0-based level.
+    double clip_mass(int n, int l) const;
+    long clip_cells(int n, int l) const;
 
 private:
     struct Impl;

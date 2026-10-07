@@ -146,6 +146,18 @@ struct TimeLoop::Impl {
     int it_last_pred = 0, it_last_corr = 0;
     double perr = 0, verr = 0;
     double zone_rel_step = 0;
+    // P3-C11/C12: per-step clip budget [L*nt + (N-1)]; pred+corr accumulate; reset at advance() start
+    std::vector<double> clip_mass_acc;
+    std::vector<long> clip_cells_acc;
+    void ensure_clip_budget()
+    {
+        const int nl = std::max(1, static_cast<int>(lc.size()));
+        const int nsp = std::max(1, nt);
+        const std::size_t need = static_cast<std::size_t>(nl) * static_cast<std::size_t>(nsp);
+        if (clip_mass_acc.size() < need) { clip_mass_acc.resize(need, 0.0); clip_cells_acc.resize(need, 0); }
+    }
+    void reset_clip_budget() { ensure_clip_budget(); std::fill(clip_mass_acc.begin(), clip_mass_acc.end(), 0.0); std::fill(clip_cells_acc.begin(), clip_cells_acc.end(), 0); }
+    int clip_slot(int lev, int n0) const { return lev * nt + n0; }
     int passes = 0;
     int bc_type[6] = {0, 0, 0, 0, 0, 0};   // pb::BC per domain face (side*3+dir)
     bool solve_dir[3] = {true, true, true};
@@ -675,6 +687,7 @@ struct TimeLoop::Impl {
                     fds_clip_species_one(rb.loVect(), rb.hiVect(), fb.loVect(), fb.hiVect(), v.loVect(), v.hiVect(), RP_[mfi].dataPtr(), RZ[mfi].dataPtr());
                 }
         } else {
+            std::vector<long> cclip(NT, 0);
             for (amrex::MFIter mfi(RP_); mfi.isValid(); ++mfi) {
                 const amrex::Box fb = RZ[mfi].box(), rb = RP_[mfi].box(), mb = mask[mfi].box(), v = mfi.validbox();
                 mkdx(fb, dxv);
@@ -683,9 +696,48 @@ struct TimeLoop::Impl {
                     fds_clip_species(fb.loVect(), fb.hiVect(), rb.loVect(), rb.hiVect(), mb.loVect(), mb.hiVect(), v.loVect(), v.hiVect(), NS, n, RP_[mfi].dataPtr(),
                                      RZ[mfi].dataPtr(), mask[mfi].dataPtr(), dxv[0].data(), dxv[1].data(), dxv[2].data(), (*c->dzz)[mfi].dataPtr(n - 1), &f, &ccnt);
                     zfl[n - 1] |= f;
+                    cclip[n - 1] += ccnt;
                 }
             }
             for (int n = 0; n < NT; ++n) { bool b = zfl[n]; amrex::ParallelAllReduce::Or(b, amrex::ParallelContext::CommunicatorSub()); zfl[n] = b; anyz = anyz || b; }
+            // CLIP_MASS/CLIP_CELLS: D-028 sum of source-only Δ(ρZ)·V (not net DELTA); NCLIP cell counts. Density-only path (NT==1) leaves zeros.
+            {
+                const int lev = static_cast<int>(c - lc.data());
+                if (lev >= 0 && nt > 0) {
+                    ensure_clip_budget();
+                    if (anyz) {
+                        const double vol = c->lev->dx[0] * c->lev->dx[1] * c->lev->dx[2];
+                        const amrex::iMultiFab* cov = L.m_reg ? L.m_reg->covered_mask(lev) : nullptr;
+                        for (int n = 0; n < NT; ++n) {
+                            long cc = cclip[n];
+                            amrex::ParallelAllReduce::Sum(cc, amrex::ParallelContext::CommunicatorSub());
+                            clip_cells_acc[clip_slot(lev, n)] += cc;
+                        }
+                        for (int n = 1; n <= NT; ++n) {
+                            if (!zfl[n - 1]) continue;
+                            std::vector<int> g;
+                            std::vector<double> vsum;
+                            for (amrex::MFIter mfi(RP_); mfi.isValid(); ++mfi) {
+                                const auto rz = RZ.const_array(mfi);
+                                const auto rp = RP_.const_array(mfi);
+                                const auto dz = c->dzz->const_array(mfi);
+                                const auto mk = mask.const_array(mfi);
+                                amrex::Array4<const int> cv;
+                                if (cov) cv = cov->const_array(mfi);
+                                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                                    if (cov && cv(i, j, k) != 0) return;
+                                    if (mk(i, j, k, 0) != 0) return;
+                                    const double q = rz(i, j, k, n - 1), r = rp(i, j, k);
+                                    if (q >= 0.0 && q <= r) return;
+                                    g.push_back(0);
+                                    vsum.push_back(dz(i, j, k, n - 1) * vol);
+                                });
+                            }
+                            clip_mass_acc[clip_slot(lev, n - 1)] += exact_group_sums(1, g, vsum)[0];
+                        }
+                    }
+                }
+            }
             for (amrex::MFIter mfi(RP_); mfi.isValid(); ++mfi) {
                 const amrex::Box fb = RZ[mfi].box(), rb = RP_[mfi].box(), v = mfi.validbox();
                 for (int n = 1; n <= NT; ++n)
@@ -1368,6 +1420,7 @@ struct TimeLoop::Impl {
         select(0);
         StepRecord rec;
         zone_rel_step = 0.0;
+        reset_clip_budget();
         ++L.m_icyc;
         rec.step = L.m_icyc;
         L.m_dt = dt_at_step_start(L.m_t, L.m_dt, dt_new, chg, tc);
@@ -1889,6 +1942,20 @@ void TimeLoop::set_cf_ghost_hook(int lev, CfGhostHook h)
 }
 
 const TimeLoop::CompositeReport& TimeLoop::composite_report() const { return m->crep; }
+double TimeLoop::clip_mass(int n, int l) const
+{
+    if (n < 1 || l < 0 || m->nt <= 0) return 0.0;
+    const int idx = l * m->nt + (n - 1);
+    if (idx >= static_cast<int>(m->clip_mass_acc.size())) return 0.0;
+    return m->clip_mass_acc[idx];
+}
+long TimeLoop::clip_cells(int n, int l) const
+{
+    if (n < 1 || l < 0 || m->nt <= 0) return 0;
+    const int idx = l * m->nt + (n - 1);
+    if (idx >= static_cast<int>(m->clip_cells_acc.size())) return 0;
+    return m->clip_cells_acc[idx];
+}
 void TimeLoop::prime_levels() { m->prime_levels(); }
 void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
 void TimeLoop::write_perf() { m->write_perf(); }
