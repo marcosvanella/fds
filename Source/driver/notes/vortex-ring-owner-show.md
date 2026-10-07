@@ -70,4 +70,4 @@ Plotfile fields: **RHO, U, V, W, OMEGA_Y**. `VORT` tagging-only.
 
 - OPEN vents refused for this pack (TimeLoop / inhomogeneous Poisson) — deferred.
 - Floor is **INERT** (not WALL). Sides PERIODIC; top **MIRROR** (z non-periodic → `periodic=(110)`).
-- Do not scale Γ for Re; keep |Γ|=0.8, R=0.20, a=0.045.
+- Do not scale Γ for Re; keep |Γ|=0.8, R=0.20, **a=0.10** (a/dx≈4.8 on 48³; was 0.045).

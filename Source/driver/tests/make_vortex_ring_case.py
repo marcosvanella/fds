@@ -26,9 +26,9 @@ from __future__ import annotations
 import argparse, os, sys
 import numpy as np
 
-def ring_field(N: int, L: float = 1.0, Gamma: float = -0.8, cz: float = 0.60):
+def ring_field(N: int, L: float = 1.0, Gamma: float = -0.8, cz: float = 0.60, a: float = 0.10):
     dx = L / N
-    R, a = 0.20, 0.045
+    R = 0.20
     cx, cy = 0.5, 0.5
     nseg = 256
     theta = np.linspace(0.0, 2.0 * np.pi, nseg, endpoint=False)
@@ -203,6 +203,8 @@ def main():
                     help="PERIODIC all sides (old baseline)")
     ap.add_argument("--baseline-periodic", action="store_true",
                     help="shorthand: --re-scale 1 --no-downward --no-floor-inert")
+    ap.add_argument("--core-radius", type=float, default=0.10,
+                    help="Rosenhead core radius a (default 0.10 ≈4.8 dx on 48³; was 0.045)")
     ap.add_argument("--gamma", type=float, default=None, help="override Γ (signed)")
     ap.add_argument("--cz", type=float, default=None, help="override ring center z")
     args = ap.parse_args()
@@ -225,7 +227,7 @@ def main():
     else:
         cz = 0.60 if args.downward else 0.40
 
-    U, V, W, dx, meta = ring_field(N, L, Gamma=Gamma, cz=cz)
+    U, V, W, dx, meta = ring_field(N, L, Gamma=Gamma, cz=cz, a=float(args.core_radius))
     meta["nu"] = nu
     meta["floor_inert"] = args.floor_inert
 
