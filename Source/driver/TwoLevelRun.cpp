@@ -323,6 +323,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 }
             }
         }
+        // Owner-show cadence (D-089 pack): --plot-every N with --plotfile; dump when s % N == 0 (1-based step). Mid-regrid + final dumps unchanged.
+        if (o.plot_every > 0 && !o.plotfile.empty() && (s % o.plot_every) == 0) {
+            const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
+            write_rho_vel_plotfile(plt, reg, nl_now, loop.time(), loop.icyc());
+        }
         const std::vector<double> m = composite_mass(reg, nl_now, ns);
         const double dm = (m[0] - m0[0]) / m0[0];
         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl_now);

@@ -29,6 +29,7 @@ struct TwoLevelOptions {
     bool bind_only = false;          // true: build hierarchy, bind all levels, report layout, skip advance (registry/bind gate when a full step is not wanted)
     int regrid_every = 0;            // CLI --regrid-every N -> AmrParams.regrid_interval (0 = static after setup; >0 mid-run gate)
     std::string plotfile;            // non-empty: WriteMultiLevelPlotfile here after the run (RHO + cell-centred U,V,W); CLI --plotfile [DIR]
+    int plot_every = 0;              // CLI --plot-every N: when N>0 and plotfile set, after step s with s%N==0 write plt_<chid>_s<s> (keeps mid-regrid + final dumps)
 };
 
 // Returns the number of failed checks (0 = completed). Prints one line per step: composite mass, drift, max |div u - D| by level.
