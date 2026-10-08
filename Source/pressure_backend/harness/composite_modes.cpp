@@ -2073,6 +2073,103 @@ void run_comp_bcdata_l1 (ParmParse& pp)
     }
 }
 
+// mode=comp_seam: vortex_ring_re100_wall at blocking 8, where level 1 reaches the periodic x,y faces. Layout 1 puts the fine
+// patch on the low corner: C/F faces across the periodic seams and fine cells on the Neumann z-lo wall. Wall data g = a on
+// both z faces, rhs + c0 (nonzero mean). At mgs 4 and 8: removed mean = composite mean of the folded rhs, div(face gradient)
+// = rhs - mean on every uncovered cell (seam cells included), both periodic images of a face equal, phi independent of mgs.
+// Negative control: a stale seam image (coarse x face at index n zeroed) must fail the divergence check.
+void run_comp_seam (ParmParse& pp)
+{
+    Real a = Real(0.7), c0 = Real(0.25); pp.query("a", a); pp.query("c0", c0);
+    std::vector<std::vector<double>> sol;
+    for (int mgs : {4, 8}) {
+        Cfg c; c.n = 16; c.mgs = mgs; c.layout = 1; pp.query("n", c.n);
+        c.bcd = c.bchi = {pb::BC::Periodic, pb::BC::Periodic, pb::BC::Neumann};
+        Hier h = build_hier(c, 2);
+        for (auto& r : h.rhs) { r->plus(c0, 0, 1, 0); }
+        pb::PressureProblem p = make_problem(c, h);
+        std::vector<pb::BoundaryData> bds(c.nlev);
+        std::vector<MultiFab*> rp;
+        std::vector<std::unique_ptr<MultiFab>> g;
+        for (int l = 0; l < c.nlev; ++l) {
+            rp.push_back(h.rhs[l].get());
+            g.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+            g.back()->setVal(a);
+            bds[l].value[pb::face_index(2,0)] = bds[l].value[pb::face_index(2,1)] = g.back().get();
+        }
+        std::string msg;
+        ccheck(pb::fold_boundary_data(p, bds, rp, &msg) == pb::Status::Ok, "comp_seam fold Ok " + msg);
+        double bs = 0.0, vs = 0.0, bmax = 0.0;
+        for (int l = 0; l < c.nlev; ++l) {
+            const double v = h.geom[l].CellSize(0)*h.geom[l].CellSize(1)*h.geom[l].CellSize(2);
+            for (MFIter mfi(*h.rhs[l]); mfi.isValid(); ++mfi) {
+                auto const& b = h.rhs[l]->const_array(mfi); auto const& u = h.unc[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (u(i,j,k)) { bs += v*b(i,j,k); vs += v; bmax = std::max(bmax, std::abs(b(i,j,k))); } });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(bs); ParallelDescriptor::ReduceRealSum(vs); ParallelDescriptor::ReduceRealMax(bmax);
+        const double mean = bs/vs;
+        pb::PressureOptions o; o.verbose = 0; apply_backend_opts(pp, o);
+        pb::PressureResult r = pb::solve_pressure(p, o);
+        const double rm = r.components.empty() ? 0.0 : r.components[0].removed_mean;
+        GradOut gr = make_grad(c, h);
+        pb::PressureResult rg = pb::face_gradient_composite(p, gr.ptr);
+        auto div_err = [&] () {   // max |div(grad) - (b - mean)| / max|b| over uncovered cells
+            double e = 0.0;
+            for (int l = 0; l < c.nlev; ++l) {
+                auto const dxa = h.geom[l].CellSizeArray();
+                for (MFIter mfi(*h.rhs[l]); mfi.isValid(); ++mfi) {
+                    auto const& b = h.rhs[l]->const_array(mfi); auto const& u = h.unc[l]->const_array(mfi);
+                    auto const& gx = gr.ptr[l][0]->const_array(mfi); auto const& gy = gr.ptr[l][1]->const_array(mfi); auto const& gz = gr.ptr[l][2]->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                        if (!u(i,j,k)) { return; }
+                        const double dv = (gx(i+1,j,k) - gx(i,j,k))/dxa[0] + (gy(i,j+1,k) - gy(i,j,k))/dxa[1] + (gz(i,j,k+1) - gz(i,j,k))/dxa[2];
+                        e = std::max(e, std::abs(dv - (b(i,j,k) - mean)));
+                    });
+                }
+            }
+            ParallelDescriptor::ReduceRealMax(e);
+            return e/bmax;
+        };
+        double seam = 0.0;   // both periodic images of a face present on a level: equal
+        for (int l = 0; l < c.nlev; ++l) {
+            for (int d = 0; d < 2; ++d) {
+                const Box fd = amrex::surroundingNodes(h.geom[l].Domain(), d);
+                MultiFab ones(gr.ptr[l][d]->boxArray(), gr.ptr[l][d]->DistributionMap(), 1, 0); ones.setVal(1.0);
+                auto gv = gather_box(*gr.ptr[l][d], fd); auto gm = gather_box(ones, fd);
+                if (!ParallelDescriptor::IOProcessor()) { continue; }
+                const Long sx = fd.length(0), sy = fd.length(1), off = (d == 0 ? Long(fd.length(0) - 1) : Long(fd.length(1) - 1)*sx);
+                for (Long q = 0; q < Long(gv.size()); ++q) {
+                    const Long id = (d == 0 ? q % sx : (q / sx) % sy);
+                    if (id == 0 && gm[q] > 0 && gm[q + off] > 0) { seam = std::max(seam, std::abs(gv[q] - gv[q + off])); }
+                }
+            }
+        }
+        ParallelDescriptor::ReduceRealMax(seam);
+        const double de = div_err();
+        Print() << "COMP_SEAM mgs=" << mgs << " status=" << pb::to_string(r.status) << " backend=" << r.backend << " true_rel2=" << r.residual_rel2
+                << " removed_mean=" << rm << " mean(b)=" << mean << " div_err_rel=" << de << " seam_image_dev=" << seam << "\n";
+        ccheck(r.status == pb::Status::Ok && rg.status == pb::Status::Ok, "comp_seam mgs=" + std::to_string(mgs) + " solve and face gradient Ok");
+        ccheck(std::abs(mean) > 0.1*std::abs(double(c0)) && std::abs(rm - mean) <= 1e-12*std::abs(mean), "comp_seam mgs=" + std::to_string(mgs) + " removed mean = composite mean of the folded rhs");
+        ccheck(de <= 1e-10, "comp_seam mgs=" + std::to_string(mgs) + " div(face gradient) = rhs - mean on every uncovered cell, seams included");
+        ccheck(seam <= 1e-13, "comp_seam mgs=" + std::to_string(mgs) + " periodic images of a seam face equal on every level");
+        for (MFIter mfi(*gr.ptr[0][0]); mfi.isValid(); ++mfi) {   // negative control: stale image at x = n
+            auto const& gx = gr.ptr[0][0]->array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (i == c.n) { gx(i,j,k) = 0.0; } });
+        }
+        ccheck(div_err() > 1e-3, "comp_seam mgs=" + std::to_string(mgs) + " negative control: a stale seam image is detected");
+        sol.push_back(hier_gather(h, c.nlev));
+    }
+    if (ParallelDescriptor::IOProcessor()) {
+        double sh = 0.0, mx = 0.0, dev = 0.0;
+        for (std::size_t q = 0; q < sol[0].size(); ++q) { sh += sol[1][q] - sol[0][q]; }
+        sh /= double(sol[0].size());   // cells outside a level are 0 in both gathers; a gauge constant shows up as a common shift
+        for (std::size_t q = 0; q < sol[0].size(); ++q) { mx = std::max(mx, std::abs(sol[0][q])); dev = std::max(dev, std::abs(sol[1][q] - sol[0][q] - (sol[0][q] != 0.0 ? sh : 0.0))); }
+        Print() << "COMP_SEAM mgs 4 vs 8: max|dphi - shift|=" << dev << " max|phi|=" << mx << "\n";
+        ccheck(dev <= 1e-9*mx, "comp_seam phi independent of the box layout (mgs 4 vs 8)");
+    }
+}
+
 } // anonymous namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp)
@@ -2082,6 +2179,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_masked") { run_comp_masked(pp); }
     else if (mode == "comp_bcdata") { run_comp_bcdata(pp); }
     else if (mode == "comp_bcdata_l1") { run_comp_bcdata_l1(pp); }
+    else if (mode == "comp_seam") { run_comp_seam(pp); }
     else if (mode == "comp_sel") { run_comp_sel(pp); }
     else if (mode == "comp_ws") { run_comp_ws(pp); }
     else if (mode == "comp_gauge") { run_comp_gauge(pp); }

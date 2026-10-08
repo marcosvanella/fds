@@ -128,6 +128,12 @@ Convergence (L2 error vs the manufactured solution, coarse n to 2n): ratio 2 Neu
 periodic 4.18e-3 to 1.038e-3 (2.01), Dirichlet 9.65e-4 to 2.417e-4 (2.00). Ratio 4 (16 to 32): 2.01, 2.03, 2.00. Difference
 against a uniform-fine solve on the fine region converges at 1.9 to 2.1.
 
+Periodic seam (2026-10-08, vortex_ring_re100_wall at blocking 8): a fine level on a periodic face has C/F faces across the
+seam. The backend is layout-independent there (`pb_comp_seam`: layout 1, wall data, rhs mean 0.25, mgs 4 vs 8, MLMG and HYPRE;
+both images of a seam face equal, div(face gradient) = rhs - mean on seam cells). The blocking-8 drift was in the driver and
+`regrid_transport` (periodic face match on a level with one copy, average-down without periodicity, stale FV(-1) after the
+flux average-down); see the Role 2 report of that date.
+
 ## Masked composite
 
 Inhomogeneous OPEN (S6): composite `fold_boundary_data` + `pb_comp_bcdata` — see `s6-open-inhomogeneous.md`.
