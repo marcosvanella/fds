@@ -195,18 +195,22 @@ void BcStep::match_periodic_faces(const std::string& name, int dir)
     amrex::BoxArray bn(b0);
     bn.shift(sh);
     amrex::DistributionMapping dm(b0);
-    amrex::MultiFab P0(b0, dm, 1, 0), PN(bn, dm, 1, 0);
-    P0.setVal(0.0); PN.setVal(0.0);
+    amrex::MultiFab P0(b0, dm, 1, 0), PN(bn, dm, 1, 0), M0(b0, dm, 1, 0), MN(bn, dm, 1, 0), one(mf.boxArray(), mf.DistributionMap(), 1, 0);
+    P0.setVal(0.0); PN.setVal(0.0); M0.setVal(0.0); MN.setVal(0.0); one.setVal(1.0);
     P0.ParallelCopy(mf, 0, 0, 1, 0, 0);
     PN.ParallelCopy(mf, 0, 0, 1, 0, 0);
+    M0.ParallelCopy(one, 0, 0, 1, 0, 0);   // 1 where the level has that copy of the face (a fine level may have only one)
+    MN.ParallelCopy(one, 0, 0, 1, 0, 0);
     // FDS: DA_OTHER = 0 + A1*A2; UU_OTHER = 0 + ((OM*A1)*A2)/DA_OTHER; UU = 0.5*(UU + UU_OTHER). A1, A2: the two other cell sizes (DY,DZ / DX,DZ / DX,DY)
     const double a1 = dir == 0 ? m_l0.dx[1] : m_l0.dx[0], a2 = dir == 2 ? m_l0.dx[1] : m_l0.dx[2];
     const double da = 0.0 + a1 * a2;
     for (amrex::MFIter mfi(P0); mfi.isValid(); ++mfi) {
         auto lo = P0.array(mfi);
         auto hi = PN.array(mfi);
+        auto m0 = M0.const_array(mfi); auto mn = MN.const_array(mfi);
         amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
             const int ih = i + (dir == 0 ? n : 0), jh = j + (dir == 1 ? n : 0), kh = k + (dir == 2 ? n : 0);
+            if (m0(i, j, k) == 0.0 || mn(ih, jh, kh) == 0.0) return;   // a fine level may hold one copy only: nothing to match
             const double a = lo(i, j, k), b = hi(ih, jh, kh);
             const double other_hi = 0.0 + ((b * a1) * a2) / da;   // what the low face sees of the high face
             const double other_lo = 0.0 + ((a * a1) * a2) / da;   // and the other way round

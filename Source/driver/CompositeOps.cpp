@@ -20,7 +20,7 @@ void composite_average_down_faces(LevelRegistry& reg, int nl, const std::array<c
         const amrex::IntVect ratio = reg.level(l).ref_ratio_from_parent;
         std::array<const amrex::MultiFab*, 3> fi{&Ff[names[0]], &Ff[names[1]], &Ff[names[2]]};
         std::array<amrex::MultiFab*, 3> co{&Fc[names[0]], &Fc[names[1]], &Fc[names[2]]};
-        fdsrt::average_down_faces(fi, co, ratio);
+        fdsrt::average_down_faces(fi, co, ratio, reg.level(l - 1).geom.periodicity());
     }
 }
 
@@ -52,7 +52,7 @@ void composite_average_down_flux(LevelRegistry& reg, int nl)
             }
             fi[d] = nf[d].get(); co[d] = nc[d].get();
         }
-        fdsrt::average_down_faces(fi, co, ratio);
+        fdsrt::average_down_faces(fi, co, ratio, reg.level(l - 1).geom.periodicity());
         for (int d = 0; d < 3; ++d) {
             amrex::MultiFab& dc = Fc[nm[d]];
             const amrex::IntVect sh = amrex::IntVect::TheDimensionVector(d);
@@ -60,6 +60,7 @@ void composite_average_down_flux(LevelRegistry& reg, int nl)
                 auto a = dc.array(mfi); const auto s = nc[d]->const_array(mfi); const amrex::Box vb = mfi.validbox();
                 amrex::LoopOnCpu(vb, [&](int i, int j, int k) { a(i, j, k) = s(i + sh[0], j + sh[1], k + sh[2]); });
             }
+            dc.FillBoundary(reg.level(l - 1).geom.periodicity());   // the low face of a box is its ghost FV(-1): refresh it from the averaged copy (periodic image included)
         }
     }
 }
