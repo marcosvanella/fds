@@ -61,7 +61,7 @@ void prolong_faces_level(const std::array<amrex::MultiFab*, 3>& fine, const std:
         if (old_fine[d]) fine[d]->ParallelCopy(*old_fine[d], 0, 0, 1, 0, 0);
 }
 
-void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const std::array<amrex::MultiFab*, 3>& crse, const amrex::IntVect& ratio)
+void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const std::array<amrex::MultiFab*, 3>& crse, const amrex::IntVect& ratio, const amrex::Periodicity& period)
 {
     for (int d = 0; d < 3; ++d) {
         // coarse faces under the fine level: coarse-aligned temporary on the coarsened fine BoxArray, then copy into the real coarse array
@@ -91,7 +91,7 @@ void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const
                 }
             });
         }
-        crse[d]->ParallelCopy(tmp, 0, 0, nc, 0, 0);
+        crse[d]->ParallelCopy(tmp, 0, 0, nc, 0, 0, period);   // period: also the other copy of a periodic domain face
     }
 }
 

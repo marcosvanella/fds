@@ -4,7 +4,8 @@
 //  * fine faces that lie on a coarse face (the interface faces of a patch included) carry exactly the coarse value;
 //  * max |div u - D| over the new cells is reported (D = 0 here; and D = the parent divergence, to show the reporting function);
 //  * old fine data is copied bitwise over the overlap; the fine -> coarse face mean returns the coarse value;
-//  * negative control: plain injection of the coarse face value breaks the parent divergence.
+//  * negative control: plain injection of the coarse face value breaks the parent divergence;
+//  * periodic seam: a patch on the low-x domain face, averaged down with the coarse periodicity, gives both copies of that face the same value (NonPeriodic: they differ).
 // Runs on 1 and 4 ranks (box-to-rank independent: values are a function of the face index only).
 #include <AMReX.H>
 #include <AMReX_MultiFab.H>
@@ -239,6 +240,27 @@ void run_case(const std::string& name, amrex::IntVect cn, amrex::IntVect ratio, 
             }
             amrex::ParallelDescriptor::ReduceLongSum(bad); amrex::ParallelDescriptor::ReduceLongSum(touched);
             CHECK_MSG(touched > 0 && bad == 0, tag + ": average_down_faces gives the mean of the fine faces on each coarse face (faces touched " + std::to_string(touched) + ", bad " + std::to_string(bad) + ")");
+        }
+
+        // periodic seam (Role 2 diag): the patch touches the low-x face of the periodic domain; with the coarse periodicity the high-x copy of that face gets the same mean,
+        // without it (negative control, the old call) the high-x copy keeps its stale value
+        if (fregion_c.smallEnd(0) == 0) {
+            auto seam_mismatch = [&](const amrex::Periodicity& p) {
+                std::array<amrex::MultiFab, 3> C3;
+                for (int d = 0; d < 3; ++d) { C3[d].define(s.C[d].boxArray(), s.cdm, 1, 0); C3[d].setVal(-5.0); }
+                average_down_faces({&s.F[0], &s.F[1], &s.F[2]}, {&C3[0], &C3[1], &C3[2]}, ratio, p);
+                amrex::MultiFab H(amrex::BoxArray(amrex::convert(s.cdom, amrex::IntVect::TheDimensionVector(0))), amrex::DistributionMapping(amrex::Vector<int>{amrex::ParallelDescriptor::IOProcessorNumber()}), 1, 0);
+                H.ParallelCopy(C3[0], 0, 0, 1, 0, 0);
+                long bad = 0;
+                if (amrex::ParallelDescriptor::IOProcessor()) {
+                    auto h = H[0].const_array();
+                    for (int k = 0; k < cn[2]; ++k) for (int j = 0; j < cn[1]; ++j) bad += h(0, j, k) != -5.0 && h(cn[0], j, k) != h(0, j, k);
+                }
+                amrex::ParallelDescriptor::ReduceLongSum(bad);
+                return bad;
+            };
+            CHECK_MSG(seam_mismatch(s.cg.periodicity()) == 0, tag + ": periodic average_down_faces writes both copies of the low-x domain face");
+            CHECK_MSG(seam_mismatch(amrex::Periodicity::NonPeriodic()) > 0, tag + ": negative control, without the periodicity the high-x copy stays stale");
         }
 
         // negative control: injection (every fine face = the coarse face value of the cell that contains it, no normal interpolation) breaks the parent divergence
