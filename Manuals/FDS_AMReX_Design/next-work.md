@@ -102,9 +102,9 @@ Adaptive / owner-show: TAG_* + set_tag_fields mid-run remesh green at src `370c4
 5. WP9b pieces 9b-5 and 9b-7: device launch sequence part A, hook, part B (`amrex/wp3-generator-coverage.md` section 3.2).
 6. Rule-7 macro form in `s4_omp.inc` and re-time (`amrex/s4-k2-single-source.md`; D-072 (d)).
 7. Open actions A-28, A-31, A-44, A-48, A-49, A-51, A-54 (`README.md`).
-8. ~~Sweep launch layer~~ done — re-pinned to s5-gen `d054f283f0` (ILD*/STORE tip), laptop GPU re-run; scheme-1 costs unchanged within ~2% (RUN; stage-1 plan §7.14); 120/120 dumps sha256-equal to host. ILD*/STORE launch at Integration scale still open (Radiation §13.4 has the small-box subset).
+8. ~~Sweep launch layer~~ done — re-pinned to s5-gen `d054f283f0` (ILD*/STORE tip), test-machine GPU re-run; scheme-1 costs unchanged within ~2% (RUN; stage-1 plan §7.14); 120/120 dumps sha256-equal to host. ILD*/STORE launch at Integration scale still open (Radiation §13.4 has the small-box subset).
 9. WP8 flat tables on the device and WP11 wall kernels in the driver after generator change W1 (`amrex/stage1-gpu-spike-plan.md`). Waits for W1 and GPU time.
-Blocked on: nothing for item 8; item 7 remaining design/write-up actions (A-48/A-49/A-51/A-54) and A-28 TinyProfiler install; A-44 full matrix and A-31 CUDA-aware check addressed on the laptop (see README).
+Blocked on: nothing for item 8; item 7 remaining design/write-up actions (A-48/A-49/A-51/A-54) and A-28 TinyProfiler install; A-44 full matrix and A-31 CUDA-aware check addressed on the test machine (see README).
 
 **Pressure Solver Lead (loop duty). Dry risk: low (7 ready, 4 of them loop items).**
 1. Review Role 2's conditions C1 to C3 (`d59803eb56`) and tests R2 and R3 (`8160c2cafc`); R4 and R5 when posted; rule on any written dispute with the Architect (D-080 (6); `pressure/08`).
