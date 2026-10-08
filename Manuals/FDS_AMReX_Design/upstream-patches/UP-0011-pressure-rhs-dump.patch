@@ -27,7 +27,7 @@ master ce1f659cd4 and to the merged tip bee11f0329).
 @@ -1650,6 +1650,12 @@
        CALL PRESSURE_SOLVER_COMPUTE_RHS(T,DT,NM)
     ENDDO
- 
+
 +   ! Optional write-only dump of PRHS before the solve (environment variable FDS_PDUMP_STEPS; off by default)
 +
 +   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
@@ -35,12 +35,12 @@ master ce1f659cd4 and to the merged tip bee11f0329).
 +   ENDDO
 +
     ! Solve the Poission equation using either FFT or ULMAT, GLMAT, or UGLMAT
- 
+
     SELECT CASE(PRES_FLAG)
 @@ -1669,6 +1675,12 @@
           ENDDO
     END SELECT
- 
+
 +   ! Optional write-only dump of the solved H or HS (environment variable FDS_PDUMP_STEPS; off by default)
 +
 +   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
@@ -48,23 +48,23 @@ master ce1f659cd4 and to the merged tip bee11f0329).
 +   ENDDO
 +
     ! Check the residuals of the Poisson solution
- 
+
     DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 --- a/Source/pres.f90
 +++ b/Source/pres.f90
 @@ -9,7 +9,7 @@
  PRIVATE
- 
+
  PUBLIC PRESSURE_SOLVER_COMPUTE_RHS,PRESSURE_SOLVER_FFT,TUNNEL_POISSON_SOLVER,PRESSURE_SOLVER_CHECK_RESIDUALS, &
 -       COMPUTE_VELOCITY_ERROR
 +       COMPUTE_VELOCITY_ERROR,PRESSURE_SOLVER_DUMP
- 
+
  CONTAINS
- 
+
 @@ -1076,6 +1076,205 @@
  END SUBROUTINE COMPUTE_VELOCITY_ERROR
- 
- 
+
+
 +
 +!> \brief Write-only dump of the pressure right-hand side and the solved H of one mesh (opt-in, off by default).
 +!> \details Enabled only if the environment variable FDS_PDUMP_STEPS is set to a comma-separated list of time-step counts
@@ -265,5 +265,5 @@ master ce1f659cd4 and to the merged tip bee11f0329).
 +
 +
  END MODULE PRES
- 
- 
+
+
