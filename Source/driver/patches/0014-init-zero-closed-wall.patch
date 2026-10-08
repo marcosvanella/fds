@@ -1,0 +1,29 @@
+diff --git a/Source/init.f90 b/Source/init.f90
+index f1a52365c1..89b382caa2 100644
+--- a/Source/init.f90
++++ b/Source/init.f90
+@@ -5379,6 +5379,24 @@ IF (PERIODIC_TEST==2) THEN
+    W(:,:,0) = W(:,:,KBAR)
+ ENDIF
+ 
++#ifdef WITH_AMREX
++! Drop wall-normal velocity on closed external faces before US/U_NORMAL/divergence.
++! UVW_INIT otherwise keeps K=KBAR (and copies it onto K=0). The singular Neumann projection
++! removes that net flux and the continuity update grows mass at a constant rate.
++DO IW=1,N_EXTERNAL_WALL_CELLS
++   WC => WALL(IW)
++   IF (WC%BOUNDARY_TYPE/=SOLID_BOUNDARY .AND. WC%BOUNDARY_TYPE/=MIRROR_BOUNDARY) CYCLE
++   BC => BOUNDARY_COORD(WC%BC_INDEX)
++   SELECT CASE(BC%IOR)
++      CASE( 1) ; U(IBAR,:,:) = 0._EB
++      CASE(-1) ; U(0,:,:)    = 0._EB
++      CASE( 2) ; V(:,JBAR,:) = 0._EB
++      CASE(-2) ; V(:,0,:)    = 0._EB
++      CASE( 3) ; W(:,:,KBAR) = 0._EB
++      CASE(-3) ; W(:,:,0)    = 0._EB
++   END SELECT
++ENDDO
++#endif
+ US=U
+ VS=V
+ WS=W

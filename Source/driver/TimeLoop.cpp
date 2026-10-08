@@ -1297,17 +1297,21 @@ struct TimeLoop::Impl {
     {
         const char* vel[3] = {"U", "V", "W"};
         const char* star[3] = {"US", "VS", "WS"};
+        const char* divn[2] = {"D", "DS"};
         const int nl = static_cast<int>(lc.size());
         for (int l = 0; l < nl; ++l) {
             const amrex::Box dom = lc[l].lev->geom.Domain();
+            const double rdx[3] = {1.0 / lc[l].lev->dx[0], 1.0 / lc[l].lev->dx[1], 1.0 / lc[l].lev->dx[2]};
             Fields& F = *lc[l].F;
             for (int d = 0; d < 3; ++d) {
                 for (int side = 0; side < 2; ++side) {
                     if (bc_type[side * 3 + d] != static_cast<int>(pb::BC::Neumann)) continue;
                     const int face = side == 0 ? dom.smallEnd(d) : dom.bigEnd(d) + 1;
-                    for (const char* name : {vel[d], star[d]}) {
-                        if (!F.has(name)) continue;
-                        amrex::MultiFab& mf = F[name];
+                    const char* names[2] = {vel[d], star[d]};
+                    for (int which = 0; which < 2; ++which) {
+                        if (!F.has(names[which]) || !F.has(divn[which])) continue;
+                        amrex::MultiFab& mf = F[names[which]];
+                        amrex::MultiFab& div = F[divn[which]];
                         for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
                             const amrex::Box vb = mfi.validbox();
                             if (side == 0 ? vb.smallEnd(d) != face : vb.bigEnd(d) != face) continue;
@@ -1315,7 +1319,17 @@ struct TimeLoop::Impl {
                             slab.setSmall(d, face);
                             slab.setBig(d, face);
                             auto a = mf.array(mfi);
-                            amrex::LoopOnCpu(slab, [&](int i, int j, int k) { a(i, j, k) = 0.0; });
+                            auto dd = div.array(mfi);
+                            const double r = rdx[d];
+                            amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
+                                const double wold = a(i, j, k);
+                                if (wold == 0.0) return;
+                                a(i, j, k) = 0.0;
+                                // div uses (high - low)/dx. Dropping the low face raises div by w/dx; dropping the high face lowers it.
+                                int c[3] = {i, j, k};
+                                c[d] += side == 0 ? 0 : -1;
+                                dd(c[0], c[1], c[2]) += (side == 0 ? wold : -wold) * r;
+                            });
                         }
                     }
                 }
