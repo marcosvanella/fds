@@ -103,7 +103,7 @@ struct Cfg {
         }
         return true;
     }
-    int layout = 0;                // level 1 patch: 0 middle half, 1 corner at the low end of the domain (touches the domain faces, wraps when periodic), 2 two separate patches (nlev = 2)
+    int layout = 0;                // level 1 patch: 0 middle half, 1 corner at the low end of the domain (touches the domain faces, wraps when periodic), 2 two separate patches (nlev = 2), 3 middle half touching the high z face only
 };
 
 struct Hier {
@@ -204,6 +204,7 @@ Hier build_hier (Cfg const& c, int dmkind)
                     if (d == hd) { continue; }
                     const int w = hi[d] - lo[d] + 1;
                     lo[d] += w/4; hi[d] -= w/4;
+                    if (l == 1 && c.layout == 3 && d == 2) { lo[d] += w/4; hi[d] += w/4; }   // layout 3: touches the high z face only
                 }
                 patch = Box(lo, hi);
             }
@@ -2015,6 +2016,63 @@ void run_comp_bcdata (ParmParse& pp)
            "negative control: without fold error is large (" + std::to_string(err2) + ")");
 }
 
+// mode=comp_bcdata_l1: S6 fold on level 1 (vortex_ring_re100_wall). Periodic x,y; Neumann z with g = a on both faces (dH/dz along +z);
+// the fine patch touches the high z face only (layout 3). phi = a z is exact for the operator and the C/F interpolation, so the
+// solution must be a (z - 1/2) to round-off on every level and the folded rhs compatible. Negative controls: no fold on level 1 / 0.
+void run_comp_bcdata_l1 (ParmParse& pp)
+{
+    Cfg c;
+    c.n = 16; c.mgs = 8; c.layout = 3;
+    pp.query("n", c.n); pp.query("mgs", c.mgs);
+    c.bcd = c.bchi = {pb::BC::Periodic, pb::BC::Periodic, pb::BC::Neumann};
+    Real a = Real(0.7); pp.query("a", a);
+    int dmkind = 0; pp.query("dmkind", dmkind);
+    Hier h = build_hier(c, dmkind);
+    pb::PressureOptions o;
+    o.verbose = 0;
+    apply_backend_opts(pp, o);
+    pb::PressureWorkspace ws;
+    auto run = [&] (int skip) {   // fold every level except `skip`; returns max|phi - a(z-1/2)| over all cells of all levels
+        for (auto& r : h.rhs) { r->setVal(Real(0)); }
+        for (auto& q : h.phi) { q->setVal(Real(0)); }
+        pb::PressureProblem p = make_problem(c, h);
+        std::vector<pb::BoundaryData> bds(c.nlev);
+        std::vector<MultiFab*> rp;
+        std::vector<std::unique_ptr<MultiFab>> g;   // per-level data on the level's own layout (as the driver passes it)
+        for (int l = 0; l < c.nlev; ++l) {
+            rp.push_back(h.rhs[l].get());
+            if (l == skip) { continue; }
+            g.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+            g.back()->setVal(a);
+            bds[l].value[pb::face_index(2,0)] = bds[l].value[pb::face_index(2,1)] = g.back().get();
+        }
+        std::string msg;
+        ccheck(pb::fold_boundary_data(p, bds, rp, &msg) == pb::Status::Ok, "comp_bcdata_l1 fold Ok " + msg);
+        pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+        double err = 0.0;
+        for (int l = 0; l < c.nlev; ++l) {
+            const Real dz = h.geom[l].CellSize(2);
+            for (MFIter mfi(*h.phi[l]); mfi.isValid(); ++mfi) {
+                auto const& q = h.phi[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { err = std::max(err, std::abs(double(q(i,j,k)) - double(a*((k + Real(0.5))*dz - Real(0.5))))); });
+            }
+        }
+        ParallelDescriptor::ReduceRealMax(err);
+        const double rel = r.components.empty() ? 0.0 : r.components[0].removed_rel;
+        Print() << "COMP_BCDATA_L1 skip=" << skip << " status=" << pb::to_string(r.status) << " backend=" << r.backend << " true_rel2=" << r.residual_rel2
+                << " removed_rel=" << rel << " max|phi-a(z-1/2)|=" << err << "\n";
+        ccheck(r.status == pb::Status::Ok, "comp_bcdata_l1 solve Ok");
+        return std::make_pair(err, rel);
+    };
+    const auto ok = run(-1);
+    ccheck(ok.first <= 1e-9 * std::abs(double(a)), "fold on L1 (fine h, domain layer only): phi = a(z-1/2) to round-off");
+    ccheck(ok.second <= 1e-10, "folded composite rhs compatible (removed mean at round-off)");
+    for (int skip = 1; skip >= 0; --skip) {
+        const auto bad = run(skip);
+        ccheck(bad.first > 1e-3 * std::abs(double(a)) && bad.second > 1e-3, "negative control: no fold on level " + std::to_string(skip) + " is detected");
+    }
+}
+
 } // anonymous namespace
 
 int run_composite_mode (std::string const& mode, ParmParse& pp)
@@ -2023,6 +2081,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_ns2d") { run_comp_ns2d(pp); }
     else if (mode == "comp_masked") { run_comp_masked(pp); }
     else if (mode == "comp_bcdata") { run_comp_bcdata(pp); }
+    else if (mode == "comp_bcdata_l1") { run_comp_bcdata_l1(pp); }
     else if (mode == "comp_sel") { run_comp_sel(pp); }
     else if (mode == "comp_ws") { run_comp_ws(pp); }
     else if (mode == "comp_gauge") { run_comp_gauge(pp); }

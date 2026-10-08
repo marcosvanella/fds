@@ -432,6 +432,13 @@ def compbcdata():
         print(out)
         ok(rc == 0, f"comp_bcdata {be}: harness checks")
 
+def compbcdatal1():
+    # S6 fold on level 1: periodic x,y + Neumann z (g=a both faces), fine patch touching z-hi only; phi = a z exact
+    for be in ("mlmg", "hypre"):
+        rc, out = run(2, mode="comp_bcdata_l1", n=16, mgs=8, backend=be, a=0.7)
+        print(out)
+        ok(rc == 0, f"comp_bcdata_l1 {be}: harness checks")
+
 def comp4r3():
     # np=4, nlev=3, multi-box fine (n=32 ratio 2 mgs=8 → fine 32^3 → 64 boxes); decomp vs np=1.
     base = dict(n=32, nlev=3, ratio=2, mgs=8, plane2d=A.plane, dmkind=2)
@@ -1103,7 +1110,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compbcdatal1": compbcdatal1, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

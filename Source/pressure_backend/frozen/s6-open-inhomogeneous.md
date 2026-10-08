@@ -84,6 +84,14 @@ Fill-in checklist: `frozen/s6-open-coldflow-RESULT.md`. Backend golden: `ctest -
 Cold-flow golden: floor INERT (Neumann z-lo) + five OPEN (Dirichlet), constant `H_b`, full-fine two-level → `phi ≈ H_b`.
 Harness `mode=comp_bcdata` / ctest `pb_comp_bcdata` (MLMG and HYPRE).
 
+L1 golden: periodic x,y, Neumann z with `g = a` on both faces given as per-level data, fine patch touching z-hi only
+(layout 3) → `phi = a z` exact, removed mean at round-off. Negative controls (no fold on L1, on L0) must fail.
+Harness `mode=comp_bcdata_l1` / ctest `pb_comp_bcdata_l1` (MLMG and HYPRE).
+
+vortex_ring_re100_wall (2026-10-08): fold is correct on L1 (fine `h`, domain layer only, periodic skipped, signs as below);
+all BXS..BZF were ~1e-14 there, so the fold is a no-op in that run. Drift came from the case IC (nonzero `W` on the
+MIRROR top face → uniform deficit removed as the rhs mean every solve) and from L1 `DDDT` never being bound (driver).
+
 ## FDS sign convention (do not invent)
 
 From FDS `pres.f90` (header ~57–58, application ~452–454, ULMAT ~1620–1679), confirmed A-56 fold sign check:
