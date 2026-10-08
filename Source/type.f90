@@ -1489,7 +1489,9 @@ END TYPE CC_CV_TYPE
 
 TYPE CC_FACE_TYPE
    INTEGER :: N = 0
-   INTEGER :: N_INT = 0 !< Last interior row. The tail is guard and orphan cut faces, then regular faces.
+   INTEGER :: N_INT = 0 !< Last interior row. The tail is guard and orphan cut faces, then seam RC faces, then regular faces.
+   INTEGER :: SEAM_RC_LO = 0 !< First seam RC tail row, else 0.
+   INTEGER :: SEAM_RC_HI = 0 !< Last seam RC tail row, else 0.
    ! --- CV topology ---
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_CV_NM !< (1:N) mesh owning OWNER_CV.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_CV    !< (1:N) owner CV index; normal points owner->neighbor.
@@ -1511,7 +1513,7 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: X1AXIS      !< (1:N) axis (IAXIS:KAXIS) for Cartesian-aligned faces, else 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK_FACE    !< (IAXIS:KAXIS,1:N) Cartesian face locator for axis faces.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: NBR_IJK     !< (IAXIS:KAXIS,1:N) outside Cartesian cell for FV/structured coupling.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKF        !< (1:N) link number. The only copy, except RC faces with FC=0.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKF        !< (1:N) link number. The only copy.
    ! Link group -> FACE rows (CSR): rows with UNKF==IL are (LINK_NM,LINK_ROW)(LINK_PTR(IL):LINK_PTR(IL+1)-1).
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_PTR    !< (1:NUNK_F+1) CSR offsets into LINK_NM/LINK_ROW.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_NM     !< (1:sum group sizes) mesh of each group member.
@@ -1587,15 +1589,12 @@ TYPE CC_RCFACE_TYPE
    INTEGER                                         ::              IWC=0 !< WALL CELL index (if present) in location of RC Face.
    INTEGER                                         ::       PRES_ZONE=-1 !< Pressure zone where RC face is.
    INTEGER,  DIMENSION(MAX_DIM+1)                  ::                IJK !< Location indexes and axis of RC face. [ I J K X1AXIS]
-   INTEGER                                         ::               FC=0 !< FV FACE index; 0 if not in FACE inventory.
-   INTEGER                                         ::             UNKF=0 !< Link number of a seam RC face (FC=0); 0 otherwise.
+   INTEGER                                         ::               FC=0 !< FV FACE index. Every RC face has a row.
    INTEGER,  DIMENSION(LOW_IND:HIGH_IND)           ::               UNKZ !< Scalar transport unknown numbers in connected cells.
    INTEGER,  DIMENSION(LOW_IND:HIGH_IND)           ::               UNKH !< Pressure unknown numbers in connected cells.
    REAL(EB), DIMENSION(MAX_DIM,LOW_IND:HIGH_IND)   ::               XCEN !< Centroid location of connected cells.
    INTEGER,  DIMENSION(1:2,1:2)                    ::                JDH !< Index matrix for H Poisson matrix coefficients.
    INTEGER,  DIMENSION(MAX_DIM+1,LOW_IND:HIGH_IND) ::          CELL_LIST !< Cell type/location of connected cells. [RC_TYPE I J K ]
-   REAL(EB)                                        ::     TMP_FACE=0._EB !< Temperature of a seam RC face (FC=0).
-   REAL(EB), ALLOCATABLE, DIMENSION(:)             ::         RHO_D_DZDN !< Species diffusive mass flux of a seam RC face (FC=0).
    INTEGER,  ALLOCATABLE, DIMENSION(:,:)           ::             NOMICF !< OMESH face info for mesh boundary RC face.
 END TYPE CC_RCFACE_TYPE
 
