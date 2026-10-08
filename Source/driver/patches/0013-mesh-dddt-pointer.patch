@@ -1,0 +1,12 @@
+diff --git a/Source/mesh.f90 b/Source/mesh.f90
+index 0d77c4c0be..8e9d87b1a7 100644
+--- a/Source/mesh.f90
++++ b/Source/mesh.f90
+@@ -996,6 +996,7 @@ IF (ASSOCIATED(BV%VS)) VS   => BV%VS
+ IF (ASSOCIATED(BV%WS)) WS   => BV%WS
+ IF (ASSOCIATED(BV%D)) D    => BV%D
+ IF (ASSOCIATED(BV%DS)) DS   => BV%DS
++IF (ASSOCIATED(BV%DDDT)) DDDT => BV%DDDT
+ IF (ASSOCIATED(BV%H)) H    => BV%H
+ IF (ASSOCIATED(BV%HS)) HS   => BV%HS
+ IF (ASSOCIATED(BV%KRES)) KRES => BV%KRES
