@@ -44,31 +44,27 @@ void ghost_exchange(Fields& F, int code, bool predictor)
     }
 }
 
-void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir)
+void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir, const FaceBc& bc)
 {
-    const amrex::Box dom = lev.geom.Domain();
+    const amrex::Box dom = amrex::convert(lev.geom.Domain(), mf.ixType());   // nodal in nodal_dir: its ends are the wall faces
+    const int nc = mf.nComp();
     for (int d = 0; d < 3; ++d) {
-        if (lev.geom.isPeriodic(d) || d == nodal_dir || dom.length(d) < 1) continue;
-        const int ng = mf.nGrow(d);
-        if (ng <= 0) continue;
+        if (lev.geom.isPeriodic(d)) continue;
+        const bool normal = d == nodal_dir;
         for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
-            const amrex::Box vb = mfi.validbox();
-            const amrex::Box fb = mf[mfi].box();
+            const amrex::Box vb = mfi.validbox(), fb = mf[mfi].box();
             auto a = mf.array(mfi);
-            const int nc = mf.nComp();
             for (int side = 0; side < 2; ++side) {
-                const int edge = side == 0 ? dom.smallEnd(d) : dom.bigEnd(d);
-                const int mine = side == 0 ? vb.smallEnd(d) : vb.bigEnd(d);
-                if (mine != edge) continue;
-                for (int g = 1; g <= ng; ++g) {
+                const int edge = side == 0 ? dom.smallEnd(d) : dom.bigEnd(d), f = bc[2 * d + side];
+                if ((side == 0 ? vb.smallEnd(d) : vb.bigEnd(d)) != edge || (normal && f != kFaceInert && f != kFaceMirror)) continue;
+                const double s = normal ? 0.0 : f == kFaceInert ? -1.0 : 1.0;   // normal: 0 on the wall face itself (g = 0 only); tangential: odd (no-slip) or even copy
+                const int g1 = normal ? 0 : mf.nGrow(d);
+                for (int g = normal ? 0 : 1; g <= g1; ++g) {
                     amrex::Box slab = fb;
-                    const int idx = side == 0 ? edge - g : edge + g;
-                    slab.setSmall(d, idx); slab.setBig(d, idx);
+                    slab.setSmall(d, side == 0 ? edge - g : edge + g); slab.setBig(d, slab.smallEnd(d));
                     amrex::IntVect sh(0, 0, 0);
                     sh[d] = side == 0 ? g : -g;
-                    amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
-                        for (int n = 0; n < nc; ++n) a(i, j, k, n) = a(i + sh[0], j + sh[1], k + sh[2], n);
-                    });
+                    amrex::LoopOnCpu(slab, nc, [&](int i, int j, int k, int n) { a(i, j, k, n) = s * a(i + sh[0], j + sh[1], k + sh[2], n); });
                 }
             }
         }
@@ -129,7 +125,8 @@ void BcStep::exchange(int code, bool predictor)
             const FieldSpec& sp = m_F.spec(n);
             int nd = -1;
             for (int d = 0; d < 3; ++d) if (sp.nodal(d)) nd = d;
-            mirror_domain_edges(m_l0, m_F[n], nd);
+            const bool vel = n == "U" || n == "V" || n == "W" || n == "US" || n == "VS" || n == "WS";
+            mirror_domain_edges(m_l0, m_F[n], nd, vel ? vel_bc : FaceBc{});
         }
     }
 }

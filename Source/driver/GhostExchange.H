@@ -24,6 +24,7 @@
 #ifndef FDS_GHOSTEXCHANGE_H_
 #define FDS_GHOSTEXCHANGE_H_
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -63,7 +64,12 @@ using CfGhostHook = std::function<void(const CfGhostRequest&)>;
 // kernels would read it (a spurious diffusive flux through the face). Phase 3 rule for such faces: the mirror (Neumann) copy of the adjacent valid cell, all ghost layers, in
 // every direction in which `mf` is cell-centred; the component normal to the face (nodal in that direction) is left alone (its face is the wall face itself).
 // nodal_dir: direction in which `mf` is nodal (-1 for a cell field). Periodic directions are the same-level fill's business.
-void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir);
+// bc (velocity components only, the caller's choice): the wall type of each domain face f = 2*dir + side (-x,+x,-y,+y,-z,+z), as FDS WALL BOUNDARY_TYPE (cons.f90).
+// kFaceInert (SOLID_BOUNDARY) and kFaceMirror (MIRROR_BOUNDARY): the normal component is 0 on the wall face (FDS: W(K=0), W(K=KBAR); the nodal index dom lo / dom hi + 1);
+// the tangential ghosts are the odd copy (no-slip) at kFaceInert. Any other code (0: default, periodic, open, mixed) is the rule above, which is also the default of every face.
+enum : int { kFaceInert = 1, kFaceMirror = 3 };
+using FaceBc = std::array<int, 6>;
+void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir, const FaceBc& bc = {});
 
 class BcStep {
 public:
@@ -74,6 +80,7 @@ public:
     bool ext_ghost = false;   // EXTERNAL_GHOSTS_FILLED mode (patches 0003/0004): MATCH_VELOCITY is skipped by FDS, the driver saves the face velocities instead
     std::function<void(bool)> iface_hook;
     CfGhostHook cf_ghost_hook;   // optional, see CfGhostRequest
+    FaceBc vel_bc{};             // level > 0: wall type of the domain faces for U, V, W, US, VS, WS (mirror_domain_edges); default {}: the plain mirror. TimeLoop sets it (patch 0015)
     // ghost_exchange(F, code, predictor) followed by cf_ghost_hook (if set). The time loop calls this at every exchange position.
     void exchange(int code, bool predictor = true);
     void after_exchange(int code, double t, double dt);

@@ -169,6 +169,12 @@ if (BUILD_TESTING)
         target_include_directories(test_tag_buffer_large PRIVATE tests ${DRV}/tests)
         add_test(NAME regrid_transport_tag_buffer_large COMMAND test_tag_buffer_large)
         add_test(NAME regrid_transport_tag_buffer_large_np4 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 $<TARGET_FILE:test_tag_buffer_large>)
+        # fine-level domain-face wall BC (GhostExchange mirror_domain_edges + FaceBc): INERT z-lo, MIRROR z-hi, periodic x/y; negative control with the default
+        add_executable(test_fine_wall_bc tests/test_fine_wall_bc.cpp tests/fds_stubs.cpp)
+        target_link_libraries(test_fine_wall_bc PRIVATE fds_regrid_transport_amrex)
+        target_include_directories(test_fine_wall_bc PRIVATE tests ${DRV}/tests)
+        add_test(NAME regrid_transport_fine_wall_bc COMMAND test_fine_wall_bc)
+        add_test(NAME regrid_transport_fine_wall_bc_np2 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:test_fine_wall_bc>)
         # L1251: radiation intensity ghost table (IlGhost.H) against an FDS IIO_R reimplementation, equal level and coarse/fine
         add_executable(test_il_ghost tests/test_il_ghost.cpp)
         target_link_libraries(test_il_ghost PRIVATE fds_regrid_transport_amrex)
