@@ -212,8 +212,8 @@ struct TimeLoop::Impl {
     std::vector<OwnLevel> own;                                   // own[lev-1]
     static int view_code(const std::string& n)
     {
-        static const char* names[22] = {"U", "V", "W", "US", "VS", "WS", "D", "DS", "H", "HS", "KRES", "FVX", "FVY", "FVZ", "RHO", "RHOS", "MU", "TMP", "Q", "RSUM", "ZZ", "ZZS"};
-        for (int i = 0; i < 22; ++i) if (n == names[i]) return i + 1;
+        static const char* names[23] = {"U", "V", "W", "US", "VS", "WS", "D", "DS", "H", "HS", "KRES", "FVX", "FVY", "FVZ", "RHO", "RHOS", "MU", "TMP", "Q", "RSUM", "ZZ", "ZZS", "DDDT"};
+        for (int i = 0; i < 23; ++i) if (n == names[i]) return i + 1;
         return 0;
     }
     void bind_level(int lev)
@@ -932,7 +932,6 @@ struct TimeLoop::Impl {
                                        std::array<std::unique_ptr<amrex::MultiFab>, 6>& owned)
     {
         pb::BoundaryData bd;
-        const amrex::IntVect ratio = (&lv == &l0) ? amrex::IntVect(1) : lv.ref_ratio_from_parent;
         // For levels > 1, ratio_from_parent is only relative to parent; inject stepwise from L0 index space:
         // use cumulative ref from geom Domain vs l0 Domain length.
         amrex::IntVect rL0(1);
@@ -957,7 +956,7 @@ struct TimeLoop::Impl {
         return bd;
     }
 
-    void fold_then_solve_level0(pb::PressureProblem& p, pb::PressureOptions& o)
+    void fold_then_solve_level0(pb::PressureProblem& p, pb::PressureOptions& /*o*/)
     {
         std::array<std::unique_ptr<amrex::MultiFab>, 6> l0bd;
         pack_l0_boundary_mfs(l0bd);
@@ -1184,7 +1183,7 @@ struct TimeLoop::Impl {
         o.trigger = pb::SolveRoutine;
         {
             std::vector<amrex::MultiFab*> rhs_levels(nl);
-            for (int l = 0; l < nl; ++l) rhs_levels[l] = p.levels[l].rhs;
+            for (int l = 0; l < nl; ++l) rhs_levels[l] = const_cast<amrex::MultiFab*>(p.levels[l].rhs);
             fold_composite(p, rhs_levels);
         }
         const pb::PressureResult r = pb::solve_pressure(p, o, pws.get());
@@ -1289,6 +1288,39 @@ struct TimeLoop::Impl {
         ProfScope prof_ad(4);
         if (pred) composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"US", "VS", "WS"});
         else composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"U", "V", "W"});
+    }
+    // Cause A (Role 2): an IC with nonzero wall-normal velocity on an INERT/MIRROR face has a net volume flux.
+    // The Neumann projection removes the mean of that flux (removed_rel ~ 1) and the continuity update then grows mass at a
+    // constant rate. Zero the normal velocity on Neumann faces (U/US, V/VS, W/WS) before the initial projection. Periodic and
+    // Dirichlet (OPEN) faces are left alone. Level 0 VELOCITY_BC repeats this each step; fine boxes have no wall cells.
+    void zero_closed_wall_normal()
+    {
+        const char* vel[3] = {"U", "V", "W"};
+        const char* star[3] = {"US", "VS", "WS"};
+        const int nl = static_cast<int>(lc.size());
+        for (int l = 0; l < nl; ++l) {
+            const amrex::Box dom = lc[l].lev->geom.Domain();
+            Fields& F = *lc[l].F;
+            for (int d = 0; d < 3; ++d) {
+                for (int side = 0; side < 2; ++side) {
+                    if (bc_type[side * 3 + d] != static_cast<int>(pb::BC::Neumann)) continue;
+                    const int face = side == 0 ? dom.smallEnd(d) : dom.bigEnd(d) + 1;
+                    for (const char* name : {vel[d], star[d]}) {
+                        if (!F.has(name)) continue;
+                        amrex::MultiFab& mf = F[name];
+                        for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                            const amrex::Box vb = mfi.validbox();
+                            if (side == 0 ? vb.smallEnd(d) != face : vb.bigEnd(d) != face) continue;
+                            amrex::Box slab = vb;
+                            slab.setSmall(d, face);
+                            slab.setBig(d, face);
+                            auto a = mf.array(mfi);
+                            amrex::LoopOnCpu(slab, [&](int i, int j, int k) { a(i, j, k) = 0.0; });
+                        }
+                    }
+                }
+            }
+        }
     }
     // One corrector-form pass without the density update on all levels: the D, DS, KRES, MU, ... of a previous stage that a newly made level does not have (notes/level-binding.md)
     // FDSTL_GHOSTDBG: min/max of the scalars over the valid cells and over the whole FAB (ghost layers included), per level
@@ -2101,6 +2133,7 @@ long TimeLoop::clip_cells(int n, int l) const
     return m->clip_cells_acc[idx];
 }
 void TimeLoop::prime_levels() { m->prime_levels(); }
+void TimeLoop::zero_closed_wall_normal() { m->zero_closed_wall_normal(); }
 void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
 void TimeLoop::write_perf() { m->write_perf(); }
 
