@@ -174,7 +174,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     const amrex::Box dom = l0.geom.Domain();
 
     // ---- the hierarchy: &AMR / &AMR_REGION -> AmrParams, level-0 meshes -> Hierarchy -> RegridAmrCore; levels 1..max_level by regrid_dynamic (nested tags)
-    if (o.max_level < 1 || o.max_level > 8) { amrex::Print() << "MULTI-LEVEL: max_level must be 1..8, got " << o.max_level << "\n"; return 1; }
+    if (o.max_level < 0 || o.max_level > 8) { amrex::Print() << "MULTI-LEVEL: max_level must be 0..8, got " << o.max_level << "\n"; return 1; }
     const char* tag = (o.max_level == 1) ? "TWO-LEVEL" : "MULTI-LEVEL";
     amrex::IntVect rr(o.ratio, o.ratio, o.ratio);
     for (int d = 0; d < 3; ++d) if (dom.length(d) == 1) rr[d] = 1;
@@ -205,13 +205,16 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     amr << " /\n";
     // Vortex adaptive: whole-domain refinable region so the ring can leave the static patch.
-    amr << std::setprecision(17) << "&AMR_REGION XB=";
-    if (use_tag_vort) {
-        for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) << "," << l0.geom.ProbHi(d) << (d < 2 ? "," : "");
-    } else {
-        for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
+    // --levels 1 (max_level 0): level 0 alone through the same loop and plotfiles, no &AMR_REGION (its LEVEL must be >= 1)
+    if (o.max_level > 0) {
+        amr << std::setprecision(17) << "&AMR_REGION XB=";
+        if (use_tag_vort) {
+            for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) << "," << l0.geom.ProbHi(d) << (d < 2 ? "," : "");
+        } else {
+            for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
+        }
+        amr << ", LEVEL=" << o.max_level << " /\n";
     }
-    amr << ", LEVEL=" << o.max_level << " /\n";
     fdsrt::Report rep;
     fdsrt::AmrParams ap = fdsrt::parse_amr_params(amr.str(), rep);
     std::vector<fdsrt::MeshInput> meshes;

@@ -233,7 +233,7 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) { to.chid = argv[++i]; ro.chid = to.chid; }
                     else if (std::strcmp(argv[i], "--log-every") == 0 && i + 1 < argc) to.log_every = std::atoi(argv[++i]);
                 }
-                if (to.max_level < 1) amrex::Abort("--levels must be >= 2");
+                if (to.max_level < 0) amrex::Abort("--levels must be >= 1");   // --levels 1: level 0 only (plotfiles, no refinement)
                 fdsamr::TimeLoop loop(l0, dt, ro);
                 const int nfail = fdsamr::two_level_run(loop, l0, dt, to);
                 const char* msg = (to.max_level == 1) ? (nfail == 0 ? "TWO-LEVEL RUN PASS" : "TWO-LEVEL RUN FAIL")
