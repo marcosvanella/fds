@@ -7,6 +7,7 @@
 // Kernel-facing rules (M2a): (a) passive scalars are handled by Fields.cpp (S2); (b) only uniform Cartesian metrics are used.
 #include <AMReX.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <AMReX_ParmParse.H>
 #include <AMReX_ParallelReduce.H>
 #include <AMReX_Print.H>
 
@@ -46,6 +47,22 @@ extern "C" int fds_fine_b_shadow_report();
 #endif
 
 namespace {
+// P2 solver-study flags of --run and --two-level-run (RunOptions::pressure_*, and hypre.* / pressure.* key=value for pb::query_options): true when
+// argv[i] is one; i is moved past its value.
+bool pressure_flag(int argc, char** argv, int& i, fdsamr::RunOptions& ro)
+{
+    const std::string a = argv[i];
+    if ((a.rfind("hypre.", 0) == 0 || a.rfind("pressure.", 0) == 0) && a.find('=') != std::string::npos) {   // pb::query_options keys, e.g. hypre.strong_threshold=0.5
+        amrex::ParmParse().add(a.substr(0, a.find('=')).c_str(), a.substr(a.find('=') + 1));
+        return true;
+    }
+    if (i + 1 >= argc) return false;
+    std::string* v = a == "--pressure-backend" ? &ro.pressure_backend : a == "--krylov" ? &ro.krylov : a == "--pressure-csv" ? &ro.pressure_csv : nullptr;
+    if (v) *v = argv[++i];
+    else if (a == "--pressure-tol") ro.pressure_tol = std::atof(argv[++i]);
+    else return false;
+    return true;
+}
 // --pressure-bc: one line "PBC ..." with the FDS pressure codes of the level's domain faces and the strings the driver passes per direction (PressureBcMap.H), no time loop.
 void print_pressure_bc(const fdsamr::Level0& l0, const char* name)
 {
@@ -202,10 +219,12 @@ int main(int argc, char** argv)
                 // --two-level-run [--levels N] [--steps N] [--patch i0 i1 k0 k1] [--patch2 i0 i1 k0 k1] [--ratio R] [--maxsize M] [--blocking B]
                 //   [--projection ON|AUTO|OFF] [--no-overwrite] [--bind-only] [--regrid-every N] [--plotfile [DIR]] [--plot-every N]
                 //   [--tag-vort auto|<thr>] [--exact-zone-sums] [--outdir D] [--chid C]: S14 / D-053 (N levels = max_level+1, default 2)
+                //   [--pressure-backend auto|mlmg|hypre] [--krylov none|gmres|bicgstab|cg] [--pressure-tol T] [--pressure-csv FILE]: P2 solver study (RunOptions)
                 fdsamr::TwoLevelOptions to;
                 fdsamr::RunOptions ro;
                 ro.quiet = true;
                 for (int i = 3; i < argc; ++i) {
+                    if (pressure_flag(argc, argv, i, ro)) continue;
                     if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) to.steps = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--levels") == 0 && i + 1 < argc) to.max_level = std::atoi(argv[++i]) - 1;  // --levels 3 -> max_level 2
                     else if (std::strcmp(argv[i], "--patch") == 0 && i + 4 < argc) { for (int q = 0; q < 4; ++q) to.patch[q] = std::atoi(argv[++i]); }
@@ -242,11 +261,12 @@ int main(int argc, char** argv)
                 if (nfail != 0) amrex::Abort("multi-level run failed");
             }
             if (argc > 2 && std::strcmp(argv[2], "--run") == 0) {
-                // --run [--steps N] [--outdir D] [--chid C] [--quiet] [--exact-zone-sums]: the C++ time loop (S5)
+                // --run [--steps N] [--outdir D] [--chid C] [--quiet] [--exact-zone-sums] [P2 solver-study flags as --two-level-run]: the C++ time loop (S5)
                 fdsamr::RunOptions ro;
                 bool fine_shadow = false;
                 int fine_build = 0;
                 for (int i = 3; i < argc; ++i) {
+                    if (pressure_flag(argc, argv, i, ro)) continue;
                     if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) ro.max_steps = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) ro.outdir = argv[++i];
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) ro.chid = argv[++i];

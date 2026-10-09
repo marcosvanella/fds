@@ -12,10 +12,25 @@ enable_language(C)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# AMReX installation (gfortran 14 + OpenMPI 5, FFT and OMP enabled). Override with -DAMReX_ROOT=<prefix> or -DCMAKE_PREFIX_PATH.
-set(AMREX_INSTALL_DIR "/workspace/amrex-install" CACHE PATH "AMReX install prefix used when USE_AMREX=ON")
+# AMReX installation (gfortran 14 + OpenMPI 5, FFT, OMP and HYPRE enabled; HYPRE = the FireX pin 63331f19, A-27). Override with -DAMREX_INSTALL_DIR=<prefix>.
+set(AMREX_INSTALL_DIR "/workspace/amrex-install-hypre232" CACHE PATH "AMReX install prefix used when USE_AMREX=ON")
 find_package(AMReX 26.09 REQUIRED CONFIG PATHS ${AMREX_INSTALL_DIR} NO_DEFAULT_PATH)
 find_package(MPI REQUIRED COMPONENTS CXX)
+# R-30, one HYPRE: fds links HYPRE::HYPRE (top level; -DUSE_SYSTEM_HYPRE=ON -DHYPRE_ROOT=<FireX pin> reuses the FireX build), AMReX's find_dependency(HYPRE)
+# resolves to that same target, and AMReX must have been compiled against the same HYPRE headers: its embedded HYPRE_DEVELOP_STRING must match.
+if (USE_HYPRE AND AMReX_HYPRE)
+    get_target_property(_hypre_inc HYPRE::HYPRE INTERFACE_INCLUDE_DIRECTORIES)
+    list(GET _hypre_inc 0 _hypre_inc)
+    if (EXISTS ${_hypre_inc}/HYPRE_config.h)
+        file(STRINGS ${_hypre_inc}/HYPRE_config.h _hypre_dev REGEX "define HYPRE_DEVELOP_STRING")
+        string(REGEX MATCH "v[^\"]+" _hypre_dev "${_hypre_dev}")
+        file(STRINGS ${AMReX_DIR}/../../libamrex_3d.a _amrex_hypre REGEX "^${_hypre_dev}$" LIMIT_COUNT 1)
+        if (NOT _amrex_hypre)
+            message(FATAL_ERROR "AMReX at ${AMREX_INSTALL_DIR} was not compiled against the linked HYPRE ${_hypre_dev} (${_hypre_inc}); R-30 needs one HYPRE")
+        endif()
+        message(STATUS "HYPRE ${_hypre_dev} from ${_hypre_inc}: the same build for FDS, AMReX and pressure_backend")
+    endif()
+endif()
 
 # The FDS options above are Fortran-only (-std=f2018, -fall-intrinsics, ...): restrict every existing option to the Fortran compiler.
 get_target_property(_fds_opts fds COMPILE_OPTIONS)
@@ -75,7 +90,12 @@ endif()
 if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeMask.cpp)
     target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeMask.cpp)
 endif()
-# Role 2's HYPRE backend is behind PB_WITH_HYPRE (pressure_backend/README.md, "Build options"). The driver does not define it and does not compile HypreBackend.cpp: no HYPRE symbol is referenced, no link stub is needed.
+# Role 2's HYPRE backend is behind PB_WITH_HYPRE (pressure_backend/README.md, "Build options"): with USE_HYPRE it is compiled and the macro is defined for every
+# C++ file (the PressureWorkspace layout depends on it); without, no HYPRE symbol is referenced and a HYPRE request is NotBuilt.
+if (USE_HYPRE)
+    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/HypreBackend.cpp)
+    target_compile_definitions(fds PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:PB_WITH_HYPRE>")
+endif()
 target_include_directories(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport)
 # Role 3 driver-level end-to-end modes (regrid_transport/DriverSources.cmake): `fds_amr <case> --rt-e2e <test>`
 if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/DriverSources.cmake)

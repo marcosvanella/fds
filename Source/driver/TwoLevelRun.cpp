@@ -449,6 +449,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         const double dm = (m[0] - m0[0]) / m0[0];
         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl_now);
         const double dv = fdsrt::composite_divergence_error(lv, &bylev);
+        loop.pressure_csv_div(s, bylev);   // P2 solver-study CSV (no-op without the flags)
         worst_mass = std::max(worst_mass, std::abs(dm));
         worst_div = std::max(worst_div, dv);
         if (bylev.size() > 1) {

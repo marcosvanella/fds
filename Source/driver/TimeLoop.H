@@ -37,6 +37,10 @@ struct RunOptions {
     // env FDSTL_EXACT_ZONES=1) replaces them by the decomposition-independent fixed-point sums of D-028 (ExactSum); a GPU option, off by default, tested separately
     // (tests/run_zone_sum_check.sh). The set-up volumes and areas (zone_setup) are D-028 sums in both modes.
     bool exact_zone_sums = false;
+    // Poisson solver study (P2): --pressure-backend auto|mlmg|hypre, --krylov none|gmres|bicgstab|cg, --pressure-tol (1e-10). With any of them (or --pressure-csv FILE)
+    // every solve uses them and writes a row to FILE (default <outdir>/<chid>_pressure.csv); otherwise the solves keep their defaults.
+    std::string pressure_backend, krylov, pressure_csv;
+    double pressure_tol = 1.0e-10;
 };
 
 struct StepRecord {
@@ -126,6 +130,7 @@ public:
         double res_check_max = 0.0, res_limit_max = 0.0, res_floor_max = 0.0;   // largest residual_check, residual_limit = max(residual_tol, residual_floor), residual_floor (Role 2, A-67)
     };
     const CompositeReport& composite_report() const;
+    void pressure_csv_div(int step, const std::vector<double>& div_by_level);   // P2 CSV: the caller's max|div u - D| per level after the step
     void prime_levels();
     // Zero normal velocity on Neumann (INERT/MIRROR) domain faces of every bound level. Call before the initial projection.
     void zero_closed_wall_normal();
