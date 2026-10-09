@@ -37,7 +37,7 @@ void prolong_faces_normal_linear(const std::array<const amrex::FArrayBox*, 3>& c
 }
 
 void prolong_faces_level(const std::array<amrex::MultiFab*, 3>& fine, const std::array<const amrex::MultiFab*, 3>& crse, const amrex::Geometry& crse_geom,
-                         const amrex::IntVect& ratio, const std::array<const amrex::MultiFab*, 3>& old_fine)
+                         const amrex::IntVect& ratio, const std::array<const amrex::MultiFab*, 3>& old_fine, const amrex::Periodicity& period)
 {
     const amrex::BoxArray fcells = amrex::convert(fine[0]->boxArray(), amrex::IntVect::TheCellVector());
     for (int b = 0; b < static_cast<int>(fcells.size()); ++b) {
@@ -58,7 +58,7 @@ void prolong_faces_level(const std::array<amrex::MultiFab*, 3>& fine, const std:
         prolong_faces_normal_linear({&tmp[0][mfi], &tmp[1][mfi], &tmp[2][mfi]}, {&(*fine[0])[mfi], &(*fine[1])[mfi], &(*fine[2])[mfi]}, cells, ratio);
     }
     for (int d = 0; d < 3; ++d)
-        if (old_fine[d]) fine[d]->ParallelCopy(*old_fine[d], 0, 0, 1, 0, 0);
+        if (old_fine[d]) fine[d]->ParallelCopy(*old_fine[d], 0, 0, 1, 0, 0, period);
 }
 
 void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const std::array<amrex::MultiFab*, 3>& crse, const amrex::IntVect& ratio, const amrex::Periodicity& period)

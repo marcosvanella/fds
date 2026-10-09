@@ -261,6 +261,32 @@ void run_case(const std::string& name, amrex::IntVect cn, amrex::IntVect ratio, 
             };
             CHECK_MSG(seam_mismatch(s.cg.periodicity()) == 0, tag + ": periodic average_down_faces writes both copies of the low-x domain face");
             CHECK_MSG(seam_mismatch(amrex::Periodicity::NonPeriodic()) > 0, tag + ": negative control, without the periodicity the high-x copy stays stale");
+            // prolong_faces_level with old fine data (the regrid copy): the patch moves to the high-x end; its x = N face must take the old x = 0 face (periodic image)
+            auto seam_prolong_mismatch = [&](const amrex::Periodicity& p) {
+                amrex::Box nb = s.fba.minimalBox();
+                nb.shift(0, s.fg.Domain().length(0) - nb.length(0));
+                const amrex::BoxArray nba(nb);
+                const amrex::DistributionMapping ndm(nba);
+                std::array<amrex::MultiFab, 3> N;
+                for (int d = 0; d < 3; ++d) N[d].define(amrex::convert(nba, amrex::IntVect::TheDimensionVector(d)), ndm, 1, 0);
+                prolong_faces_level({&N[0], &N[1], &N[2]}, {&s.C[0], &s.C[1], &s.C[2]}, s.cg, ratio, {&s.F[0], &s.F[1], &s.F[2]}, p);
+                const int nf = s.fg.Domain().length(0);
+                amrex::Box face = amrex::convert(nb, amrex::IntVect::TheDimensionVector(0));
+                face.setSmall(0, nf); face.setBig(0, nf);
+                const amrex::DistributionMapping io(amrex::Vector<int>{amrex::ParallelDescriptor::IOProcessorNumber()});
+                amrex::MultiFab Gn(amrex::BoxArray(face), io, 1, 0), G0(amrex::BoxArray(amrex::Box(face).shift(0, -nf)), io, 1, 0);
+                Gn.ParallelCopy(N[0], 0, 0, 1, 0, 0);
+                G0.ParallelCopy(s.F[0], 0, 0, 1, 0, 0);
+                long bad = 0;
+                if (amrex::ParallelDescriptor::IOProcessor()) {
+                    auto gn = Gn[0].const_array(); auto g0 = G0[0].const_array();
+                    amrex::LoopOnCpu(face, [&](int i, int j, int k) { bad += gn(i, j, k) != g0(i - nf, j, k); });
+                }
+                amrex::ParallelDescriptor::ReduceLongSum(bad);
+                return bad;
+            };
+            CHECK_MSG(seam_prolong_mismatch(s.fg.periodicity()) == 0, tag + ": prolong_faces_level with the fine periodicity copies the old x = 0 face onto the new x = N face");
+            CHECK_MSG(seam_prolong_mismatch(amrex::Periodicity::NonPeriodic()) > 0, tag + ": negative control, without the periodicity the new x = N face is the coarse prolongation");
         }
 
         // negative control: injection (every fine face = the coarse face value of the cell that contains it, no normal interpolation) breaks the parent divergence

@@ -31,10 +31,12 @@ void prolong_faces_normal_linear(const std::array<const amrex::FArrayBox*, 3>& c
 // prolong_faces_level fills the VALID faces of fine[0..2] (all of them) from the coarse level by prolong_faces_normal_linear, in three steps:
 //   1. the coarse faces under each fine box are gathered into temporary coarse-aligned arrays (ParallelCopy with the periodicity of the coarse level);
 //   2. prolong_faces_normal_linear; fine faces on a coarse face carry exactly the coarse value (the interface faces of a patch included);
-//   3. if old_fine is given, the valid faces of the old fine level are copied over the overlapping faces (bitwise), so only faces without fine data are new.
+//   3. if old_fine is given, the valid faces of the old fine level are copied over the overlapping faces (bitwise), so only faces without fine data are new;
+//      period (the FINE level's periodicity): also over the periodic image, so a new fine face on one copy of a periodic domain face takes the old data of the other copy.
 // Every fine box must be a union of whole coarse cells (blocking factor >= ratio). The fine MultiFab arrays must already exist on the new BoxArray.
 void prolong_faces_level(const std::array<amrex::MultiFab*, 3>& fine, const std::array<const amrex::MultiFab*, 3>& crse, const amrex::Geometry& crse_geom,
-                         const amrex::IntVect& ratio, const std::array<const amrex::MultiFab*, 3>& old_fine = {nullptr, nullptr, nullptr});
+                         const amrex::IntVect& ratio, const std::array<const amrex::MultiFab*, 3>& old_fine = {nullptr, nullptr, nullptr},
+                         const amrex::Periodicity& period = amrex::Periodicity::NonPeriodic());
 
 // Fine -> coarse mean of the faces: every coarse face that carries fine faces gets the mean of the (r_t1 * r_t2) fine faces that lie on it (area average; the
 // normal-velocity flux through the coarse face is then the sum of the fine ones). All components of the arrays (same count on both levels), also used for face fluxes. Only coarse faces that coincide with fine faces are written (interface included).
