@@ -6,6 +6,7 @@
 #include <AMReX_ParallelReduce.H>
 #include <AMReX_Print.H>
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <cstdio>
@@ -400,7 +401,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     std::string logname = o.outdir + "/" + o.chid + "_multi_level.csv";
     std::FILE* lf = amrex::ParallelDescriptor::IOProcessor() ? std::fopen(logname.c_str(), "w") : nullptr;
     if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel\n"); }
-    double worst_mass = 0.0, worst_div = 0.0;
+    double worst_mass = 0.0, worst_div = 0.0, worst_fine = 0.0;   // worst_fine: max|div u - D| over levels >= 1
+    int untracked = 0;                                               // steps with fine div > max(2*L0, 1e-10)
     std::vector<double> bylev;
     int nl_now = nl;
     for (int s = 1; s <= o.steps; ++s) {
@@ -446,6 +448,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         const double dv = fdsrt::composite_divergence_error(lv, &bylev);
         worst_mass = std::max(worst_mass, std::abs(dm));
         worst_div = std::max(worst_div, dv);
+        if (bylev.size() > 1) {
+            const double f = *std::max_element(bylev.begin() + 1, bylev.end());
+            worst_fine = std::max(worst_fine, f);
+            untracked += f > std::max(2.0 * bylev[0], 1e-10);
+        }
         const double dts = loop.steps().empty() ? 0.0 : loop.steps().back().dt;
         // CLIP_MASS / CLIP_CELLS (P3-C11/C12): every dump step when P3-C01 CSV path is active (emit zeros too).
         if (lf) {
@@ -477,11 +484,15 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     for (int n = 0; n < ns; ++n)
         if (std::abs(m0[1 + n]) > 0.0) amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " relative change " << (m1[1 + n] - m0[1 + n]) / m0[1 + n] << "\n";
     amrex::Print() << tag << " RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";
+    // PASS gate (Architect): fine div <= 1e-9 and tracking L0 every step, |mass rel| <= 1e-10
+    const bool gate = worst_fine <= 1e-9 && untracked == 0 && worst_mass <= 1e-10;
+    amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked
+                   << ", worst |mass rel| " << worst_mass << " (<= 1e-10)\n";
     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
                    << ", fine H ghost cells set " << cr.h_ghost_cells << "\n";
     if (cr.res_checked > 0) amrex::Print() << tag << " RESULT pressure residual check: " << cr.res_checked << " solves checked, largest residual " << cr.res_check_max << ", largest limit " << cr.res_limit_max << " (round-off floor " << cr.res_floor_max << "), " << cr.res_failed << " above the limit\n";
     amrex::Print() << tag << " RESULT cf scalar ghost hook: calls " << cfs.calls << ", fine ghost cells " << cfs.fine_ghost_cells << ", covered cells " << cfs.covered_cells << ", conflicts " << cfs.conflicts << "\n";
-    return fails;
+    return fails + !gate;
 }
 
 }  // namespace fdsamr
