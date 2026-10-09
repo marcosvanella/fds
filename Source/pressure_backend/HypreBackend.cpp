@@ -17,6 +17,7 @@
 #include "HYPRE_parcsr_ls.h"
 #include "HYPRE_IJ_mv.h"
 #include "HYPRE_krylov.h"
+#include "_hypre_parcsr_mv.h"   // hypre_ParCSRMatrixTranspose / Add / InfNorm for the symmetry check
 
 #include <algorithm>
 #include <cmath>
@@ -29,6 +30,112 @@
 namespace pb {
 
 using namespace amrex;
+
+namespace {
+// BoomerAMG-preconditioned Krylov solver of HypreSystem and MaskedHypre (HypreOptions::krylov). None: BoomerAMG is the solver (V-cycles to
+// the tolerance); otherwise one BoomerAMG V(1,1) preconditions PCG / GMRES / BiCGSTAB. Auto: PCG when ||A - A^T||_inf / ||A||_inf < 1e-13,
+// else GMRES (pressure/13; set-up cost: one transpose and one add of A).
+struct KrylovSolver {
+    Krylov k = Krylov::PCG;
+    HYPRE_Solver solver = nullptr, amg = nullptr;
+    ~KrylovSolver () { destroy(); }
+    void destroy ()
+    {
+        if (solver) { k == Krylov::PCG ? HYPRE_ParCSRPCGDestroy(solver) : k == Krylov::GMRES ? HYPRE_ParCSRGMRESDestroy(solver) : HYPRE_ParCSRBiCGSTABDestroy(solver); }
+        if (amg) { HYPRE_BoomerAMGDestroy(amg); }
+        solver = amg = nullptr;
+    }
+    static bool symmetric (HYPRE_ParCSRMatrix A)
+    {
+        hypre_ParCSRMatrix *a = (hypre_ParCSRMatrix*)A, *at = nullptr, *d = nullptr;
+        HYPRE_Real na = 0.0, nd = 0.0;
+        hypre_ParCSRMatrixTranspose(a, &at, 1);
+        hypre_ParCSRMatrixAdd(1.0, a, -1.0, at, &d);
+        hypre_ParCSRMatrixInfNorm(a, &na); hypre_ParCSRMatrixInfNorm(d, &nd);
+        hypre_ParCSRMatrixDestroy(at); hypre_ParCSRMatrixDestroy(d);
+        return nd < 1.0e-13 * na;
+    }
+    // Set-up on (A, b, x); returns the HYPRE error code and the failing call in `what`.
+    int make (HypreOptions const& opt, Krylov kk, HYPRE_ParCSRMatrix A, HYPRE_ParVector b, HYPRE_ParVector x, const char*& what)
+    {
+        k = (kk != Krylov::Auto) ? kk : symmetric(A) ? Krylov::PCG : Krylov::GMRES;
+        MPI_Comm comm = ParallelDescriptor::Communicator();
+        what = "BoomerAMGCreate";
+        if (int e = HYPRE_BoomerAMGCreate(&amg)) { return e; }
+        HYPRE_BoomerAMGSetPrintLevel(amg, 0);
+        HYPRE_BoomerAMGSetCoarsenType(amg, opt.coarsen_type);
+        HYPRE_BoomerAMGSetRelaxType(amg, opt.relax_type);
+        HYPRE_BoomerAMGSetNumSweeps(amg, opt.num_sweeps);
+        HYPRE_BoomerAMGSetTol(amg, 0.0);
+        HYPRE_BoomerAMGSetMaxIter(amg, 1);
+        if (opt.strong_threshold >= 0.0) { HYPRE_BoomerAMGSetStrongThreshold(amg, opt.strong_threshold); }
+        if (opt.interp_type >= 0) { HYPRE_BoomerAMGSetInterpType(amg, opt.interp_type); }
+        if (opt.agg_levels > 0) { HYPRE_BoomerAMGSetAggNumLevels(amg, opt.agg_levels); }
+        if (opt.agg_interp_type >= 0) { HYPRE_BoomerAMGSetAggInterpType(amg, opt.agg_interp_type); }
+        if (opt.keep_transpose >= 0) { HYPRE_BoomerAMGSetKeepTranspose(amg, opt.keep_transpose); }
+        HYPRE_BoomerAMGSetPMaxElmts(amg, opt.pmax_elmts);
+        HYPRE_BoomerAMGSetMaxLevels(amg, opt.max_levels);
+        HYPRE_BoomerAMGSetCycleRelaxType(amg, opt.coarse_relax, 3);
+        HYPRE_BoomerAMGSetRelaxOrder(amg, 0);
+        switch (k) {
+        case Krylov::PCG:
+            what = "PCGSetup";
+            HYPRE_ParCSRPCGCreate(comm, &solver);
+            HYPRE_ParCSRPCGSetTwoNorm(solver, 1);
+            HYPRE_ParCSRPCGSetLogging(solver, 1);
+            HYPRE_ParCSRPCGSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, amg);
+            return HYPRE_ParCSRPCGSetup(solver, A, b, x);
+        case Krylov::GMRES:
+            what = "GMRESSetup";
+            HYPRE_ParCSRGMRESCreate(comm, &solver);
+            HYPRE_ParCSRGMRESSetKDim(solver, opt.gmres_kdim);
+            HYPRE_ParCSRGMRESSetLogging(solver, 1);
+            HYPRE_ParCSRGMRESSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, amg);
+            return HYPRE_ParCSRGMRESSetup(solver, A, b, x);
+        case Krylov::BiCGSTAB:
+            what = "BiCGSTABSetup";
+            HYPRE_ParCSRBiCGSTABCreate(comm, &solver);
+            HYPRE_ParCSRBiCGSTABSetLogging(solver, 1);
+            HYPRE_ParCSRBiCGSTABSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, amg);
+            return HYPRE_ParCSRBiCGSTABSetup(solver, A, b, x);
+        default:
+            what = "BoomerAMGSetup";
+            return HYPRE_BoomerAMGSetup(amg, A, b, x);
+        }
+    }
+    // Solve to the relative 2-norm tol in at most max_iter iterations (V-cycles for None); returns the HYPRE error code.
+    int solve (HYPRE_ParCSRMatrix A, HYPRE_ParVector b, HYPRE_ParVector x, double tol, int max_iter, HYPRE_Int& nit, double& rel) const
+    {
+        int e = 0;
+        switch (k) {
+        case Krylov::PCG:
+            HYPRE_ParCSRPCGSetTol(solver, tol); HYPRE_ParCSRPCGSetMaxIter(solver, max_iter);
+            e = HYPRE_ParCSRPCGSolve(solver, A, b, x);
+            HYPRE_ParCSRPCGGetNumIterations(solver, &nit); HYPRE_ParCSRPCGGetFinalRelativeResidualNorm(solver, &rel);
+            return e;
+        case Krylov::GMRES:
+            HYPRE_ParCSRGMRESSetTol(solver, tol); HYPRE_ParCSRGMRESSetMaxIter(solver, max_iter);
+            e = HYPRE_ParCSRGMRESSolve(solver, A, b, x);
+            HYPRE_ParCSRGMRESGetNumIterations(solver, &nit); HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(solver, &rel);
+            return e;
+        case Krylov::BiCGSTAB:
+            HYPRE_ParCSRBiCGSTABSetTol(solver, tol); HYPRE_ParCSRBiCGSTABSetMaxIter(solver, max_iter);
+            e = HYPRE_ParCSRBiCGSTABSolve(solver, A, b, x);
+            HYPRE_ParCSRBiCGSTABGetNumIterations(solver, &nit); HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver, &rel);
+            return e;
+        default:
+            HYPRE_BoomerAMGSetTol(amg, tol); HYPRE_BoomerAMGSetMaxIter(amg, max_iter);
+            e = HYPRE_BoomerAMGSolve(amg, A, b, x);
+            HYPRE_BoomerAMGGetNumIterations(amg, &nit); HYPRE_BoomerAMGGetFinalRelativeResidualNorm(amg, &rel);
+            return e;
+        }
+    }
+    const char* name () const
+    {
+        return k == Krylov::PCG ? "PCG" : k == Krylov::GMRES ? "GMRES" : k == Krylov::BiCGSTAB ? "BiCGSTAB" : "BoomerAMG";
+    }
+};
+}
 
 struct HypreSystem::Impl {
     std::vector<HypreLayoutLevel> lev;
@@ -50,7 +157,6 @@ struct HypreSystem::Impl {
     long long pin_id = -1;
     long long nnz_local = 0, nnz_global = 0;
     double setup_s = 0.0;
-    int kind = 0;                                     // 0 PCG, 1 GMRES, 2 BiCGSTAB
     int rank = 0;
     // Masked composite (D3/D4/D6): gas-only rows, multi-pin, Solid out of C/F stencil.
     bool is_masked = false;
@@ -64,7 +170,7 @@ struct HypreSystem::Impl {
     HYPRE_ParCSRMatrix parA = nullptr;
     HYPRE_IJVector bvec = nullptr, xvec = nullptr;
     HYPRE_ParVector parb = nullptr, parx = nullptr;
-    HYPRE_Solver solver = nullptr, precond = nullptr;
+    KrylovSolver ks;
 
     ~Impl ();
     void build ();
@@ -277,12 +383,7 @@ void hcheck (int ierr, const char* what, std::string& msg, bool& ok)
 
 HypreSystem::Impl::~Impl ()
 {
-    if (solver) {
-        if (kind == 0) { HYPRE_ParCSRPCGDestroy(solver); }
-        else if (kind == 1) { HYPRE_ParCSRGMRESDestroy(solver); }
-        else { HYPRE_ParCSRBiCGSTABDestroy(solver); }
-    }
-    if (precond) { HYPRE_BoomerAMGDestroy(precond); }
+    ks.destroy();
     if (A) { HYPRE_IJMatrixDestroy(A); }
     if (bvec) { HYPRE_IJVectorDestroy(bvec); }
     if (xvec) { HYPRE_IJVectorDestroy(xvec); }
@@ -511,48 +612,8 @@ void HypreSystem::Impl::assemble ()
 void HypreSystem::Impl::make_solver ()
 {
     if (!ok) { return; }
-    MPI_Comm comm = ParallelDescriptor::Communicator();
-    HypreKrylov k = opt.krylov;
-    if (k == HypreKrylov::Auto) { k = (nlev == 1) ? HypreKrylov::PCG : HypreKrylov::GMRES; }
-    kind = (k == HypreKrylov::PCG) ? 0 : (k == HypreKrylov::GMRES) ? 1 : 2;
-    int ierr = 0;
-    ierr = HYPRE_BoomerAMGCreate(&precond); hcheck(ierr, "BoomerAMGCreate", message, ok);
-    HYPRE_BoomerAMGSetPrintLevel(precond, 0);
-    HYPRE_BoomerAMGSetCoarsenType(precond, opt.coarsen_type);
-    HYPRE_BoomerAMGSetRelaxType(precond, opt.relax_type);
-    HYPRE_BoomerAMGSetNumSweeps(precond, opt.num_sweeps);
-    HYPRE_BoomerAMGSetTol(precond, 0.0);
-    HYPRE_BoomerAMGSetMaxIter(precond, 1);
-    if (opt.strong_threshold >= 0.0) { HYPRE_BoomerAMGSetStrongThreshold(precond, opt.strong_threshold); }
-    if (opt.interp_type >= 0) { HYPRE_BoomerAMGSetInterpType(precond, opt.interp_type); }
-    if (opt.agg_levels > 0) { HYPRE_BoomerAMGSetAggNumLevels(precond, opt.agg_levels); }
-    if (kind == 0) {
-        ierr = HYPRE_ParCSRPCGCreate(comm, &solver); hcheck(ierr, "PCGCreate", message, ok);
-        HYPRE_ParCSRPCGSetMaxIter(solver, 1000);
-        HYPRE_ParCSRPCGSetTol(solver, 1.0e-12);
-        HYPRE_ParCSRPCGSetTwoNorm(solver, 1);
-        HYPRE_ParCSRPCGSetPrintLevel(solver, 0);
-        HYPRE_ParCSRPCGSetLogging(solver, 1);
-        HYPRE_ParCSRPCGSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
-        ierr = HYPRE_ParCSRPCGSetup(solver, parA, parb, parx); hcheck(ierr, "PCGSetup", message, ok);
-    } else if (kind == 1) {
-        ierr = HYPRE_ParCSRGMRESCreate(comm, &solver); hcheck(ierr, "GMRESCreate", message, ok);
-        HYPRE_ParCSRGMRESSetKDim(solver, opt.gmres_kdim);
-        HYPRE_ParCSRGMRESSetMaxIter(solver, 1000);
-        HYPRE_ParCSRGMRESSetTol(solver, 1.0e-12);
-        HYPRE_ParCSRGMRESSetPrintLevel(solver, 0);
-        HYPRE_ParCSRGMRESSetLogging(solver, 1);
-        HYPRE_ParCSRGMRESSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
-        ierr = HYPRE_ParCSRGMRESSetup(solver, parA, parb, parx); hcheck(ierr, "GMRESSetup", message, ok);
-    } else {
-        ierr = HYPRE_ParCSRBiCGSTABCreate(comm, &solver); hcheck(ierr, "BiCGSTABCreate", message, ok);
-        HYPRE_ParCSRBiCGSTABSetMaxIter(solver, 1000);
-        HYPRE_ParCSRBiCGSTABSetTol(solver, 1.0e-12);
-        HYPRE_ParCSRBiCGSTABSetPrintLevel(solver, 0);
-        HYPRE_ParCSRBiCGSTABSetLogging(solver, 1);
-        HYPRE_ParCSRBiCGSTABSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
-        ierr = HYPRE_ParCSRBiCGSTABSetup(solver, parA, parb, parx); hcheck(ierr, "BiCGSTABSetup", message, ok);
-    }
+    const char* what = "";
+    hcheck(ks.make(opt, opt.krylov, parA, parb, parx, what), what, message, ok);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1023,7 +1084,7 @@ long long HypreSystem::nonzeros () const { return m_impl->nnz_global; }
 double HypreSystem::setup_seconds () const { return m_impl->setup_s; }
 IntVect HypreSystem::pin_cell () const { return m_impl->pin_iv; }
 int HypreSystem::pin_level () const { return m_impl->has_pin ? m_impl->pin_lev : -1; }
-std::string HypreSystem::method () const { return m_impl->kind == 0 ? "PCG" : m_impl->kind == 1 ? "GMRES" : "BiCGSTAB"; }
+std::string HypreSystem::method () const { return m_impl->ks.name(); }
 
 bool HypreSystem::matches (std::vector<HypreLayoutLevel> const& levels, std::array<BC,6> const& ebc, HypreOptions const& opt, bool singular) const
 {
@@ -1129,7 +1190,7 @@ BackendStatus HypreSystem::solve (std::vector<MultiFab*> const& phi, std::vector
     Impl& I = *m_impl;
     BackendStatus s;
     s.hypre_rows = I.nglobal; s.hypre_nnz = nonzeros();
-    s.hypre_method = method();
+    s.method = method();
     s.pin_applied = I.has_pin; s.pin_level = I.has_pin ? I.pin_lev : 0; s.pin_cell = I.pin_iv;
     if (I.is_masked) {
         for (auto const& pr : I.pin_list) { s.pins.push_back(pr); }
@@ -1141,26 +1202,12 @@ BackendStatus HypreSystem::solve (std::vector<MultiFab*> const& phi, std::vector
         std::vector<MultiFab const*> pc(phi.begin(), phi.end());
         I.put_x_masked(pc, use_guess);
         const double t0 = amrex::second();
-        int ierr = 0;
         HYPRE_Int nit = 0;
         double rel = -1.0;
         const double nb = std::sqrt(I.last_b_norm2), nf = std::sqrt(I.last_F_norm2);
         const double tol_map = (nf > 0.0 && nb > 0.0 && nb < nf) ? tol_rel * nb / nf : tol_rel;
-        const double tol_int = 0.1*tol_map;
-        if (I.kind == 0) {
-            HYPRE_ParCSRPCGSetTol(I.solver, tol_int); HYPRE_ParCSRPCGSetMaxIter(I.solver, max_iter);
-            ierr = HYPRE_ParCSRPCGSolve(I.solver, I.parA, I.parb, I.parx);
-            HYPRE_ParCSRPCGGetNumIterations(I.solver, &nit); HYPRE_ParCSRPCGGetFinalRelativeResidualNorm(I.solver, &rel);
-        } else if (I.kind == 1) {
-            HYPRE_ParCSRGMRESSetTol(I.solver, tol_int); HYPRE_ParCSRGMRESSetMaxIter(I.solver, max_iter);
-            ierr = HYPRE_ParCSRGMRESSolve(I.solver, I.parA, I.parb, I.parx);
-            HYPRE_ParCSRGMRESGetNumIterations(I.solver, &nit); HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(I.solver, &rel);
-        } else {
-            HYPRE_ParCSRBiCGSTABSetTol(I.solver, tol_int); HYPRE_ParCSRBiCGSTABSetMaxIter(I.solver, max_iter);
-            ierr = HYPRE_ParCSRBiCGSTABSolve(I.solver, I.parA, I.parb, I.parx);
-            HYPRE_ParCSRBiCGSTABGetNumIterations(I.solver, &nit); HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(I.solver, &rel);
-        }
-        s.hypre_solve_seconds = amrex::second() - t0;
+        const int ierr = I.ks.solve(I.parA, I.parb, I.parx, 0.1*tol_map, max_iter, nit, rel);
+        s.solve_seconds = amrex::second() - t0;
         if (ierr != 0) { HYPRE_ClearAllErrors(); }
         s.iterations = int(nit);
         s.own_residual = rel;
@@ -1189,26 +1236,12 @@ BackendStatus HypreSystem::solve (std::vector<MultiFab*> const& phi, std::vector
         HYPRE_IJVectorAssemble(I.xvec);
     }
     const double t0 = amrex::second();
-    int ierr = 0;
     HYPRE_Int nit = 0;
     double rel = -1.0;
     // The Krylov recurrence residual is slightly optimistic compared with the independent true residual (pin row, round-off),
     // so the solver is asked for a tenth of the requested tolerance; convergence is still judged against tol_rel.
-    const double tol_int = 0.1*tol_rel;
-    if (I.kind == 0) {
-        HYPRE_ParCSRPCGSetTol(I.solver, tol_int); HYPRE_ParCSRPCGSetMaxIter(I.solver, max_iter);
-        ierr = HYPRE_ParCSRPCGSolve(I.solver, I.parA, I.parb, I.parx);
-        HYPRE_ParCSRPCGGetNumIterations(I.solver, &nit); HYPRE_ParCSRPCGGetFinalRelativeResidualNorm(I.solver, &rel);
-    } else if (I.kind == 1) {
-        HYPRE_ParCSRGMRESSetTol(I.solver, tol_int); HYPRE_ParCSRGMRESSetMaxIter(I.solver, max_iter);
-        ierr = HYPRE_ParCSRGMRESSolve(I.solver, I.parA, I.parb, I.parx);
-        HYPRE_ParCSRGMRESGetNumIterations(I.solver, &nit); HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(I.solver, &rel);
-    } else {
-        HYPRE_ParCSRBiCGSTABSetTol(I.solver, tol_int); HYPRE_ParCSRBiCGSTABSetMaxIter(I.solver, max_iter);
-        ierr = HYPRE_ParCSRBiCGSTABSolve(I.solver, I.parA, I.parb, I.parx);
-        HYPRE_ParCSRBiCGSTABGetNumIterations(I.solver, &nit); HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(I.solver, &rel);
-    }
-    s.hypre_solve_seconds = amrex::second() - t0;
+    const int ierr = I.ks.solve(I.parA, I.parb, I.parx, 0.1*tol_rel, max_iter, nit, rel);
+    s.solve_seconds = amrex::second() - t0;
     if (ierr != 0) { HYPRE_ClearAllErrors(); }
     s.iterations = int(nit);
     s.own_residual = rel;
@@ -1313,13 +1346,12 @@ struct MaskedHypre {
     std::array<bool,3> active{{true,true,true}};
     std::vector<IntVect> pins;
     std::vector<long long> pin_ids;
-    int kind = 0;
     int rank = 0;
     HYPRE_IJMatrix A = nullptr;
     HYPRE_ParCSRMatrix parA = nullptr;
     HYPRE_IJVector bvec = nullptr, xvec = nullptr;
     HYPRE_ParVector parb = nullptr, parx = nullptr;
-    HYPRE_Solver solver = nullptr, precond = nullptr;
+    KrylovSolver ks;
     // Kept for solve: class / known / row ids with one ghost.
     std::unique_ptr<iMultiFab> row_id;
     std::unique_ptr<iMultiFab> cls_g;
@@ -1328,12 +1360,7 @@ struct MaskedHypre {
 
     ~MaskedHypre ()
     {
-        if (solver) {
-            if (kind == 0) { HYPRE_ParCSRPCGDestroy(solver); }
-            else if (kind == 1) { HYPRE_ParCSRGMRESDestroy(solver); }
-            else { HYPRE_ParCSRBiCGSTABDestroy(solver); }
-        }
-        if (precond) { HYPRE_BoomerAMGDestroy(precond); }
+        ks.destroy();
         if (bvec) { HYPRE_IJVectorDestroy(bvec); }
         if (xvec) { HYPRE_IJVectorDestroy(xvec); }
         if (A) { HYPRE_IJMatrixDestroy(A); }
@@ -1547,50 +1574,9 @@ struct MaskedHypre {
     void make_solver ()
     {
         if (!ok) { return; }
-        MPI_Comm comm = ParallelDescriptor::Communicator();
-        HypreKrylov k = opt.krylov;
-        if (k == HypreKrylov::Auto) { k = HypreKrylov::PCG; }
-        kind = (k == HypreKrylov::PCG) ? 0 : (k == HypreKrylov::GMRES) ? 1 : 2;
-        int ierr = 0;
-        auto hcheck = [&] (int e, const char* what) {
-            if (e != 0 && ok) { ok = false; message = std::string("HYPRE masked: ") + what; }
-        };
-        ierr = HYPRE_BoomerAMGCreate(&precond); hcheck(ierr, "BoomerAMGCreate");
-        HYPRE_BoomerAMGSetPrintLevel(precond, 0);
-        HYPRE_BoomerAMGSetCoarsenType(precond, opt.coarsen_type);
-        HYPRE_BoomerAMGSetRelaxType(precond, opt.relax_type);
-        HYPRE_BoomerAMGSetNumSweeps(precond, opt.num_sweeps);
-        HYPRE_BoomerAMGSetTol(precond, 0.0);
-        HYPRE_BoomerAMGSetMaxIter(precond, 1);
-        if (opt.strong_threshold >= 0.0) { HYPRE_BoomerAMGSetStrongThreshold(precond, opt.strong_threshold); }
-        if (opt.interp_type >= 0) { HYPRE_BoomerAMGSetInterpType(precond, opt.interp_type); }
-        if (opt.agg_levels > 0) { HYPRE_BoomerAMGSetAggNumLevels(precond, opt.agg_levels); }
-        if (kind == 0) {
-            ierr = HYPRE_ParCSRPCGCreate(comm, &solver); hcheck(ierr, "PCGCreate");
-            HYPRE_ParCSRPCGSetMaxIter(solver, 1000);
-            HYPRE_ParCSRPCGSetTol(solver, 1.0e-12);
-            HYPRE_ParCSRPCGSetTwoNorm(solver, 1);
-            HYPRE_ParCSRPCGSetPrintLevel(solver, 0);
-            HYPRE_ParCSRPCGSetLogging(solver, 1);
-            HYPRE_ParCSRPCGSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
-            ierr = HYPRE_ParCSRPCGSetup(solver, parA, parb, parx); hcheck(ierr, "PCGSetup");
-        } else if (kind == 1) {
-            ierr = HYPRE_ParCSRGMRESCreate(comm, &solver); hcheck(ierr, "GMRESCreate");
-            HYPRE_ParCSRGMRESSetKDim(solver, opt.gmres_kdim);
-            HYPRE_ParCSRGMRESSetMaxIter(solver, 1000);
-            HYPRE_ParCSRGMRESSetTol(solver, 1.0e-12);
-            HYPRE_ParCSRGMRESSetPrintLevel(solver, 0);
-            HYPRE_ParCSRGMRESSetLogging(solver, 1);
-            HYPRE_ParCSRGMRESSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
-            ierr = HYPRE_ParCSRGMRESSetup(solver, parA, parb, parx); hcheck(ierr, "GMRESSetup");
-        } else {
-            ierr = HYPRE_ParCSRBiCGSTABCreate(comm, &solver); hcheck(ierr, "BiCGSTABCreate");
-            HYPRE_ParCSRBiCGSTABSetMaxIter(solver, 1000);
-            HYPRE_ParCSRBiCGSTABSetTol(solver, 1.0e-12);
-            HYPRE_ParCSRBiCGSTABSetPrintLevel(solver, 0);
-            HYPRE_ParCSRBiCGSTABSetLogging(solver, 1);
-            HYPRE_ParCSRBiCGSTABSetPrecond(solver, HYPRE_BoomerAMGSolve, HYPRE_BoomerAMGSetup, precond);
-            ierr = HYPRE_ParCSRBiCGSTABSetup(solver, parA, parb, parx); hcheck(ierr, "BiCGSTABSetup");
+        const char* what = "";
+        if (ks.make(opt, opt.krylov, parA, parb, parx, what) != 0) {
+            ok = false; message = std::string("HYPRE masked: ") + what;
         }
     }
 
@@ -1695,7 +1681,7 @@ struct MaskedHypre {
     {
         BackendStatus s;
         s.hypre_rows = nglobal; s.hypre_nnz = nnz_global;
-        s.hypre_method = kind == 0 ? "PCG" : kind == 1 ? "GMRES" : "BiCGSTAB";
+        s.method = ks.name();
         s.pin_applied = !pins.empty();
         if (!pins.empty()) {
             s.pin_level = 0; s.pin_cell = pins[0];
@@ -1704,27 +1690,13 @@ struct MaskedHypre {
         put_rhs(rhs);
         put_x(phi, use_guess);
         const double t0 = amrex::second();
-        int ierr = 0;
         HYPRE_Int nit = 0;
         double rel = -1.0;
         // Map common-layer tol on ||b||_2 to HYPRE's ||F||_2 (Known terms can dominate F), then ask for a tenth (same as unmasked).
         const double nb = std::sqrt(last_b_norm2), nf = std::sqrt(last_F_norm2);
         const double tol_map = (nf > 0.0 && nb > 0.0 && nb < nf) ? tol_rel * nb / nf : tol_rel;
-        const double tol_int = 0.1*tol_map;
-        if (kind == 0) {
-            HYPRE_ParCSRPCGSetTol(solver, tol_int); HYPRE_ParCSRPCGSetMaxIter(solver, max_iter);
-            ierr = HYPRE_ParCSRPCGSolve(solver, parA, parb, parx);
-            HYPRE_ParCSRPCGGetNumIterations(solver, &nit); HYPRE_ParCSRPCGGetFinalRelativeResidualNorm(solver, &rel);
-        } else if (kind == 1) {
-            HYPRE_ParCSRGMRESSetTol(solver, tol_int); HYPRE_ParCSRGMRESSetMaxIter(solver, max_iter);
-            ierr = HYPRE_ParCSRGMRESSolve(solver, parA, parb, parx);
-            HYPRE_ParCSRGMRESGetNumIterations(solver, &nit); HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(solver, &rel);
-        } else {
-            HYPRE_ParCSRBiCGSTABSetTol(solver, tol_int); HYPRE_ParCSRBiCGSTABSetMaxIter(solver, max_iter);
-            ierr = HYPRE_ParCSRBiCGSTABSolve(solver, parA, parb, parx);
-            HYPRE_ParCSRBiCGSTABGetNumIterations(solver, &nit); HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver, &rel);
-        }
-        s.hypre_solve_seconds = amrex::second() - t0;
+        const int ierr = ks.solve(parA, parb, parx, 0.1*tol_map, max_iter, nit, rel);
+        s.solve_seconds = amrex::second() - t0;
         if (ierr != 0) { HYPRE_ClearAllErrors(); }
         s.iterations = int(nit);
         s.own_residual = rel;
@@ -1765,21 +1737,21 @@ public:
             }
             if (!m_masked || !m_masked->ok) {
                 s.converged = false;
-                s.hypre_method = m_masked ? m_masked->message : "HYPRE masked: not built";
+                s.method = m_masked ? m_masked->message : "HYPRE masked: not built";
                 return s;
             }
             s = m_masked->solve(phi, rhs, o.tol_rel, o.max_iter, o.use_initial_guess);
             s.plan_reused = reused;
-            s.hypre_setup_seconds = reused ? 0.0 : m_setup;
+            s.setup_seconds = reused ? 0.0 : m_setup;
             return s;
         }
         BackendStatus s;
         const bool reused = m_sys && m_sys->ok() && m_sys->matches(layout(p), effective_bc(p.bc, p.geom.Domain()), o.hypre, is_singular(p));
         if (!reused) { build(p, o.hypre); }
-        if (!m_sys->ok()) { s.converged = false; s.hypre_method = m_sys->message(); return s; }
+        if (!m_sys->ok()) { s.converged = false; s.method = m_sys->message(); return s; }
         s = m_sys->solve({&phi}, {&rhs}, o.tol_rel, o.max_iter, o.use_initial_guess);
         s.plan_reused = reused;
-        s.hypre_setup_seconds = reused ? 0.0 : m_setup;
+        s.setup_seconds = reused ? 0.0 : m_setup;
         return s;
     }
     HypreSystem* system () { return m_sys.get(); }

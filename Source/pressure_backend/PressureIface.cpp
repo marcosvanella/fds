@@ -1,5 +1,6 @@
 // Selector and the full solve_pressure() wrapper (common layer around a backend).
 #include "PressureIface.H"
+#include <AMReX_ParmParse.H>
 #include "PressureBackend.H"
 #include "CommonLayer.H"
 #include "Composite.H"
@@ -21,11 +22,11 @@ using namespace amrex;
 // HYPRE references are compiled only with PB_WITH_HYPRE (README.md, "Build options"). Without it the selector rejects BackendKind::HYPRE
 // (Status::NotBuilt, kHypreNotBuilt) before anything else, so no HYPRE type or symbol is named below.
 #ifdef PB_WITH_HYPRE
-#define PB_FFT_OR_HYPRE_SLOT(W, kind) (((kind) == BackendKind::FFT) ? (W).fft : (W).hypre)
+#define PB_FFT_OR_HYPRE_SLOT(W, kind) (((kind) == BackendKind::FFT) ? (W).fft : ((kind) == BackendKind::MLMG) ? (W).mlmg1 : (W).hypre)
 #define PB_MAKE_HYPRE() make_hypre_backend()
 #define PB_HYPRE_CACHED(ws) ((ws)->hypre_built())
 #else
-#define PB_FFT_OR_HYPRE_SLOT(W, kind) ((W).fft)
+#define PB_FFT_OR_HYPRE_SLOT(W, kind) (((kind) == BackendKind::FFT) ? (W).fft : (W).mlmg1)
 #define PB_MAKE_HYPRE() std::unique_ptr<PressureBackend>()
 #define PB_HYPRE_CACHED(ws) false
 #endif
@@ -160,6 +161,26 @@ Status rebuild_single_level (PressureWorkspace& ws, PressureProblem const& p, st
     return Status::Ok;
 }
 
+void query_options (PressureOptions& o)
+{
+    auto kry = [] (ParmParse& pp, const char* key, Krylov& k) {
+        std::string v;
+        if (!pp.query(key, v)) { return; }
+        k = v == "none" ? Krylov::None : v == "pcg" || v == "cg" ? Krylov::PCG : v == "gmres" ? Krylov::GMRES : v == "bicgstab" ? Krylov::BiCGSTAB : Krylov::Auto;
+        if (k == Krylov::Auto && v != "auto") { amrex::Abort("pressure options: " + std::string(key) + " = " + v + ": use auto, none, pcg, gmres or bicgstab"); }
+    };
+    ParmParse ph("hypre");
+    HypreOptions& h = o.hypre;
+    kry(ph, "krylov", h.krylov);
+    ph.query("coarsen_type", h.coarsen_type); ph.query("relax_type", h.relax_type); ph.query("num_sweeps", h.num_sweeps);
+    ph.query("strong_threshold", h.strong_threshold); ph.query("interp_type", h.interp_type); ph.query("agg_levels", h.agg_levels);
+    ph.query("agg_interp_type", h.agg_interp_type); ph.query("pmax_elmts", h.pmax_elmts); ph.query("keep_transpose", h.keep_transpose);
+    ph.query("coarse_relax", h.coarse_relax); ph.query("max_levels", h.max_levels); ph.query("gmres_kdim", h.gmres_kdim);
+    ParmParse pp("pressure");
+    kry(pp, "mlmg_krylov", o.mlmg_krylov);
+    pp.query("tol_rel", o.tol_rel); pp.query("max_iter", o.max_iter); pp.query("warm_start", o.use_initial_guess);
+}
+
 PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws)
 {
     PressureResult R;
@@ -171,6 +192,11 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // Selector first: "not built" must be reported for unsupported requests whatever else is unset.
     Selection sel = select_backend(p, o.backend);
     if (!sel.ok) { return fail(Status::NotBuilt, sel.message); }
+    // Krylov choice (PressureOptions::mlmg_krylov, HypreOptions::krylov): FFT is direct; PCG needs a symmetric matrix, which the
+    // composite operator is not (one-sided C/F interpolation).
+    const Krylov kry = (sel.kind == BackendKind::HYPRE) ? o.hypre.krylov : o.mlmg_krylov;
+    if (sel.kind == BackendKind::FFT && (o.hypre.krylov != Krylov::Auto || o.mlmg_krylov != Krylov::Auto)) { return fail(Status::InvalidInput, "FFT is a direct solve: no Krylov method can be chosen"); }
+    if (!p.levels.empty() && kry == Krylov::PCG) { return fail(Status::InvalidInput, "CG needs a symmetric matrix; the composite operator is not (one-sided C/F interpolation): use GMRES or BiCGSTAB"); }
     // A workspace built for another layout is a regrid (its stale part is rebuilt by this solve).
     if (ws) {
         if (!p.levels.empty()) { if (ws->num_levels() > 0 && !ws->matches(p)) { ws->mark_regrid(); } }
@@ -191,10 +217,9 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
         } else if (ws) { ws->note_solve_done(); }
         return R;
     }
-    // Single level. With a workspace the FFT plan / HYPRE set-up is cached; the layout was validated when it was built.
-    const bool cached_kind = (sel.kind == BackendKind::FFT || sel.kind == BackendKind::HYPRE);
+    // Single level. With a workspace the FFT plan / MLMG operator / HYPRE set-up is cached; the layout was validated when it was built.
     bool plan_ok = false, had_slot = false;
-    if (ws && cached_kind && ws->impl()) {
+    if (ws && ws->impl()) {
         auto& slot = PB_FFT_OR_HYPRE_SLOT(*ws->impl(), sel.kind);
         had_slot = (slot != nullptr);
         plan_ok = slot && slot->plan_matches(p);
@@ -204,10 +229,10 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
 
     std::unique_ptr<PressureBackend> local;
     PressureBackend* be = nullptr;
-    if (ws && cached_kind) {
+    if (ws) {
         PressureWorkspace::Impl& W = ws->ensure_impl();
         auto& slot = PB_FFT_OR_HYPRE_SLOT(W, sel.kind);
-        if (!slot) { slot = (sel.kind == BackendKind::FFT) ? make_fft_backend() : PB_MAKE_HYPRE(); }
+        if (!slot) { slot = (sel.kind == BackendKind::FFT) ? make_fft_backend() : (sel.kind == BackendKind::MLMG) ? make_mlmg_backend() : PB_MAKE_HYPRE(); }
         be = slot.get();
         R.workspace_rebuilt = (sel.kind == BackendKind::FFT) ? (!plan_ok && ws->fft_plan_builds() > 0) : (!plan_ok && had_slot);
     } else {

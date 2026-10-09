@@ -730,7 +730,7 @@ void run_comp_ns2d (ParmParse& pp)
         for (std::size_t q = 0; q < v1.size(); ++q) { dn += (v1[q]-m1[q])*(v1[q]-m1[q]); nn += m1[q]*m1[q]; }
         ParallelDescriptor::ReduceRealSum(dn); ParallelDescriptor::ReduceRealSum(nn);   // gathered on the I/O rank only
         Print() << std::setprecision(6) << "NS2DCMP hypre_vs_mlmg rel_l2=" << std::sqrt(dn/nn) << " mlmg_iters=" << rm.backend_status.iterations << " hypre_iters=" << res.backend_status.iterations
-                << " method=" << res.backend_status.hypre_method << " hypre_status=" << pb::to_string(res.status) << " backend=" << res.backend << "\n";
+                << " method=" << res.backend_status.method << " hypre_status=" << pb::to_string(res.status) << " backend=" << res.backend << "\n";
         ccheck(std::sqrt(dn/nn) <= 1e-8, "ns2d_16 HYPRE equals MLMG (rel L2 " + std::to_string(std::sqrt(dn/nn)) + ")");
         ccheck(res.backend == "HYPRE", "ns2d_16 solved by the HYPRE backend");
         // restore the HYPRE solution for the checks below
@@ -1400,17 +1400,17 @@ void run_hypre_op (ParmParse& pp)
     ccheck(dmax/rmax <= 1.0e-12, "HYPRE matrix applied to a random field equals MLMG's composite operator (rel max diff <= 1e-12)");
 }
 
-// backend selection from the command line: backend=auto|fft|mlmg|hypre, krylov=auto|pcg|gmres|bicgstab, coarsen= relax= sweeps= strong= interp= agg=
+// backend selection from the command line: backend=auto|fft|mlmg|hypre, krylov= / mlmg_krylov=auto|none|pcg|gmres|bicgstab, coarsen= relax= sweeps= strong= interp= agg=
 void apply_backend_opts (ParmParse& pp, pb::PressureOptions& o)
 {
     std::string b;
     if (pp.query("backend", b)) {
         o.backend = b == "hypre" ? pb::BackendKind::HYPRE : b == "mlmg" ? pb::BackendKind::MLMG : b == "fft" ? pb::BackendKind::FFT : pb::BackendKind::Auto;
     }
+    auto kry = [] (std::string const& k) { return k == "pcg" ? pb::HypreKrylov::PCG : k == "gmres" ? pb::HypreKrylov::GMRES : k == "bicgstab" ? pb::HypreKrylov::BiCGSTAB : k == "none" ? pb::HypreKrylov::None : pb::HypreKrylov::Auto; };
     std::string k;
-    if (pp.query("krylov", k)) {
-        o.hypre.krylov = k == "pcg" ? pb::HypreKrylov::PCG : k == "gmres" ? pb::HypreKrylov::GMRES : k == "bicgstab" ? pb::HypreKrylov::BiCGSTAB : pb::HypreKrylov::Auto;
-    }
+    if (pp.query("krylov", k)) { o.hypre.krylov = kry(k); }
+    if (pp.query("mlmg_krylov", k)) { o.mlmg_krylov = kry(k); }
     pp.query("coarsen", o.hypre.coarsen_type); pp.query("relax", o.hypre.relax_type); pp.query("sweeps", o.hypre.num_sweeps);
     pp.query("strong", o.hypre.strong_threshold); pp.query("interp", o.hypre.interp_type); pp.query("agg", o.hypre.agg_levels);
     pp.query("max_iter", o.max_iter);
@@ -1429,8 +1429,9 @@ void run_hypre_cmp (ParmParse& pp)
     pb::PressureProblem p = make_problem(c, h);
     pb::PressureOptions om;
     om.tol_rel = tol_rel; om.removed_mean_warn = 1.0; om.residual_tol = eps_H; om.verbose = 0;
+    apply_backend_opts(pp, om);
     pb::PressureOptions oh = om;
-    oh.backend = pb::BackendKind::HYPRE; apply_backend_opts(pp, oh); oh.backend = pb::BackendKind::HYPRE;
+    oh.backend = pb::BackendKind::HYPRE;
     om.backend = pb::BackendKind::MLMG;
     auto zero = [&] () { for (auto& m : h.phi) { m->setVal(0.0); } };
     zero();
@@ -1463,12 +1464,12 @@ void run_hypre_cmp (ParmParse& pp)
     Print() << std::setprecision(6) << "HYPCMP n=" << c.n << " nlev=" << c.nlev << " ratio=" << c.ratio << " full=" << int(c.full) << " plane2d=" << int(c.plane2d)
             << " bc=" << bcs << " layout=" << c.layout << " nranks=" << ParallelDescriptor::NProcs() << " mgs=" << c.mgs
             << " mlmg_status=" << pb::to_string(rm.status) << " hypre_status=" << pb::to_string(rh.status)
-            << " mlmg_iters=" << rm.backend_status.iterations << " hypre_iters=" << rh.backend_status.iterations << " method=" << rh.backend_status.hypre_method
+            << " mlmg_iters=" << rm.backend_status.iterations << " hypre_iters=" << rh.backend_status.iterations << " method=" << rh.backend_status.method
             << " rows=" << rh.backend_status.hypre_rows << " nnz=" << rh.backend_status.hypre_nnz
             << " mlmg_true_rel2=" << rm.residual_rel2 << " hypre_true_rel2=" << rh.residual_rel2
             << " rel2_diff=" << rel2 << " relmax_diff=" << relmax
             << " t_mlmg=" << tm << " t_hypre_first=" << th << " t_hypre_reuse=" << th3
-            << " hypre_setup=" << rh.backend_status.hypre_setup_seconds << " hypre_solve=" << rh.backend_status.hypre_solve_seconds
+            << " hypre_setup=" << rh.backend_status.setup_seconds << " hypre_solve=" << rh.backend_status.solve_seconds
             << " repeat_bitwise=" << ((vh == vh2 && vh == vh3) ? 1 : 0) << " reuse=" << int(rh3.backend_status.plan_reused)
             << " gauge_shift_diff=" << (rh.components.empty() || rm.components.empty() ? 0.0 : std::abs(rh.components[0].gauge_shift - rm.components[0].gauge_shift))
             << " hash=" << hx(fnv(vh)) << "\n";

@@ -184,7 +184,13 @@ enum SolveTrigger : unsigned { SolveRoutine = 0u, SolveFirst = 1u, SolveFirstAft
 // The tolerance and iteration cap are PressureOptions::tol_rel and max_iter.
 //  krylov:         PCG (symmetric positive definite matrices: every single-level problem) or GMRES / BiCGSTAB for the composite
 //                  matrix, which is not symmetric (the C/F interpolation is one-sided); Auto = PCG on one level, GMRES on a
-//                  hierarchy.
+//                  hierarchy; None = BoomerAMG alone (V-cycles to the tolerance). PCG on a composite problem is InvalidInput.
+//                  Auto now decides at set-up by the symmetry check ||A - A^T||_inf / ||A||_inf < 1e-13 (pressure/13): PCG if it passes,
+//                  else GMRES(gmres_kdim) (HYPRE's GMRES is right-preconditioned); BackendStatus::method records the one that ran.
+// pressure/13 (pyramid comparison) defaults: one V(1,1) per iteration, PMIS (8), no aggressive coarsening, ext+i (6) interpolation without
+// truncation (pmax_elmts 0), l1-Jacobi (18) 1 sweep, relaxation order 0, Gaussian elimination (9) on the coarsest grid, strong threshold
+// 0.25, max_levels 25. GPU knobs (agg_levels 1 + agg_interp_type 4, pmax_elmts 4, keep_transpose 1) are set only when given.
+// All of them can be set at run time through ParmParse `hypre.<name>` (query_options).
 //  coarsen_type:   BoomerAMG coarsening (FDS 8 = PMIS).     relax_type: smoother (FDS 18 = L1-Jacobi, symmetric).
 //  num_sweeps:     sweeps per level.                        strong_threshold: BoomerAMG strength threshold, < 0 = HYPRE default.
 //  interp_type:    interpolation, < 0 = HYPRE default.      agg_levels: aggressive coarsening levels.
@@ -200,16 +206,19 @@ enum SolveTrigger : unsigned { SolveRoutine = 0u, SolveFirst = 1u, SolveFirstAft
 // b - L H (7-point stencil with the boundary ghost, 9 flops), times the unit round-off 2^-53.
 inline constexpr double kResidualRoundoff = 10.0;
 
-enum class HypreKrylov { Auto, PCG, GMRES, BiCGSTAB };
+enum class Krylov { Auto, PCG, GMRES, BiCGSTAB, None };   // HypreOptions::krylov and PressureOptions::mlmg_krylov
+using HypreKrylov = Krylov;
 struct HypreOptions {
     HypreKrylov krylov = HypreKrylov::Auto;
     int coarsen_type = 8;
     int relax_type = 18;
     int num_sweeps = 1;
-    double strong_threshold = -1.0;
-    int interp_type = -1;
+    double strong_threshold = 0.25;
+    int interp_type = 6;
     int agg_levels = 0;
     int gmres_kdim = 30;
+    int coarse_relax = 9, max_levels = 25, pmax_elmts = 0;
+    int agg_interp_type = -1, keep_transpose = -1;   // < 0: HYPRE default
     // Masked HYPRE (D6): how many sealed-component pin rows to apply (-1 = all, in component-id order). Test hook: a smaller count
     // leaves a singular component unpinned so the residual check warns.
     int max_pins = -1;
@@ -217,13 +226,17 @@ struct HypreOptions {
     {
         return krylov == o.krylov && coarsen_type == o.coarsen_type && relax_type == o.relax_type && num_sweeps == o.num_sweeps &&
                strong_threshold == o.strong_threshold && interp_type == o.interp_type && agg_levels == o.agg_levels &&
-               gmres_kdim == o.gmres_kdim && max_pins == o.max_pins;
+               gmres_kdim == o.gmres_kdim && max_pins == o.max_pins && coarse_relax == o.coarse_relax && max_levels == o.max_levels &&
+               pmax_elmts == o.pmax_elmts && agg_interp_type == o.agg_interp_type && keep_transpose == o.keep_transpose;
     }
 };
 
 struct PressureOptions {
     BackendKind backend = BackendKind::Auto;      // Auto = selector rule; FFT/MLMG/HYPRE = request, still rule-checked
     HypreOptions hypre;                           // used when backend == HYPRE
+    // MLMG: Auto / None = V-cycles (the masked single level: Auto = GMRES, D7); PCG / GMRES / BiCGSTAB = AMReX Krylov solver with one
+    // V-cycle per iteration as the preconditioner. PCG on a composite problem is InvalidInput. FFT takes Auto only.
+    Krylov mlmg_krylov = Krylov::Auto;
     double tol_rel = 1.0e-12;                     // backend relative tolerance
     int max_iter = 200;                           // backend iteration cap
     bool use_initial_guess = false;               // false: start from zero
@@ -255,11 +268,11 @@ struct BackendStatus {
     int iterations = 0;                           // 0 for direct backends
     double own_residual = -1.0;                   // backend-reported relative residual (-1: none)
     bool plan_reused = false;                     // FFT/HYPRE: the set-up cached in the PressureWorkspace was used (not built for this solve)
-    // HYPRE only (0 otherwise): matrix size, set-up time (assembly + BoomerAMG setup; 0 when the cached set-up was reused),
-    // solver time of this solve, Krylov method actually used ("PCG", "GMRES", "BiCGSTAB").
-    long long hypre_rows = 0, hypre_nnz = 0;
-    double hypre_setup_seconds = 0.0, hypre_solve_seconds = 0.0;
-    std::string hypre_method;
+    // Set-up time (HYPRE: assembly + BoomerAMG set-up, 0 when the cached set-up was reused; MLMG: operator and hierarchy build) and
+    // solver time of this solve (amrex::second, this rank); method actually used ("PCG", "GMRES", "BiCGSTAB", "BoomerAMG", "V-cycle").
+    double setup_seconds = 0.0, solve_seconds = 0.0;
+    std::string method;
+    long long hypre_rows = 0, hypre_nnz = 0;      // HYPRE only: matrix size
     // HYPRE on a singular problem pins one unknown per sealed component by an identity row (D6). pins lists every (level, cell);
     // pin_applied / pin_level / pin_cell mirror the first entry for callers that still expect a single pin. The common layer's
     // residual check excludes every pin row (PressureResult::residual_check).
@@ -395,6 +408,10 @@ private:
 // status other than Ok/NotConverged the phi field is not modified. `ws` holds the composite hierarchy set-up and the FFT plan
 // (null = build the set-up for this call and discard it after the call). Which checks run: see SolveTrigger.
 PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws = nullptr);
+// Run-time options from ParmParse (solver study, pressure/13): hypre.{krylov=auto|none|pcg|gmres|bicgstab, coarsen_type, relax_type, num_sweeps,
+// strong_threshold, interp_type, agg_levels, agg_interp_type, pmax_elmts, keep_transpose, coarse_relax, max_levels, gmres_kdim} and
+// pressure.{mlmg_krylov (same names), tol_rel, max_iter, warm_start (0: zero initial guess, the default; 1: previous solution)}. Unset keys keep o.
+void query_options (PressureOptions& o);
 
 // Face-centred dphi/dn of the composite solution, one component, valid faces, for every level, in the sign
 // convention grad = (phi(+) - phi(-)) / dx in the direction of increasing index. grad_out[l][d] must be nodal in d

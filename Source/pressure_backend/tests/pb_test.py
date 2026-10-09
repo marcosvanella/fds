@@ -199,6 +199,22 @@ def hypcomp():
             print(f"HYPDECOMP composite {bc} ratio={ratio} np={np_} vs np=1: rel_l2 {r:.3e}")
             ok(r <= 1e-8, f"composite HYPRE {bc} ratio={ratio}: np={np_} equals np=1 within eps_H (rel L2 {r:.2e})")
 
+def krylov():
+    """P2 solver-study options: HYPRE (BoomerAMG alone or AMG-preconditioned GMRES / BiCGSTAB) and MLMG (V-cycles or V-cycle-preconditioned
+    GMRES / BiCGSTAB / CG) agree on a composite and a single-level problem at tol 1e-10; CG on a composite and any Krylov choice on FFT are InvalidInput."""
+    for k, mk in (("none", "bicgstab"), ("gmres", "gmres"), ("bicgstab", "none")):
+        rc, out = run(2, mode="hypre_cmp", n=16, nlev=2, ratio=2, bc="neumann", mgs=8, tol_rel=1e-10, krylov=k, mlmg_krylov=mk)
+        d = kv(lines(out, "HYPCMP")[0]) if lines(out, "HYPCMP") else {}
+        ok(rc == 0 and float(d.get("rel2_diff", 1)) <= 1e-8, f"composite HYPRE {k} vs MLMG {mk}: rel L2 {d.get('rel2_diff')}, iters {d.get('hypre_iters')} ({d.get('method')}) / {d.get('mlmg_iters')}")
+    rc, out = run(2, mode="hypre_cmp", n=16, nlev=2, ratio=2, bc="neumann", mgs=8, krylov="pcg")
+    ok(rc != 0 and "hypre_status=InvalidInput" in out, "composite CG is InvalidInput (the composite matrix is not symmetric)")
+    for be, k in (("mlmg", "pcg"), ("mlmg", "bicgstab"), ("hypre", "none")):
+        rc, out = run(2, mode="solve", n_cell="32 32 32", bc="neumann", max_grid_size=16, verbose=0, backends=be, tol_rel=1e-10, krylov=k, mlmg_krylov=k)
+        r = kv(lines(out, "RESULT")[0]) if lines(out, "RESULT") else {}
+        ok(rc == 0 and r.get("status") == "Ok" and float(r.get("true_rel2", 1)) <= 1e-9, f"single level {be} {k}: {r.get('method')} {r.get('iters')} iterations, true rel2 {r.get('true_rel2')}")
+    rc, out = run(1, mode="solve", n_cell="16 16 16", bc="neumann", verbose=0, backends="fft", mlmg_krylov="gmres")
+    ok(lines(out, "RESULT") and kv(lines(out, "RESULT")[0]).get("status") == "InvalidInput", "FFT with a Krylov choice is InvalidInput")
+
 def hypcache():
     for np_ in (1, 2):
         rc, out = run(np_, mode="hypcache", n_cell=A.n, mgs=16, nsolve=5, bcpairs=A.bc); print(out)
@@ -1117,7 +1133,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compbcdatal1": compbcdatal1, "compseam": compseam, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "krylov": krylov, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compbcdatal1": compbcdatal1, "compseam": compseam, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

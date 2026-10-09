@@ -41,6 +41,7 @@ struct PressureWorkspace::Impl {
     std::unique_ptr<MLMG> mlmg;                       // refers to *mlp: declared after it, destroyed first
     // Single level: the FFT backend object, which owns the cached FFT::Poisson plan (null until needed).
     std::unique_ptr<PressureBackend> fft;
+    std::unique_ptr<PressureBackend> mlmg1;           // single-level MLMG backend: owns the cached operator (unmasked; the solver study, P2)
     // Masked single level (D1): component labels, singular flags and pins, keyed on the mask content and the layout. The mask is static
     // for a run and changes at a regrid; the flood fill is the expensive part of a masked solve, so it is done once per mask.
     struct MaskCache {

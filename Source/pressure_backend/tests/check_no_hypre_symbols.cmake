@@ -1,7 +1,8 @@
 # ctest helper: fail if any object of the pressure backend compiled without PB_WITH_HYPRE names a HYPRE symbol (defined or undefined).
 # Two kinds of names are expected and ignored: the accessor PressureWorkspace::hypre_built() (part of the public API, always false
 # without HYPRE) and amrex::Hypre* destructor references that AMReX's own headers emit when AMReX itself was built with HYPRE
-# (an AMReX built without HYPRE has neither; the scratch link test against such an AMReX shows zero).
+# (an AMReX built without HYPRE has neither; the scratch link test against such an AMReX shows zero), and the static-initializer
+# symbol _GLOBAL__sub_I_<file> that only carries the file name (HypreBackend.cpp's header-level statics).
 # Usage: cmake -DNM=<nm> "-DOBJS=<a.o;b.o;...>" -P check_no_hypre_symbols.cmake
 if(NOT NM OR NOT OBJS)
   message(FATAL_ERROR "usage: -DNM=<nm> -DOBJS=<objects>")
@@ -9,7 +10,7 @@ endif()
 list(REMOVE_ITEM OBJS "")
 set(bad "")
 foreach(o ${OBJS})
-  execute_process(COMMAND sh -c "'${NM}' -C '${o}' | grep -i hypre | grep -v 'amrex::Hypre' | grep -v 'PressureWorkspace::hypre_built'"
+  execute_process(COMMAND sh -c "'${NM}' -C '${o}' | grep -i hypre | grep -v 'amrex::Hypre' | grep -v 'PressureWorkspace::hypre_built' | grep -v '_GLOBAL__sub_I_'"
                   OUTPUT_VARIABLE hits)
   if(hits)
     string(APPEND bad "${o}:\n${hits}\n")

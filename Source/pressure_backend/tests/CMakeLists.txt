@@ -118,6 +118,8 @@ endforeach()
 pb_add_test(pb_hypre_ci_vs_mlmg hypci --n "34 18 32")
 # (b) composite hierarchies: HYPRE vs MLMG, independent true residual, repeatability, rank independence.
 pb_add_test(pb_hypre_comp_vs_mlmg  hypcomp)
+# P2 solver-study options (--krylov): every HYPRE / MLMG Krylov choice agrees, CG composite and Krylov-on-FFT are InvalidInput.
+pb_add_test(pb_krylov_options krylov)
 pb_add_test(pb_hypre_comp_ns2d_16  compns2d --be hypre)
 # (e) selector (NotBuilt for masks, covered cells, cylindrical, stretched, variable coefficients) is in pb_selector;
 #     the composite selector checks are repeated with HYPRE as the requested backend.

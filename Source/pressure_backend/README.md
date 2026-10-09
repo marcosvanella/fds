@@ -59,9 +59,9 @@ Harness `pb_fds_loops`; ctests `pb_fdsloops_*` (bitwise against the verbatim ups
 The HYPRE backend is optional at compile time. Everything that names HYPRE is behind the compile definition `PB_WITH_HYPRE`:
 `HypreBackend.H` and `HypreBackend.cpp` (both empty without it), `make_hypre_backend` (`PressureBackend.H`), the `hypre` / `hsys` members of
 `PbWorkspaceImpl.H`, and the HYPRE branches of `PressureIface.cpp` and `CompositeSolve.cpp`. `PressureIface.H` (`BackendKind::HYPRE`,
-`HypreOptions`, the `hypre_*` result fields, `PressureWorkspace::hypre_built()`) is unchanged and needs no HYPRE header.
+`HypreOptions`, `BackendStatus::hypre_rows/hypre_nnz`, `PressureWorkspace::hypre_built()`) is unchanged and needs no HYPRE header.
 
-- **Without `PB_WITH_HYPRE`** (the driver build): no HYPRE type or symbol is referenced, so a link against AMReX alone (no HYPRE) needs no stub.
+- **Without `PB_WITH_HYPRE`** (a `USE_HYPRE=OFF` driver build): no HYPRE type or symbol is referenced, so a link against AMReX alone (no HYPRE) needs no stub.
   `BackendKind::HYPRE` is rejected by the selector, for a single level and for a composite request, before anything else is looked at:
   `Status::NotBuilt` with `message == pb::kHypreNotBuilt` (`"built without HYPRE"`); `PressureWorkspace::hypre_built()` is always false.
   Compiling `HypreBackend.cpp` without the definition is harmless (empty object), so a source list may keep it.
@@ -73,8 +73,36 @@ The HYPRE backend is optional at compile time. Everything that names HYPRE is be
   OFF is an error. The build without the definition is covered by `pb_nohypre_obj` (the driver's pressure_backend source list plus
   `HypreBackend.cpp`, compiled without the definition) and two ctests: `pb_nohypre_symbols` (no HYPRE symbol in any of those objects, by `nm`)
   and `pb_nohypre_check` (HYPRE request is `NotBuilt` / `kHypreNotBuilt` single level, composite and with a workspace; FFT and MLMG still solve).
-- **Driver** (`Source/driver/CMakeLists.txt`, owned by Role 1): drop `HypreStub.cpp` and the `if (EXISTS .../HypreBackend.cpp)` block. Do not
-  define `PB_WITH_HYPRE` unless `HypreBackend.cpp` is also in the sources and the AMReX is built with HYPRE.
+- **Driver** (`Source/driver/CMakeLists.txt`, owned by Role 1; P2 of the Pyramid study): with `USE_HYPRE` (the FDS default) `HypreBackend.cpp` is
+  in the sources and `PB_WITH_HYPRE` is defined for every C++ file. One HYPRE (R-30): configure with `-DUSE_SYSTEM_HYPRE=ON
+  -DCMAKE_PREFIX_PATH=/workspace/firemodels-gnu/libs/hypre/63331f19` (the FireX pin, static `libHYPRE.a`); the default AMReX is
+  `/workspace/amrex-install-hypre232`, built against that HYPRE. Configure stops when the AMReX library does not carry the linked HYPRE's
+  `HYPRE_DEVELOP_STRING` (e.g. `/workspace/amrex-install`, built against the v3.0.0 headers).
+
+## Solver-study options (P2; docs/pressure/13)
+
+- `Krylov` (alias `HypreKrylov`), in `PressureOptions::mlmg_krylov` and `HypreOptions::krylov`: `None` = plain MLMG V-cycles / BoomerAMG alone;
+  `PCG`, `GMRES`, `BiCGSTAB` = Krylov with one V-cycle per iteration as the preconditioner (MLMG through `GMRESMLMG`, correction form, smoother
+  bottom solve, PCG on the negated operator: `mlmg_solve`, `MLMGBackend.cpp`; BoomerAMG: `KrylovSolver`, `HypreBackend.cpp`). The explicit
+  choices stop at tol/10 of their own residual so the shared true residual check passes at tol. `Auto`: MLMG keeps V-cycles (masked single level GMRES);
+  HYPRE checks the assembled matrix at set-up, ||A - A^T||_inf / ||A||_inf < 1e-13 -> PCG, else GMRES(kdim 30, right preconditioned).
+  InvalidInput: any Krylov choice on FFT, and PCG on a composite problem (not symmetric).
+- BoomerAMG defaults (pressure/13): V(1,1), max 25 levels, PMIS (8), no aggressive coarsening, interp 6, l1-Jacobi (18) one sweep, coarsest
+  relax 9, strong threshold 0.25, default max coarse size, AMG alone max 200 iterations. The pin (singular problems) zeroes the row and the
+  column (identity row, pin value 0), so the matrix stays symmetric.
+- `query_options(o)` reads ParmParse: `hypre.{krylov,gmres_kdim,strong_threshold,coarsen_type,interp_type,relax_type,coarse_relax,num_sweeps,max_levels,
+  agg_levels,agg_interp_type,pmax_elmts,keep_transpose}`, `pressure.{mlmg_krylov,tol_rel,max_iter,warm_start}` (`warm_start=1` keeps the previous
+  solution as the initial guess; default zero).
+- Set-up is frozen between regrids: HYPRE matrix + AMG hierarchy and the MLMG operator (single level `PressureWorkspace` slot, composite workspace)
+  are built once and rebuilt only when the grids change. `BackendStatus`: `method`, `iterations`, `own_residual`, `setup_seconds` (0 when reused;
+  HYPRE numbering + IJ + AMG set-up, MLMG build + set-up, FFT plan), `solve_seconds` (amrex::second, local rank), `plan_reused`.
+- Driver (`--run`, `--two-level-run`): `--pressure-backend auto|mlmg|hypre --krylov none|gmres|bicgstab|cg --pressure-tol T (1e-10)
+  --pressure-csv FILE` and `hypre.*=v` / `pressure.*=v` tokens. With any of them every solve uses the full true residual check at T and rank 0 writes
+  `FILE` (default `<outdir>/<chid>_pressure.csv`):
+  `step,stage,level,backend,krylov_used,guess,first,rebuilt,iterations,own_residual,true_rel2,true_ok,setup_s,solve_s,rss_max_mb,rss_sum_mb,div_max`.
+  `stage` pred/corr (a repeated predictor after a dt cut gives a second pred row), `level` 0 or `all` (composite); `guess` zero/warm; `first` = set
+  up in this solve; `rebuilt` = a set-up after an earlier one (regrid); `true_rel2` = ||b - L H||_2/||b||_2 (D-067 gauge), `true_ok` against T;
+  `rss_*` = getrusage peak RSS, max and sum over ranks (MB). `stage=end` rows (two-level run) carry the per-level max|div u - D| in `div_max`.
 
 ## M2 additions (see frozen/m2-notes.md)
 

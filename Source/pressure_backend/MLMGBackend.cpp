@@ -4,10 +4,12 @@
 #include "PressureBackend.H"
 #include "CommonLayer.H"
 
+#include <AMReX_BiCGStab.H>
 #include <AMReX_GMRES_MLMG.H>
 #include <AMReX_MLABecLaplacian.H>
 #include <AMReX_MLMG.H>
 #include <AMReX_MLPoisson.H>
+#include <AMReX_PCG.H>
 
 namespace pb {
 
@@ -117,40 +119,55 @@ BackendStatus solve_masked (PressureProblem const& p, PressureOptions const& o, 
     mlmg.setPreSmooth(8);
     mlmg.setPostSmooth(8);
     mlmg.setVerbose(0);
-    GMRESMLMG gm(mlmg);
-    gm.setMaxIters(o.max_iter);
     const Real ns = s.norm2(), nr = rhs.norm2();
     const Real rel = (ns > Real(0) && nr > Real(0) && nr < ns) ? Real(o.tol_rel) * nr / ns : Real(o.tol_rel);
-    gm.solve(phi, s, rel, Real(0));
-    BackendStatus st;
-    st.converged = (gm.getGMRES().getStatus() == 0);
-    st.iterations = gm.getNumIters();
-    st.own_residual = (ns > Real(0)) ? gm.getResidualNorm() / ns : gm.getResidualNorm();
-    return st;
+    return mlmg_solve(mlmg, {&phi}, {&s}, o.mlmg_krylov == Krylov::Auto ? Krylov::GMRES : o.mlmg_krylov, rel, o.max_iter);
 }
 
 class MLMGBackend final : public PressureBackend {
 public:
     const char* name () const override { return "MLMG"; }
-    BackendStatus solve (PressureProblem const& p, PressureOptions const& o,
-                         MultiFab& phi, MultiFab const& rhs) override
+    // Unmasked: the operator is built once per layout (the workspace keeps this object; P2 "set up once per regrid").
+    bool plan_matches (PressureProblem const& p) const override
     {
-        if (is_masked(p)) { return solve_masked(p, o, phi, rhs); }
+        return m_mlmg && !is_masked(p) && m_ba == p.ba && m_dm == p.dm && m_bc == p.bc && same_geometry(m_geom, p.geom);
+    }
+    void prepare (PressureProblem const& p) override
+    {
+        m_mlmg.reset();
         LPInfo info;
-        MLPoisson mlp({p.geom}, {p.ba}, {p.dm}, info);
-        mlp.setMaxOrder(2);
+        m_mlp = std::make_unique<MLPoisson>(Vector<Geometry>{p.geom}, Vector<BoxArray>{p.ba}, Vector<DistributionMapping>{p.dm}, info);
+        m_mlp->setMaxOrder(2);
         std::array<BC,6> const eb = effective_bc(p.bc, p.geom.Domain());
         Array<LinOpBCType,AMREX_SPACEDIM> lo{lin_bc(eb[face_index(0,0)]), lin_bc(eb[face_index(1,0)]), lin_bc(eb[face_index(2,0)])};
         Array<LinOpBCType,AMREX_SPACEDIM> hi{lin_bc(eb[face_index(0,1)]), lin_bc(eb[face_index(1,1)]), lin_bc(eb[face_index(2,1)])};
-        mlp.setDomainBC(lo, hi);
-        mlp.setLevelBC(0, &phi);      // homogeneous Dirichlet values; other BCs ignore the ghost data
-        MLMG mlmg(mlp);
-        mlmg.setVerbose(0);
+        m_mlp->setDomainBC(lo, hi);
+        m_mlp->setLevelBC(0, nullptr);   // homogeneous Dirichlet values; other BCs ignore the ghost data
+        m_mlmg = std::make_unique<MLMG>(*m_mlp);
+        m_mlmg->setVerbose(0);
+        m_mlmg->setConvergenceNormType(MLMGNormType::bnorm);
+        m_mlmg->setThrowException(true);
+        m_ba = p.ba; m_dm = p.dm; m_bc = p.bc; m_geom = p.geom;
+    }
+    BackendStatus solve (PressureProblem const& p, PressureOptions const& o,
+                         MultiFab& phi, MultiFab const& rhs) override
+    {
+        const double t0 = amrex::second();
+        if (is_masked(p)) { return solve_masked(p, o, phi, rhs); }
+        const bool reused = plan_matches(p);
+        if (!reused) { prepare(p); }
+        MLMG& mlmg = *m_mlmg;
         mlmg.setMaxIter(o.max_iter);
-        mlmg.setConvergenceNormType(MLMGNormType::bnorm);
-        mlmg.setThrowException(true);
-        BackendStatus s;
+        const double t_setup = amrex::second() - t0;
         const Real tgt = Real(kMlmgTolFactor*o.tol_rel);
+        if (o.mlmg_krylov != Krylov::Auto && o.mlmg_krylov != Krylov::None) {
+            BackendStatus s = mlmg_solve(mlmg, {&phi}, {&rhs}, o.mlmg_krylov, tgt, o.max_iter);
+            s.setup_seconds = reused ? 0.0 : t_setup; s.plan_reused = reused;
+            return s;
+        }
+        BackendStatus s;
+        s.method = "V-cycle";
+        s.setup_seconds = reused ? 0.0 : t_setup; s.plan_reused = reused;
         // Polish toward residual_tol (proxy for residual_limit) when that is looser than half-tol; never chase below 0.5*tol_rel
         // when the caller asked for a loose solve (negative controls with tol_rel >> residual_tol must still warn).
         const Real polish_tgt = std::max(tgt, Real(o.residual_tol > 0.0 ? o.residual_tol : tgt));
@@ -182,9 +199,68 @@ public:
         s.iterations = iters;
         const Real b0 = mlmg.getInitRHS();
         s.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
+        s.solve_seconds = amrex::second() - t0 - t_setup;
         return s;
     }
+private:
+    std::unique_ptr<MLPoisson> m_mlp;
+    std::unique_ptr<MLMG> m_mlmg;                 // refers to *m_mlp: declared after it, destroyed first
+    BoxArray m_ba;
+    DistributionMapping m_dm;
+    Geometry m_geom;
+    std::array<BC,6> m_bc{};
 };
+}
+
+namespace {
+// -L and -(one V-cycle) for PCG: the MLPoisson operator is negative (semi-)definite, PCG needs a positive one.
+struct NegatedMLMG : GMRESMLMG {
+    using GMRESMLMG::GMRESMLMG;
+    void apply (VEC& lhs, VEC const& rhs) const { GMRESMLMG::apply(lhs, rhs); scale(lhs, RT(-1)); }
+    void precond (VEC& lhs, VEC const& rhs) const { GMRESMLMG::precond(lhs, rhs); scale(lhs, RT(-1)); }
+};
+}
+
+BackendStatus mlmg_solve (MLMG& mlmg, Vector<MultiFab*> const& x, Vector<MultiFab const*> const& b, Krylov k, Real tol, int max_iter)
+{
+    BackendStatus st;
+    const double t0 = amrex::second();
+    if (k == Krylov::Auto || k == Krylov::None) {
+        st.method = "V-cycle";
+        // None (the study's explicit choice) stops at tol/10 like the Krylov solvers: the MLMG max-norm criterion can leave the true relative L2 residual
+        // just above tol after a regrid. Auto keeps the default stop of the time loop.
+        const Real t = (k == Krylov::None) ? Real(0.1) * tol : tol;
+        try { mlmg.solve(x, b, t, Real(0)); st.converged = true; } catch (std::exception const&) {}
+        st.iterations = mlmg.getNumIters();
+        const Real b0 = mlmg.getInitRHS();
+        st.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
+        st.solve_seconds = amrex::second() - t0;
+        return st;
+    }
+    // Correction form of GMRESMLMG::solve: L cor = L x - b from cor = 0, then x -= cor. GMRESMLMG supplies the operator, the one-V-cycle
+    // preconditioner (smoother bottom solver: a fixed linear map) and the vector algebra that every AMReX Krylov solver needs.
+    using V = Vector<MultiFab>;
+    GMRESMLMG op(mlmg);
+    const BottomSolver bottom = mlmg.getBottomSolver();
+    mlmg.setBottomSolver(BottomSolver::smoother);
+    V res = op.makeVecLHS(), cor = op.makeVecLHS();
+    mlmg.apply(GetVecOfPtrs(res), x);
+    for (int l = 0; l < int(x.size()); ++l) { MultiFab::Saxpy(res[l], Real(-1), *b[l], 0, 0, 1, 0); }
+    const Real r0 = op.norm2(res);
+    auto run = [&] (auto& s) {
+        s.setMaxIters(max_iter);
+        s.solve(cor, res, Real(0.1) * tol, Real(0));   // the recursive Krylov residual drifts from the true one: stop at tol/10, as the HYPRE solvers
+        st.converged = (s.getStatus() == 0);
+        st.iterations = s.getNumIters();
+        st.own_residual = (r0 > 0) ? s.getResidualNorm() / r0 : s.getResidualNorm();
+    };
+    if (k == Krylov::GMRES) { st.method = "GMRES"; run(op.getGMRES()); }
+    else if (k == Krylov::BiCGSTAB) { st.method = "BiCGSTAB"; BiCGStab<V,GMRESMLMG> s; s.define(op); run(s); }
+    else { st.method = "PCG"; NegatedMLMG nop(mlmg); GMRESMLMG::scale(res, Real(-1)); PCG<V,NegatedMLMG> s; s.define(nop); run(s); }
+    for (int l = 0; l < int(x.size()); ++l) { MultiFab::Saxpy(*x[l], Real(-1), cor[l], 0, 0, 1, 0); }
+    mlmg.setBottomSolver(bottom);
+    st.solve_seconds = amrex::second() - t0;
+    return st;
 }
 
 std::unique_ptr<PressureBackend> make_mlmg_backend () { return std::make_unique<MLMGBackend>(); }

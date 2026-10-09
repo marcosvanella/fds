@@ -43,8 +43,11 @@ public:
     {
         BackendStatus s;
         s.plan_reused = plan_matches(p);
-        if (!s.plan_reused) { prepare(p); }
+        const double t0 = amrex::second();
+        if (!s.plan_reused) { prepare(p); s.setup_seconds = amrex::second() - t0; }
+        const double t1 = amrex::second();
         m_plan->solve(phi, rhs);
+        s.solve_seconds = amrex::second() - t1;
         s.converged = true;     // direct solve
         return s;
     }

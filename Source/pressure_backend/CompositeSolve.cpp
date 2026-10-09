@@ -649,7 +649,7 @@ PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions
     for (int l = 0; l < nlev; ++l) { ph.push_back(phi[l].get()); bb.push_back(b[l].get()); }
     BackendStatus bs = W.hsys->solve(ph, bb, o.tol_rel, o.max_iter, o.use_initial_guess);
     bs.plan_reused = reused;
-    bs.hypre_setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
+    bs.setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
     R.backend_status = bs;
 
     // Fill Solid=0, Known=g on every level.
@@ -875,11 +875,14 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     }
     PressureWorkspace local;
     if (!ws) { ws = &local; }
+    double setup_s = 0.0;   // workspace (MLMG operator) build; 0 when it was reused
     if (!ws->matches(p)) {
+        const double t0 = amrex::second();
         R.workspace_rebuilt = ws->num_levels() > 0;
         std::string msg;
         Status st = ws->rebuild(p, &msg);
         if (st != Status::Ok) { R.status = st; R.message = msg; return R; }
+        setup_s = amrex::second() - t0;
     }
     PressureWorkspace::Impl& W = *ws->impl();
     const int nlev = W.nlev;
@@ -1005,15 +1008,8 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     for (auto const& m : (ext ? bx : b)) { pb_.push_back(m.get()); }
     BackendStatus bs;
     if (!use_hypre) {
-        try {
-            mlmg.solve(pphi, pb_, Real(o.tol_rel), Real(0.0));
-            bs.converged = true;
-        } catch (std::exception const&) {
-            bs.converged = false;
-        }
-        bs.iterations = mlmg.getNumIters();
-        const Real b0 = mlmg.getInitRHS();
-        bs.own_residual = (b0 > 0) ? mlmg.getFinalResidual() / b0 : mlmg.getFinalResidual();
+        bs = mlmg_solve(mlmg, pphi, pb_, o.mlmg_krylov, Real(o.tol_rel), o.max_iter);
+        bs.setup_seconds = setup_s; bs.plan_reused = (setup_s == 0.0);
         R.backend_status = bs;
         if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *phix[l], *phi[l]); } }
     }
@@ -1034,7 +1030,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         for (int l = 0; l < nlev; ++l) { ph.push_back(phi[l].get()); bb.push_back(b[l].get()); }
         bs = W.hsys->solve(ph, bb, o.tol_rel, o.max_iter, o.use_initial_guess);
         bs.plan_reused = reused;
-        bs.hypre_setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
+        bs.setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
         R.backend_status = bs;
     }
 #endif
