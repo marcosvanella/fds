@@ -73,46 +73,45 @@ std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl
 
 namespace {
 
-// Cell-centred plot Multifab: RHO, U, V, W + undivided OMEGA_Y (ω_y = Δ_z U − Δ_x W).
+// Cell-centred plot Multifab: RHO, U, V, W + OMEGA_Y = ∂u/∂z − ∂w/∂x (FDS edge form, 1/s), the mean of the cell's four y-edges.
 // Owner viz: ω_y on mid-y xz + dark-grey mesh/AMR boxes. VORT (|ω|) stays TAG_VORT-only via ensure().
-void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, int nl, double t, int step)
+void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, TimeLoop& loop, int nl)
 {
     amrex::Vector<amrex::MultiFab> mf(nl);
     amrex::Vector<const amrex::MultiFab*> pmf(nl);
     amrex::Vector<amrex::Geometry> geom(nl);
-    amrex::Vector<int> level_steps(nl, step);
+    amrex::Vector<int> level_steps(nl, loop.icyc());
     amrex::Vector<amrex::IntVect> ref_ratio(std::max(nl - 1, 0));
     for (int l = 0; l < nl; ++l) {
         const Level& Lv = reg.level(l);
         Fields& F = reg.fields(l);
-        const amrex::Periodicity per = Lv.geom.periodicity();
-        F["U"].FillBoundary(per);
-        F["W"].FillBoundary(per);
+        // Ghosts incl. coarse-fine and wall: the corrector-end exchange (code 6) on U, V, W, H, restored afterwards so a dump never changes the run.
+        std::vector<amrex::MultiFab> keep;
+        for (const char* n : {"U", "V", "W", "H"}) { keep.emplace_back(F[n].boxArray(), F[n].DistributionMap(), 1, F[n].nGrow()); amrex::MultiFab::Copy(keep.back(), F[n], 0, 0, 1, F[n].nGrow()); }
+        loop.stage_exchange(l, 6, false);
         mf[l].define(Lv.ba, Lv.dm, 5, 0);
         amrex::MultiFab::Copy(mf[l], F["RHO"], 0, 0, 1, 0);
         amrex::Array<const amrex::MultiFab*, 3> faces{&F["U"], &F["V"], &F["W"]};
         amrex::average_face_to_cellcenter(mf[l], 1, faces);
-        const amrex::Box dom = Lv.geom.Domain();
-        const int dx_on = (dom.length(0) > 1) ? 1 : 0;
-        const int dz_on = (dom.length(2) > 1) ? 1 : 0;
-        const amrex::MultiFab& U = F["U"];
-        const amrex::MultiFab& W = F["W"];
+        const double fz = 0.25 / Lv.dx[2], fx = 0.25 / Lv.dx[0];
         for (amrex::MFIter mfi(mf[l]); mfi.isValid(); ++mfi) {
             auto a = mf[l].array(mfi);
-            auto u = U.const_array(mfi);
-            auto w = W.const_array(mfi);
+            auto u = F["U"].const_array(mfi);
+            auto w = F["W"].const_array(mfi);
             amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
-                // undivided ω_y (FDS dump.f90 vorticity without /dx)
-                a(i, j, k, 4) = dz_on * (u(i, j, k + 1) - u(i, j, k)) - dx_on * (w(i + 1, j, k) - w(i, j, k));
+                // edge (i,k) = (u(i,k)-u(i,k-1))/dz - (w(i,k)-w(i-1,k))/dx (AMReX face indices); sum over edges i..i+1, k..k+1 telescopes to this
+                a(i, j, k, 4) = fz * (u(i, j, k + 1) + u(i + 1, j, k + 1) - u(i, j, k - 1) - u(i + 1, j, k - 1)) - fx * (w(i + 1, j, k) + w(i + 1, j, k + 1) - w(i - 1, j, k) - w(i - 1, j, k + 1));
             });
         }
+        int q = 0;
+        for (const char* n : {"U", "V", "W", "H"}) { amrex::MultiFab::Copy(F[n], keep[q], 0, 0, 1, F[n].nGrow()); ++q; }
         pmf[l] = &mf[l];
         geom[l] = Lv.geom;
         if (l + 1 < nl) ref_ratio[l] = reg.level(l + 1).ref_ratio_from_parent;
     }
     amrex::Vector<std::string> names{"RHO", "U", "V", "W", "OMEGA_Y"};
-    amrex::WriteMultiLevelPlotfile(path, nl, pmf, names, geom, t, level_steps, ref_ratio);
-    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W,OMEGA_Y cell-centred; OMEGA_Y undivided ω_y, " << nl << " level(s))\n";
+    amrex::WriteMultiLevelPlotfile(path, nl, pmf, names, geom, loop.time(), level_steps, ref_ratio);
+    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W,OMEGA_Y cell-centred; OMEGA_Y = du/dz - dw/dx [1/s] from the 4 cell edges, " << nl << " level(s))\n";
 }
 
 }  // namespace
@@ -432,14 +431,14 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 // Mid-run dump shares the same write helper (Architect: regrid dump path); only without a --plot-every cadence (else it dumped every regrid).
                 if (!o.plotfile.empty() && o.plot_every <= 0) {
                     const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
-                    write_rho_vel_plotfile(plt, reg, nl_now, loop.time(), loop.icyc());
+                    write_rho_vel_plotfile(plt, reg, loop, nl_now);
                 }
             }
         }
         // Owner-show cadence (D-089 pack): --plot-every N with --plotfile; dump when s % N == 0 (1-based step). Final dump unchanged; mid-regrid dump off.
         if (o.plot_every > 0 && !o.plotfile.empty() && (s % o.plot_every) == 0) {
             const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
-            write_rho_vel_plotfile(plt, reg, nl_now, loop.time(), loop.icyc());
+            write_rho_vel_plotfile(plt, reg, loop, nl_now);
         }
         const std::vector<double> m = composite_mass(reg, nl_now, ns);
         const double dm = (m[0] - m0[0]) / m0[0];
@@ -470,7 +469,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     loop.write_perf();
     if (!o.plotfile.empty() && fails == 0) {
         const std::string plt = o.plotfile + "/plt_" + o.chid + "_final";
-        write_rho_vel_plotfile(plt, reg, loop.num_levels(), loop.time(), loop.icyc());
+        write_rho_vel_plotfile(plt, reg, loop, loop.num_levels());
     }
     const std::vector<double> m1 = composite_mass(reg, loop.num_levels(), ns);
     const fdsamr::TimeLoop::CompositeReport& cr = loop.composite_report();
