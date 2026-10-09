@@ -60,7 +60,7 @@ struct PostRegridProjectionState {
     int calls = 0;
 };
 
-// Installs the hook on `core` (RegridAmrCore::set_post_regrid_hook): after a regrid, when POST_REGRID_PROJECTION asks for it (AUTO default: new fine faces next to retained ones),
+// Installs the hook on `core` (RegridAmrCore::set_post_regrid_hook): after a regrid, when POST_REGRID_PROJECTION asks for it (AUTO default, = ON: whenever the grids changed),
 // before control returns to the time loop, it runs project_after_regrid on the registry. `state` must outlive the core.
 void install_post_regrid_projection(RegridAmrCore& core, fdsamr::LevelRegistry& reg, PostRegridProjectionState& state);
 

@@ -658,15 +658,8 @@ void run(Sim& S, bool verbose)
                 fdsrt::average_down_velocity(plv);
                 S.worst_post = std::max(S.worst_post, fdsrt::composite_divergence_error(plv));
             }
-            if (S.c.project) {   // the projection ran inside regrid_dynamic through the hook (AUTO: only when retained and new fine cells meet); an independent count says when it must have
-                bool expect = false;
-                for (int l = 1; l <= std::min<int>(S.core->finestLevel(), static_cast<int>(old_ba.size()) - 1); ++l) {
-                    long ret = 0, tot = 0;
-                    for (int b = 0; b < static_cast<int>(S.core->boxArray(l).size()); ++b)
-                        amrex::LoopOnCpu(S.core->boxArray(l)[b], [&](int i, int j, int k) { ++tot; if (old_ba[l].contains(amrex::IntVect(i, j, k))) ++ret; });
-                    if (ret > 0 && ret < tot) expect = true;
-                }
-                if (expect) ++S.hook_expected;
+            if (S.c.project) {   // the projection ran inside regrid_dynamic through the hook (AUTO: whenever the grids changed)
+                if (ch) ++S.hook_expected;
             } else if (ch && S.core->finestLevel() > 0) {   // POST_REGRID_PROJECTION='OFF': only measure max|div u - D|
                 projection_step(S);
             }
@@ -947,7 +940,7 @@ void check_projection(const Cfg& c0, const Outcome& off, uint64_t* hier_hash)
     CHECK_MSG(o.err_amr < o.err_coarse, c.name + ": with the projection the AMR result is still closer to the uniform-fine run than the uniform-coarse one");
     CHECK_MSG(off.proj_before > bound, c.name + ": control: without the projection the divergence at the seams exceeds the bound (" + std::to_string(off.proj_before) + " > " + std::to_string(bound) + ")");
     CHECK_MSG(c.strict_off ? off.proj_notaccepted == off.proj_n : off.proj_notaccepted > 0, c.name + ": control: the acceptance test fails for every regrid when the projection is off");
-    CHECK_MSG(o.hook_calls == o.hook_expected && o.hook_calls == o.proj_n, c.name + ": POST_REGRID_PROJECTION=AUTO runs the hook exactly at the regrids with retained and new fine cells (calls " + std::to_string(o.hook_calls) + ", expected " + std::to_string(o.hook_expected) + ", projections " + std::to_string(o.proj_n) + ")");
+    CHECK_MSG(o.hook_calls == o.hook_expected && o.hook_calls == o.proj_n, c.name + ": POST_REGRID_PROJECTION=AUTO runs the hook exactly at the regrids that changed the grids (calls " + std::to_string(o.hook_calls) + ", expected " + std::to_string(o.hook_expected) + ", projections " + std::to_string(o.proj_n) + ")");
     if (g_assert_projection && c.gate) {
         CHECK_MSG(o.worst_post <= bound, c.name + ": max|div u - D| right after every regrid (the hook ran or AUTO skipped it) <= bound, worst " + std::to_string(o.worst_post) + " <= " + std::to_string(bound));
         CHECK_MSG(o.proj_notaccepted == 0, c.name + ": D-063 acceptance: max|div u - D| <= bound on all uncovered cells after every projection (not accepted: " + std::to_string(o.proj_notaccepted) + ")");
@@ -1037,14 +1030,14 @@ int main(int argc, char** argv)
         else if (std::string(argv[i]) == "--gates") g_gates = true;
     int one = 1;
     amrex::Initialize(one, argv);
-    {   // D-063 hook policy table (POST_REGRID_PROJECTION): OFF never; ON whenever the grids changed; AUTO when retained and new fine cells coexist
+    {   // D-063 hook policy table (POST_REGRID_PROJECTION): OFF never; ON and AUTO whenever the grids changed (a shrink regrid needs it too)
         RegridOutcome none, chg, both;
         chg.changed = true; both.changed = true; both.retained_and_new = true;
         CHECK(!RegridAmrCore::projection_wanted(PostRegridProjection::Off, both));
         CHECK(!RegridAmrCore::projection_wanted(PostRegridProjection::On, none));
         CHECK(RegridAmrCore::projection_wanted(PostRegridProjection::On, chg));
         CHECK(!RegridAmrCore::projection_wanted(PostRegridProjection::Auto, none));
-        CHECK(!RegridAmrCore::projection_wanted(PostRegridProjection::Auto, chg));
+        CHECK(RegridAmrCore::projection_wanted(PostRegridProjection::Auto, chg));
         CHECK(RegridAmrCore::projection_wanted(PostRegridProjection::Auto, both));
     }
     uint64_t hh = 0, dh = 0;

@@ -251,12 +251,7 @@ bool RegridAmrCore::regrid_dynamic(amrex::Real time)
 
 bool RegridAmrCore::projection_wanted(PostRegridProjection mode, const RegridOutcome& o)
 {
-    switch (mode) {
-        case PostRegridProjection::Off: return false;
-        case PostRegridProjection::On: return o.changed;
-        case PostRegridProjection::Auto: return o.changed && o.retained_and_new;
-    }
-    return false;
+    return mode != PostRegridProjection::Off && o.changed;   // AUTO = ON: a shrink (fine cells removed, none new) also leaves the composite not div-free (b8 vortex ring steps 70/75)
 }
 
 }  // namespace fdsrt

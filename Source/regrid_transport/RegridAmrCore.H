@@ -83,7 +83,7 @@ public:
     bool regrid_dynamic(amrex::Real time);
 
     // Post-regrid hook (D-063): called at the end of regrid_dynamic, after hierarchy_done(false) and before control returns to the time loop (so before the next dt),
-    // when POST_REGRID_PROJECTION asks for it: AUTO (default) when RegridOutcome::retained_and_new, ON whenever the grids changed, OFF never. The driver installs
+    // when POST_REGRID_PROJECTION asks for it: AUTO (default) and ON whenever the grids changed, OFF never. The driver installs
     // the composite projection here (PostRegridProjection.H, DriverAdapter.H: install_post_regrid_projection).
     using PostRegridHook = std::function<void(const RegridOutcome&)>;
     void set_post_regrid_hook(PostRegridHook f) { post_hook_ = std::move(f); }
