@@ -2,6 +2,7 @@
 // z-lo INERT (kFaceInert), z-hi MIRROR (kFaceMirror). Fine box A (0..7, 0..7, 0..15) touches both z walls, fine box B (8..15, 8..15, 4..11) touches none.
 // Asserts: W = 0 on the two wall faces of A (nodal k = 0 and k = 16, FDS W(K=0), W(K=KBAR)); U, V z-ghosts of A = -interior at z-lo (no-slip), +interior at z-hi (free-slip);
 // a scalar keeps the even copy; every other value of A (x/y ghosts included) and all of B unchanged. Negative control: the default FaceBc{} leaves W on the wall faces nonzero.
+// BcStep::zero_wall_flux: FVZ = 0 on the two wall faces of A (FV(-1), FV(15)), nothing else changed.
 // Exit code 0 = pass.
 #include <AMReX.H>
 #include <AMReX_MultiFab.H>
@@ -11,6 +12,7 @@
 #include <string>
 
 #include "FdsAmr.H"
+#include "Fields.H"
 #include "GhostExchange.H"
 #include "check.H"
 
@@ -78,6 +80,27 @@ int main(int argc, char* argv[])
         check_field(W, 2, 1.0, 1.0, true);
         check_field(R, 3, 1.0, 1.0, true);
         check_field(Wd, 2, 1.0, 1.0, false);
+        // BcStep::zero_wall_flux (NO_FLUX of a fine box): FVZ = 0 on the wall faces of box A (cell-shaped, FV(k) = flux at the upper face of cell k: k = -1 and k = 15);
+        // every other FVZ value and all of FVX, FVY (periodic x/y) unchanged
+        Fields F(l1, 1, {"FVX", "FVY", "FVZ"});
+        const char* fv[3] = {"FVX", "FVY", "FVZ"};
+        for (int d = 0; d < 3; ++d)
+            for (amrex::MFIter mfi(F[fv[d]]); mfi.isValid(); ++mfi) {
+                auto a = F[fv[d]].array(mfi);
+                amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) { a(i, j, k) = v0(i, j, k, 4 + d); });
+            }
+        BcStep step(l1, F);
+        step.vel_bc = bc;
+        step.zero_wall_flux();
+        for (int d = 0; d < 3; ++d)
+            for (amrex::MFIter mfi(F[fv[d]]); mfi.isValid(); ++mfi) {
+                auto a = F[fv[d]].const_array(mfi);
+                const bool boxA = mfi.validbox().smallEnd(2) == 0;
+                amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
+                    const double e = boxA && d == 2 && (k == -1 || k == 15) ? 0.0 : v0(i, j, k, 4 + d);
+                    CHECK_MSG(a(i, j, k) == e, std::string(fv[d]) + " (" + std::to_string(i) + "," + std::to_string(j) + "," + std::to_string(k) + ") got " + std::to_string(a(i, j, k)));
+                });
+            }
         long bad = fdstest::report("fine_wall_bc");
         // the negative control must differ from the fixed W on the wall faces (W nonzero there)
         double wmin = 1.0e30;

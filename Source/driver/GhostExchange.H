@@ -83,6 +83,9 @@ public:
     FaceBc vel_bc{};             // level > 0: wall type of the domain faces for U, V, W, US, VS, WS (mirror_domain_edges); default {}: the plain mirror. TimeLoop sets it (patch 0015)
     // ghost_exchange(F, code, predictor) followed by cf_ghost_hook (if set). The time loop calls this at every exchange position.
     void exchange(int code, bool predictor = true);
+    // level > 0: FVX/FVY/FVZ = 0 on the INERT/MIRROR wall faces of vel_bc (what NO_FLUX does on level 0 for W = WS = 0 and the mirrored H ghost; a fine box has no wall cell).
+    // FV(n) is the flux at the upper face of cell n: the wall faces are FV(dom lo - 1) and FV(dom hi). Call after NO_FLUX, before the pressure RHS and the flux average_down.
+    void zero_wall_flux();
     void after_exchange(int code, double t, double dt);
     void wall_bc(int predictor, double t, double dt);   // WALL_BC of the stage (all local boxes)
     // Kernel-check replay: the box data is ALREADY matched (a frozen dump state), so MATCH_VELOCITY is not run again; the ghost-producing routines only:

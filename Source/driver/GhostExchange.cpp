@@ -131,6 +131,25 @@ void BcStep::exchange(int code, bool predictor)
     }
 }
 
+void BcStep::zero_wall_flux()
+{
+    static const char* const fv[3] = {"FVX", "FVY", "FVZ"};
+    const amrex::Box& dom = m_l0.geom.Domain();
+    for (int d = 0; d < 3; ++d)
+        for (amrex::MFIter mfi(m_F[fv[d]]); mfi.isValid(); ++mfi) {
+            const amrex::Box fb = mfi.fabbox();
+            auto a = m_F[fv[d]].array(mfi);
+            for (int side = 0; side < 2; ++side) {
+                const int f = vel_bc[2 * d + side];
+                if (f != kFaceInert && f != kFaceMirror) continue;
+                amrex::Box s = fb;
+                s.setRange(d, side == 0 ? dom.smallEnd(d) - 1 : dom.bigEnd(d));
+                s &= fb;
+                if (s.ok()) amrex::LoopOnCpu(s, [&](int i, int j, int k) { a(i, j, k) = 0.0; });
+            }
+        }
+}
+
 void BcStep::after_exchange(int code, double t, double dt)
 {
     (void)dt;
