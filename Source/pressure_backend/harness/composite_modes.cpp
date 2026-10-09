@@ -894,9 +894,9 @@ void run_comp_sel (ParmParse& pp)
             cls.define(p.levels[0].ba, p.levels[0].dm, 1, 0); cls.setVal(1); p.cell_class = &cls; }, AU, "PressureLevel");
     }
     {
-        // Q1: MLMG composite masked is NotBuilt; Auto/HYPRE take the assembled path.
+        // P3 (pressure/13): masked composite MLMG is built for an explicit MLMG request; Auto/HYPRE take the assembled path.
         std::vector<std::unique_ptr<iMultiFab>> cls;
-        expect("per-level mask + MLMG NotBuilt (Q1)", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
+        expect("per-level mask + explicit MLMG Ok (pressure/13)", c, S::Ok, [&] (pb::PressureProblem& p) {
             for (int l = 0; l < 2; ++l) {
                 cls.push_back(std::make_unique<iMultiFab>(p.levels[l].ba, p.levels[l].dm, 1, 0));
                 cls.back()->setVal(pb::CellGas);
@@ -908,7 +908,23 @@ void run_comp_sel (ParmParse& pp)
                 }
                 p.levels[l].cell_class = cls[l].get();
             }
-        }, K::MLMG, "MLMG");
+        }, K::MLMG, "");
+    }
+    {
+        // Ruling 5: a one-fine-cell Solid with gas on both sides on level 1 makes masked MLMG NotBuilt.
+        std::vector<std::unique_ptr<iMultiFab>> cls;
+        expect("fine thin wall + explicit MLMG NotBuilt (pressure/13 ruling 5)", c, S::NotBuilt, [&] (pb::PressureProblem& p) {
+            for (int l = 0; l < 2; ++l) {
+                cls.push_back(std::make_unique<iMultiFab>(p.levels[l].ba, p.levels[l].dm, 1, 0));
+                cls.back()->setVal(pb::CellGas);
+                if (l == 1) {
+                    for (MFIter mfi(*cls.back()); mfi.isValid(); ++mfi) {
+                        if (mfi.validbox().contains(IntVect(15,15,15))) { cls.back()->array(mfi)(15,15,15) = pb::CellSolid; }
+                    }
+                }
+                p.levels[l].cell_class = cls[l].get();
+            }
+        }, K::MLMG, "ruling 5");
     }
     {
         MultiFab a;
@@ -1928,6 +1944,203 @@ void run_comp_masked (ParmParse& pp)
 }
 
 
+// mode=comp_pyramid (P3, docs/pressure/13): two levels (ratio 2), periodic x and y, Neumann z, and a three-step pyramid OBST
+// on odd fine planes (the steps of pyramid_48_4m scaled to n = 24; n = 48 uses that input's own indices). cross=0: level 1
+// covers the pyramid and one coarse cell around it; cross=1: level 1 stops at x = 1/2, so the obstacle crosses the C/F interface
+// (masked MLMG NotBuilt, Auto HYPRE Ok). Solves with masked composite MLMG (V-cycles, then BiCGStab) and with HYPRE, compares them
+// (gauge removed), logs the V-cycle convergence factor and the rulings 1-4 diagnostics. thin=1: adds a one-fine-cell plate (ruling 5
+// negative). seq="mlmg hypre ...": diagnostics only, the given solves in one process (state carried between solves).
+void run_comp_pyramid (ParmParse& pp)
+{
+    int n = 24; pp.query("n", n);
+    int mgs = 8; pp.query("mgs", mgs);
+    int cross = 0; pp.query("cross", cross);
+    int thin = 0; pp.query("thin", thin);
+    int verbose = 0; pp.query("verbose", verbose);
+    double tol_rel = 1e-10; pp.query("tol_rel", tol_rel);
+    double difftol = 1e-8; pp.query("difftol", difftol);
+    AMREX_ALWAYS_ASSERT(n == 24 || n == 48);
+    int nsteps = 3; pp.query("steps", nsteps);
+    // steps {xy lo, xy hi (exclusive), z top (exclusive)} in fine cells
+    const std::array<std::array<int,3>,3> st = (n == 48) ? std::array<std::array<int,3>,3>{{{17,79,5},{27,69,11},{37,59,17}}}
+                                                         : std::array<std::array<int,3>,3>{{{9,39,3},{13,35,5},{17,31,7}}};
+    const int plx = st[0][0] - 2, ply0 = st[0][0] + 1, ply1 = st[0][0] + 11, plz = 4;   // thin plate: fine x = plx, gas at plx +- 1
+    auto solid_at = [&] (Real cx, Real cy, Real cz) {      // cell centre in fine-cell units
+        for (int q = 0; q < nsteps; ++q) {
+            auto const& s = st[q];
+            if (cx >= s[0] && cx < s[1] && cy >= s[0] && cy < s[1] && cz < s[2]) { return true; }
+        }
+        return thin && cx >= plx && cx < plx + 1 && cy >= ply0 && cy < ply1 && cz < plz;
+    };
+
+    Hier h;
+    Box dom0(IntVect(0), IntVect(n-1));
+    RealBox rb({0.,0.,0.}, {1.,1.,1.});
+    std::string bcxy = "periodic"; pp.query("bcxy", bcxy);
+    const pb::BC bxy = cparse_bc(bcxy);
+    Array<int,3> isp{bxy == pb::BC::Periodic, bxy == pb::BC::Periodic, 0};
+    const int clo = st[0][0]/2 - 1, chi = (st[0][1] - 1)/2 + 1, czh = (st[2][2] - 1)/2 + 2;
+    Box patch(IntVect(clo, clo, 0), IntVect(cross ? n/2 - 1 : chi, chi, czh));
+    for (int l = 0; l < 2; ++l) {
+        h.geom.emplace_back(l == 0 ? dom0 : amrex::refine(dom0, 2), rb, CoordSys::cartesian, isp);
+        BoxArray ba(l == 0 ? dom0 : amrex::refine(patch, 2));
+        ba.maxSize(mgs);
+        h.ba.push_back(ba);
+        h.dm.push_back(DistributionMapping(ba));
+        h.ratio.push_back(IntVect(l == 0 ? 1 : 2));
+    }
+    std::vector<std::unique_ptr<iMultiFab>> cls(2);
+    for (int l = 0; l < 2; ++l) {
+        h.rhs.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0));
+        h.phi.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 1));
+        h.unc.push_back(std::make_unique<iMultiFab>(h.ba[l], h.dm[l], 1, 0));
+        cls[l] = std::make_unique<iMultiFab>(h.ba[l], h.dm[l], 1, 0);
+        h.unc[l]->setVal(1);
+        if (l == 0) {
+            BoxArray cba = h.ba[1]; cba.coarsen(2);
+            for (MFIter mfi(*h.unc[0]); mfi.isValid(); ++mfi) {
+                auto const& a = h.unc[0]->array(mfi);
+                for (auto const& is : cba.intersections(mfi.validbox())) { amrex::LoopOnCpu(is.second, [&] (int i, int j, int k) { a(i,j,k) = 0; }); }
+            }
+        }
+        const Real f = (l == 0) ? Real(2) : Real(1);
+        auto const dx = h.geom[l].CellSizeArray();
+        for (MFIter mfi(*cls[l]); mfi.isValid(); ++mfi) {
+            auto const& c = cls[l]->array(mfi);
+            auto const& r = h.rhs[l]->array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const bool s = solid_at((i + Real(0.5))*f, (j + Real(0.5))*f, (k + Real(0.5))*f);
+                c(i,j,k) = s ? pb::CellSolid : pb::CellGas;
+                const Real x = (i + Real(0.5))*dx[0], y = (j + Real(0.5))*dx[1], z = (k + Real(0.5))*dx[2];
+                r(i,j,k) = s ? Real(0) : std::cos(2*kPi*x)*std::cos(kPi*z) + Real(0.5)*std::sin(2*kPi*y + Real(0.3))*std::cos(2*kPi*z);
+            });
+        }
+    }
+    Cfg c; c.n = n; c.nlev = 2; c.ratio = 2; c.mgs = mgs;
+    c.bcd = {bxy, bxy, pb::BC::Neumann}; c.bchi = c.bcd;
+    pb::PressureProblem p = make_problem(c, h);
+    for (int l = 0; l < 2; ++l) { p.levels[l].cell_class = cls[l].get(); }
+
+    auto solve = [&] (pb::BackendKind bk, pb::HypreKrylov mk, std::vector<MultiFab>* out) {
+        for (int l = 0; l < 2; ++l) { h.phi[l]->setVal(0.0); }
+        pb::PressureOptions o;
+        o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.residual_tol = 1e-8; o.verbose = verbose;
+        o.backend = bk; o.mlmg_krylov = mk;
+        pb::PressureWorkspace ws;
+        pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+        if (out) {
+            out->clear();
+            for (int l = 0; l < 2; ++l) { out->emplace_back(h.ba[l], h.dm[l], 1, 0); MultiFab::Copy(out->back(), *h.phi[l], 0, 0, 1, 0); }
+        }
+        return r;
+    };
+    // volume-weighted rel. L2 of (a - b) against b over uncovered gas cells, both with their mean removed
+    auto rdiff = [&] (std::vector<MultiFab> const& a, std::vector<MultiFab> const& b) {
+        double s[5] = {0, 0, 0, 0, 0};   // vol, vol*d, vol*b, vol*d^2, vol*b^2
+        for (int l = 0; l < 2; ++l) {
+            auto const dx = h.geom[l].CellSizeArray();
+            const double v = dx[0]*dx[1]*dx[2];
+            for (MFIter mfi(a[l]); mfi.isValid(); ++mfi) {
+                auto const& x = a[l].const_array(mfi); auto const& y = b[l].const_array(mfi);
+                auto const& u = h.unc[l]->const_array(mfi); auto const& cl = cls[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (!u(i,j,k) || cl(i,j,k) != pb::CellGas) { return; }
+                    const double d = x(i,j,k) - y(i,j,k), q = y(i,j,k);
+                    s[0] += v; s[1] += v*d; s[2] += v*q; s[3] += v*d*d; s[4] += v*q*q;
+                });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(s, 5);
+        const double vd = s[3] - s[1]*s[1]/s[0], vb = s[4] - s[2]*s[2]/s[0];
+        return std::sqrt(std::max(vd, 0.0) / std::max(vb, 1e-300));
+    };
+    // fingerprint of a solution (gauge-free): sum over uncovered gas cells of V (phi - mean) w(x, y, z)
+    auto fp = [&] (std::vector<MultiFab> const& a) {
+        double t[4] = {0, 0, 0, 0};
+        for (int l = 0; l < 2; ++l) {
+            auto const dx = h.geom[l].CellSizeArray(); const double v = dx[0]*dx[1]*dx[2];
+            for (MFIter mfi(a[l]); mfi.isValid(); ++mfi) {
+                auto const& x = a[l].const_array(mfi); auto const& u = h.unc[l]->const_array(mfi); auto const& cl = cls[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (!u(i,j,k) || cl(i,j,k) != pb::CellGas) { return; }
+                    const double w = std::cos(2*kPi*(i + 0.5)*dx[0]) + std::sin(3*(j + 0.5)*dx[1] + 5*(k + 0.5)*dx[2]);
+                    t[0] += v; t[1] += v*x(i,j,k); t[2] += v*w*x(i,j,k); t[3] += v*w;
+                });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(t, 4);
+        return t[2] - t[1]*t[3]/t[0];
+    };
+    using K = pb::BackendKind; using HK = pb::HypreKrylov;
+    const std::string tag = "COMP_PYRAMID n=" + std::to_string(n) + " cross=" + std::to_string(cross) + " thin=" + std::to_string(thin);
+    Print() << tag << " fine_boxes=" << h.ba[1].size() << " patch=" << patch << "\n";
+
+    if (thin || cross) {
+        pb::PressureResult rm = solve(K::MLMG, HK::Auto, nullptr);
+        Print() << "  MLMG: status=" << pb::to_string(rm.status) << " msg=\"" << rm.message << "\"\n";
+        if (thin) { ccheck(rm.status == pb::Status::NotBuilt && rm.message.find("ruling 5") != std::string::npos, "thin wall: masked MLMG NotBuilt (ruling 5)"); }
+        else { ccheck(rm.status == pb::Status::NotBuilt && rm.message.find("C/F interface") != std::string::npos, "obstacle across C/F: masked MLMG NotBuilt"); }
+        pb::PressureResult ra = solve(K::Auto, HK::Auto, nullptr);
+        Print() << "  Auto: status=" << pb::to_string(ra.status) << " backend=" << ra.backend << " iters=" << ra.backend_status.iterations << " true_rel2=" << ra.residual_rel2
+                << " residual_check=" << ra.residual_check << " limit=" << ra.residual_limit << " msg=\"" << ra.message << "\"\n";
+        ccheck(ra.status == pb::Status::Ok && ra.backend == "HYPRE" && ra.residual_ok, "thin wall / C/F crossing: Auto -> HYPRE Ok");
+        return;
+    }
+
+    std::vector<MultiFab> pm, ph, pk;
+    std::vector<std::string> seq; pp.queryarr("seq", seq);    // diagnostics: run this sequence of backends and stop
+    if (!seq.empty()) {
+        for (auto const& q : seq) {
+            std::vector<MultiFab> tmp;
+            pb::PressureResult r0 = solve(q == "mlmg" ? K::MLMG : K::HYPRE, HK::Auto, &tmp);
+            Print() << std::setprecision(6) << "  SEQ " << q << ": status=" << pb::to_string(r0.status) << " iters=" << r0.backend_status.iterations
+                    << " own=" << r0.backend_status.own_residual << " true_rel2=" << r0.residual_rel2 << " diff_vs_first=" << (pm.empty() ? 0.0 : rdiff(tmp, pm))
+                    << " solid=" << r0.backend_status.mg_solid_cells << " partial=" << r0.backend_status.mg_partial_cells << " half=" << r0.backend_status.mg_half_faces << "\n";
+            if (pm.empty()) { pm = std::move(tmp); }
+        }
+        return;
+    }
+    pb::PressureResult rh = solve(K::HYPRE, HK::Auto, &ph);
+    pb::PressureResult rm = solve(K::MLMG, HK::Auto, &pm);
+    auto const& bs = rm.backend_status;
+    const double fac = (bs.iterations > 0 && bs.own_residual > 0) ? std::pow(bs.own_residual, 1.0/bs.iterations) : -1.0;
+    const int c10 = (fac > 0 && fac < 1) ? int(std::ceil(std::log(1e-10)/std::log(fac))) : -1;
+    Print() << std::setprecision(6) << "  MLMG: status=" << pb::to_string(rm.status) << " backend=" << rm.backend << " method=" << bs.method
+            << " iters=" << bs.iterations << " own_rel=" << bs.own_residual << " factor=" << fac << " cycles_to_1e-10=" << c10
+            << " true_rel2=" << rm.residual_rel2 << " residual_ok=" << int(rm.residual_ok)
+            << " setup_s=" << bs.setup_seconds << " solve_s=" << bs.solve_seconds << " msg=\"" << rm.message << "\"\n"
+            << "  diag: max_coarsening=" << bs.mg_max_coarsening << " mg_levels0=" << bs.mg_levels0 << " solid=" << bs.mg_solid_cells
+            << " solid_bad=" << bs.mg_solid_bad << " partial=" << bs.mg_partial_cells << " partial_shifted=" << bs.mg_partial_shifted
+            << " half_faces_L0=" << bs.mg_half_faces << "\n";
+    ccheck(rm.status == pb::Status::Ok && rm.backend == "MLMG", "pyramid masked composite MLMG Ok");
+    ccheck(rm.residual_checked && rm.residual_ok, "pyramid MLMG residual ok");
+    ccheck(fac > 0 && fac < 0.5, "pyramid MLMG V-cycle factor < 0.5");
+    ccheck(bs.mg_solid_cells > 0 && bs.mg_solid_bad == 0, "ruling 3: every solid cell is an identity row");
+    ccheck(bs.mg_partial_cells > 0 && bs.mg_partial_shifted == 0, "ruling 3: no diagonal shift on partly solid cells");
+    ccheck(bs.mg_half_faces > 0, "rulings 1/2: L0 under L1 carries the averaged-down fine beta");
+    ccheck(bs.mg_max_coarsening >= 0, "ruling 4: max_coarsening_level set");
+
+    const double dmh = rdiff(pm, ph);
+    Print() << std::setprecision(6) << "  HYPRE: status=" << pb::to_string(rh.status) << " backend=" << rh.backend << " own=" << rh.backend_status.own_residual << " iters=" << rh.backend_status.iterations
+            << " true_rel2=" << rh.residual_rel2 << " check_nopin=" << rh.residual_check << "  rel_diff(MLMG,HYPRE)=" << dmh << " fp_mlmg=" << std::setprecision(12) << fp(pm) << " fp_hypre=" << fp(ph) << std::setprecision(6) << " msg=\"" << rh.message << "\"\n";
+    ccheck(rh.status == pb::Status::Ok && rh.residual_ok, "pyramid HYPRE Ok, residual (pin row excluded) ok");
+    // cmp_hypre=0: report only. On more than one rank the assembled HYPRE masked composite operator currently depends on the box
+    // distribution (its C/F stencil sees only coarse cells of local boxes and one ghost layer); the test then compares the MLMG
+    // fingerprint across rank counts instead.
+    int cmp_hypre = 1; pp.query("cmp_hypre", cmp_hypre);
+    if (cmp_hypre) { ccheck(dmh < difftol, "obstacle inside L1: MLMG matches HYPRE"); }
+
+    pb::PressureResult rk = solve(K::MLMG, HK::BiCGSTAB, &pk);
+    const double dkm = rdiff(pk, pm);
+    Print() << std::setprecision(6) << "  MLMG+BiCGStab: status=" << pb::to_string(rk.status) << " method=" << rk.backend_status.method
+            << " iters=" << rk.backend_status.iterations << " true_rel2=" << rk.residual_rel2 << " rel_diff(vs V-cycle)=" << dkm << "\n";
+    ccheck(rk.status == pb::Status::Ok && rk.backend_status.method == "BiCGSTAB" && rk.residual_ok, "MLMG-preconditioned BiCGStab on masked composite Ok");
+    ccheck(dkm < difftol, "BiCGStab matches the V-cycle solution");
+
+    pb::PressureResult ra = solve(K::Auto, HK::Auto, nullptr);
+    ccheck(ra.status == pb::Status::Ok && ra.backend == "HYPRE", "masked composite Auto stays HYPRE");
+}
+
 // mode=comp_bcdata: S6 OPEN cold-flow — floor INERT (Neumann z-lo) + five OPEN (Dirichlet),
 // constant H_b folded per level, full-fine two-level composite. Expected: phi ≈ H_b.
 void run_comp_bcdata (ParmParse& pp)
@@ -2178,6 +2391,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     if (mode == "comp") { run_comp(pp); }
     else if (mode == "comp_ns2d") { run_comp_ns2d(pp); }
     else if (mode == "comp_masked") { run_comp_masked(pp); }
+    else if (mode == "comp_pyramid") { run_comp_pyramid(pp); }
     else if (mode == "comp_bcdata") { run_comp_bcdata(pp); }
     else if (mode == "comp_bcdata_l1") { run_comp_bcdata_l1(pp); }
     else if (mode == "comp_seam") { run_comp_seam(pp); }

@@ -30,6 +30,7 @@ Long gindex (Box const& dom, IntVect const& iv, Long off)
 void copy_class (PressureLevel const& L, Geometry const& geom, iMultiFab& cls)
 {
     cls.define(L.ba, L.dm, 1, 1);
+    cls.setVal(CellGas);                  // C/F ghost cells are not filled below; never leave them uninitialised
     if (L.cell_class) {
         for (MFIter mfi(cls); mfi.isValid(); ++mfi) {
             auto const& o = cls.array(mfi);
@@ -166,12 +167,10 @@ std::string label_components_composite_masked (PressureProblem const& p,
                     int nb[3] = {i,j,k}; nb[d] += s ? 1 : -1;
                     const bool edge = (s == 0) ? (iv[d] == dom.smallEnd(d)) : (iv[d] == dom.bigEnd(d));
                     if (edge && ebc[face_index(d,s)] != BC::Periodic) { continue; }
-                    int nbi[3] = {nb[0],nb[1],nb[2]};
-                    if (edge && ebc[face_index(d,s)] == BC::Periodic) {
-                        nbi[d] = (s == 0) ? dom.bigEnd(d) : dom.smallEnd(d);
-                    }
-                    if (cl(nbi[0],nbi[1],nbi[2]) == CellGas && o(nbi[0],nbi[1],nbi[2]) >= 0) {
-                        cur = std::min(cur, o(nbi[0],nbi[1],nbi[2]));
+                    // periodic neighbours are read from the ghost cell (FillBoundary with periodicity): the wrapped index lies
+                    // outside this box whenever the box does not span the domain
+                    if (cl(nb[0],nb[1],nb[2]) == CellGas && o(nb[0],nb[1],nb[2]) >= 0) {
+                        cur = std::min(cur, o(nb[0],nb[1],nb[2]));
                     }
                 }
                 if (cur < o(i,j,k)) { o(i,j,k) = cur; ch = 1; }
@@ -340,11 +339,7 @@ std::string label_components_composite_masked (PressureProblem const& p,
                         int nb[3] = {i,j,k}; nb[d] += s ? 1 : -1;
                         bool edge = (s == 0) ? (iv[d] == dom.smallEnd(d)) : (iv[d] == dom.bigEnd(d));
                         if (edge && ebc[face_index(d,s)] != BC::Periodic) { continue; }
-                        int nbi[3] = {nb[0],nb[1],nb[2]};
-                        if (edge && ebc[face_index(d,s)] == BC::Periodic) {
-                            nbi[d] = (s == 0) ? dom.bigEnd(d) : dom.smallEnd(d);
-                        }
-                        if (cl(nbi[0],nbi[1],nbi[2]) == CellKnown) { open[id] = 1; }
+                        if (cl(nb[0],nb[1],nb[2]) == CellKnown) { open[id] = 1; }     // periodic: ghost cell, as above
                     }
                 }
             });

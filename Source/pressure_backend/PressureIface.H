@@ -17,8 +17,9 @@
 // BackendKind::HYPRE`; Auto selects HYPRE for a masked single level (D-091) and for composite+mask (D-092); unmasked Auto never picks HYPRE). HYPRE assembles the same discrete operator as MLMG (including the
 // coarse/fine interface treatment) into an IJ matrix, see HypreBackend.H and frozen/hypre-notes.md.
 //
-// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on FFT; MLMG composite with masks (Q1: composite
-// masked is assembled HYPRE only); covered cells on the single-level API, non-uniform cell widths, non-Cartesian
+// Not built (returned as Status::NotBuilt, never a silent fallback): masked cells on FFT; masked composite MLMG (explicit request
+// only, docs/pressure/13) when built without HYPRE, with a one-cell direction, a Solid wall thinner than the ratio between gas cells,
+// an obstacle across a C/F interface, or a singular bottom it cannot gauge (more than one singular fluid region); covered cells on the single-level API, non-uniform cell widths, non-Cartesian
 // (cylindrical, RZ) geometry, variable coefficients, a Dirichlet face in a one-cell x or z direction, anisotropic refinement ratios (except ratio 1 in a one-cell direction), ratios other than 2 and 4,
 // composite on the FFT backend, and a multi-level request through the single-level fields (`nlevels` > 1 with an
 // empty `levels`).
@@ -108,7 +109,8 @@ struct PressureLevel {
     amrex::MultiFab const* gauge_weight = nullptr;
     amrex::MultiFab const* gauge_offset = nullptr;
     // Masked composite (D3/D4/D6): per-level cell class and Known values (same BA/DM as `ba`). Null or all-zero on every
-    // level = unmasked. With any non-zero mask the solve is assembled HYPRE only (Q1/D-092 product Built); MLMG composite masked is NotBuilt.
+    // level = unmasked. With any non-zero mask Auto is assembled HYPRE (D-092); an explicit MLMG request builds the masked composite
+    // MLMG of docs/pressure/13 (NotBuilt cases: see the top of this file).
     // Known (OPEN) cells may not sit on a coarse/fine face (Q2: InvalidInput).
     amrex::iMultiFab const* cell_class = nullptr;
     amrex::MultiFab const* known_value = nullptr;
@@ -140,7 +142,7 @@ struct PressureProblem {
     // Masks (same BoxArray/DistributionMapping as `ba`; frozen/masked-notes.md). cell_class codes (CellClass): 0 Gas (unknown), 1 Solid
     // (OBST or gap cell: excluded, no flux through any of its faces), 2 Known (known-value cell behind a face-Dirichlet condition: not an
     // unknown, holds the face value `known_value`; the gas neighbour gets the flux 2 (g - phi)/dx^2). Null or all zero: unmasked problem
-    // (unchanged code). Masked single-level: assembled HYPRE (D6/D-091; Auto picks HYPRE) or explicit MLMG. Masked composite: use
+    // (unchanged code). Masked single-level: assembled HYPRE (D6/D-091; Auto picks HYPRE) or explicit MLMG. Masked composite (HYPRE, or MLMG on request): use
     // PressureLevel::cell_class / known_value (this top-level field with `levels` set is InvalidInput). FFT stays NotBuilt.
     // Any other code: InvalidInput. uncovered: zero = covered by a finer level, NotBuilt.
     amrex::iMultiFab const* cell_class = nullptr;
@@ -280,6 +282,11 @@ struct BackendStatus {
     int pin_level = 0;
     amrex::IntVect pin_cell{0};
     std::vector<std::pair<int, amrex::IntVect>> pins;
+    // Masked composite MLMG (P3, docs/pressure/13), from the operator build: max_coarsening_level (ruling 4; -1 = AMReX default), MG levels
+    // of level 0, and over every AMR and MG level: fully excluded cells (identity row a = 1) and those with another a, partly excluded
+    // cells and those with a != the averaged Known term (a diagonal shift, ruling 3), level-0 faces with 0 < beta < 1 (rulings 1, 2).
+    int mg_max_coarsening = -1, mg_levels0 = 0;
+    long long mg_solid_cells = 0, mg_solid_bad = 0, mg_partial_cells = 0, mg_partial_shifted = 0, mg_half_faces = 0;
 };
 
 struct PressureResult {

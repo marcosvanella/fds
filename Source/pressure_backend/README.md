@@ -30,10 +30,18 @@ the next finer level's BoxArray coarsened by its `ref_ratio`. `solve_pressure(p,
 (valid cells; covered coarse cells = average-down of the fine solution) and the composite true residual on the uncovered cells.
 The workspace (`PressureWorkspace::rebuild`, D-058) holds the hierarchy-dependent setup so repeated solves on one hierarchy do not
 rebuild it. `face_gradient_composite` returns face-centred dphi/dn per level with the coarse faces at C/F faces replaced by the
-average of the fine gradients. Unmasked composite defaults to MLMG; composite+mask defaults to assembled HYPRE under `Auto` (D-092); MLMG composite+mask and `face_gradient_composite`+mask stay `NotBuilt` (see the header and
-`frozen/composite-notes.md`).
+average of the fine gradients. Unmasked composite defaults to MLMG; composite+mask defaults to assembled HYPRE under `Auto` (D-092); `face_gradient_composite`+mask stays `NotBuilt` (see the header and
+`frozen/composite-notes.md`). An explicit MLMG request on composite+mask builds the masked composite MLMG of docs/pressure/13 (P3):
+MLABecLaplacian with beta = 0 on faces touching Solid/Known and a = 1 on fully excluded cells; coarse beta = arithmetic face average
+(AMR and MG coarsening), level 0 under level 1 = the averaged level-1 coefficients; a partly solid coarse cell keeps a pure Laplacian
+row (a re-set from the averaged excluded fraction after AMReX's averaging, `mg_partial_shifted` = 0); max_coarsening_level from the
+thinnest fluid-separating Solid run (measured up to 4 level-0 cells); BoomerAMG bottom (options namespace `pb_mlmg_bottom`, HYPRE row 0
+pinned on a singular bottom) with the mean removed per singular fluid region of each level-0 MG level. NotBuilt (use HYPRE): built
+without HYPRE, a one-cell direction, a Solid run thinner than the ratio between gas cells on a level >= 1 (ruling 5), a Solid/Known
+coarse cell in the C/F interpolation stencil of an open C/F face (obstacle across C/F: MLMG's interpolation would read it as 0), more
+than one singular fluid region on the bottom level or HYPRE row 0 outside it. Test: `pb_comp_masked_mlmg` (harness `comp_pyramid`).
 
-Selector: FFT only on one level with no masked or covered cells; a masked single level (`cell_class` Gas/Solid/Known, `known_value`) goes to HYPRE under `Auto` (D-091; explicit MLMG remains); composite+mask under `Auto` is HYPRE (D-092; MLMG composite+mask NotBuilt); FFT with a mask is `NotBuilt`, see frozen/masked-notes.md; any per-face mix of Neumann, Dirichlet and periodic
+Selector: FFT only on one level with no masked or covered cells; a masked single level (`cell_class` Gas/Solid/Known, `known_value`) goes to HYPRE under `Auto` (D-091; explicit MLMG remains); composite+mask under `Auto` is HYPRE (D-092; explicit MLMG: masked composite MLMG, P3); FFT with a mask is `NotBuilt`, see frozen/masked-notes.md; any per-face mix of Neumann, Dirichlet and periodic
 faces (each direction: PP, NN, DD, ND, DN), see frozen/m2-notes.md. MLMG on request for the same problems. A Dirichlet face in a one-cell x or z
 direction, variable-coefficient, non-uniform cell widths, cylindrical, and multi-level requests through the single-level fields return `Status::NotBuilt` with a message; `phi` is left untouched.
 

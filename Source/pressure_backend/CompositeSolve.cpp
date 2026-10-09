@@ -6,11 +6,16 @@
 #include "ExactSum.H"
 #include "PbWorkspaceImpl.H"
 
+#include <AMReX_MLABecLaplacian.H>
 #include <AMReX_MLMG.H>
 #include <AMReX_MLPoisson.H>
+#include <AMReX_ParmParse.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
+#if defined(PB_WITH_HYPRE) && defined(AMREX_USE_HYPRE)
+#include "HYPRE_utilities.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -139,7 +144,7 @@ void build_impl (PressureWorkspace::Impl& W, PressureProblem const& p)
         }
         ebc[face_index(d,0)] = BC::Periodic; ebc[face_index(d,1)] = BC::Periodic;     // the hidden direction's term is 0 whatever its BC (D-057)
     }
-    // Q1: masked composite is assembled HYPRE only — no MLMG hierarchy (C/F interp cannot exclude Solid/Known).
+    // Masked composite: no MLPoisson hierarchy (HYPRE assembles its own matrix; masked MLMG builds MaskedMlmg on its first solve).
     if (composite_is_masked(p)) {
         W.mlmg.reset();
         W.mlp.reset();
@@ -236,9 +241,11 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     }
     if (has_zero_mask(p.uncovered)) { s.message = "composite with a caller-supplied covered-cell mask is not built: covered cells are derived from the level BoxArrays"; return s; }
     const bool masked = composite_is_masked(p);
+#if !defined(PB_WITH_HYPRE) || !defined(AMREX_USE_HYPRE)
     if (masked && requested == BackendKind::MLMG) {
-        s.message = "composite with masked cells is not built on MLMG (C/F interpolation cannot exclude Solid/Known per stencil; Q1: use assembled HYPRE)"; return s;
+        s.message = "composite with masked cells on MLMG needs the HYPRE bottom solver (pressure/13 ruling 6): built without HYPRE"; return s;
     }
+#endif
     if (masked && requested == BackendKind::FFT) {
         s.message = "composite with masked cells cannot go through FFT"; return s;
     }
@@ -468,6 +475,517 @@ template <class V> Vector<MultiFab*> ptrs (V const& v)
 } // anonymous
 
 // ---------------------------------------------------------------------------------------------------------------
+// Masked composite MLMG (P3, docs/pressure/13): MLABecLaplacian, A = 1, B = 1 (a phi - div(beta grad phi), the negative of L),
+// beta = 0 on every face touching a Solid or Known cell, 1 elsewhere; a = 1 on Solid/Known cells (identity rows), a = sum 2/dx^2 over
+// the Known faces of a gas cell (as MLMGBackend.cpp, solve_masked). Rulings: (1) every coarse face beta is the arithmetic average
+// of the fine faces (AMReX average_down_faces, both between AMR levels and between MG levels); (2) level-0 coefficients under level 1
+// are the averaged level-1 ones (AMReX averageDownCoeffsToCoarseAmrLevel overwrites the covered cells and faces, the level-0 mask
+// is not used there); (3) mechanism: a = 1 only on cells whose whole volume is excluded at that level; after AMReX's averaging, a is
+// re-set from the averaged excluded fraction f (f == 1: a = 1, else a = the averaged Known term, 0 for a Solid-only problem), so a
+// partly solid cell keeps a pure Laplacian row (the AMReX overset mask was not used: its coarsening stops at the first partly masked
+// cell); (4) max_coarsening_level from the thinnest fluid-separating Solid run; (5) a Solid run shorter than the ratio between gas
+// cells on a level >= 1 is NotBuilt; (6) bottom solver HYPRE BoomerAMG (IJ interface, options namespace pb_mlmg_bottom, HYPRE row 0
+// pinned when the bottom is singular), gauge: the mean is removed per singular fluid region of each level-0 MG level (MaskedABecLap).
+// Smoother: AMReX GSRB, V(2,2). C/F: MLMG's own interpolation reads the coarse cell under an open C/F face and its tangential
+// neighbours, so a Solid/Known coarse cell there (HYPRE drops it from the stencil) is NotBuilt: the obstacle may not cross the C/F
+// interface. With that, MLMG and the assembled HYPRE operator are the same discretisation.
+// ---------------------------------------------------------------------------------------------------------------
+#if defined(PB_WITH_HYPRE) && defined(AMREX_USE_HYPRE)
+namespace {
+constexpr int kRunCap = 4;                // ruling 4: Solid runs are measured up to this many level-0 cells (ghost width)
+
+class MaskedABecLap final : public MLABecLaplacian {
+public:
+    using MLABecLaplacian::MLABecLaplacian;
+    Vector<Vector<MultiFab>> frac, akn;   // per AMR and MG level: excluded volume fraction, averaged Known a-term
+    void set_masks (int amrlev, MultiFab const& f, MultiFab const& k)
+    {
+        if (frac.empty()) { frac.resize(NAMRLevels()); akn.resize(NAMRLevels()); }
+        for (auto* v : {&frac, &akn}) {
+            (*v)[amrlev].clear();
+            for (int mg = 0; mg < NMGLevels(amrlev); ++mg) {
+                MultiFab const& a = m_a_coeffs[amrlev][mg];
+                (*v)[amrlev].emplace_back(a.boxArray(), a.DistributionMap(), 1, 0);
+                (*v)[amrlev].back().setVal(0.0);
+            }
+        }
+        MultiFab::Copy(frac[amrlev][0], f, 0, 0, 1, 0);
+        MultiFab::Copy(akn[amrlev][0], k, 0, 0, 1, 0);
+        m_chained = false; m_regions = false;
+    }
+    // Ruling 6 gauge (D-067 per connected fluid region): a region of an MG level of AMR level 0 (cells not fully excluded, joined by
+    // faces with beta > 0) without a Dirichlet face or Known term carries a constant null vector. MLMG then calls the two functions
+    // below on level 0 (its residual each cycle, the bottom right-hand side, and the bottom correction, which BoomerAMG returns with an
+    // arbitrary constant per region): they remove the mean per singular region over its cells, and leave excluded cells alone. On a
+    // finer AMR level (only the start of the solve, where the caller has already made the rhs compatible) nothing is done.
+    bool isSingular (int amrlev) const override { return amrlev == 0 && m_any_sing; }
+    bool isBottomSingular () const override { return m_any_sing; }
+    Vector<Real> getSolvabilityOffset (int amrlev, int mglev, MultiFab const& rhs) const override
+    {
+        if (amrlev != 0) { return Vector<Real>(1, Real(0)); }
+        Reg const& R = m_reg[mglev];
+        std::vector<Real> s(2*R.n, Real(0));
+        for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+            auto const& r = rhs.const_array(mfi);
+            auto const& g = R.id.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const int q = g(i,j,k);
+                if (q >= 0 && R.sing[q]) { s[2*q] += r(i,j,k); s[2*q+1] += Real(1); }
+            });
+        }
+        // coarse MG levels may live on a sub-communicator (AMReX consolidation): reduce over it, as MLCellLinOp does
+        if (R.n > 0) { ParallelAllReduce::Sum(s.data(), 2*R.n, ParallelContext::CommunicatorSub()); }
+        R.off.assign(R.n, Real(0));
+        for (int q = 0; q < R.n; ++q) { if (s[2*q+1] > 0) { R.off[q] = s[2*q] / s[2*q+1]; } }
+        return Vector<Real>(1, Real(0));
+    }
+    void fixSolvabilityByOffset (int amrlev, int mglev, MultiFab& rhs, Vector<Real> const&) const override
+    {
+        if (amrlev != 0) { return; }
+        Reg const& R = m_reg[mglev];
+        for (MFIter mfi(rhs); mfi.isValid(); ++mfi) {
+            auto const& r = rhs.array(mfi);
+            auto const& g = R.id.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const int q = g(i,j,k);
+                if (q >= 0 && R.sing[q]) { r(i,j,k) -= R.off[q]; }
+            });
+        }
+    }
+    // BoomerAMG's coarsest-grid elimination needs a nonsingular bottom matrix. AMReX (pb_mlmg_bottom.adjust_singular_matrix = 1) pins
+    // HYPRE row 0, the low corner of the first box of rank 0; that covers one singular region if the corner lies in it. Empty = Ok.
+    std::string bottom_pin_check () const
+    {
+        Reg const& R = m_reg.back();
+        int ns = 0;
+        for (char v : R.sing) { ns += v ? 1 : 0; }
+        if (ns == 0) { return std::string(); }
+        if (ns > 1) { return std::to_string(ns) + " separate singular fluid regions on the bottom MG level"; }
+        BoxArray const& ba = R.id.boxArray();
+        DistributionMapping const& dm = R.id.DistributionMap();
+        int ib = 0;
+        while (ib < int(ba.size()) && dm[ib] != 0) { ++ib; }
+        int q = -1;
+        if (ParallelDescriptor::MyProc() == 0 && ib < int(ba.size())) { { Box const bx = ba[ib]; q = R.id[ib](bx.smallEnd()); } }
+        ParallelDescriptor::ReduceIntMax(q);
+        if (q < 0 || !R.sing[q]) { return "the pinned bottom row (HYPRE row 0) is not in the singular fluid region"; }
+        return std::string();
+    }
+    void prepareForSolve () override
+    {
+        MLABecLaplacian::prepareForSolve();
+        if (!m_chained) { chain(); m_chained = true; }
+        for (int al = 0; al < NAMRLevels(); ++al) {
+            for (int mg = 0; mg < NMGLevels(al); ++mg) {
+                for (MFIter mfi(m_a_coeffs[al][mg]); mfi.isValid(); ++mfi) {
+                    auto const& a = m_a_coeffs[al][mg].array(mfi);
+                    auto const& f = frac[al][mg].const_array(mfi);
+                    auto const& k = akn[al][mg].const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int kk) { a(i,j,kk) = (f(i,j,kk) >= Real(1) - Real(1e-12)) ? Real(1) : k(i,j,kk); });
+                }
+            }
+        }
+        if (!m_regions) { regions_build_all(); m_regions = true; }     // MLMG::solve calls this again; the regions do not change
+    }
+private:
+    bool m_chained = false, m_regions = false;
+    struct Reg {
+        int n = 0;
+        iMultiFab id;                     // region of each cell (-1: fully excluded)
+        std::vector<char> sing;           // per region: no Dirichlet face and no Known term
+        mutable std::vector<Real> off;
+    };
+    Vector<Reg> m_reg;                    // per MG level of AMR level 0
+    bool m_any_sing = false;
+    // Connected fluid regions of MG level `mg` of AMR level 0: minimum-label propagation, then compact numbering by repeated global minimum.
+    void regions_build_all ()
+    {
+        m_reg.resize(NMGLevels(0));
+        m_any_sing = false;
+        for (int mg = 0; mg < NMGLevels(0); ++mg) {
+            regions_build(mg, m_reg[mg]);
+            for (char v : m_reg[mg].sing) { m_any_sing = m_any_sing || v; }
+        }
+    }
+    void regions_build (int mg, Reg& Rg)
+    {
+        iMultiFab& lab = Rg.id;
+        MultiFab const& a = m_a_coeffs[0][mg];
+        MultiFab const& f = frac[0][mg];
+        auto const& bc = m_b_coeffs[0][mg];
+        Geometry const& geom = m_geom[0][mg];
+        Box const dom = geom.Domain();
+        const int nx = dom.length(0), ny = dom.length(1);
+        lab.define(a.boxArray(), a.DistributionMap(), 1, 1);
+        lab.setVal(-1);
+        for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+            auto const& g = lab.array(mfi);
+            auto const& ff = f.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (ff(i,j,k) < Real(1) - Real(1e-12)) { g(i,j,k) = (i - dom.smallEnd(0)) + nx*((j - dom.smallEnd(1)) + ny*(k - dom.smallEnd(2))); }
+            });
+        }
+        for (bool changed = true; changed; ) {
+            lab.FillBoundary(geom.periodicity());
+            changed = false;
+            for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+                auto const& g = lab.array(mfi);
+                Array4<Real const> b[3] = {bc[0].const_array(mfi), bc[1].const_array(mfi), bc[2].const_array(mfi)};
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (g(i,j,k) < 0) { return; }
+                    for (int d = 0; d < 3; ++d) {
+                        for (int side = 0; side < 2; ++side) {
+                            IntVect q(i,j,k), fc(i,j,k); q[d] += side ? 1 : -1; fc[d] += side;
+                            if (!geom.isPeriodic(d) && !dom.contains(q)) { continue; }
+                            const int v = g(q[0],q[1],q[2]);
+                            if (v >= 0 && v < g(i,j,k) && b[d](fc[0],fc[1],fc[2]) > Real(0)) { g(i,j,k) = v; changed = true; }
+                        }
+                    }
+                });
+            }
+            ParallelDescriptor::ReduceBoolOr(changed);
+        }
+        // compact numbering: region q = the q-th smallest root label
+        Rg.n = 0; Rg.sing.clear();
+        iMultiFab id(lab.boxArray(), lab.DistributionMap(), 1, 0);
+        id.setVal(-1);
+        for (;;) {
+            int mn = std::numeric_limits<int>::max();
+            for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+                auto const& g = lab.const_array(mfi); auto const& o = id.const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (g(i,j,k) >= 0 && o(i,j,k) < 0) { mn = std::min(mn, g(i,j,k)); } });
+            }
+            ParallelDescriptor::ReduceIntMin(mn);
+            if (mn == std::numeric_limits<int>::max()) { break; }
+            bool fixed = false;                     // a Known term or an open Dirichlet domain face
+            for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+                auto const& g = lab.const_array(mfi); auto const& o = id.array(mfi); auto const& aa = a.const_array(mfi);
+                Array4<Real const> b[3] = {bc[0].const_array(mfi), bc[1].const_array(mfi), bc[2].const_array(mfi)};
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (g(i,j,k) != mn) { return; }
+                    o(i,j,k) = Rg.n;
+                    if (aa(i,j,k) > Real(0)) { fixed = true; }
+                    for (int d = 0; d < 3; ++d) {
+                        if (geom.isPeriodic(d)) { continue; }
+                        if (i*(d==0) + j*(d==1) + k*(d==2) == dom.smallEnd(d) && m_lobc[0][d] == LinOpBCType::Dirichlet && b[d](i,j,k) > Real(0)) { fixed = true; }
+                        IntVect fc(i,j,k); fc[d] += 1;
+                        if (fc[d] == dom.bigEnd(d) + 1 && m_hibc[0][d] == LinOpBCType::Dirichlet && b[d](fc[0],fc[1],fc[2]) > Real(0)) { fixed = true; }
+                    }
+                });
+            }
+            ParallelDescriptor::ReduceBoolOr(fixed);
+            Rg.sing.push_back(fixed ? 0 : 1);
+            ++Rg.n;
+        }
+        for (MFIter mfi(lab); mfi.isValid(); ++mfi) {
+            auto const& g = lab.array(mfi); auto const& o = id.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { g(i,j,k) = o(i,j,k); });
+        }
+    }
+    // The same averaging chain as MLABecLaplacian::averageDownCoeffs (finest AMR level first: its MG levels, then into the covered
+    // cells of the next coarser level's MG level 0; level 0's MG levels last).
+    void chain ()
+    {
+        for (int al = NAMRLevels() - 1; al >= 0; --al) {
+            for (int mg = 1; mg < NMGLevels(al); ++mg) {
+                const IntVect r = (al > 0) ? IntVect(this->mg_coarsen_ratio) : this->mg_coarsen_ratio_vec[mg-1];
+                amrex::average_down(frac[al][mg-1], frac[al][mg], 0, 1, r);
+                amrex::average_down(akn[al][mg-1], akn[al][mg], 0, 1, r);
+            }
+            if (al > 0) {
+                amrex::average_down(frac[al].back(), frac[al-1].front(), 0, 1, IntVect(this->mg_coarsen_ratio));
+                amrex::average_down(akn[al].back(), akn[al-1].front(), 0, 1, IntVect(this->mg_coarsen_ratio));
+            }
+        }
+    }
+};
+
+std::uint64_t composite_class_hash (PressureProblem const& p)
+{
+    std::uint64_t g = 1469598103934665603ULL;
+    for (auto const& L : p.levels) {
+        PressureProblem q; q.cell_class = L.cell_class;
+        g ^= class_content_hash(q); g *= 1099511628211ULL; g ^= g >> 29;
+    }
+    return g;
+}
+} // namespace
+
+struct MaskedMlmg {
+    std::uint64_t hash = 0;
+    bool has_known = false;
+    std::unique_ptr<MaskedABecLap> op;
+    std::unique_ptr<MLMG> mlmg;           // refers to *op: declared after it, destroyed first
+    std::vector<std::unique_ptr<iMultiFab>> cls1;   // cell codes with one ghost cell (Known terms of the right-hand side)
+    BackendStatus diag;                   // the mg_* fields
+    double setup_s = 0.0;
+};
+
+namespace {
+// Cell codes of every level with `ng` ghost cells: Gas 0, Solid 1, Known 2, covered by the next finer level -2, outside the domain -1.
+// Ghost cells of a level > 0 outside that level take the code of the coarse cell under them (C/F), then the level's own boxes.
+std::vector<std::unique_ptr<iMultiFab>> class_codes (PressureWorkspace::Impl const& W, PressureProblem const& p, std::vector<int> const& ng)
+{
+    std::vector<std::unique_ptr<iMultiFab>> cg(W.nlev);
+    for (int l = 0; l < W.nlev; ++l) {
+        cg[l] = std::make_unique<iMultiFab>(W.ba[l], W.dm[l], 1, ng[l]);
+        cg[l]->setVal(-1);
+        iMultiFab const* cls = p.levels[l].cell_class;
+        for (MFIter mfi(*cg[l]); mfi.isValid(); ++mfi) {
+            auto const& o = cg[l]->array(mfi);
+            auto const& u = W.unc[l]->const_array(mfi);
+            Array4<int const> c;
+            if (cls) { c = cls->const_array(mfi); }
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { o(i,j,k) = (u(i,j,k) == 0) ? -2 : (cls ? c(i,j,k) : int(CellGas)); });
+        }
+        if (l > 0) {
+            const IntVect r = W.ratio[l];
+            BoxArray cba(W.ba[l]); cba.grow(ng[l]); cba.coarsen(r);
+            iMultiFab ct(cba, W.dm[l], 1, 0);
+            ct.setVal(-1);
+            ct.ParallelCopy(*cg[l-1], 0, 0, 1, 0, 0, W.geom[l-1].periodicity());
+            for (MFIter mfi(*cg[l]); mfi.isValid(); ++mfi) {
+                auto const& o = cg[l]->array(mfi);
+                auto const& c = ct.const_array(mfi);
+                Box const vb = mfi.validbox();
+                amrex::LoopOnCpu(amrex::grow(vb, ng[l]), [&] (int i, int j, int k) {
+                    if (vb.contains(IntVect(i,j,k))) { return; }
+                    o(i,j,k) = c(amrex::coarsen(i, r[0]), amrex::coarsen(j, r[1]), amrex::coarsen(k, r[2]));
+                });
+            }
+        }
+        cg[l]->FillBoundary(W.geom[l].periodicity());
+        // FillBoundary leaves the ghost cells of a level > 0 that lie outside the periodic domain image; coarse-filled values there are kept.
+    }
+    return cg;
+}
+
+// Build the masked operator and its MLMG. Empty string = built; otherwise the NotBuilt reason.
+std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem const& p, std::array<BC,6> const& ebc, MaskedMlmg& M)
+{
+    const int n = W.nlev;
+    if (W.hidden >= 0) { return "masked composite MLMG with a one-cell direction is not built (use HYPRE)"; }
+    std::vector<int> R(n, 1), ng(n, 1);
+    for (int l = 1; l < n; ++l) { R[l] = R[l-1] * W.ratio[l][0]; }
+    for (int l = 0; l < n; ++l) { ng[l] = kRunCap * R[l] + 1; }
+    auto cg = class_codes(W, p, ng);
+
+    // Rulings 4 and 5: Solid runs along each direction that start and end at a gas cell (fluid-separating), on uncovered cells.
+    double tmin = std::numeric_limits<double>::max();
+    int nlong = 0;
+    Long thin = 0;
+    std::string thin_at;
+    for (int l = 0; l < n; ++l) {
+        for (MFIter mfi(*cg[l]); mfi.isValid(); ++mfi) {
+            auto const& c = cg[l]->const_array(mfi);
+            Box const gb = amrex::grow(mfi.validbox(), ng[l]);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (c(i,j,k) != CellSolid) { return; }
+                for (int d = 0; d < 3; ++d) {
+                    IntVect lo(i,j,k); lo[d] -= 1;
+                    if (c(lo[0],lo[1],lo[2]) != CellGas) { continue; }        // not the start of a run bounded by gas
+                    int len = 0; bool sep = false, lng = true;
+                    for (IntVect q(i,j,k); gb.contains(q); q[d] += 1) {
+                        const int v = c(q[0],q[1],q[2]);
+                        if (v == CellSolid) { ++len; continue; }
+                        lng = false; sep = (v == CellGas); break;
+                    }
+                    if (lng) { ++nlong; continue; }
+                    if (!sep) { continue; }
+                    if (l > 0 && len < W.ratio[l][d]) {
+                        if (thin++ == 0) { std::ostringstream m; m << "level " << l << " cell (" << i << "," << j << "," << k << ") direction " << d << ", " << len << " cell(s)"; thin_at = m.str(); }
+                    }
+                    tmin = std::min(tmin, double(len) / double(R[l]));
+                }
+            });
+        }
+    }
+    ParallelDescriptor::ReduceLongSum(thin);
+    ParallelDescriptor::ReduceIntSum(nlong);
+    ParallelDescriptor::ReduceRealMin(tmin);
+    if (thin > 0) {
+        // the first offending cell is only known on its rank; the count is global
+        return "masked composite MLMG is not built: " + std::to_string(thin) + " Solid wall(s) thinner than the refinement ratio between gas cells"
+               + (thin_at.empty() ? std::string() : " (e.g. " + thin_at + ")") + "; averaging would erase them (pressure/13 ruling 5): use HYPRE";
+    }
+    // C/F: MLMG's coarse/fine interpolation (order 2) reads the coarse cell under an open C/F face and its tangential neighbours. A
+    // Solid or Known coarse cell there enters with its MLMG value 0 (HYPRE drops it from the stencil), which is wrong for a
+    // pressure: the obstacle may not cross the C/F interface of a level >= 1.
+    Long cfbad = 0;
+    std::string cf_at;
+    for (int l = 1; l < n; ++l) {
+        const IntVect r = W.ratio[l];
+        iMultiFab inf(W.ba[l], W.dm[l], 1, 1);           // 1 on this level's cells (valid and periodic images), 0 elsewhere
+        inf.setVal(0); inf.setVal(1, 0, 1, 0);
+        inf.FillBoundary(W.geom[l].periodicity());
+        BoxArray cba(W.ba[l]); cba.coarsen(r); cba.grow(2);
+        iMultiFab cc(cba, W.dm[l], 1, 0);
+        cc.setVal(-1);
+        cc.ParallelCopy(*cg[l-1], 0, 0, 1, 0, 0, W.geom[l-1].periodicity());
+        Box const fdom = W.geom[l].Domain();
+        for (MFIter mfi(inf); mfi.isValid(); ++mfi) {
+            auto const& m = inf.const_array(mfi);
+            auto const& c = cg[l]->const_array(mfi);
+            auto const& k0 = cc.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (c(i,j,k) != CellGas) { return; }
+                for (int d = 0; d < 3; ++d) {
+                    for (int side = 0; side < 2; ++side) {
+                        IntVect q(i,j,k); q[d] += side ? 1 : -1;
+                        if (m(q[0],q[1],q[2]) == 1) { continue; }                                 // fine neighbour
+                        if (!W.geom[l].isPeriodic(d) && !fdom.contains(q)) { continue; }         // domain face
+                        IntVect Q = amrex::coarsen(q, r);
+                        if (k0(Q[0],Q[1],Q[2]) != CellGas) { continue; }                        // closed face
+                        for (int t = 0; t < 3; ++t) {
+                            if (t == d) { continue; }
+                            for (int st = -1; st <= 1; st += 2) {
+                                IntVect T = Q; T[t] += st;
+                                const int v = k0(T[0],T[1],T[2]);
+                                if (v == CellSolid || v == CellKnown) {
+                                    if (cfbad++ == 0) { std::ostringstream m2; m2 << "level " << l << " cell (" << i << "," << j << "," << k << ") face " << d << (side ? "+" : "-"); cf_at = m2.str(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    ParallelDescriptor::ReduceLongSum(cfbad);
+    if (cfbad > 0) {
+        return "masked composite MLMG is not built: a Solid/Known coarse cell lies in the coarse/fine interpolation stencil of "
+               + std::to_string(cfbad) + " open C/F face(s)" + (cf_at.empty() ? std::string() : " (e.g. " + cf_at + ")")
+               + "; the obstacle crosses the C/F interface (cover it with the fine level): use HYPRE";
+    }
+
+    int maxc = -1;
+    if (nlong > 0) { tmin = std::min(tmin, double(kRunCap)); }
+    if (tmin < std::numeric_limits<double>::max()) { maxc = std::max(0, int(std::floor(std::log2(tmin) + 1e-12))); }
+
+    // Level coefficients (MG level 0 of each AMR level).
+    std::vector<MultiFab> a0(n), f0(n), k0(n);
+    std::vector<std::array<MultiFab,3>> b0(n);
+    M.has_known = false;
+    for (int l = 0; l < n; ++l) {
+        Box const dom = W.geom[l].Domain();
+        const auto dx = W.geom[l].CellSizeArray();
+        a0[l].define(W.ba[l], W.dm[l], 1, 0); f0[l].define(W.ba[l], W.dm[l], 1, 0); k0[l].define(W.ba[l], W.dm[l], 1, 0);
+        for (MFIter mfi(a0[l]); mfi.isValid(); ++mfi) {
+            auto const& a = a0[l].array(mfi); auto const& f = f0[l].array(mfi); auto const& kn = k0[l].array(mfi);
+            auto const& c = cg[l]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const int v = c(i,j,k);
+                if (v == CellSolid || v == CellKnown) { a(i,j,k) = Real(1); f(i,j,k) = Real(1); kn(i,j,k) = Real(0); M.has_known = M.has_known || v == CellKnown; return; }
+                Real s = 0;                                     // gas (or covered: overwritten by the fine average)
+                for (int d = 0; d < 3; ++d) {
+                    for (int side = 0; side < 2; ++side) {
+                        IntVect q(i,j,k); q[d] += side ? 1 : -1;
+                        if (c(q[0],q[1],q[2]) == CellKnown) { s += Real(2) / (dx[d]*dx[d]); }
+                    }
+                }
+                a(i,j,k) = s; f(i,j,k) = Real(0); kn(i,j,k) = s;
+            });
+        }
+        for (int d = 0; d < 3; ++d) {
+            b0[l][d].define(amrex::convert(W.ba[l], IntVect::TheDimensionVector(d)), W.dm[l], 1, 0);
+            for (MFIter mfi(b0[l][d]); mfi.isValid(); ++mfi) {
+                auto const& b = b0[l][d].array(mfi);
+                auto const& c = cg[l]->const_array(mfi);
+                const bool per = W.geom[l].isPeriodic(d);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    IntVect hi(i,j,k), lo(i,j,k); lo[d] -= 1;
+                    auto open = [] (int v) { return v == CellGas || v == -2; };     // covered faces are overwritten by the fine average
+                    bool g;
+                    if (!per && hi[d] == dom.smallEnd(d)) { g = open(c(hi[0],hi[1],hi[2])); }
+                    else if (!per && lo[d] == dom.bigEnd(d)) { g = open(c(lo[0],lo[1],lo[2])); }
+                    else { g = open(c(hi[0],hi[1],hi[2])) && open(c(lo[0],lo[1],lo[2])); }
+                    b(i,j,k) = g ? Real(1) : Real(0);
+                });
+            }
+        }
+    }
+    ParallelDescriptor::ReduceBoolOr(M.has_known);
+
+    LPInfo info;
+    if (maxc >= 0) { info.setMaxCoarseningLevel(maxc); }
+    Vector<Geometry> geoms(W.geom.begin(), W.geom.end());
+    Vector<BoxArray> bas(W.ba.begin(), W.ba.end());
+    Vector<DistributionMapping> dms(W.dm.begin(), W.dm.end());
+    M.mlmg.reset();
+    M.op = std::make_unique<MaskedABecLap>(geoms, bas, dms, info);
+    M.op->setMaxOrder(2);
+    Array<LinOpBCType,AMREX_SPACEDIM> lo{lin_bc(ebc[face_index(0,0)]), lin_bc(ebc[face_index(1,0)]), lin_bc(ebc[face_index(2,0)])};
+    Array<LinOpBCType,AMREX_SPACEDIM> hi{lin_bc(ebc[face_index(0,1)]), lin_bc(ebc[face_index(1,1)]), lin_bc(ebc[face_index(2,1)])};
+    M.op->setDomainBC(lo, hi);
+    M.op->setScalars(Real(1), Real(1));
+    for (int l = 0; l < n; ++l) {
+        M.op->setLevelBC(l, nullptr);
+        M.op->setACoeffs(l, a0[l]);
+        M.op->setBCoeffs(l, Array<MultiFab const*,AMREX_SPACEDIM>{&b0[l][0], &b0[l][1], &b0[l][2]});
+        M.op->set_masks(l, f0[l], k0[l]);
+    }
+    M.op->prepareForSolve();
+    {
+        const std::string e = M.op->bottom_pin_check();
+        if (!e.empty()) { return "masked composite MLMG is not built: " + e + " (pressure/13 ruling 6 gauge for the BoomerAMG bottom): use HYPRE"; }
+    }
+
+    // Diagnostics of rulings 1-4 on the built hierarchy.
+    BackendStatus& D = M.diag;
+    D = BackendStatus();
+    D.mg_max_coarsening = maxc;
+    D.mg_levels0 = M.op->NMGLevels(0);
+    for (int al = 0; al < n; ++al) {
+        for (int mg = 0; mg < M.op->NMGLevels(al); ++mg) {
+            for (MFIter mfi(M.op->m_a_coeffs[al][mg]); mfi.isValid(); ++mfi) {
+                auto const& a = M.op->m_a_coeffs[al][mg].const_array(mfi);
+                auto const& f = M.op->frac[al][mg].const_array(mfi);
+                auto const& k = M.op->akn[al][mg].const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int kk) {
+                    if (f(i,j,kk) >= Real(1) - Real(1e-12)) { ++D.mg_solid_cells; if (a(i,j,kk) != Real(1)) { ++D.mg_solid_bad; } }
+                    else if (f(i,j,kk) > Real(0)) { ++D.mg_partial_cells; if (a(i,j,kk) != k(i,j,kk)) { ++D.mg_partial_shifted; } }
+                });
+            }
+        }
+    }
+    for (int d = 0; d < 3; ++d) {
+        for (MFIter mfi(M.op->m_b_coeffs[0][0][d]); mfi.isValid(); ++mfi) {
+            auto const& b = M.op->m_b_coeffs[0][0][d].const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (b(i,j,k) > Real(0) && b(i,j,k) < Real(1)) { ++D.mg_half_faces; } });
+        }
+    }
+    Long sums[5] = {Long(D.mg_solid_cells), Long(D.mg_solid_bad), Long(D.mg_partial_cells), Long(D.mg_partial_shifted), Long(D.mg_half_faces)};
+    ParallelDescriptor::ReduceLongSum(sums, 5);
+    D.mg_solid_cells = sums[0]; D.mg_solid_bad = sums[1]; D.mg_partial_cells = sums[2]; D.mg_partial_shifted = sums[3]; D.mg_half_faces = sums[4];
+
+    // Ruling 6: BoomerAMG bottom (pressure/13 family; ParmParse pb_mlmg_bottom.bamg_* overrides).
+    {
+        ParmParse pp("pb_mlmg_bottom");
+        int ct = 8, it = 6, rd = 18, ru = 18, rc = 9, ml = 25; Real st = 0.25;
+        pp.queryAdd("bamg_coarsen_type", ct); pp.queryAdd("bamg_interp_type", it); pp.queryAdd("bamg_strong_threshold", st);
+        pp.queryAdd("bamg_down_relax_type", rd); pp.queryAdd("bamg_up_relax_type", ru); pp.queryAdd("bamg_coarse_relax_type", rc);
+        pp.queryAdd("bamg_max_levels", ml);
+        int adj = 1; pp.queryAdd("adjust_singular_matrix", adj);
+    }
+    M.mlmg = std::make_unique<MLMG>(*M.op);
+    {
+        std::string bot = "hypre";              // diagnostics only: pb_mlmg_bottom.solver = smoother | bicgstab
+        ParmParse("pb_mlmg_bottom").query("solver", bot);
+        M.mlmg->setBottomSolver(bot == "smoother" ? BottomSolver::smoother : bot == "bicgstab" ? BottomSolver::bicgstab : BottomSolver::hypre);
+    }
+    M.mlmg->setHypreInterface(Hypre::Interface::ij);
+    M.mlmg->setHypreOptionsNamespace("pb_mlmg_bottom");
+    M.cls1.clear();
+    for (int l = 0; l < n; ++l) {
+        M.cls1.push_back(std::make_unique<iMultiFab>(W.ba[l], W.dm[l], 1, 1));
+        iMultiFab::Copy(*M.cls1[l], *cg[l], 0, 0, 1, 1);
+    }
+    return std::string();
+}
+} // namespace
+#endif
+
+// ---------------------------------------------------------------------------------------------------------------
 // Masked composite solve (Q1: assembled HYPRE; D3/D4/D6)
 // ---------------------------------------------------------------------------------------------------------------
 namespace {
@@ -513,11 +1031,11 @@ void average_down_gas (PressureWorkspace::Impl const& W, PressureProblem const& 
     }
 }
 
-PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws, bool full)
+PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws, bool full, bool use_mlmg)
 {
     MFIter::allowMultipleMFIters(true);
     PressureResult R;
-    R.backend = "HYPRE";
+    R.backend = use_mlmg ? "MLMG" : "HYPRE";
 #ifndef PB_WITH_HYPRE
     R.status = Status::NotBuilt; R.message = kHypreNotBuilt; R.backend = ""; return R;
 #else
@@ -626,31 +1144,102 @@ PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions
         }
     }
 
-    // HYPRE system with sealed pins.
-    std::vector<HypreLayoutLevel> hl;
-    for (int l = 0; l < nlev; ++l) {
-        HypreLayoutLevel L;
-        L.ba = W.ba[l]; L.dm = W.dm[l]; L.geom = W.geom[l]; L.ratio = W.ratio[l];
-        L.cell_class = p.levels[l].cell_class;
-        L.known_value = p.levels[l].known_value;
-        hl.push_back(L);
-    }
     std::array<BC,6> const ebc = effective_bc(p.bc, p.levels[0].geom.Domain());
-    std::vector<std::pair<int, IntVect>> pins;
-    for (auto const& cp : cm.pins) { pins.push_back({cp.level, cp.cell}); }
-    const bool reused = W.hsys && W.hsys->ok() && W.hsys->masked() && W.hsys->matches_masked(hl, ebc, o.hypre, pins);
-    if (!reused) { W.hsys = std::make_unique<HypreSystem>(hl, ebc, o.hypre, pins); }
-    if (!W.hsys->ok()) {
-        R.status = Status::NotBuilt; R.message = W.hsys->message(); R.backend = "";
-        W.hsys.reset();
-        return R;
+    BackendStatus bs;
+    std::vector<std::unique_ptr<MultiFab>> mrhs;          // masked MLMG: its right-hand side s (residual check)
+    if (use_mlmg) {
+#ifdef AMREX_USE_HYPRE
+        const std::uint64_t h = composite_class_hash(p);
+        const bool reused = W.mmg && W.mmg->hash == h;
+        if (!reused) {
+            const double t0 = amrex::second();
+            auto M = std::make_shared<MaskedMlmg>();
+            std::string err = build_masked_mlmg(W, p, ebc, *M);
+            if (!err.empty()) { W.mmg.reset(); R.status = Status::NotBuilt; R.message = err; R.backend = ""; return R; }
+            M->hash = h; M->setup_s = amrex::second() - t0;
+            W.mmg = M;
+        }
+        MaskedMlmg& M = *W.mmg;
+        // s = -b + sum over Known faces 2 g/dx^2 on uncovered gas cells, 0 elsewhere (A = -L); excluded cells start at 0.
+        for (int l = 0; l < nlev; ++l) {
+            mrhs.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+            std::unique_ptr<MultiFab> kv;
+            if (M.has_known) {
+                kv = std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 1);
+                kv->setVal(0.0);
+                if (p.levels[l].known_value) { MultiFab::Copy(*kv, *p.levels[l].known_value, 0, 0, 1, 0); }
+                kv->FillBoundary(W.geom[l].periodicity());
+            }
+            const auto dx = W.geom[l].CellSizeArray();
+            for (MFIter mfi(*mrhs[l]); mfi.isValid(); ++mfi) {
+                auto const& sr = mrhs[l]->array(mfi);
+                auto const& bb = b[l]->const_array(mfi);
+                auto const& lab = cm.label[l]->const_array(mfi);
+                auto const& c = M.cls1[l]->const_array(mfi);
+                auto const& f = phi[l]->array(mfi);
+                Array4<Real const> g;
+                if (kv) { g = kv->const_array(mfi); }
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (c(i,j,k) == CellSolid || c(i,j,k) == CellKnown) { f(i,j,k) = Real(0); }
+                    if (lab(i,j,k) < 0) { sr(i,j,k) = Real(0); return; }
+                    Real v = -bb(i,j,k);
+                    if (kv) {
+                        for (int d = 0; d < 3; ++d) {
+                            for (int side = 0; side < 2; ++side) {
+                                IntVect q(i,j,k); q[d] += side ? 1 : -1;
+                                if (c(q[0],q[1],q[2]) == CellKnown) { v += Real(2) * g(q[0],q[1],q[2]) / (dx[d]*dx[d]); }
+                            }
+                        }
+                    }
+                    sr(i,j,k) = v;
+                });
+            }
+        }
+        MLMG& mlmg = *M.mlmg;
+        mlmg.setVerbose(o.verbose >= 3 ? o.verbose - 2 : 0);
+        mlmg.setMaxIter(o.max_iter);
+        mlmg.setConvergenceNormType(MLMGNormType::bnorm);
+        mlmg.setThrowException(true);
+        Vector<MultiFab const*> ps;
+        for (auto const& m : mrhs) { ps.push_back(m.get()); }
+        // Auto = plain V-cycles (pressure/13 ruling 7), run like None to tol/10 of the own residual (mlmg_solve).
+        const Krylov kk = (o.mlmg_krylov == Krylov::Auto) ? Krylov::None : o.mlmg_krylov;
+        bs = mlmg_solve(mlmg, ptrs(phi), ps, kk, Real(o.tol_rel), o.max_iter, true);
+        HYPRE_ClearAllErrors();     // the BoomerAMG bottom stops at its own tolerance or iteration cap; its error flag is sticky
+        const BackendStatus& D = M.diag;
+        bs.mg_max_coarsening = D.mg_max_coarsening; bs.mg_levels0 = D.mg_levels0;
+        bs.mg_solid_cells = D.mg_solid_cells; bs.mg_solid_bad = D.mg_solid_bad; bs.mg_partial_cells = D.mg_partial_cells;
+        bs.mg_partial_shifted = D.mg_partial_shifted; bs.mg_half_faces = D.mg_half_faces;
+        bs.plan_reused = reused;
+        bs.setup_seconds = reused ? 0.0 : M.setup_s;
+        R.backend_status = bs;
+#endif
+    } else {
+        // HYPRE system with sealed pins.
+        std::vector<HypreLayoutLevel> hl;
+        for (int l = 0; l < nlev; ++l) {
+            HypreLayoutLevel L;
+            L.ba = W.ba[l]; L.dm = W.dm[l]; L.geom = W.geom[l]; L.ratio = W.ratio[l];
+            L.cell_class = p.levels[l].cell_class;
+            L.known_value = p.levels[l].known_value;
+            hl.push_back(L);
+        }
+        std::vector<std::pair<int, IntVect>> pins;
+        for (auto const& cp : cm.pins) { pins.push_back({cp.level, cp.cell}); }
+        const bool reused = W.hsys && W.hsys->ok() && W.hsys->masked() && W.hsys->matches_masked(hl, ebc, o.hypre, pins);
+        if (!reused) { W.hsys = std::make_unique<HypreSystem>(hl, ebc, o.hypre, pins); }
+        if (!W.hsys->ok()) {
+            R.status = Status::NotBuilt; R.message = W.hsys->message(); R.backend = "";
+            W.hsys.reset();
+            return R;
+        }
+        std::vector<MultiFab*> ph; std::vector<MultiFab const*> bb;
+        for (int l = 0; l < nlev; ++l) { ph.push_back(phi[l].get()); bb.push_back(b[l].get()); }
+        bs = W.hsys->solve(ph, bb, o.tol_rel, o.max_iter, o.use_initial_guess);
+        bs.plan_reused = reused;
+        bs.setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
+        R.backend_status = bs;
     }
-    std::vector<MultiFab*> ph; std::vector<MultiFab const*> bb;
-    for (int l = 0; l < nlev; ++l) { ph.push_back(phi[l].get()); bb.push_back(b[l].get()); }
-    BackendStatus bs = W.hsys->solve(ph, bb, o.tol_rel, o.max_iter, o.use_initial_guess);
-    bs.plan_reused = reused;
-    bs.setup_seconds = reused ? 0.0 : W.hsys->setup_seconds();
-    R.backend_status = bs;
 
     // Fill Solid=0, Known=g on every level.
     for (int l = 0; l < nlev; ++l) {
@@ -751,27 +1340,79 @@ PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions
     // Residual via HYPRE apply: A = -V L ⇒ L phi = -A phi / V; res = b - L phi = b + Aphi/V (Known already in A/RHS).
     if (o.check_residual && full) {
         LevelMFs& phv = phr.empty() ? phi : phr;
-        LevelMFs Ax;
-        for (int l = 0; l < nlev; ++l) {
-            Ax.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
-            Ax[l]->setVal(0.0);
-        }
-        std::vector<MultiFab const*> px; std::vector<MultiFab*> py;
-        for (int l = 0; l < nlev; ++l) { px.push_back(phv[l].get()); py.push_back(Ax[l].get()); }
-        W.hsys->apply(px, py);
         LevelMFs res;
-        for (int l = 0; l < nlev; ++l) {
-            res.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
-            const double v = double(W.vol[l]);
-            for (MFIter mfi(*res[l]); mfi.isValid(); ++mfi) {
-                auto const& r = res[l]->array(mfi);
-                auto const& bb = b[l]->const_array(mfi);
-                auto const& ax = Ax[l]->const_array(mfi);
-                auto const& lab = cm.label[l]->const_array(mfi);
-                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
-                    if (lab(i,j,k) < 0) { r(i,j,k) = Real(0); return; }
-                    r(i,j,k) = Real(double(bb(i,j,k)) + double(ax(i,j,k)) / v);
-                });
+        if (use_mlmg) {
+#ifdef AMREX_USE_HYPRE
+            // compResidual on a copy (it fills ghost cells): s - A phi = -(b - L phi) on gas cells, 0 on excluded cells.
+            LevelMFs tmp, rr;
+            for (int l = 0; l < nlev; ++l) {
+                tmp.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 1)); tmp[l]->setVal(0.0);
+                MultiFab::Copy(*tmp[l], *phv[l], 0, 0, 1, 0);
+                rr.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0)); rr[l]->setVal(0.0);
+            }
+            Vector<MultiFab const*> ps;
+            for (auto const& m : mrhs) { ps.push_back(m.get()); }
+            W.mmg->mlmg->compResidual(ptrs(rr), ptrs(tmp), ps);
+            for (int l = 0; l < nlev; ++l) {
+                res.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+                for (MFIter mfi(*res[l]); mfi.isValid(); ++mfi) {
+                    auto const& r = res[l]->array(mfi);
+                    auto const& q = rr[l]->const_array(mfi);
+                    auto const& lab = cm.label[l]->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { r(i,j,k) = (lab(i,j,k) < 0) ? Real(0) : -q(i,j,k); });
+                }
+            }
+#endif
+        } else {
+            LevelMFs Ax;
+            for (int l = 0; l < nlev; ++l) {
+                Ax.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+                Ax[l]->setVal(0.0);
+            }
+            // The assembled matrix pins one cell per singular component (identity row, column eliminated). Applied to a field whose
+            // pin value is not 0 it misses that coupling in the pin's neighbours, so apply it to phv shifted per component to phi_pin = 0
+            // (L of the true operator is unchanged by a constant on a singular component).
+            LevelMFs pz;
+            {
+                const int nc = int(cm.comps.size());
+                std::vector<double> pv(nc, 0.0);
+                for (auto const& cp : cm.pins) {
+                    for (MFIter mfi(*phv[cp.level]); mfi.isValid(); ++mfi) {
+                        if (!mfi.validbox().contains(cp.cell)) { continue; }
+                        const int id = cm.label[cp.level]->const_array(mfi)(cp.cell);
+                        if (id >= 0) { pv[id] = double(phv[cp.level]->const_array(mfi)(cp.cell)); }
+                    }
+                }
+                if (nc > 0) { ParallelDescriptor::ReduceRealSum(pv.data(), nc); }
+                for (int l = 0; l < nlev; ++l) {
+                    pz.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, phv[l]->nGrow()));
+                    MultiFab::Copy(*pz[l], *phv[l], 0, 0, 1, phv[l]->nGrow());
+                    for (MFIter mfi(*pz[l]); mfi.isValid(); ++mfi) {
+                        auto const& a = pz[l]->array(mfi);
+                        auto const& lab = cm.label[l]->const_array(mfi);
+                        amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                            const int id = lab(i,j,k);
+                            if (id >= 0 && cm.comps[id].singular) { a(i,j,k) -= Real(pv[id]); }
+                        });
+                    }
+                }
+            }
+            std::vector<MultiFab const*> px; std::vector<MultiFab*> py;
+            for (int l = 0; l < nlev; ++l) { px.push_back(pz[l].get()); py.push_back(Ax[l].get()); }
+            W.hsys->apply(px, py);
+            for (int l = 0; l < nlev; ++l) {
+                res.push_back(std::make_unique<MultiFab>(W.ba[l], W.dm[l], 1, 0));
+                const double v = double(W.vol[l]);
+                for (MFIter mfi(*res[l]); mfi.isValid(); ++mfi) {
+                    auto const& r = res[l]->array(mfi);
+                    auto const& bb = b[l]->const_array(mfi);
+                    auto const& ax = Ax[l]->const_array(mfi);
+                    auto const& lab = cm.label[l]->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                        if (lab(i,j,k) < 0) { r(i,j,k) = Real(0); return; }
+                        r(i,j,k) = Real(double(bb(i,j,k)) + double(ax(i,j,k)) / v);
+                    });
+                }
             }
         }
         ResidualSums S;
@@ -867,12 +1508,6 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     Selection const sel0 = select_composite(p, o.backend);
     const bool use_hypre = (sel0.kind == BackendKind::HYPRE) || (o.backend == BackendKind::HYPRE);
     R.backend = use_hypre ? "HYPRE" : "MLMG";
-    if (masked && !use_hypre) {
-        R.status = Status::NotBuilt;
-        R.message = "composite with masked cells is not built on MLMG (C/F interpolation cannot exclude Solid/Known per stencil; Q1: use assembled HYPRE)";
-        R.backend = "";
-        return R;
-    }
     PressureWorkspace local;
     if (!ws) { ws = &local; }
     double setup_s = 0.0;   // workspace (MLMG operator) build; 0 when it was reused
@@ -889,7 +1524,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     R.nlevels = nlev;
 
     if (masked) {
-        return solve_composite_masked(p, o, ws, full);
+        return solve_composite_masked(p, o, ws, full, !use_hypre);   // explicit MLMG: masked composite MLMG (P3); Auto stays HYPRE (D-092)
     }
 
     bool open = false;

@@ -39,7 +39,8 @@ public:
 // MLMG solve of L x = b (x: initial guess, one ghost layer) to the relative tolerance tol with the Krylov choice k (PressureOptions::mlmg_krylov,
 // Auto = None): V-cycles, or PCG / GMRES / BiCGSTAB with one V-cycle per iteration as preconditioner. MLMGBackend.cpp; the composite solve uses it too.
 BackendStatus mlmg_solve (amrex::MLMG& mlmg, amrex::Vector<amrex::MultiFab*> const& x, amrex::Vector<amrex::MultiFab const*> const& b,
-                          Krylov k, amrex::Real tol, int max_iter);
+                          Krylov k, amrex::Real tol, int max_iter,
+                         bool keep_bottom = false);
 
 std::unique_ptr<PressureBackend> make_fft_backend ();
 std::unique_ptr<PressureBackend> make_mlmg_backend ();

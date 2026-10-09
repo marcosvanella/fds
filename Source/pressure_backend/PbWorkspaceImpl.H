@@ -14,10 +14,13 @@
 #include <AMReX_MLPoisson.H>
 
 #include <cmath>
+#include <memory>
 
 namespace pb {
 
 using namespace amrex;
+
+struct MaskedMlmg;                                    // CompositeSolve.cpp
 
 struct PressureWorkspace::Impl {
     int nlev = 0;
@@ -55,6 +58,8 @@ struct PressureWorkspace::Impl {
     } mask;
     // HYPRE backend set-up (matrix + BoomerAMG hierarchy), built on the first HYPRE solve of this layout and dropped with the Impl
     // (rebuild() / discard()). Single level: the backend object (it owns the HypreSystem); composite: the system itself.
+    // Masked composite MLMG operator and solver (P3; CompositeSolve.cpp), keyed on the mask content; dropped with the Impl at a regrid.
+    std::shared_ptr<MaskedMlmg> mmg;
 #ifdef PB_WITH_HYPRE
     std::unique_ptr<PressureBackend> hypre;
     std::unique_ptr<HypreSystem> hsys;

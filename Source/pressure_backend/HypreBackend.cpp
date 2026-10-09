@@ -644,6 +644,7 @@ void HypreSystem::Impl::build_masked ()
         // class + known with one ghost (periodic wrap; outside non-periodic = Solid / 0)
         cls_g[l] = std::make_unique<iMultiFab>(lev[l].ba, lev[l].dm, 1, 1);
         known_g[l] = std::make_unique<MultiFab>(lev[l].ba, lev[l].dm, 1, 1);
+        cls_g[l]->setVal(CellGas); known_g[l]->setVal(0.0);    // C/F ghost cells are not filled below; never leave them uninitialised
         if (lev[l].cell_class) {
             for (MFIter mfi(*cls_g[l]); mfi.isValid(); ++mfi) {
                 auto const& o = cls_g[l]->array(mfi);

@@ -221,7 +221,7 @@ struct NegatedMLMG : GMRESMLMG {
 };
 }
 
-BackendStatus mlmg_solve (MLMG& mlmg, Vector<MultiFab*> const& x, Vector<MultiFab const*> const& b, Krylov k, Real tol, int max_iter)
+BackendStatus mlmg_solve (MLMG& mlmg, Vector<MultiFab*> const& x, Vector<MultiFab const*> const& b, Krylov k, Real tol, int max_iter, bool keep_bottom)
 {
     BackendStatus st;
     const double t0 = amrex::second();
@@ -242,7 +242,7 @@ BackendStatus mlmg_solve (MLMG& mlmg, Vector<MultiFab*> const& x, Vector<MultiFa
     using V = Vector<MultiFab>;
     GMRESMLMG op(mlmg);
     const BottomSolver bottom = mlmg.getBottomSolver();
-    mlmg.setBottomSolver(BottomSolver::smoother);
+    if (!keep_bottom) { mlmg.setBottomSolver(BottomSolver::smoother); }   // keep_bottom: the masked composite keeps its BoomerAMG bottom (pressure/13 ruling 6)
     V res = op.makeVecLHS(), cor = op.makeVecLHS();
     mlmg.apply(GetVecOfPtrs(res), x);
     for (int l = 0; l < int(x.size()); ++l) { MultiFab::Saxpy(res[l], Real(-1), *b[l], 0, 0, 1, 0); }
