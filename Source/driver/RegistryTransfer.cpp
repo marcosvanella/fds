@@ -127,7 +127,7 @@ void RegistryTransfer::prolong(int level, bool remade)
     if (Fo) {
         long n = 0;
         for (const char* nm : kCell) { Ff[nm].ParallelCopy(Fo->operator[](nm), 0, 0, Ff[nm].nComp(), 0, 0); }
-        for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) Ff[kFace[d][s]].ParallelCopy(Fo->operator[](kFace[d][s]), 0, 0, 1, 0, 0);
+        for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) Ff[kFace[d][s]].ParallelCopy(Fo->operator[](kFace[d][s]), 0, 0, 1, 0, 0, lf.geom.periodicity());   // periodic image: a new face on one copy of a periodic domain face takes the old data of the other copy
         const amrex::BoxArray& ob = m_reg.retired_level(level)->ba;
         for (amrex::MFIter mfi(Ff["RHO"]); mfi.isValid(); ++mfi) {
             const amrex::Box b = mfi.validbox();

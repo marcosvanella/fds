@@ -1,0 +1,19 @@
+0016 regrid-old-fine-face-period (Role 3 -> Role 1). Against committed Source/driver/RegistryTransfer.cpp (HEAD 65983d4189; unchanged since 41329dd277).
+Apply from the repo root: git apply 0016-regrid-old-fine-face-period.patch
+RegistryTransfer::prolong (the driver's regrid path, fill_remade_level) copies the old fine face velocities onto the new fine level without the fine periodicity:
+a new fine box on one copy of a periodic domain face (x = N) whose old data lies on the other copy (x = 0) keeps the coarse prolongation there, while the x = 0 copy
+holds the old fine values -> the two copies differ, the cells next to the seam carry a div error that the post-regrid projection cannot remove (one phi, two face values).
+Same fix as fdsrt::prolong_faces_level (regrid_transport commit, `period` argument).
+
+diff --git a/Source/driver/RegistryTransfer.cpp b/Source/driver/RegistryTransfer.cpp
+--- a/Source/driver/RegistryTransfer.cpp
++++ b/Source/driver/RegistryTransfer.cpp
+@@ -127,7 +127,7 @@
+     if (Fo) {
+         long n = 0;
+         for (const char* nm : kCell) { Ff[nm].ParallelCopy(Fo->operator[](nm), 0, 0, Ff[nm].nComp(), 0, 0); }
+-        for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) Ff[kFace[d][s]].ParallelCopy(Fo->operator[](kFace[d][s]), 0, 0, 1, 0, 0);
++        for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) Ff[kFace[d][s]].ParallelCopy(Fo->operator[](kFace[d][s]), 0, 0, 1, 0, 0, lf.geom.periodicity());   // periodic image: a new face on one copy of a periodic domain face takes the old data of the other copy
+         const amrex::BoxArray& ob = m_reg.retired_level(level)->ba;
+         for (amrex::MFIter mfi(Ff["RHO"]); mfi.isValid(); ++mfi) {
+             const amrex::Box b = mfi.validbox();
