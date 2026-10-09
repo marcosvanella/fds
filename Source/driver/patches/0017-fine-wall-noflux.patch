@@ -1,0 +1,19 @@
+0017 fine-wall-noflux (Role 3 -> Role 1). Built against the COMMITTED Source/driver/TimeLoop.cpp of HEAD 1929665620 WITH patch 0015 applied (0015 adds BcStep::vel_bc wiring).
+Needs commit 85cc2d7291 (GhostExchange BcStep::zero_wall_flux). Apply from the repo root after 0013/0014/0015: git apply 0017-fine-wall-noflux.patch
+pressure_scheme_composite: after NO_FLUX of every level, a fine level zeroes FVX/FVY/FVZ on its INERT/MIRROR domain wall faces (FDS FVZ(K=0), FVZ(KBAR)), before
+composite_average_down_flux and the PRHS. Fine boxes have no wall cells, so NO_FLUX left the VELOCITY_FLUX value there; it entered the fine RHS row k=0
+((FVZ(K-1)-FVZ(K))/dz), the averaged-down coarse BZS, and the predictor/corrector W(K=0) = W - dt*(FVZ(0)+dH/dz); mirror_domain_edges then reset W(K=0)=0,
+leaving max|div u - D| ~ dt*FVZ/dz in the k=0 row.
+
+diff --git a/Source/driver/TimeLoop.cpp b/Source/driver/TimeLoop.cpp
+index a989f0f998..4294165936 100644
+--- a/Source/driver/TimeLoop.cpp
++++ b/Source/driver/TimeLoop.cpp
+@@ -1254,6 +1254,7 @@ struct TimeLoop::Impl {
+         each_local([&](int nm) { fds_g_match_flux(nm); });
+         wrap_check("composite after match");
+         for_levels([&](int) { each_local([&](int nm) { fds_p_noflux(dt, nm, 1); }); });
++        for (int l = 1; l < nl; ++l) lc[l].bc->zero_wall_flux();   // NO_FLUX of a fine box at an INERT/MIRROR domain face (no wall cell there): FV = 0 on the wall face (patch 0017)
+         wrap_check("composite after noflux");
+         { ProfScope prof_ad(4); composite_average_down_flux(reg, nl); }
+         wrap_check("composite after avg-down");

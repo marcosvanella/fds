@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sys/resource.h>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -1012,6 +1013,48 @@ struct TimeLoop::Impl {
             if (bm > 0.0) amrex::Print() << "  [pb] inhomogeneous BXS..BZF max|·|=" << bm << " (fold before solve)\n";
         }
     }
+    // P2 solver study (RunOptions::pressure_*): backend, Krylov method and tolerance of every solve; one CSV row per solve (rank 0).
+    // pressure/13 rules: shared true relative L2 residual check at the tolerance on every solve, setup frozen between regrids (workspaces), zero initial
+    // guess unless pressure.warm_start=1 (then the previous solution: `warm` keeps phi between solves).
+    std::FILE* pcsv = nullptr;
+    bool study = false, warm = false;
+    int nsetup = 0;               // operator set-ups seen so far: a later one (regrid, changed workspace) is a rebuild
+    pb::PressureWorkspace pws0;   // level-0 solves of the study
+    void study_options(pb::PressureOptions& o)
+    {
+        const RunOptions& ro = L.m_o;
+        study = !(ro.pressure_backend.empty() && ro.krylov.empty() && ro.pressure_csv.empty());
+        if (!study) return;
+        const std::string& b = ro.pressure_backend;
+        const std::string& k = ro.krylov;
+        if (b == "mlmg") o.backend = pb::BackendKind::MLMG;
+        else if (b == "hypre") o.backend = pb::BackendKind::HYPRE;
+        else if (!b.empty() && b != "auto") die("--pressure-backend " + b + ": use auto, mlmg or hypre");
+        using K = pb::HypreKrylov;
+        o.mlmg_krylov = o.hypre.krylov = k == "none" ? K::None : k == "gmres" ? K::GMRES : k == "bicgstab" ? K::BiCGSTAB : k == "cg" ? K::PCG : K::Auto;
+        if (o.mlmg_krylov == K::Auto && !k.empty()) die("--krylov " + k + ": use none, gmres, bicgstab or cg");
+        o.tol_rel = ro.pressure_tol;
+        pb::query_options(o);
+        o.check_residual = true; o.trigger = pb::SolveDebug; o.residual_tol = o.tol_rel;   // full path: true residual on every solve
+        warm = o.use_initial_guess;
+        if (pcsv || !amrex::ParallelDescriptor::IOProcessor()) return;
+        pcsv = std::fopen((ro.pressure_csv.empty() ? dir + "/" + ro.chid + "_pressure.csv" : ro.pressure_csv).c_str(), "w");
+        if (!pcsv) die("cannot open the pressure CSV");
+        std::setvbuf(pcsv, nullptr, _IOLBF, 0);
+        std::fprintf(pcsv, "step,stage,level,backend,krylov_used,guess,first,rebuilt,iterations,own_residual,true_rel2,true_ok,setup_s,solve_s,rss_max_mb,rss_sum_mb,div_max\n");
+    }
+    void study_row(bool pred, const char* level, const pb::PressureResult& r)
+    {
+        if (!study) return;
+        rusage ru; getrusage(RUSAGE_SELF, &ru);
+        long rmax = ru.ru_maxrss, rsum = ru.ru_maxrss;   // KiB, peak resident set of this rank
+        amrex::ParallelDescriptor::ReduceLongMax(rmax); amrex::ParallelDescriptor::ReduceLongSum(rsum);
+        const pb::BackendStatus& s = r.backend_status;
+        const bool first = !s.plan_reused, rebuilt = first && nsetup++ > 0;   // first: set up in this solve; rebuilt: a set-up after an earlier one
+        if (pcsv) std::fprintf(pcsv, "%d,%s,%s,%s,%s,%s,%d,%d,%d,%.3e,%.3e,%d,%.3e,%.3e,%.1f,%.1f,\n", L.m_icyc, pred ? "pred" : "corr", level, r.backend.c_str(),
+                               s.method.empty() ? "direct" : s.method.c_str(), warm ? "warm" : "zero", first ? 1 : 0, (rebuilt || r.workspace_rebuilt) ? 1 : 0, s.iterations,
+                               s.own_residual, r.residual_rel2, r.residual_ok ? 1 : 0, s.setup_seconds, s.solve_seconds, rmax / 1024.0, rsum / 1024.0);
+    }
     void solve_level0(bool pred, Fields& F)
     {
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] bc_type %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), bc_type[0], bc_type[1], bc_type[2], bc_type[3], bc_type[4], bc_type[5]);
@@ -1023,10 +1066,12 @@ struct TimeLoop::Impl {
         o.backend = pb::BackendKind::FFT;
         o.verbose = std::getenv("FDSTL_PBV") ? 1 : 0;
         o.check_residual = std::getenv("FDSTL_PBV") != nullptr;
-        phi->setVal(0.0);
+        if (!warm) phi->setVal(0.0);
         fold_then_solve_level0(p, o);
-        const pb::PressureResult r = pb::solve_pressure(p, o);
+        study_options(o);
+        const pb::PressureResult r = pb::solve_pressure(p, o, study ? &pws0 : nullptr);
         if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("pressure interface: ") + pb::to_string(r.status) + ": " + r.message);
+        study_row(pred, "0", r);
         if (std::getenv("FDSTL_PBV")) { amrex::Print() << "  [pb] backend=" << r.backend << " res_rel2=" << r.residual_rel2 << " relmax=" << r.residual_relmax << " residual_check=" << r.residual_check << " residual_limit=" << r.residual_limit << " residual_floor=" << r.residual_floor << " ok=" << r.residual_ok << " rhs max=" << rhs->norminf(0) << " phi max=" << phi->norminf(0); for (auto& c : r.components) amrex::Print() << " removed_mean=" << c.removed_mean << " rel=" << c.removed_rel; for (auto& w : r.warnings) amrex::Print() << " W:" << w; amrex::Print() << "\n"; }
         if (const char* e = std::getenv("FDSTL_PDUMP")) {
             // hand-over for the one-solve check against another Poisson solver (Role 2): the right-hand side PRHS (FDS IPS=0 layout, valid cells, I fastest) and the level solution
@@ -1174,7 +1219,7 @@ struct TimeLoop::Impl {
             pl.ref_ratio = l == 0 ? amrex::IntVect(1) : lv.ref_ratio_from_parent;
             pl.rhs = l == 0 ? rhs.get() : crhs[l].get();
             pl.phi = l == 0 ? phi.get() : cphi[l].get();
-            pl.phi->setVal(0.0);
+            if (!warm) pl.phi->setVal(0.0);
         }
         pb::PressureOptions o;
         o.backend = pb::BackendKind::Auto;
@@ -1186,8 +1231,10 @@ struct TimeLoop::Impl {
             for (int l = 0; l < nl; ++l) rhs_levels[l] = const_cast<amrex::MultiFab*>(p.levels[l].rhs);
             fold_composite(p, rhs_levels);
         }
+        study_options(o);
         const pb::PressureResult r = pb::solve_pressure(p, o, pws.get());
         if (r.status != pb::Status::Ok && r.status != pb::Status::NotConverged) die(std::string("composite pressure solve: ") + pb::to_string(r.status) + ": " + r.message);
+        study_row(pred, "all", r);
         ++crep.solves;
         for (const auto& ci : r.components) { crep.removed_mean = std::max(crep.removed_mean, std::abs(ci.removed_mean)); crep.removed_rel = std::max(crep.removed_rel, ci.removed_rel); }
         crep.iterations += r.backend_status.iterations;
@@ -1244,6 +1291,7 @@ struct TimeLoop::Impl {
         each_local([&](int nm) { fds_g_match_flux(nm); });
         wrap_check("composite after match");
         for_levels([&](int) { each_local([&](int nm) { fds_p_noflux(dt, nm, 1); }); });
+        for (int l = 1; l < nl; ++l) lc[l].bc->zero_wall_flux();   // NO_FLUX of a fine box at an INERT/MIRROR domain face (no wall cell there): FV = 0 on the wall face (patch 0017)
         wrap_check("composite after noflux");
         { ProfScope prof_ad(4); composite_average_down_flux(reg, nl); }
         wrap_check("composite after avg-down");
@@ -2132,6 +2180,10 @@ void TimeLoop::set_cf_ghost_hook(int lev, CfGhostHook h)
 }
 
 const TimeLoop::CompositeReport& TimeLoop::composite_report() const { return m->crep; }
+void TimeLoop::pressure_csv_div(int step, const std::vector<double>& div_by_level)
+{
+    for (std::size_t l = 0; m->pcsv && l < div_by_level.size(); ++l) std::fprintf(m->pcsv, "%d,end,%zu,,,,,,,,,,,,,,%.3e\n", step, l, div_by_level[l]);
+}
 double TimeLoop::clip_mass(int n, int l) const
 {
     if (n < 1 || l < 0 || m->nt <= 0) return 0.0;
