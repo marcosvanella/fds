@@ -414,6 +414,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 const int fb = loop.finest_bound();
                 for (int l = fb; l >= 1; --l) loop.unbind_level(l);
                 if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
+                // auto: thr stays 0.45*max|VORT|_L0 of now (AmrParams thr fixed, so rescale VORT by thr/(0.45*max))
+                if (o.tag_vort_auto) { const double sc = tag_vort_thr / (0.45 * reg.fields(0)["VORT"].max(0, 0)); for (int l = 0; l < reg.num_levels(); ++l) reg.fields(l)["VORT"].mult(sc); }
                 const bool changed = core.regrid_dynamic(loop.time());
                 const int finest = core.finestLevel();
                 bool rebound = false;
@@ -427,14 +429,14 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 amrex::Print() << tag << " mid-regrid after step " << s << " t " << loop.time()
                                << " changed " << changed << " finest " << finest
                                << " boxes L1 " << (finest >= 1 ? reg.level(1).ba.size() : 0) << "\n";
-                // Mid-run dump shares the same write helper (Architect: regrid dump path).
-                if (!o.plotfile.empty()) {
+                // Mid-run dump shares the same write helper (Architect: regrid dump path); only without a --plot-every cadence (else it dumped every regrid).
+                if (!o.plotfile.empty() && o.plot_every <= 0) {
                     const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
                     write_rho_vel_plotfile(plt, reg, nl_now, loop.time(), loop.icyc());
                 }
             }
         }
-        // Owner-show cadence (D-089 pack): --plot-every N with --plotfile; dump when s % N == 0 (1-based step). Mid-regrid + final dumps unchanged.
+        // Owner-show cadence (D-089 pack): --plot-every N with --plotfile; dump when s % N == 0 (1-based step). Final dump unchanged; mid-regrid dump off.
         if (o.plot_every > 0 && !o.plotfile.empty() && (s % o.plot_every) == 0) {
             const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
             write_rho_vel_plotfile(plt, reg, nl_now, loop.time(), loop.icyc());
