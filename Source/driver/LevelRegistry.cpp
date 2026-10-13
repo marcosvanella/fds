@@ -4,19 +4,26 @@
 
 #include <AMReX_ParallelDescriptor.H>
 
+#include "../pressure_backend/ObstMask.H"
+
 namespace fdsamr {
 
 CellWallProvider layout_cell_walls(const Level& lev)
 {
-    const amrex::Box dom = lev.geom.Domain();
-    return [dom](int /*nm*/, const amrex::Box& vb, amrex::Array4<int> const& a) {
+    const amrex::Geometry geom = lev.geom;
+    const int l = lev.level;
+    return [geom, l](int /*nm*/, const amrex::Box& vb, amrex::Array4<int> const& a) {
+        const amrex::Box dom = geom.Domain();
+        amrex::BaseFab<int> sf(amrex::grow(vb, 1));
+        const auto s = sf.array();
+        pb::fill_obst_mask(geom, l, sf.box(), s);   // OBST cells (ObstMask.H): SOLID; all 0 without OBST
         amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
-            a(i, j, k, 0) = 0;
+            a(i, j, k, 0) = s(i, j, k);
             for (int f = 0; f < 6; ++f) {
                 amrex::IntVect nb(i, j, k);
                 nb[f / 2] += (f % 2 == 0) ? -1 : 1;
-                // inside the box: no wall; outside the domain: wall (periodic edges too); else the neighbour is another box of this level or the coarser level: open
-                a(i, j, k, 1 + f) = vb.contains(nb) ? kNoWall : !dom.contains(nb) ? kWall : kInterface;
+                // solid/gas face: wall; inside the box: no wall; outside the domain: wall (periodic edges too); else another box of this level or the coarser level: open
+                a(i, j, k, 1 + f) = s(nb) != s(i, j, k) ? kWall : vb.contains(nb) ? kNoWall : !dom.contains(nb) ? kWall : kInterface;
             }
         });
     };

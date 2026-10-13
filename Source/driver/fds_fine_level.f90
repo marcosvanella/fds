@@ -19,7 +19,7 @@ USE FDS_KERNELS, ONLY: FDS_K_RESERVE_BOXES
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
-PUBLIC :: BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY
+PUBLIC :: BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID
 
 CONTAINS
 
@@ -35,7 +35,7 @@ REAL(C_DOUBLE), INTENT(IN) :: XB(6,NBOX)
 INTEGER(C_INT), INTENT(OUT) :: NM0
 INTEGER(C_INT) :: IERR
 TYPE(FINE_LEVEL_TYPE), ALLOCATABLE :: TMP(:)
-INTEGER :: L,IB,N0,NM,Z0,NMREF,K
+INTEGER :: L,IB,N0,NM,Z0,NMREF,I,J,K
 LOGICAL :: Z0_SET
 
 IERR = 0 ; NM0 = 0
@@ -60,8 +60,13 @@ Z0 = 0 ; Z0_SET = .FALSE. ; NMREF = 0
 DO NM=1,SIZE(MESHES)
    IF (.NOT.ALLOCATED(MESHES(NM)%PRESSURE_ZONE)) CYCLE
    IF (NMREF==0 .AND. ALLOCATED(MESHES(NM)%PBAR)) NMREF = NM
-   IF (.NOT.Z0_SET) THEN ; Z0 = MESHES(NM)%PRESSURE_ZONE(1,1,1) ; Z0_SET = .TRUE. ; ENDIF
-   IF (ANY(MESHES(NM)%PRESSURE_ZONE(1:MESHES(NM)%IBAR,1:MESHES(NM)%JBAR,1:MESHES(NM)%KBAR)/=Z0)) THEN ; IERR = 3 ; RETURN ; ENDIF
+   ASSOCIATE(R=>MESHES(NM))
+   DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR   ! gas cells only: an OBST cell carries no zone of its own
+      IF (R%CELL(R%CELL_INDEX(I,J,K))%SOLID) CYCLE
+      IF (.NOT.Z0_SET) THEN ; Z0 = R%PRESSURE_ZONE(I,J,K) ; Z0_SET = .TRUE. ; ENDIF
+      IF (R%PRESSURE_ZONE(I,J,K)/=Z0) THEN ; IERR = 3 ; RETURN ; ENDIF
+   ENDDO ; ENDDO ; ENDDO
+   END ASSOCIATE
 ENDDO
 FINE_LEVEL(LEV)%NM0 = N0 ; FINE_LEVEL(LEV)%N_BOXES = NBOX
 IF (ALLOCATED(FINE_LEVEL(LEV)%BOX)) DEALLOCATE(FINE_LEVEL(LEV)%BOX)
@@ -106,6 +111,15 @@ FINE_LEVEL(LEV)%N_BOXES = 0
 
 END FUNCTION FDS_FINE_LEVEL_DESTROY
 
+!> CELL%SOLID of the interior cells of local box IB of level LEV from S (SideData comp 0 on valid+2): a solid cell points at the shared solid cell CELL(UBOUND).
+SUBROUTINE FDS_FINE_SET_SOLID(LEV,IB,S) BIND(C,NAME='fds_fine_set_solid')
+INTEGER(C_INT), VALUE :: LEV,IB
+INTEGER(C_INT), INTENT(IN) :: S(-1:FINE_LEVEL(LEV)%BOX(IB)%IBAR+2,-1:FINE_LEVEL(LEV)%BOX(IB)%JBAR+2,-1:FINE_LEVEL(LEV)%BOX(IB)%KBAR+2)
+ASSOCIATE(M=>FINE_LEVEL(LEV)%BOX(IB))
+WHERE (S(1:M%IBAR,1:M%JBAR,1:M%KBAR)/=0) M%CELL_INDEX(1:M%IBAR,1:M%JBAR,1:M%KBAR) = UBOUND(M%CELL,1)
+END ASSOCIATE
+END SUBROUTINE FDS_FINE_SET_SOLID
+
 !> Allocate the arrays of a fine-level mesh object of NI x NJ x NK cells on [XS,XF]x[YS,YF]x[ZS,ZF] (axis-aligned, uniform, Cartesian, no obstructions) with the contents the kernels read
 !> (level-interface.md section 3): metrics (the arithmetic of READ_MESH for an untransformed grid), cell tables (ghost ring SOLID/EXTERIOR as READ_OBST sets it), empty edge and wall tables
 !> (a fine box has no WALL cells: its non-domain faces are interface faces whose ghost values the driver fills, and there is no OMESH neighbour), and the state, field and work arrays of
@@ -147,7 +161,7 @@ DO K=0,KBP1
    ENDDO
 ENDDO
 CALL NUMBER_CELLS(M,NI,NJ,NK,NC)
-ALLOCATE(M%CELL(0:NC))
+ALLOCATE(M%CELL(0:NC+1)) ; M%CELL(NC+1)%SOLID=.TRUE.   ! CELL(NC+1): the shared interior solid cell (FDS_FINE_SET_SOLID)
 DO K=0,KBP1
    DO J=0,JBP1
       DO I=0,IBP1

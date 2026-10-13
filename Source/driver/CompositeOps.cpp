@@ -12,6 +12,23 @@
 
 namespace fdsamr {
 
+void composite_zero_solid_faces(LevelRegistry& reg, int l0, int nl, const std::array<const char*, 3>& names, int sh)
+{
+    for (int l = l0; l < nl; ++l) {
+        const amrex::iMultiFab& m = reg.side_data(l).mask();
+        for (int d = 0; d < 3; ++d) {
+            amrex::MultiFab& f = reg.fields(l)[names[d]];
+            const amrex::IntVect e = amrex::IntVect::TheDimensionVector(d);
+            for (amrex::MFIter mfi(f); mfi.isValid(); ++mfi) {
+                const auto a = f.array(mfi); const auto s = m.const_array(mfi);
+                amrex::LoopOnCpu(amrex::surroundingNodes(m.box(mfi.index()), d), [&](int i, int j, int k) {
+                    if (s(i, j, k) | s(i - e[0], j - e[1], k - e[2])) a(i + sh * e[0], j + sh * e[1], k + sh * e[2]) = 0.0;
+                });
+            }
+        }
+    }
+}
+
 void composite_average_down_faces(LevelRegistry& reg, int nl, const std::array<const char*, 3>& names)
 {
     for (int l = nl - 1; l >= 1; --l) {

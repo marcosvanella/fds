@@ -1,6 +1,7 @@
 // TwoLevelRun.cpp: see TwoLevelRun.H.
 #include "ObstList.H"
 #include "TwoLevelRun.H"
+#include "CompositeOps.H"
 
 #include <AMReX_ParallelContext.H>
 #include <AMReX_ParallelDescriptor.H>
@@ -312,6 +313,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     pst.solver = &solver;
     pst.D = [&](int l) { return &reg.fields(l)["D"]; };
     pst.options.accept_abs = 1.0e-9;
+    pst.before = [&](std::vector<fdsrt::ProjectionLevel>& lv) { composite_zero_solid_faces(reg, 0, static_cast<int>(lv.size()), {"U", "V", "W"}, 0); };   // faces in an OBST (prolonged, or the level-0 IC)
     fdsrt::install_post_regrid_projection(core, reg, pst);   // D-063: the hook of RegridAmrCore::regrid_dynamic
     loop.zero_closed_wall_normal();   // IC: Neumann faces carry no net volume flux into the first projection
     // One AmrCore::regrid grows at most one new fine level; repeat until max_level (or stuck).
@@ -387,6 +389,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         fdsrt::ProjectionOptions po = pst.options;
         po.enabled = (o.projection != "OFF");
         loop.zero_closed_wall_normal();   // fine faces prolonged onto INERT/MIRROR, then the projection
+        pst.before(lv);
         const fdsrt::ProjectionReport pr = fdsrt::project_after_regrid(lv, &solver, po);
         amrex::Print() << tag << " initial projection (" << o.projection << "): ran " << pr.ran << " solved " << pr.solved << " max|div u - D| before " << pr.div_before << " after " << pr.div_after
                        << " (level 0 " << (pr.div_after_level.empty() ? 0.0 : pr.div_after_level[0]) << ", level 1 " << (pr.div_after_level.size() > 1 ? pr.div_after_level[1] : 0.0) << "), accepted " << pr.accepted

@@ -114,6 +114,7 @@ void fds_flux_reserve(int ntot);
 int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext, void* p);   // fds_box_obj.f90: 0 ok, 3 no fine-level support in this tree
 #ifdef FDS_HAVE_FINE_LEVEL
 int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
+void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
 int fds_fine_level_destroy(int lev);
 #endif
 int fds_wseam_refresh(int nm);
@@ -260,6 +261,10 @@ struct TimeLoop::Impl {
                 if (fds_fine_b_set_view(lev, mfi.index() + 1, which, lb, ext, mf[mfi].dataPtr()) != 0)
                     die(std::string("bind_level: cannot bind the view of ") + sp.name + " on level " + std::to_string(lev));
             }
+        }
+        {   // CELL%SOLID of the fine cells from SideData comp 0
+            const amrex::iMultiFab& sm = L.m_reg->side_data(lev).mask();
+            for (amrex::MFIter mfi(sm); mfi.isValid(); ++mfi) fds_fine_set_solid(lev, mfi.index() + 1, sm[mfi].dataPtr());
         }
         own.resize(lev);
         OwnLevel& o = own[lev - 1];
@@ -1174,6 +1179,7 @@ struct TimeLoop::Impl {
         ensure_comp();
         LevelRegistry& reg = *L.m_reg;
         const int nl = static_cast<int>(lc.size());
+        composite_zero_solid_faces(reg, 0, nl, {"FVX", "FVY", "FVZ"}, -1);   // no flux through a solid face: with U = 0 there, the face stays 0 (beta = 0 in the solve)
         level0_rhs_and_check();
         for (int l = 1; l < nl; ++l) composite_fine_pressure_rhs(*lc[l].F, *lc[l].lev, *crhs[l]);
         if (std::getenv("FDSTL_GHOSTDBG") && nl > 1) {   // composite right-hand side by level: its sum must vanish for a periodic domain
@@ -1340,6 +1346,7 @@ struct TimeLoop::Impl {
     {
         if (!multi()) return;
         ProfScope prof_ad(4);
+        composite_zero_solid_faces(*L.m_reg, 1, static_cast<int>(lc.size()), pred ? std::array<const char*, 3>{"US", "VS", "WS"} : std::array<const char*, 3>{"U", "V", "W"}, 0);
         if (pred) composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"US", "VS", "WS"});
         else composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"U", "V", "W"});
     }

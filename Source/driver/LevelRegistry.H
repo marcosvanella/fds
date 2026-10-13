@@ -33,9 +33,9 @@
 
 namespace fdsamr {
 
-// SideData provider for a layout-only level: SOLID = 0 everywhere; a face of a valid cell is kWall at the domain edge (periodic edges included, as in FDS),
+// SideData provider for a layout-only level: SOLID = the OBST cells of pb::obst_list() (ObstMask.H; none before load_obst_list), a solid/gas face is kWall; otherwise a face of a valid cell is kWall at the domain edge (periodic edges included, as in FDS),
 // kInterface (open: SideData turns it into a no-wall face) wherever the neighbouring cell is inside the domain but in another box: a same-level box-to-box face and
-// a coarse-fine face are both open faces. Obstructions at a fine level are not representable (no OBST, Role 3 plan item 5).
+// a coarse-fine face are both open faces.
 CellWallProvider layout_cell_walls(const Level& lev);
 
 // Mask of the valid cells of `ba` that are covered by the finer level: 1 where a cell of ba, refined by `ratio`, is inside a box of `fine_ba` (the fine level's BoxArray).
