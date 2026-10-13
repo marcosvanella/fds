@@ -538,7 +538,14 @@ void HypreSystem::Impl::assemble ()
                                 // MLMG: ghost = a*b + (1-a)*phi_c with a = 2/(r+1): linear extrapolation through (-r/2, b) and (0.5, phi_c)
                                 const double ra = 2.0/(double(lev[l].ratio[d]) + 1.0);
                                 diag += ra*kk;
-                                for (auto const& e : st) { ent.push_back({e.id, -ra*kk*e.w}); }
+                                if (opt.symmetric_cf) {   // ghost = phi of the coarse cell under it (symmetric C/F weight)
+                                    IntVect wn = n; wrap(l, wn);
+                                    IntVect cc;
+                                    for (int t = 0; t < 3; ++t) { cc[t] = amrex::coarsen(wn[t], lev[l].ratio[t]); }
+                                    ent.push_back({id_at(l - 1, cc), -ra*kk});
+                                } else {
+                                    for (auto const& e : st) { ent.push_back({e.id, -ra*kk*e.w}); }
+                                }
                             } else {   // COVERED: reflux. Average of the fine face fluxes 2*(phi_f - b_f)/h_f replaces the coarse face flux.
                                 IntVect wn = n; wrap(l, wn);
                                 double F = 1.0;
@@ -560,6 +567,7 @@ void HypreSystem::Impl::assemble ()
                                     const long long fid = id_at(l + 1, fn);
                                     if (fid < 0 || !bdry_stencil(l + 1, fg, d, st)) { bad("reflux face data not available (nesting)"); continue; }
                                     ent.push_back({fid, -coef});
+                                    if (opt.symmetric_cf) { diag += coef; continue; }   // (phi_f - phi_C)/h_eff: the fine row's weight
                                     for (auto const& e : st) { ent.push_back({e.id, coef*e.w}); }
                                 }
                             }
@@ -896,6 +904,7 @@ void HypreSystem::Impl::assemble_masked ()
                                     if (fid < 0) { continue; }
                                     if (!bdry_stencil_gas(l + 1, fg, d, st)) { bad("reflux face data not available (nesting/mask)"); continue; }
                                     ent.push_back({fid, -coef});
+                                    if (opt.symmetric_cf) { diag += coef; continue; }   // (phi_f - phi_C)/h_eff: the fine row's weight
                                     for (auto const& e : st) { ent.push_back({e.id, coef*e.w}); }
                                 }
                             } else if (!lev[l].ba.contains(w)) {
@@ -907,6 +916,7 @@ void HypreSystem::Impl::assemble_masked ()
                                 if (!bdry_stencil_gas(l, n, d, st)) { bad("coarse/fine interpolation stencil not available (nesting/mask)"); continue; }
                                 const double ra = 2.0/(double(lev[l].ratio[d]) + 1.0);
                                 diag += ra*kk;
+                                if (opt.symmetric_cf) { ent.push_back({cid, -ra*kk}); continue; }   // ghost = phi of the coarse cell under it
                                 for (auto const& e : st) { ent.push_back({e.id, -ra*kk*e.w}); }
                             } else {
                                 const long long gid = id_gas(l, w);

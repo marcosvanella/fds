@@ -224,12 +224,17 @@ struct HypreOptions {
     // Masked HYPRE (D6): how many sealed-component pin rows to apply (-1 = all, in component-id order). Test hook: a smaller count
     // leaves a singular component unpinned so the residual check warns.
     int max_pins = -1;
+    // Composite only (hypre.symmetric_cf=1): FDS multi-mesh style C/F coupling, the flux (phi_f - phi_C)/h_eff with h_eff = (r+1)/2 h_f on each
+    // fine face, the same weight in the fine and the coarse row (no interpolation slopes). The volume-scaled matrix is then symmetric, so
+    // Auto Krylov picks PCG. First-order at the C/F interface; not the default (frozen/m3-pyramid-cost-table.md).
+    int symmetric_cf = 0;
     bool operator== (HypreOptions const& o) const
     {
         return krylov == o.krylov && coarsen_type == o.coarsen_type && relax_type == o.relax_type && num_sweeps == o.num_sweeps &&
                strong_threshold == o.strong_threshold && interp_type == o.interp_type && agg_levels == o.agg_levels &&
                gmres_kdim == o.gmres_kdim && max_pins == o.max_pins && coarse_relax == o.coarse_relax && max_levels == o.max_levels &&
-               pmax_elmts == o.pmax_elmts && agg_interp_type == o.agg_interp_type && keep_transpose == o.keep_transpose;
+               pmax_elmts == o.pmax_elmts && agg_interp_type == o.agg_interp_type && keep_transpose == o.keep_transpose &&
+               symmetric_cf == o.symmetric_cf;
     }
 };
 

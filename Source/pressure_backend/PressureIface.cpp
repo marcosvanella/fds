@@ -176,6 +176,7 @@ void query_options (PressureOptions& o)
     ph.query("strong_threshold", h.strong_threshold); ph.query("interp_type", h.interp_type); ph.query("agg_levels", h.agg_levels);
     ph.query("agg_interp_type", h.agg_interp_type); ph.query("pmax_elmts", h.pmax_elmts); ph.query("keep_transpose", h.keep_transpose);
     ph.query("coarse_relax", h.coarse_relax); ph.query("max_levels", h.max_levels); ph.query("gmres_kdim", h.gmres_kdim);
+    ph.query("symmetric_cf", h.symmetric_cf);
     ParmParse pp("pressure");
     kry(pp, "mlmg_krylov", o.mlmg_krylov);
     pp.query("tol_rel", o.tol_rel); pp.query("max_iter", o.max_iter); pp.query("warm_start", o.use_initial_guess);
@@ -196,7 +197,7 @@ PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& 
     // composite operator is not (one-sided C/F interpolation).
     const Krylov kry = (sel.kind == BackendKind::HYPRE) ? o.hypre.krylov : o.mlmg_krylov;
     if (sel.kind == BackendKind::FFT && (o.hypre.krylov != Krylov::Auto || o.mlmg_krylov != Krylov::Auto)) { return fail(Status::InvalidInput, "FFT is a direct solve: no Krylov method can be chosen"); }
-    if (!p.levels.empty() && kry == Krylov::PCG) { return fail(Status::InvalidInput, "CG needs a symmetric matrix; the composite operator is not (one-sided C/F interpolation): use GMRES or BiCGSTAB"); }
+    if (!p.levels.empty() && kry == Krylov::PCG && !(sel.kind == BackendKind::HYPRE && o.hypre.symmetric_cf)) { return fail(Status::InvalidInput, "CG needs a symmetric matrix; the composite operator is not (one-sided C/F interpolation): use GMRES or BiCGSTAB"); }
     // A workspace built for another layout is a regrid (its stale part is rebuilt by this solve).
     if (ws) {
         if (!p.levels.empty()) { if (ws->num_levels() > 0 && !ws->matches(p)) { ws->mark_regrid(); } }

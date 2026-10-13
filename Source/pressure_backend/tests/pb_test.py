@@ -1091,6 +1091,16 @@ def compmlmg():
             v = [fps[n][k] for n in sorted(fps)]
             ok(len(v) == 3 and max(v) - min(v) <= 1e-9 * max(abs(x) for x in v),
                f"masked composite {name} solution independent of the rank count {extra} {[f'{x:.12g}' for x in v]}")
+    # hypre.symmetric_cf (selectable, not the default): symmetric composite matrix -> Auto picks PCG; documented accuracy cost vs MLMG < 2%
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="comp_pyramid", symcmp=1); print(out)
+        d = [l for l in out.splitlines() if l.startswith("SYMCMP sym_vs_mlmg")]
+        mx = float(d[0].split("max=")[1].split()[0]) if d else 1.0
+        ok(rc == 0 and mx < 0.02, f"symmetric C/F np={np_}: PCG chosen, max rel diff vs MLMG {mx:.3g} < 0.02")
+    # C/F labelling: coarse regions joined only through the fine level are one component (an L1 slab across y and z, Neumann x)
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="comp_pyramid", slab=1, bcxy="neumann", difftol=1e-9); print(out)
+        ok(rc == 0 and lines(out, "COMP_PYRAMID"), f"comp_pyramid slab np={np_}: one component, MLMG matches HYPRE [{out[-400:]}]")
     for extra in ({"cross": 1}, {"thin": 1}):
         rc, out = run(1, mode="comp_pyramid", **extra); print(out)
         m = lines(out, "COMP_PYRAMID")

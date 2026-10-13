@@ -1997,13 +1997,14 @@ void run_pyr_cost (ParmParse& pp, Cfg const& c, Hier& h, pb::PressureProblem& p,
         }
     }
     using K = pb::Krylov;
-    struct Arm { const char* name; bool single; pb::BackendKind bk; K hk, mk; };
+    struct Arm { const char* name; bool single; pb::BackendKind bk; K hk, mk; int sym = 0; };
     const std::vector<Arm> arms = {
         {"FFT (single-level unmasked L0)", true, pb::BackendKind::FFT, K::Auto, K::Auto},
         {"HYPRE PCG+BoomerAMG (single-level unmasked L0)", true, pb::BackendKind::HYPRE, K::PCG, K::Auto},
         {"HYPRE Auto Krylov+BoomerAMG (masked composite)", false, pb::BackendKind::HYPRE, K::Auto, K::Auto},
         {"HYPRE GMRES(30)+BoomerAMG (masked composite)", false, pb::BackendKind::HYPRE, K::GMRES, K::Auto},
         {"BoomerAMG alone (masked composite)", false, pb::BackendKind::HYPRE, K::None, K::Auto},
+        {"HYPRE PCG+BoomerAMG, symmetric C/F (masked composite, hypre.symmetric_cf)", false, pb::BackendKind::HYPRE, K::Auto, K::Auto, 1},
         {"MLMG V-cycle (masked composite)", false, pb::BackendKind::MLMG, K::Auto, K::None},
         {"MLMG-preconditioned BiCGStab (masked composite)", false, pb::BackendKind::MLMG, K::Auto, K::BiCGSTAB}};
     const int na = static_cast<int>(arms.size());
@@ -2017,7 +2018,7 @@ void run_pyr_cost (ParmParse& pp, Cfg const& c, Hier& h, pb::PressureProblem& p,
             pb::PressureProblem& P = A.single ? ps : p;
             pb::PressureOptions o;
             o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.residual_tol = 1e-8; o.check_residual = true;
-            o.backend = A.bk; o.hypre.krylov = A.hk; o.mlmg_krylov = A.mk;
+            o.backend = A.bk; o.hypre.krylov = A.hk; o.mlmg_krylov = A.mk; o.hypre.symmetric_cf = A.sym;
             pb::PressureWorkspace ws;
             auto go = [&] (bool warm) {
                 if (!warm) { for (int l = 0; l < nl; ++l) { h.phi[l]->setVal(0.0); } }
@@ -2058,6 +2059,86 @@ void run_pyr_cost (ParmParse& pp, Cfg const& c, Hier& h, pb::PressureProblem& p,
     Print() << "COST peak_rss_MB max_rank=" << rmax/1024.0 << " sum=" << rsum/1024.0 << " (process high-water mark over all arms)\n";
 }
 
+// symcmp=1 in mode=comp_pyramid (task A): accuracy cost of the symmetric C/F operator (hypre.symmetric_cf). Solves the masked pyramid with
+// HYPRE (default, non-symmetric C/F), HYPRE symmetric C/F (Auto Krylov: PCG when the matrix is symmetric) and MLMG; reports max and
+// volume-weighted L2 of the mean-removed differences (relative to max / L2 of the MLMG solution) over uncovered gas cells, globally and
+// near C/F (uncovered cells within 2 cells of the interface on their level). One SYMCMP line per pair.
+void run_sym_cmp (Cfg const& c, Hier& h, pb::PressureProblem& p, double tol_rel, std::vector<std::unique_ptr<iMultiFab>> const& cls)
+{
+    const int nl = static_cast<int>(h.ba.size());
+    auto solve = [&] (pb::BackendKind bk, int sym, std::vector<MultiFab>& out) {
+        for (int l = 0; l < nl; ++l) { h.phi[l]->setVal(0.0); }
+        pb::PressureOptions o; o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.residual_tol = 1e-8; o.check_residual = true;
+        o.backend = bk; o.hypre.symmetric_cf = sym;
+        pb::PressureWorkspace ws;
+        pb::PressureResult r = pb::solve_pressure(p, o, &ws);
+        out.clear();
+        for (int l = 0; l < nl; ++l) { out.emplace_back(h.ba[l], h.dm[l], 1, 0); MultiFab::Copy(out.back(), *h.phi[l], 0, 0, 1, 0); }
+        Print() << "SYMRUN backend=" << r.backend << " sym=" << sym << " status=" << pb::to_string(r.status) << " method=" << r.backend_status.method
+                << " iters=" << r.backend_status.iterations << " true_rel=" << r.residual_check << "\n";
+        return r;
+    };
+    // near-C/F flag: uncovered cell with a non-uncovered-same-level cell (covered, or outside the level's BoxArray inside the domain) within 2 cells
+    std::vector<std::unique_ptr<iMultiFab>> near(nl);
+    for (int l = 0; l < nl; ++l) {
+        near[l] = std::make_unique<iMultiFab>(h.ba[l], h.dm[l], 1, 0); near[l]->setVal(0);
+        iMultiFab u(h.ba[l], h.dm[l], 1, 2); u.setVal(0); iMultiFab::Copy(u, *h.unc[l], 0, 0, 1, 0); u.FillBoundary(h.geom[l].periodicity());
+        Box dom = h.geom[l].Domain();
+        for (int d = 0; d < 3; ++d) { if (h.geom[l].isPeriodic(d)) { dom.grow(d, 2); } }
+        for (MFIter mfi(*near[l]); mfi.isValid(); ++mfi) {
+            auto const& nr = near[l]->array(mfi); auto const& ua = u.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (!ua(i,j,k)) { return; }
+                for (int a = -2; a <= 2; ++a) for (int b = -2; b <= 2; ++b) for (int e = -2; e <= 2; ++e) {
+                    IntVect q(i+a, j+b, k+e);
+                    if (dom.contains(q) && ua(q) == 0) { nr(i,j,k) = 1; return; }
+                }
+            });
+        }
+    }
+    auto mean = [&] (std::vector<MultiFab> const& a) {
+        double s[2] = {0, 0};
+        for (int l = 0; l < nl; ++l) {
+            auto const dx = h.geom[l].CellSizeArray(); const double v = dx[0]*dx[1]*dx[2];
+            for (MFIter mfi(a[l]); mfi.isValid(); ++mfi) {
+                auto const& x = a[l].const_array(mfi); auto const& u = h.unc[l]->const_array(mfi); auto const& cl = cls[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (u(i,j,k) && cl(i,j,k) == pb::CellGas) { s[0] += v; s[1] += v*x(i,j,k); } });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(s, 2);
+        return s[1]/s[0];
+    };
+    auto cmp = [&] (const char* name, std::vector<MultiFab> const& a, std::vector<MultiFab> const& b) {
+        const double ma = mean(a), mb = mean(b);
+        double s[6] = {0, 0, 0, 0, 0, 0};   // global: sum v d^2, sum v b^2, near: sum v d^2, sum v b^2 (the reference norm is global)
+        double m[3] = {0, 0, 0};             // max|d| global, max|d| near, max|b|
+        for (int l = 0; l < nl; ++l) {
+            auto const dx = h.geom[l].CellSizeArray(); const double v = dx[0]*dx[1]*dx[2];
+            for (MFIter mfi(a[l]); mfi.isValid(); ++mfi) {
+                auto const& x = a[l].const_array(mfi); auto const& y = b[l].const_array(mfi);
+                auto const& u = h.unc[l]->const_array(mfi); auto const& cl = cls[l]->const_array(mfi); auto const& nr = near[l]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (!u(i,j,k) || cl(i,j,k) != pb::CellGas) { return; }
+                    const double d = (x(i,j,k) - ma) - (y(i,j,k) - mb), r = y(i,j,k) - mb;
+                    s[0] += v*d*d; s[1] += v*r*r; m[0] = std::max(m[0], std::abs(d)); m[2] = std::max(m[2], std::abs(r));
+                    if (nr(i,j,k)) { s[2] += v*d*d; s[3] += v*r*r; m[1] = std::max(m[1], std::abs(d)); }
+                });
+            }
+        }
+        ParallelDescriptor::ReduceRealSum(s, 4); ParallelDescriptor::ReduceRealMax(m, 3);
+        Print() << std::setprecision(4) << "SYMCMP " << name << " global: max=" << m[0]/m[2] << " L2=" << std::sqrt(s[0]/s[1])
+                << " near_CF: max=" << m[1]/m[2] << " L2=" << std::sqrt(s[2]/s[1]) << " (relative to max|ref| / ||ref||_2 global)\n";
+    };
+    std::vector<MultiFab> xh, xs, xm;
+    solve(pb::BackendKind::HYPRE, 0, xh);
+    pb::PressureResult rs = solve(pb::BackendKind::HYPRE, 1, xs);
+    solve(pb::BackendKind::MLMG, 0, xm);
+    cmp("sym_vs_hypre", xs, xh);
+    cmp("sym_vs_mlmg", xs, xm);
+    cmp("hypre_vs_mlmg", xh, xm);
+    ccheck(rs.status == pb::Status::Ok && rs.backend_status.method == "PCG", "symmetric C/F: Auto Krylov picks PCG (symmetry check passes)");
+}
+
 // mode=comp_pyramid (P3, docs/pressure/13): two levels (ratio 2), periodic x and y, Neumann z, and a three-step pyramid OBST
 // on odd fine planes (the steps of pyramid_48_4m scaled to n = 24; n = 48 uses that input's own indices). cross=0: level 1
 // covers the pyramid and one coarse cell around it; cross=1: level 1 stops at x = 1/2, so the obstacle crosses the C/F interface
@@ -2094,7 +2175,8 @@ void run_comp_pyramid (ParmParse& pp)
     const pb::BC bxy = cparse_bc(bcxy);
     Array<int,3> isp{bxy == pb::BC::Periodic, bxy == pb::BC::Periodic, 0};
     const int clo = st[0][0]/2 - 1, chi = (st[0][1] - 1)/2 + 1, czh = (st[2][2] - 1)/2 + 2;
-    Box patch(IntVect(clo, clo, 0), IntVect(cross ? n/2 - 1 : chi, chi, czh));
+    int slab = 0; pp.query("slab", slab);   // slab=1: L1 spans all y and z, so with bcxy=neumann the uncovered L0 is two parts joined only through L1
+    Box patch(IntVect(clo, slab ? 0 : clo, 0), IntVect(cross ? n/2 - 1 : chi, slab ? n - 1 : chi, slab ? n - 1 : czh));
     for (int l = 0; l < 2; ++l) {
         h.geom.emplace_back(l == 0 ? dom0 : amrex::refine(dom0, 2), rb, CoordSys::cartesian, isp);
         BoxArray ba(l == 0 ? dom0 : amrex::refine(patch, 2));
@@ -2136,6 +2218,8 @@ void run_comp_pyramid (ParmParse& pp)
     for (int l = 0; l < 2; ++l) { p.levels[l].cell_class = cls[l].get(); }
     int cost = 0; pp.query("cost", cost);
     if (cost) { run_pyr_cost(pp, c, h, p, tol_rel); return; }
+    int symcmp = 0; pp.query("symcmp", symcmp);
+    if (symcmp) { run_sym_cmp(c, h, p, tol_rel, cls); return; }
 
     auto solve = [&] (pb::BackendKind bk, pb::HypreKrylov mk, std::vector<MultiFab>* out) {
         for (int l = 0; l < 2; ++l) { h.phi[l]->setVal(0.0); }
@@ -2240,6 +2324,7 @@ void run_comp_pyramid (ParmParse& pp)
     Print() << std::setprecision(6) << "  HYPRE: status=" << pb::to_string(rh.status) << " backend=" << rh.backend << " own=" << rh.backend_status.own_residual << " iters=" << rh.backend_status.iterations
             << " true_rel2=" << rh.residual_rel2 << " check_nopin=" << rh.residual_check << "  rel_diff(MLMG,HYPRE)=" << dmh << " fp_mlmg=" << std::setprecision(12) << fp(pm) << " fp_hypre=" << fp(ph) << std::setprecision(6) << " msg=\"" << rh.message << "\"\n";
     ccheck(rh.status == pb::Status::Ok && rh.residual_ok, "pyramid HYPRE Ok, residual (pin row excluded) ok");
+    ccheck(rh.components.size() == 1, "one gas component across levels (found " + std::to_string(rh.components.size()) + ")");
     // cmp_hypre=0: report only (diagnostics). The test enforces it on 1, 2 and 4 ranks; the HYPRE C/F stencil and reflux read remote
     // coarse/fine row ids from halos filled once before assembly, so the operator does not depend on the box distribution.
     int cmp_hypre = 1; pp.query("cmp_hypre", cmp_hypre);
