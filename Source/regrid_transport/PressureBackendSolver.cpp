@@ -62,7 +62,7 @@ void PressureBackendSolver::rebuild(const std::vector<ProjectionLevel>& levels)
     }
     m.cls.clear();
     if (!pb::obst_list().empty()) {
-        for (size_t l = 0; l < m.ba.size(); ++l) m.cls.push_back(pb::build_obst_class(m.geom[l], static_cast<int>(l), m.ba[l], m.dm[l]));
+        for (size_t l = 0; l < m.ba.size(); ++l) m.cls.push_back(l == 0 ? nullptr : pb::build_obst_class(m.geom[l], static_cast<int>(l), m.ba[l], m.dm[l]));   // L0: FDS's own OBST (TimeLoop.cpp)
     }
     std::string msg;
     const pb::Status st = m.ws.rebuild(m.problem(nullptr), &msg);

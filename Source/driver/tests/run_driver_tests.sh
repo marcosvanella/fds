@@ -8,6 +8,7 @@
 #   4. run_stage_boundary_fine_check.sh (stage_boundary(1,3|6) on a bound fine level, with its two negative controls)
 #   5. run_step_sequence_check.sh (T and DT per step against single-mesh FDS, on 4-mesh and 1-mesh driver runs)
 #   6. run_exchange_code_check.sh (FireX: code 6 = U/V/W/H only; 66/67 never through the driver fill)
+#   6b. run_obst_burner_check.sh (L0-only OBST with a MASS_FLUX burner, two levels: div <= 1e-10, no L0 clipping)
 #   7. run_three_level_check.sh when DRIVER_THREE_LEVEL_CHECK=1 (D-053 bind + short advance)
 #   5. (optional, DRIVER_DENSITY_CHECK=1; about 25 min on one shared core) run_two_level_density_check.sh: variable-density two-level run, flux overwrite ON vs OFF, 1 and 4 ranks
 # FDS ends the set-up run with STOP (exit 0), so the FDS-linked checks are judged from their PASS/FAIL lines.
@@ -35,6 +36,7 @@ if [ -n "${h[0]}" ] && [ "${h[0]}" = "${h[1]}" ]; then echo "PASS side-data hash
 bash "$HERE/run_stage_boundary_fine_check.sh" "$BLD" "$BLD/run/stageboundary" || rc=1
 bash "$HERE/run_step_sequence_check.sh" "$BLD" "$BLD/run/stepseq" || rc=1   # T, DT per step of shunn3_4mesh_32 (2x2 meshes), np 1 and 4, against single-mesh FDS
 bash "$HERE/run_exchange_code_check.sh" "$(cd "$HERE/.." && pwd)" || rc=1
+bash "$HERE/run_obst_burner_check.sh" "$BLD" "$BLD/run/obstburner" || rc=1   # L0-only OBST + MASS_FLUX burner, two levels: div and no L0 clipping
 if [ "${DRIVER_THREE_LEVEL_CHECK:-0}" = 1 ]; then bash "$HERE/run_three_level_check.sh" "$BLD" "$BLD/run/threelevel" 10 || rc=1; fi
 if [ "${DRIVER_DENSITY_CHECK:-0}" = 1 ]; then bash "$HERE/run_two_level_density_check.sh" "$BLD" "$BLD/run/density" || rc=1; fi
 [ $rc = 0 ] && echo "ALL DRIVER TESTS PASS" || echo "DRIVER TESTS FAILED"

@@ -46,6 +46,7 @@ void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* dat
 void fds_k_dens_post(double t, double dt, int nm);
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
+void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION, level 0 (Stage R1)
 void fds_k_div2(double dt, int nm);
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
 void fds_k_vcorr(double t, double dt, int nm);
@@ -310,7 +311,7 @@ struct TimeLoop::Impl {
     {
         std::vector<std::string> bad;
         auto chk = [&](bool cond, const char* what) { if (cond) bad.push_back(what); };
-        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[9] > 0, "reactions"); chk(IP[10], "radiation"); chk(IP[11] != 0, "LEVEL_SET_MODE");
+        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[9] > 0, "reactions"); chk(IP[11] != 0, "LEVEL_SET_MODE");
         chk(IP[12], "TUNNEL_PRECONDITIONER"); chk(IP[13] != 1, "pressure solver other than FFT"); chk(IP[14], "CYLINDRICAL"); chk(IP[15], "particle drag");
         // D-089: FREEZE_VELOCITY (IP[18]) allowed in AMR TimeLoop for cold-flow / passive-scalar adaptive demos; reacting-flow production must not depend on freeze.
         chk(IP[16], "SOLID_HEAT_TRANSFER_3D"); chk(IP[17] > 0, "Lagrangian particles"); chk(IP[19], "SOLID_PHASE_ONLY");
@@ -329,6 +330,7 @@ struct TimeLoop::Impl {
         fds_p_params(IP, RP);
         check_scope();
         nbox = static_cast<int>(l0.ba.size());
+        if (IP[10] && nbox > 1) die("radiation: one level-0 box only (Stage R1; multi-box intensity exchange and fine levels are Stage R2)");
         ns = l0.dom.n_total;
         nt = l0.dom.n_tracked;
         double t_end, dtfill, dtmin, dt0; int nz;
@@ -1180,7 +1182,9 @@ struct TimeLoop::Impl {
         pws.reset(new pb::PressureWorkspace());
         load_obst_list();
         ccls.clear();
-        if (!pb::obst_list().empty()) for (int l = 0; l < nl; ++l) ccls.push_back(pb::build_obst_class(lc[l].lev->geom, l, lc[l].lev->ba, lc[l].lev->dm));
+        // Level 0 is an FDS mesh: FDS treats its OBSTs itself (solve through solids, wall normal velocity, e.g. a MASS_FLUX burner, via NO_FLUX FV),
+        // as with --levels 1. Only levels >= 1, where FDS has no OBST, are masked; a Solid L0 cell is under L1 (--tag-obst) or FDS's own.
+        if (!pb::obst_list().empty()) for (int l = 0; l < nl; ++l) ccls.push_back(l == 0 ? nullptr : pb::build_obst_class(lc[l].lev->geom, l, lc[l].lev->ba, lc[l].lev->dm));
         comp_gen = layout_gen;
     }
     // Composite pressure solve of the stage: PRHS of every level, one solve, H (pred) / HS (corrector) of every level, the face gradient at the interface into the fine ghost cells.
@@ -1189,7 +1193,7 @@ struct TimeLoop::Impl {
         ensure_comp();
         LevelRegistry& reg = *L.m_reg;
         const int nl = static_cast<int>(lc.size());
-        composite_zero_solid_faces(reg, 0, nl, {"FVX", "FVY", "FVZ"}, -1);   // no flux through a solid face: with U = 0 there, the face stays 0 (beta = 0 in the solve)
+        composite_zero_solid_faces(reg, 1, nl, {"FVX", "FVY", "FVZ"}, -1);   // levels >= 1 only: level 0 keeps FDS's NO_FLUX FV (wall velocity, e.g. MASS_FLUX)   // no flux through a solid face: with U = 0 there, the face stays 0 (beta = 0 in the solve)
         level0_rhs_and_check();
         for (int l = 1; l < nl; ++l) composite_fine_pressure_rhs(*lc[l].F, *lc[l].lev, *crhs[l]);
         if (std::getenv("FDSTL_GHOSTDBG") && nl > 1) {   // composite right-hand side by level: its sum must vanish for a periodic domain
@@ -1794,6 +1798,7 @@ struct TimeLoop::Impl {
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
+        if (IP[10]) each_local([&](int nm) { fds_k_rad(L.m_t, nm); });   // main.f90 ~1121: after WALL_BC, before DIVERGENCE_PART_1; level 0 only
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();
