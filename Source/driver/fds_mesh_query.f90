@@ -103,4 +103,33 @@ DO N=1,N_TRACKED_SPECIES
 ENDDO
 END FUNCTION FDS_FIND_TRACKED_SPECIES
 
+!> \brief Number of OBSTs of the meshes of this rank (OBSTRUCTION(1:N_OBST); a multi-mesh OBST counts once per mesh it was clipped to)
+FUNCTION FDS_OBST_COUNT() BIND(C,NAME='fds_obst_count') RESULT(N)
+INTEGER(C_INT) :: N
+INTEGER :: NM
+N = 0
+DO NM=1,NMESHES
+   IF (PROCESS(NM)/=MY_RANK) CYCLE
+   N = N + MESHES(NM)%N_OBST
+ENDDO
+END FUNCTION FDS_OBST_COUNT
+
+!> \brief XB of those OBSTs as READ_OBST stored them (OB%X1..Z2: input XB clipped to the mesh, input nudges kept), 6 per OBST, same order
+SUBROUTINE FDS_OBST_XB(N,XB) BIND(C,NAME='fds_obst_xb')
+INTEGER(C_INT), VALUE :: N
+REAL(C_DOUBLE), INTENT(OUT) :: XB(6,N)
+INTEGER :: NM,I,M
+M = 0
+DO NM=1,NMESHES
+   IF (PROCESS(NM)/=MY_RANK) CYCLE
+   DO I=1,MESHES(NM)%N_OBST
+      M = M + 1
+      IF (M>N) RETURN
+      ASSOCIATE (OB=>MESHES(NM)%OBSTRUCTION(I))
+         XB(:,M) = [OB%X1,OB%X2,OB%Y1,OB%Y2,OB%Z1,OB%Z2]
+      END ASSOCIATE
+   ENDDO
+ENDDO
+END SUBROUTINE FDS_OBST_XB
+
 END MODULE FDS_MESH_QUERY

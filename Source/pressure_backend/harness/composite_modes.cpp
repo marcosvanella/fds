@@ -8,6 +8,7 @@
 //                 (2,1,2)), geometry replicated from the case files (no driver code).
 // mode=comp_sel   composite selector / validation checks (NotBuilt and InvalidInput messages).
 // mode=comp_ws    workspace rebuild checks (D-058).
+#include "ObstMask.H"
 #include "PressureIface.H"
 #include "ExactSum.H"
 #include "HypreBackend.H"
@@ -1944,6 +1945,38 @@ void run_comp_masked (ParmParse& pp)
 }
 
 
+// mode=obst_mask (M2 driver OBST hook): pb::fill_obst_mask on the pyramid_48_4m XB (nudged out 1e-6) at L0 dx 1/48 and L1 dx 1/96,
+// FDS NINT snapping. Expected solid counts by hand: L0 32^2*3 + 22^2*3 + 12^2*3 = 4956; L1 62^2*5 + 42^2*6 + 22^2*6 = 32708. Also the
+// --tag-obst box of step 1 at L0 with NBUF 1: x,y [8-1, 39+1], z [0, 2+1] (floor/ceil outward, clipped to the domain).
+void run_obst_mask (ParmParse& pp)
+{
+    int mgs = 16; pp.query("mgs", mgs);
+    pb::obst_list() = { {0.1770823333, 0.8229176667, 0.1770823333, 0.8229176667, -0.0000010000, 0.0520843333},
+                        {0.2812490000, 0.7187510000, 0.2812490000, 0.7187510000, -0.0000010000, 0.1145843333},
+                        {0.3854156667, 0.6145843333, 0.3854156667, 0.6145843333, -0.0000010000, 0.1770843333} };
+    RealBox rb({0., 0., 0.}, {1., 1., 1.});
+    Array<int, 3> per{1, 1, 0};
+    long long expect[2] = {4956, 32708};
+    for (int l = 0; l < 2; ++l) {
+        const int n = 48 << l;
+        Geometry g(Box(IntVect(0), IntVect(n - 1)), rb, CoordSys::cartesian, per);
+        BoxArray ba(g.Domain()); ba.maxSize(mgs);
+        DistributionMapping dm(ba);
+        auto m = pb::build_obst_class(g, l, ba, dm);
+        Long c = 0;
+        for (MFIter mfi(*m); mfi.isValid(); ++mfi) { auto a = m->const_array(mfi); amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { c += a(i, j, k); }); }
+        ParallelDescriptor::ReduceLongSum(c);
+        Print() << "OBST_MASK L" << l << " solid=" << c << " expect=" << expect[l] << "\n";
+        ccheck(c == expect[l], "OBST mask solid count at L" + std::to_string(l));
+        if (l == 0) {
+            const Box t = pb::obst_tag_box(g, pb::obst_list()[0], 1);
+            Print() << "OBST_MASK tag step1 L0 nbuf1 " << t << "\n";
+            ccheck(t == Box(IntVect(7, 7, 0), IntVect(40, 40, 3)), "--tag-obst box of step 1 at L0 (outward, grown 1)");
+        }
+    }
+    pb::obst_list().clear();
+}
+
 // mode=comp_pyramid (P3, docs/pressure/13): two levels (ratio 2), periodic x and y, Neumann z, and a three-step pyramid OBST
 // on odd fine planes (the steps of pyramid_48_4m scaled to n = 24; n = 48 uses that input's own indices). cross=0: level 1
 // covers the pyramid and one coarse cell around it; cross=1: level 1 stops at x = 1/2, so the obstacle crosses the C/F interface
@@ -2391,6 +2424,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_ns2d") { run_comp_ns2d(pp); }
     else if (mode == "comp_masked") { run_comp_masked(pp); }
     else if (mode == "comp_pyramid") { run_comp_pyramid(pp); }
+    else if (mode == "obst_mask") { run_obst_mask(pp); }
     else if (mode == "comp_bcdata") { run_comp_bcdata(pp); }
     else if (mode == "comp_bcdata_l1") { run_comp_bcdata_l1(pp); }
     else if (mode == "comp_seam") { run_comp_seam(pp); }

@@ -27,6 +27,7 @@ struct TwoLevelOptions {
     std::string outdir = ".";
     std::string chid = "two_level";
     int log_every = 1;
+    int tag_obst = -1;               // --tag-obst [NBUF]: force-tag OBST extents grown by NBUF level-0 cells (default 1); -1 off
     int boundary_test = 0;           // 1: call stage_boundary(1,3) and (1,6) on the bound fine level and check level 0 is untouched; 2: same with the pre-S14.1 level-0-only guard (must stop the run)
     bool bind_only = false;          // true: build hierarchy, bind all levels, report layout, skip advance (registry/bind gate when a full step is not wanted)
     int regrid_every = 0;            // CLI --regrid-every N -> AmrParams.regrid_interval (0 = static after setup; >0 mid-run gate)

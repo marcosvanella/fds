@@ -1096,6 +1096,12 @@ def compmlmg():
         m = lines(out, "COMP_PYRAMID")
         ok(rc == 0 and m, f"comp_pyramid {extra}: harness checks pass [{out[-400:] if rc else m[0]}]")
 
+def obstmask():
+    """M2 driver OBST hook: ObstMask.H snaps the pyramid_48_4m XB with FDS rounding at L0/L1 (solid counts) and the --tag-obst box (checks in the harness)."""
+    for np_ in (1, 2):
+        rc, out = run(np_, mode="obst_mask"); print(out)
+        ok(rc == 0 and len(lines(out, "OBST_MASK")) == 3, f"obst_mask np={np_}: harness checks pass [{out[-300:]}]")
+
 def maskedgeo():
     """D1/D7 at scale: the doc 06 hallways (Known OPEN slab) through the product masked path at two max_grid_size; iterations not within
     5% of the cap, labels cached on the second solve (checks in the harness). Long."""
@@ -1157,7 +1163,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "krylov": krylov, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compbcdatal1": compbcdatal1, "compseam": compseam, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "compmlmg": compmlmg, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "krylov": krylov, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compbcdatal1": compbcdatal1, "compseam": compseam, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "compmlmg": compmlmg, "obstmask": obstmask, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")

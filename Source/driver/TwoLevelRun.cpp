@@ -1,4 +1,5 @@
 // TwoLevelRun.cpp: see TwoLevelRun.H.
+#include "ObstList.H"
 #include "TwoLevelRun.H"
 
 #include <AMReX_ParallelContext.H>
@@ -296,6 +297,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             if (b.ok()) amrex::LoopOnCpu(b, [&](int i, int j, int k) { a(i, j, k) = amrex::TagBox::SET; });
         }
     });
+    load_obst_list();
+    core.set_tag_obst(o.tag_obst);
     core.init_static(reg, false, fdsrt::RegridAmrCore::DmFn(), &l0.dm);
     probe("after init_static");
 

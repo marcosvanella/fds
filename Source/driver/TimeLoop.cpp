@@ -4,6 +4,7 @@
 //  (a) Passive scalars: N_TOTAL_SCALARS beyond the tracked species are handled by Fields.cpp (ZZ/ZZS carry ncomp = N_TOTAL_SCALARS); every copy, exchange and clip
 //      here loops over all components, the D-031 clip special-cases only the tracked species.
 //  (b) Only uniform Cartesian metrics are used (R(I)/RRN(I) dropped); CYLINDRICAL and TRN* meshes are rejected (IR-002), the pressure call-through assumes IPS=0.
+#include "ObstList.H"
 #include "TimeLoop.H"
 #include "LevelRegistry.H"
 #include "PressureBcMap.H"
@@ -1140,6 +1141,7 @@ struct TimeLoop::Impl {
     std::unique_ptr<pb::PressureWorkspace> pws;
     std::unique_ptr<fdsrt::FluxStageRunner> runner;
     std::vector<std::unique_ptr<amrex::MultiFab>> crhs, cphi;   // by level (index 0 unused: level 0 has rhs / phi)
+    std::vector<std::unique_ptr<amrex::iMultiFab>> ccls;        // OBST cell_class by level (ObstMask.H); empty without OBST
     TimeLoop::CompositeReport crep;
     void ensure_comp()
     {
@@ -1161,6 +1163,9 @@ struct TimeLoop::Impl {
         if (const char* e = std::getenv("FDSTL_OVERWRITE")) comp_overwrite = std::atoi(e) != 0;
         runner.reset(new fdsrt::FluxStageRunner(sl, comp_overwrite));
         pws.reset(new pb::PressureWorkspace());
+        load_obst_list();
+        ccls.clear();
+        if (!pb::obst_list().empty()) for (int l = 0; l < nl; ++l) ccls.push_back(pb::build_obst_class(lc[l].lev->geom, l, lc[l].lev->ba, lc[l].lev->dm));
         comp_gen = layout_gen;
     }
     // Composite pressure solve of the stage: PRHS of every level, one solve, H (pred) / HS (corrector) of every level, the face gradient at the interface into the fine ghost cells.
@@ -1220,6 +1225,7 @@ struct TimeLoop::Impl {
             pl.rhs = l == 0 ? rhs.get() : crhs[l].get();
             pl.phi = l == 0 ? phi.get() : cphi[l].get();
             if (!warm) pl.phi->setVal(0.0);
+            if (l < static_cast<int>(ccls.size())) pl.cell_class = ccls[l].get();
         }
         pb::PressureOptions o;
         o.backend = pb::BackendKind::Auto;

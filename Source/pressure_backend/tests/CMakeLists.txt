@@ -155,6 +155,7 @@ pb_add_test(pb_comp_masked compmasked)
 pb_add_test(pb_comp_masked_4rank_3level compmasked4r3)
 # P3 masked composite MLMG (docs/pressure/13): pyramid OBST, MLMG vs HYPRE, rulings 1-6 diagnostics, C/F-crossing and thin-wall negatives.
 pb_add_test(pb_comp_masked_mlmg compmlmg)
+pb_add_test(pb_obst_mask obstmask)
 pb_add_test(pb_comp_bcdata           compbcdata)
 pb_add_test(pb_comp_bcdata_l1        compbcdatal1)
 pb_add_test(pb_comp_seam             compseam)

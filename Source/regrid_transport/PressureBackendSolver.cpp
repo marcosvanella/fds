@@ -5,6 +5,7 @@
 #include <AMReX_Print.H>
 
 #include "PressureIface.H"
+#include "ObstMask.H"
 
 namespace fdsrt {
 
@@ -17,6 +18,7 @@ struct PressureBackendSolver::Impl {
     std::vector<amrex::MultiFab> phi;       // owned solution storage, valid cells + one ghost layer
     std::vector<amrex::MultiFab> rhs0;      // zero right-hand sides: layout carriers for rebuild
     std::array<pb::BC, 6> bc;
+    std::vector<std::unique_ptr<amrex::iMultiFab>> cls;   // OBST cell_class per level (empty: no OBST loaded)
 
     pb::PressureProblem problem(const std::vector<const amrex::MultiFab*>* rhs)
     {
@@ -27,6 +29,7 @@ struct PressureBackendSolver::Impl {
             L.ba = ba[l]; L.dm = dm[l]; L.geom = geom[l]; L.ref_ratio = ratio[l];
             L.rhs = rhs ? (*rhs)[l] : &rhs0[l];
             L.phi = &phi[l];
+            if (l < cls.size()) L.cell_class = cls[l].get();
             p.levels.push_back(L);
         }
         return p;
@@ -56,6 +59,10 @@ void PressureBackendSolver::rebuild(const std::vector<ProjectionLevel>& levels)
         const pb::BC b = levels[0].geom.isPeriodic(d) ? pb::BC::Periodic : pb::BC::Neumann;
         m.bc[pb::face_index(d, 0)] = b;
         m.bc[pb::face_index(d, 1)] = b;
+    }
+    m.cls.clear();
+    if (!pb::obst_list().empty()) {
+        for (size_t l = 0; l < m.ba.size(); ++l) m.cls.push_back(pb::build_obst_class(m.geom[l], static_cast<int>(l), m.ba[l], m.dm[l]));
     }
     std::string msg;
     const pb::Status st = m.ws.rebuild(m.problem(nullptr), &msg);

@@ -64,6 +64,8 @@ public:
     // Preferred path: AmrParams TAG_* keys + set_tag_fields (ErrorEst calls apply_tag_criteria). set_tag_function is the fallback for unit tests
     // that build a TagCriterion by hand (used only when no TAG_* criterion is set).
     void set_tag_function(TagFn f) { tag_fn_ = std::move(f); }
+    // --tag-obst NBUF: force-tag every OBST of pb::obst_list() (ObstMask.H) on each level below the top, rounded outward and grown by NBUF level-0 cells (<0: off)
+    void set_tag_obst(int nbuf) { tag_obst_nbuf_ = nbuf; }
     using TagFieldsFn = std::function<TagFields(int lev)>;
     void set_tag_fields(TagFieldsFn f) { tag_fields_fn_ = std::move(f); }
     const AmrParams& amr_params() const { return params_; }
@@ -119,6 +121,7 @@ private:
     LevelListener* listener_ = nullptr;
     LevelDataTransfer* transfer_ = nullptr;
     TagFn tag_fn_;
+    int tag_obst_nbuf_ = -1;
     TagFieldsFn tag_fields_fn_;
     DmFn dm_fn_;
     amrex::DistributionMapping level0_dm_;

@@ -1,4 +1,5 @@
 // RegridAmrCore.cpp: see RegridAmrCore.H.
+#include "../pressure_backend/ObstMask.H"
 #include "RegridAmrCore.H"
 
 #include <AMReX_Print.H>
@@ -149,6 +150,17 @@ void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time
         std::vector<amrex::Box> forced;
         for (const GridBox& g : h_.levels[lev + 1].grids)
             if (g.mesh >= 0) forced.push_back(amrex::coarsen(to_amrex(g.box), r));
+        if (!forced.empty()) tag_boxes(tags, forced);
+    }
+    // --tag-obst: OBST extents at this level, rounded outward, grown by NBUF level-0 cells (NBUF * cumulative ratio of this level)
+    if (tag_obst_nbuf_ >= 0 && lev + 1 <= h_.top && !pb::obst_list().empty()) {
+        int cum = 1;
+        for (int l = 0; l < lev; ++l) cum *= amrex::AmrCore::refRatio(l)[0];
+        std::vector<amrex::Box> forced;
+        for (auto const& xb : pb::obst_list()) {
+            const amrex::Box b = pb::obst_tag_box(Geom(lev), xb, tag_obst_nbuf_ * cum);
+            if (b.ok()) forced.push_back(b);
+        }
         if (!forced.empty()) tag_boxes(tags, forced);
     }
     // IR-008: tags outside the refinable region are discarded and counted; one message per level

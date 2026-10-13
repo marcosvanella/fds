@@ -250,6 +250,7 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--stage-boundary-test") == 0) to.boundary_test = (i + 1 < argc && std::strcmp(argv[i + 1], "legacy") == 0) ? (++i, 2) : 1;
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) { to.outdir = argv[++i]; ro.outdir = to.outdir; }
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) { to.chid = argv[++i]; ro.chid = to.chid; }
+                    else if (std::strcmp(argv[i], "--tag-obst") == 0) to.tag_obst = (i + 1 < argc && argv[i + 1][0] != '-') ? std::atoi(argv[++i]) : 1;
                     else if (std::strcmp(argv[i], "--log-every") == 0 && i + 1 < argc) to.log_every = std::atoi(argv[++i]);
                 }
                 if (to.max_level < 0) amrex::Abort("--levels must be >= 1");   // --levels 1: level 0 only (plotfiles, no refinement)
