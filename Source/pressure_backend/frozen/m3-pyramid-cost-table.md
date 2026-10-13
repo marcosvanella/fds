@@ -33,7 +33,7 @@ composite BiCGStab, composite CG = InvalidInput). The masked composite BiCGStab 
 | MLMG-preconditioned BiCGStab (masked composite) | BiCGSTAB | 5 / 6 | 29.6 | 359.0 | 329.9 | 368.7 | 689.4 / 662.8 / 660.1 | 3.2e-12 |
 
 Peak RSS (process high-water mark over all arms): max per rank 223 MB, sum 223 MB.
-### pop-os (i9-13900HX, 24 cores / 32 threads, P+E hybrid; shared, load average 19-21 during the run), 1 rank
+### NVIDIA test machine (i9-13900HX, 24 cores / 32 threads, P+E hybrid; shared, load average 19-21 during the run), 1 rank
 
 | Arm | Method | Iters (zero / warm) | Setup ms | First solve ms | Re-solve ms | Warm solve ms | Amortized N=1 / 10 / 100 ms | True rel residual |
 |---|---|---|---|---|---|---|---|---|
@@ -47,7 +47,7 @@ Peak RSS (process high-water mark over all arms): max per rank 223 MB, sum 223 M
 | MLMG-preconditioned BiCGStab (masked composite) | BiCGSTAB | 5 / 6 | 44.4 | 679.8 | 638.5 | 713.0 | 1321.5 / 1281.5 / 1277.5 | 3.2e-12 |
 
 Peak RSS (process high-water mark over all arms): max per rank 227 MB, sum 227 MB.
-### pop-os, 4 ranks (--bind-to core)
+### NVIDIA test machine, 4 ranks (--bind-to core)
 
 | Arm | Method | Iters (zero / warm) | Setup ms | First solve ms | Re-solve ms | Warm solve ms | Amortized N=1 / 10 / 100 ms | True rel residual |
 |---|---|---|---|---|---|---|---|---|
@@ -88,9 +88,9 @@ PCG chosen, max diff vs MLMG < 2 %).
 - BoomerAMG alone needs 44 iterations, about 2.5x the Krylov-wrapped arms.
 - Warm start saves 2 to 7 iterations; it does not change the ranking.
 - The unmasked single-level FFT baseline costs about 6 ms per step, roughly 150x below any masked composite arm.
-- 4 ranks (pop-os): every HYPRE arm speeds up by about 2.2-2.5x versus pop-os 1 rank. MLMG V-cycle speeds up only 1.5x and BiCGStab 1.9x.
+- 4 ranks (NVIDIA test machine): every HYPRE arm speeds up by about 2.2-2.5x versus its 1 rank. MLMG V-cycle speeds up only 1.5x and BiCGStab 1.9x.
   At 4 ranks MLMG-preconditioned BiCGStab is the cheapest masked arm at N = 1 and 10: 0.70 / 0.68 s per step, versus 1.52 / 0.72 s for the
   best HYPRE arm. At N = 100 they are about equal: HYPRE PCG with the symmetric C/F at 0.64 s (with the 0.8 % accuracy cost above), BiCGStab
   at 0.68 s, default HYPRE GMRES at 0.69 s.
-- pop-os was shared (load 19-21 from other jobs) on hybrid P/E cores, so its absolute times are pessimistic. Its 1-rank times are slower than
+- The NVIDIA test machine was shared (load 19-21 from other jobs) on hybrid P/E cores, so its absolute times are pessimistic. Its 1-rank times are slower than
   the idle box. The ratios between arms in one run are the reliable part (interleaved, median of 5).
