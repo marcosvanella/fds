@@ -195,10 +195,7 @@ std::string label_components_composite_masked (PressureProblem const& p,
             iMultiFab ccls(cba, p.levels[L].dm, 1, 0); ccls.setVal(CellSolid);
             ccls.ParallelCopy(cls[L-1], 0, 0, 1);
 
-            // Fine takes min from coarse across C/F; collect fine->coarse mins in a Fab then ParallelCopy back.
-            BoxArray cba0 = p.levels[L].ba; cba0.coarsen(ratio[L]);
-            iMultiFab f2c(cba0, p.levels[L].dm, 1, 0);
-            f2c.setVal(std::numeric_limits<int>::max());
+            // Fine takes min from coarse across C/F (here); coarse takes min from fine below (halo of fine labels on the coarse side).
             BoxArray const& fba = p.levels[L].ba;
 
             for (MFIter mfi(*cm.label[L]); mfi.isValid(); ++mfi) {
@@ -209,9 +206,6 @@ std::string label_components_composite_masked (PressureProblem const& p,
                 auto const& ua = cunc.const_array(mfi);
                 auto const& ca = ccls.const_array(mfi);
                 Box const cbox = clab[mfi].box();
-                // f2c uses un-grown coarsened boxes; same index as fine.
-                auto const& f2 = f2c.array(mfi);
-                Box const f2box = f2c[mfi].box();
                 amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
                     if (u(i,j,k) == 0 || cl(i,j,k) != CellGas || o(i,j,k) < 0) { return; }
                     for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) {
@@ -227,25 +221,35 @@ std::string label_components_composite_masked (PressureProblem const& p,
                         const int kc = ca(cc[0],cc[1],cc[2]);
                         if (uc != 0 && kc == CellGas && lc >= 0) {
                             if (lc < o(i,j,k)) { o(i,j,k) = lc; changed = 1; }
-                            if (f2box.contains(cc)) {
-                                f2(cc[0],cc[1],cc[2]) = std::min(f2(cc[0],cc[1],cc[2]), o(i,j,k));
-                            }
                         }
                     }
                 });
             }
             cm.label[L]->FillBoundary(geom[L].periodicity());
-            iMultiFab cmin(p.levels[L-1].ba, p.levels[L-1].dm, 1, 0);
-            cmin.setVal(std::numeric_limits<int>::max());
-            cmin.ParallelCopy(f2c, 0, 0, 1);
+            // Coarse side: fine labels (>= 0 only on uncovered fine gas) on refine(grow(coarse box, 1)), one ParallelCopy (periodic images
+            // included). An uncovered coarse gas cell takes the min label of the fine cells across each of its faces. (The former push into
+            // un-grown coarsened fine boxes never reached the coarse neighbour, so coarse regions joined only through the fine level stayed
+            // separate components: spurious pins and per-component mean removal.)
+            BoxArray hba = p.levels[L-1].ba; hba.grow(1); hba.refine(ratio[L]);
+            iMultiFab flab(hba, p.levels[L-1].dm, 1, 0); flab.setVal(-1);
+            flab.ParallelCopy(*cm.label[L], 0, 0, 1, 0, 0, geom[L].periodicity());
+            const IntVect rr = ratio[L];
             for (MFIter mfi(*cm.label[L-1]); mfi.isValid(); ++mfi) {
                 auto const& o = cm.label[L-1]->array(mfi);
                 auto const& cl = cls[L-1].const_array(mfi);
                 auto const& u = W_unc[L-1]->const_array(mfi);
-                auto const& mn = cmin.const_array(mfi);
+                auto const& fl = flab.const_array(mfi);
                 amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
                     if (u(i,j,k) == 0 || cl(i,j,k) != CellGas || o(i,j,k) < 0) { return; }
-                    if (mn(i,j,k) < o(i,j,k)) { o(i,j,k) = mn(i,j,k); changed = 1; }
+                    for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) {
+                        IntVect n(i,j,k); n[d] += s ? 1 : -1;
+                        Box fb = amrex::refine(Box(n, n), rr);
+                        if (s) { fb.setBig(d, fb.smallEnd(d)); } else { fb.setSmall(d, fb.bigEnd(d)); }   // fine layer on the shared face
+                        amrex::LoopOnCpu(fb, [&] (int a, int b, int c) {
+                            const int v = fl(a,b,c);
+                            if (v >= 0 && v < o(i,j,k)) { o(i,j,k) = v; changed = 1; }
+                        });
+                    }
                 });
             }
             cm.label[L-1]->FillBoundary(geom[L-1].periodicity());

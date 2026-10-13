@@ -1834,11 +1834,13 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
             }
         }
     }
-    if (composite_is_masked(p)) {
-        return fail(Status::NotBuilt, "face_gradient_composite with masked cells is not built");
-    }
+    // Solid-only mask: the gradient of the unmasked operator, zeroed on every face touching a Solid cell (beta = 0 there). C/F faces
+    // never touch a Solid cell (NotBuilt in the solve), so they are unchanged. Known cells stay NotBuilt.
+    for (auto const& L : p.levels) { if (L.known_value) { return fail(Status::NotBuilt, "face_gradient_composite with Known cells is not built"); } }
+    PressureProblem pu = p;
+    for (auto& L : pu.levels) { L.cell_class = nullptr; }
     PressureWorkspace::Impl W;
-    build_impl(W, p);
+    build_impl(W, pu);
     const bool ext = (W.hidden >= 0);
     LevelMFs phi;
     Vector<MultiFab*> pphi;
@@ -1878,6 +1880,21 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
             } else {
                 MultiFab::Copy(g, *flux[l][d], 0, 0, 1, 0);
                 g.mult(Real(-1.0), 0, 1, 0);
+            }
+        }
+    }
+    for (int l = 0; l < nlev; ++l) {
+        if (!p.levels[l].cell_class) { continue; }
+        iMultiFab c(p.levels[l].ba, p.levels[l].dm, 1, 1);
+        c.setVal(0);
+        iMultiFab::Copy(c, *p.levels[l].cell_class, 0, 0, 1, 0);
+        c.FillBoundary(p.levels[l].geom.periodicity());
+        for (int d = 0; d < 3; ++d) {
+            const IntVect e = IntVect::TheDimensionVector(d);
+            for (MFIter mfi(*grad_out[l][d]); mfi.isValid(); ++mfi) {
+                auto const& g = grad_out[l][d]->array(mfi);
+                auto const& s = c.const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (s(i,j,k) == 1 || s(i-e[0],j-e[1],k-e[2]) == 1) { g(i,j,k) = 0.0; } });
             }
         }
     }

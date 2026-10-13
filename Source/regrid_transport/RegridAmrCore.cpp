@@ -153,7 +153,7 @@ void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time
         if (!forced.empty()) tag_boxes(tags, forced);
     }
     // --tag-obst: OBST extents at this level, rounded outward, grown by NBUF level-0 cells (NBUF * cumulative ratio of this level)
-    if (tag_obst_nbuf_ >= 0 && lev + 1 <= h_.top && !pb::obst_list().empty()) {
+    if (tag_obst_nbuf_ >= 0 && lev < maxLevel() && !pb::obst_list().empty()) {
         int cum = 1;
         for (int l = 0; l < lev; ++l) cum *= amrex::AmrCore::refRatio(l)[0];
         std::vector<amrex::Box> forced;
