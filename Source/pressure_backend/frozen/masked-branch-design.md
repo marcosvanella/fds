@@ -143,7 +143,7 @@ Composite masked is built on assembled HYPRE (D3, D4, D6; Q1). MLMG composite ma
 * **Tests.** `pb_masked` HYPRE rows on the six small cases vs MLMG; sealed2: two pins reported, residual excludes both; `max_pins=1` warns (singular).
 * **Status.** Built for single level and composite (multi-pin constructor on `HypreSystem`).
 * **D-091.** Masked single-level `Auto` → HYPRE (Architect accept; A-56). Explicit MLMG override kept.
-* **D-092.** Product composite-masked is **Built**: `Auto` → assembled HYPRE (Architect). MLMG composite+mask stays NotBuilt; Known-on-C/F InvalidInput; `face_gradient_composite`+mask NotBuilt. Unmasked Mf default and D-091 unchanged.
+* **D-092.** Product composite-masked is **Built**: `Auto` → assembled HYPRE (Architect). MLMG composite+mask stays NotBuilt; Known-on-C/F InvalidInput; `face_gradient_composite`+mask NotBuilt. Unmasked Mf default and D-091 unchanged. *Rank dependence (fixed):* the assembled C/F stencil and reflux once dropped coarse/fine cells of remote boxes (~18% solution change at 2 ranks); row ids of the other level are now ParallelCopy'd once into halos before assembly. `pb_comp_masked_mlmg` enforces MLMG = HYPRE and rank-count independence (1/2/4 ranks, 24³ and 48³, partial C/F overlap) to 1e-9.
 
 ## Closed decisions (Q1–Q6) and remaining open
 

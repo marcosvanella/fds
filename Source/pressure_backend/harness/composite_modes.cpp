@@ -2124,9 +2124,8 @@ void run_comp_pyramid (ParmParse& pp)
     Print() << std::setprecision(6) << "  HYPRE: status=" << pb::to_string(rh.status) << " backend=" << rh.backend << " own=" << rh.backend_status.own_residual << " iters=" << rh.backend_status.iterations
             << " true_rel2=" << rh.residual_rel2 << " check_nopin=" << rh.residual_check << "  rel_diff(MLMG,HYPRE)=" << dmh << " fp_mlmg=" << std::setprecision(12) << fp(pm) << " fp_hypre=" << fp(ph) << std::setprecision(6) << " msg=\"" << rh.message << "\"\n";
     ccheck(rh.status == pb::Status::Ok && rh.residual_ok, "pyramid HYPRE Ok, residual (pin row excluded) ok");
-    // cmp_hypre=0: report only. On more than one rank the assembled HYPRE masked composite operator currently depends on the box
-    // distribution (its C/F stencil sees only coarse cells of local boxes and one ghost layer); the test then compares the MLMG
-    // fingerprint across rank counts instead.
+    // cmp_hypre=0: report only (diagnostics). The test enforces it on 1, 2 and 4 ranks; the HYPRE C/F stencil and reflux read remote
+    // coarse/fine row ids from halos filled once before assembly, so the operator does not depend on the box distribution.
     int cmp_hypre = 1; pp.query("cmp_hypre", cmp_hypre);
     if (cmp_hypre) { ccheck(dmh < difftol, "obstacle inside L1: MLMG matches HYPRE"); }
 

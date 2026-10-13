@@ -1075,18 +1075,26 @@ def compmasked():
 def compmlmg():
     """P3 (docs/pressure/13): masked composite MLMG on a stepped pyramid (odd fine planes) covered by level 1: MLMG matches HYPRE,
     V-cycle factor < 0.5, no diagonal shift, averaged L0 beta, MLMG-preconditioned BiCGStab; obstacle across C/F and a one-fine-cell
-    wall are NotBuilt for MLMG and HYPRE under Auto (checks in the harness)."""
-    fps = {}
-    # np=2: the MLMG solution must not depend on the rank count (fingerprint vs np=1); the assembled HYPRE masked composite operator
-    # currently does (C/F stencil limited to local coarse boxes), so that comparison is reported only (cmp_hypre=0).
-    for np_, extra in ((1, {}), (2, {"cmp_hypre": 0}), (1, {"cross": 1}), (1, {"thin": 1})):
-        rc, out = run(np_, mode="comp_pyramid", **extra); print(out)
+    wall are NotBuilt for MLMG and HYPRE under Auto (checks in the harness). 1, 2 and 4 ranks at 24^3 and 48^3: MLMG and HYPRE agree
+    with each other and across rank counts to 1e-9 relative."""
+    # D-092 (Auto -> HYPRE): the same solve on 1, 2 and 4 ranks must match MLMG (difftol) and agree across rank counts to 1e-9 relative,
+    # at 24^3 and 48^3 (mgs=16: partial C/F overlap across rank boundaries; the HYPRE C/F stencil and reflux once dropped remote cells).
+    for extra in ({}, {"n": 48, "mgs": 16}):
+        fps = {}
+        for np_ in (1, 2, 4):
+            rc, out = run(np_, mode="comp_pyramid", difftol=1e-9, **extra); print(out)
+            m = lines(out, "COMP_PYRAMID")
+            ok(rc == 0 and m, f"comp_pyramid np={np_} {extra}: harness checks pass, MLMG matches HYPRE [{out[-400:] if rc else m[0]}]")
+            f = [l for l in out.splitlines() if "fp_mlmg=" in l]
+            if f: fps[np_] = (float(f[0].split("fp_mlmg=")[1].split()[0]), float(f[0].split("fp_hypre=")[1].split()[0]))
+        for k, name in ((0, "MLMG"), (1, "HYPRE")):
+            v = [fps[n][k] for n in sorted(fps)]
+            ok(len(v) == 3 and max(v) - min(v) <= 1e-9 * max(abs(x) for x in v),
+               f"masked composite {name} solution independent of the rank count {extra} {[f'{x:.12g}' for x in v]}")
+    for extra in ({"cross": 1}, {"thin": 1}):
+        rc, out = run(1, mode="comp_pyramid", **extra); print(out)
         m = lines(out, "COMP_PYRAMID")
-        ok(rc == 0 and m, f"comp_pyramid np={np_} {extra}: harness checks pass [{out[-400:] if rc else m[0]}]")
-        f = [l for l in out.splitlines() if "fp_mlmg=" in l]
-        if f: fps[np_] = float(f[0].split("fp_mlmg=")[1].split()[0])
-    ok(1 in fps and 2 in fps and abs(fps[1] - fps[2]) <= 1e-9 * max(abs(fps[1]), 1e-30),
-       f"masked composite MLMG solution independent of the rank count {fps}")
+        ok(rc == 0 and m, f"comp_pyramid {extra}: harness checks pass [{out[-400:] if rc else m[0]}]")
 
 def maskedgeo():
     """D1/D7 at scale: the doc 06 hallways (Known OPEN slab) through the product masked path at two max_grid_size; iterations not within

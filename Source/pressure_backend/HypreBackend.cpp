@@ -279,41 +279,51 @@ struct HypreSystem::Impl {
         return true;
     }
 
+    // Row ids of other ranks needed by this rank's rows (filled once before assembly, see id_gas): halo_c[L] = level L-1 ids on
+    // coarsen(level L boxes) grown by 2 (level L distribution), halo_f[l] = level l+1 ids on refine(level l boxes grown by 1) (level l
+    // distribution).
+    std::vector<std::unique_ptr<iMultiFab>> halo_c, halo_f;
     bool is_pin_id (long long id) const
     {
         for (long long p : pin_ids) { if (p == id) { return true; } }
         return false;
     }
-    // Gas-only row id of cell iv on level l, or -1.
+    // Gas-only row id of cell iv on level l, or -1. Looked up in this rank's row_id fabs (valid and one ghost layer, FillBoundary) and
+    // in the halos filled once before assembly (halo_c: level l cells around the next finer level's boxes, for its C/F stencils;
+    // halo_f: level l cells around the next coarser level's boxes, for its reflux), at iv or any periodic image of it.
     long long id_gas (int l, IntVect iv) const
     {
         if (!wrap(l, iv)) { return -1; }
-        if (!row_id[l]) { return -1; }
-        auto isects = lev[l].ba.intersections(Box(iv, iv), true, IntVect(0));
-        if (isects.empty()) { return -1; }
-        const int b = isects[0].first;
-        if (lev[l].dm[b] != rank) {
-            // Owned by another rank: read from FillBoundary ghost if present on a local fab covering iv's ghost.
-            // Fall through to MFIter search on local fabs (ghost layer).
-        }
-        for (MFIter mfi(*row_id[l]); mfi.isValid(); ++mfi) {
-            Box gbx = amrex::grow(mfi.validbox(), row_id[l]->nGrow());
-            if (gbx.contains(iv)) {
-                return (long long)(row_id[l]->const_array(mfi)(iv[0], iv[1], iv[2]));
+        if (!row_id[l] || !lev[l].ba.contains(iv)) { return -1; }
+        long long r = -1;
+        auto look = [&] (iMultiFab const& mf, IntVect const& q) {
+            for (MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                if (amrex::grow(mfi.validbox(), mf.nGrow()).contains(q)) { r = std::max(r, (long long)(mf.const_array(mfi)(q[0], q[1], q[2]))); }
             }
+        };
+        Box const& dom = lev[l].geom.Domain();
+        for (int sz = -1; sz <= 1 && r < 0; ++sz)
+        for (int sy = -1; sy <= 1 && r < 0; ++sy)
+        for (int sx = -1; sx <= 1 && r < 0; ++sx) {
+            const int sh[3] = {sx, sy, sz};
+            IntVect q = iv;
+            bool skip = false;
+            for (int d = 0; d < 3; ++d) {
+                if (sh[d] != 0 && !lev[l].geom.isPeriodic(d)) { skip = true; }
+                q[d] += sh[d]*dom.length(d);
+            }
+            if (skip) { continue; }
+            look(*row_id[l], q);
+            if (l + 1 < nlev && halo_c[l+1]) { look(*halo_c[l+1], q); }
+            if (l >= 1 && halo_f[l-1]) { look(*halo_f[l-1], q); }
         }
-        return -1;
+        return r;
     }
     bool avail_gas (int L, IntVect c, long long& id) const
     {
         if (!wrap(L-1, c)) { return false; }
         if (cfine[L-1].contains(c)) { return false; }
-        // D3: only uncovered Gas cells enter a C/F stencil.
-        for (MFIter mfi(*cls_g[L-1]); mfi.isValid(); ++mfi) {
-            Box gbx = amrex::grow(mfi.validbox(), cls_g[L-1]->nGrow());
-            if (!gbx.contains(c)) { continue; }
-            if (cls_g[L-1]->const_array(mfi)(c[0],c[1],c[2]) != CellGas) { return false; }
-        }
+        // D3: only uncovered Gas cells enter a C/F stencil; exactly those have a row id (also for cells of other ranks, via halo_c).
         id = id_gas(L-1, c);
         return id >= 0;
     }
@@ -744,6 +754,19 @@ void HypreSystem::Impl::build_masked ()
             });
         }
         row_id[l]->FillBoundary(lev[l].geom.periodicity());
+    }
+    // C/F halos: one ParallelCopy per level pair and direction, so the C/F stencil and reflux of a row never depend on which rank owns
+    // the other level's cells.
+    halo_c.clear(); halo_c.resize(nlev); halo_f.clear(); halo_f.resize(nlev);
+    for (int L = 1; L < nlev; ++L) {
+        BoxArray cba(lev[L].ba); cba.coarsen(lev[L].ratio); cba.grow(2);
+        halo_c[L] = std::make_unique<iMultiFab>(cba, lev[L].dm, 1, 0);
+        halo_c[L]->setVal(-1);
+        halo_c[L]->ParallelCopy(*row_id[L-1], 0, 0, 1, 0, 0, lev[L-1].geom.periodicity());
+        BoxArray fba(lev[L-1].ba); fba.grow(1); fba.refine(lev[L].ratio);
+        halo_f[L-1] = std::make_unique<iMultiFab>(fba, lev[L-1].dm, 1, 0);
+        halo_f[L-1]->setVal(-1);
+        halo_f[L-1]->ParallelCopy(*row_id[L], 0, 0, 1, 0, 0, lev[L].geom.periodicity());
     }
 
     // Resolve pins.
