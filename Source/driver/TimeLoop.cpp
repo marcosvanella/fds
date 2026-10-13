@@ -92,6 +92,7 @@ double fds_p_zone_volume(int iz);
 void fds_p_zone_volume_set(int iz, double v);
 int fds_p_vent_count(int nm);
 void fds_p_vent_get(int nm, int nv, int* ip, double* rp);
+void fds_get_face_bc(int nm, int* code);   // fds_mesh_query.f90 (patch 0015)
 void fds_p_iter_init();
 void fds_p_iter_inc();
 int fds_p_iter_baro();
@@ -167,6 +168,7 @@ struct TimeLoop::Impl {
     int clip_slot(int lev, int n0) const { return lev * nt + n0; }
     int passes = 0;
     int bc_type[6] = {0, 0, 0, 0, 0, 0};   // pb::BC per domain face (side*3+dir)
+    FaceBc vel_bc{};                        // wall type per domain face (2*dir+side) for the fine-level velocity ghosts (BcStep::vel_bc, patch 0015)
     bool solve_dir[3] = {true, true, true};
     std::string dir;
     std::vector<std::string> log_steps;
@@ -275,6 +277,7 @@ struct TimeLoop::Impl {
         if (!std::getenv("FDSTL_LEGACY_BCSTEP_OFFSET")) o.bc->set_mesh_offset(nm0);   // (FDSTL_LEGACY_BCSTEP_OFFSET=1: offset 0 as before S14.4, reproducer of the level-0 ghost overwrite, notes/fine-velocity-bc.md)
         // BcStep calls the FDS routines with the FDS mesh number of the bound box (the registry Level carries offset 0)
         o.bc->ext_ghost = true;   // requirement of levels > 0 (BcStep::exchange): the driver saves the face velocities, MATCH_VELOCITY is not run
+        o.bc->vel_bc = vel_bc;    // fine boxes have no wall cells: the domain-face wall type of level 0 (patch 0015)
         LevelCtx x;
         x.lev = &Lv; x.F = &F; x.bc = o.bc.get(); x.sd = &L.m_reg->side_data(lev); x.drho = o.drho.get(); x.dzz = o.dzz.get();
         x.nbox = nb; x.fds0 = nm0; x.off = total_boxes();
@@ -402,10 +405,15 @@ struct TimeLoop::Impl {
     void pressure_bc_map()
     {
         int code[6] = {-1, -1, -1, -1, -1, -1}, nn[3] = {0, 0, 0};
+        int whi[6] = {-1, -1, -1, -1, -1, -1}, wlo[6] = {-99, -99, -99, -99, -99, -99};   // max and -min of the wall types of the meshes on each domain face (patch 0015)
         const amrex::Box dom = l0.geom.Domain();
         for (int i = 0; i < nbox; ++i) {
             if (!local(i)) continue;
             const amrex::Box vb = l0.ba[i];
+            int fc[6];
+            fds_get_face_bc(i + 1, fc);
+            for (int f = 0; f < 6; ++f)
+                if (fc[f] >= 0 && (f % 2 ? vb.bigEnd(f / 2) == dom.bigEnd(f / 2) : vb.smallEnd(f / 2) == dom.smallEnd(f / 2))) { whi[f] = std::max(whi[f], fc[f]); wlo[f] = std::max(wlo[f], -fc[f]); }
             const int c3[3] = {mip[16 * i + 3], mip[16 * i + 4], mip[16 * i + 5]};
             for (int d = 0; d < 3; ++d) {
                 nn[d] = dom.length(d);
@@ -415,6 +423,8 @@ struct TimeLoop::Impl {
         }
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] codes before reduce %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), code[0], code[1], code[2], code[3], code[4], code[5]);
         for (int f = 0; f < 6; ++f) all_max(code[f]);
+        for (int f = 0; f < 6; ++f) { all_max(whi[f]); all_max(wlo[f]); vel_bc[f] = whi[f] == -wlo[f] ? whi[f] : 0; }   // one type over the whole face, else 0 (plain mirror)
+        if (!L.m_o.quiet) amrex::Print() << "driver set-up: fine-level wall types -x..+z (1 INERT, 3 MIRROR, else plain mirror) " << vel_bc[0] << " " << vel_bc[1] << " " << vel_bc[2] << " " << vel_bc[3] << " " << vel_bc[4] << " " << vel_bc[5] << "\n";
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] codes %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), code[0], code[1], code[2], code[3], code[4], code[5]);
         DirBc dm[3];
         for (int d = 0; d < 3; ++d) {

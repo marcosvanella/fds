@@ -13,7 +13,7 @@ MODULE FDS_MESH_QUERY
 USE ISO_C_BINDING, ONLY: C_INT,C_DOUBLE,C_CHAR,C_NULL_CHAR
 USE MESH_VARIABLES, ONLY: MESHES
 USE TYPES, ONLY: SPECIES_MIXTURE
-USE GLOBAL_CONSTANTS, ONLY: INTERPOLATED_BOUNDARY,NMESHES,PROCESS,PERIODIC_DOMAIN_X,PERIODIC_DOMAIN_Y,PERIODIC_DOMAIN_Z,CYLINDRICAL,N_TRACKED_SPECIES, &
+USE GLOBAL_CONSTANTS, ONLY: INTERPOLATED_BOUNDARY,NULL_BOUNDARY,NMESHES,PROCESS,PERIODIC_DOMAIN_X,PERIODIC_DOMAIN_Y,PERIODIC_DOMAIN_Z,CYLINDRICAL,N_TRACKED_SPECIES, &
                             N_TOTAL_SCALARS,MY_RANK,N_MPI_PROCESSES
 
 IMPLICIT NONE (TYPE,EXTERNAL)
@@ -80,6 +80,23 @@ DO K=1,N(3) ; DO J=1,N(2) ; DO I=1,N(1)
    ENDDO
 ENDDO ; ENDDO ; ENDDO
 END SUBROUTINE FDS_GET_CELL_WALLS
+
+!> \brief Wall type of the six faces (-x,+x,-y,+y,-z,+z) of local mesh NM for the fine-level velocity BC (GhostExchange mirror_domain_edges, patch 0015): the
+!> WALL BOUNDARY_TYPE (cons.f90: 1 SOLID/INERT, 3 MIRROR) shared by every external wall cell of that face, 0 when they differ, -1 when there is none. NULL walls are skipped.
+SUBROUTINE FDS_GET_FACE_BC(NM,CODE) BIND(C,NAME='fds_get_face_bc')
+INTEGER(C_INT), VALUE :: NM
+INTEGER(C_INT), INTENT(OUT) :: CODE(6)
+INTEGER :: IW,IO,F,BT
+CODE = -1
+DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
+   BT = MESHES(NM)%WALL(IW)%BOUNDARY_TYPE
+   IF (BT==NULL_BOUNDARY) CYCLE
+   IO = MESHES(NM)%BOUNDARY_COORD(MESHES(NM)%WALL(IW)%BC_INDEX)%IOR
+   F = 2*ABS(IO) - MERGE(1,0,IO>0)   ! IOR=+1 is the wall of the -x face (its normal points into the mesh)
+   IF (CODE(F)==-1) CODE(F) = BT
+   IF (CODE(F)/=BT) CODE(F) = 0
+ENDDO
+END SUBROUTINE FDS_GET_FACE_BC
 
 !> \brief 0-based ZZ component for tracked species / tracer ID (SPECIES_MIXTURE%ID), or -1 if unknown.
 !> NAME is a NUL-terminated C string. Passive search is exact on TRIM(ID) (case-sensitive, as FDS namelist IDs).
