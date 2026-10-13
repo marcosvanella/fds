@@ -48,6 +48,7 @@ void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
 void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION, level 0 (Stage R1)
 void fds_k_div2(double dt, int nm);
+void fds_k_comb(double t, double dt);
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
 void fds_k_vcorr(double t, double dt, int nm);
 void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);
@@ -311,12 +312,12 @@ struct TimeLoop::Impl {
     {
         std::vector<std::string> bad;
         auto chk = [&](bool cond, const char* what) { if (cond) bad.push_back(what); };
-        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[9] > 0, "reactions"); chk(IP[11] != 0, "LEVEL_SET_MODE");
+        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[11] != 0, "LEVEL_SET_MODE");
         chk(IP[12], "TUNNEL_PRECONDITIONER"); chk(IP[13] != 1, "pressure solver other than FFT"); chk(IP[14], "CYLINDRICAL"); chk(IP[15], "particle drag");
         // D-089: FREEZE_VELOCITY (IP[18]) allowed in AMR TimeLoop for cold-flow / passive-scalar adaptive demos; reacting-flow production must not depend on freeze.
         chk(IP[16], "SOLID_HEAT_TRANSFER_3D"); chk(IP[17] > 0, "Lagrangian particles"); chk(IP[19], "SOLID_PHASE_ONLY");
         chk(IP[22], "MPI particle exchange"); chk(IP[23], "obstruction mass exchange"); chk(IP[24] > 0, "agglomeration");
-        // D-090: INIT_HRRPUV (IP[25]) allowed for manufactured-HRR / TAG_HRRPUV gates (R4-T2); reactions (IP[9]) stay refused.
+        // D-090: INIT_HRRPUV (IP[25]) allowed for manufactured-HRR / TAG_HRRPUV gates (R4-T2); reactions (IP[9]) allowed on level 0 (COMBUSTION in the corrector).
         chk(IP[26], "TERRAIN_CASE"); chk(IP[27], "READ_EXTERNAL"); chk(IP[28], "SYNTHETIC_EDDY_METHOD");
         if (!bad.empty()) {
             std::string s;
@@ -1793,6 +1794,7 @@ struct TimeLoop::Impl {
         stage_raw("c_prevflux", {"RHOS", "US", "VS", "WS", "MU", "KRES", "H", "HS", "ZZS", "TMP", "RHO"});
         for_levels([&](int) { s_vflux(false); });
         stage("c_vflux", {"FVX", "FVZ"});
+        if (IP[9] > 0) fds_k_comb(t, dt);   // main.f90: COMBUSTION_LOAD_BALANCED and COMBUSTION_BC after VELOCITY_FLUX, before WALL_BC/DIVERGENCE_PART_1
         // WP1b / 7.13b: edge tables + vorticity/stress work arrays right after VELOCITY_FLUX (corrector); FDSTL_STAGES=<icyc>
         stage_scratch("c_vfluxE", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"DS", 3}, {"FVX", 3}, {"FVY", 3}, {"FVZ", 3}, {"ED_OMEGA", 2}, {"ED_TAU", 2}, {"CE_EDGE_INDEX", 4}});
         ++wall_counter;
