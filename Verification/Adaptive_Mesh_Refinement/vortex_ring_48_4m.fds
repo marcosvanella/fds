@@ -1,0 +1,34 @@
+! 3-D vortex ring, 48^3 4m. Re/nu: VISCOSITY=1.0E-02 → Re_advect≈25 (baseline≈2460 @ μ=1e-4).
+! IC: Rosenhead Biot-Savart; Γ=-0.8, R=0.3, a=0.2, cz=0.6 → downward (−z).
+! BC: floor INERT (no-slip impermeable); sides PERIODIC; top MIRROR (OPEN deferred; expect periodic=(110)). PERIODIC_TEST=2 + UVW/CSVF = IC loader only.
+! Owner: --two-level-run --tag-vort auto --maxsize 8 --blocking 4; TAG_KEEP~0.85; fields RHO,U,V,W,OMEGA_Y.
+! Hint: undivided |ω| peak ~ 0.132629; try --tag-vort auto or [0.03316, 0.06631].
+! See Source/driver/notes/vortex-ring-owner-show.md.
+
+&HEAD CHID='vortex_ring_48_4m', TITLE='3-D vortex ring cold-flow, 48^3 4m, owner-show TAG_VORT adaptive' /
+
+&MESH IJK=24,24,48, XB=0,0.5,0,0.5,0,1, MPI_PROCESS=0 /
+&MESH IJK=24,24,48, XB=0.5,1,0,0.5,0,1, MPI_PROCESS=1 /
+&MESH IJK=24,24,48, XB=0,0.5,0.5,1,0,1, MPI_PROCESS=2 /
+&MESH IJK=24,24,48, XB=0.5,1,0.5,1,0,1, MPI_PROCESS=3 /
+
+&TIME T_END=5.0 /
+
+&MISC SIMULATION_MODE='DNS', STRATIFICATION=.FALSE., NOISE=.FALSE., CFL_MAX=0.25,
+      PERIODIC_TEST=2, UVW_FILE='vortex_ring_48_4m_uvw_m1.csv' /
+
+&CSVF UVWFILE='vortex_ring_48_4m_uvw_m1.csv' /
+
+&PRES VELOCITY_TOLERANCE=1.E-6, MAX_PRESSURE_ITERATIONS=100 /
+
+&RADI RADIATION=.FALSE. /
+
+&SPEC ID='BACKGROUND', BACKGROUND=.TRUE., MW=28.0, VISCOSITY=1.0E-02, DIFFUSIVITY=1.0E-02, SPECIFIC_HEAT=1.0 /
+
+&VENT PBX=0, SURF_ID='PERIODIC' /
+&VENT PBX=1, SURF_ID='PERIODIC' /
+&VENT PBY=0, SURF_ID='PERIODIC' /
+&VENT PBY=1, SURF_ID='PERIODIC' /
+&VENT PBZ=0, SURF_ID='INERT' /
+&VENT PBZ=1, SURF_ID='MIRROR' /
+&TAIL /

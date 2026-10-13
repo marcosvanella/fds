@@ -1,5 +1,8 @@
 # FireX: A Research Branch of Fire Dynamics Simulator (FDS)
 
+> **FDS-AMReX branch:** build and run instructions for the AMReX adaptive-mesh driver are in [README_FDS_AMReX.md](README_FDS_AMReX.md).
+
+
 FireX is a research branch of the Fire Dynamics Simulator (FDS) focused on integrating high-performance computing (HPC) functionalities. We try to keep FireX synchronized with the master branch of FDS, ensuring that any new commits to the master branch are incorporated into FireX within a few days.
 
 ### Key Features of FireX:
