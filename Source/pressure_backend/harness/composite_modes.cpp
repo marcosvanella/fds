@@ -1977,6 +1977,87 @@ void run_obst_mask (ParmParse& pp)
     pb::obst_list().clear();
 }
 
+// cost=1 in mode=comp_pyramid (M3, docs/pressure/13 section 3 rules): solver-only cost table on the masked pyramid composite (and the
+// unmasked single-level L0 baseline for FFT / HYPRE PCG). Every arm: fresh workspace, first solve (zero guess), re-solve (zero guess),
+// warm solve (previous solution as guess for a perturbed rhs, "next step"); interleaved arm by arm, rep 0 untimed warm-up, median of
+// nrep. true_rel = residual_check (gauge-free, pin rows excluded). Times are the max over ranks of the backend's own setup/solve clocks. One COST line per arm.
+void run_pyr_cost (ParmParse& pp, Cfg const& c, Hier& h, pb::PressureProblem& p, double tol_rel)
+{
+    int nrep = 5; pp.query("nrep", nrep);
+    const int nl = static_cast<int>(h.ba.size());
+    pb::PressureProblem ps = make_single_problem(c, h);
+    std::vector<MultiFab> rhs0, rhs1;   // headline rhs and the perturbed "next step" rhs
+    for (int l = 0; l < nl; ++l) {
+        rhs0.emplace_back(h.ba[l], h.dm[l], 1, 0); MultiFab::Copy(rhs0[l], *h.rhs[l], 0, 0, 1, 0);
+        rhs1.emplace_back(h.ba[l], h.dm[l], 1, 0); MultiFab::Copy(rhs1[l], *h.rhs[l], 0, 0, 1, 0);
+        auto const dx = h.geom[l].CellSizeArray();
+        for (MFIter mfi(rhs1[l]); mfi.isValid(); ++mfi) {
+            auto const& r = rhs1[l].array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (r(i,j,k) != 0) { r(i,j,k) += Real(0.01) * std::sin(2*kPi*(i + Real(0.5))*dx[0]) * std::cos(kPi*(k + Real(0.5))*dx[2]); } });
+        }
+    }
+    using K = pb::Krylov;
+    struct Arm { const char* name; bool single; pb::BackendKind bk; K hk, mk; };
+    const std::vector<Arm> arms = {
+        {"FFT (single-level unmasked L0)", true, pb::BackendKind::FFT, K::Auto, K::Auto},
+        {"HYPRE PCG+BoomerAMG (single-level unmasked L0)", true, pb::BackendKind::HYPRE, K::PCG, K::Auto},
+        {"HYPRE Auto Krylov+BoomerAMG (masked composite)", false, pb::BackendKind::HYPRE, K::Auto, K::Auto},
+        {"HYPRE GMRES(30)+BoomerAMG (masked composite)", false, pb::BackendKind::HYPRE, K::GMRES, K::Auto},
+        {"BoomerAMG alone (masked composite)", false, pb::BackendKind::HYPRE, K::None, K::Auto},
+        {"MLMG V-cycle (masked composite)", false, pb::BackendKind::MLMG, K::Auto, K::None},
+        {"MLMG-preconditioned BiCGStab (masked composite)", false, pb::BackendKind::MLMG, K::Auto, K::BiCGSTAB}};
+    const int na = static_cast<int>(arms.size());
+    // per arm, per rep: setup, first, resolve, warm, iters (first), iters (warm), true rel residual (first)
+    std::vector<std::vector<std::array<double,7>>> rec(na);
+    std::vector<std::string> meth(na), stat(na);
+    auto setrhs = [&] (std::vector<MultiFab> const& r) { for (int l = 0; l < nl; ++l) { MultiFab::Copy(*h.rhs[l], r[l], 0, 0, 1, 0); } };
+    for (int rep = 0; rep <= nrep; ++rep) {
+        for (int a = 0; a < na; ++a) {
+            Arm const& A = arms[a];
+            pb::PressureProblem& P = A.single ? ps : p;
+            pb::PressureOptions o;
+            o.tol_rel = tol_rel; o.removed_mean_warn = 1.0; o.residual_tol = 1e-8; o.check_residual = true;
+            o.backend = A.bk; o.hypre.krylov = A.hk; o.mlmg_krylov = A.mk;
+            pb::PressureWorkspace ws;
+            auto go = [&] (bool warm) {
+                if (!warm) { for (int l = 0; l < nl; ++l) { h.phi[l]->setVal(0.0); } }
+                o.use_initial_guess = warm;
+                ParallelDescriptor::Barrier();
+                return pb::solve_pressure(P, o, &ws);
+            };
+            setrhs(rhs0);
+            pb::PressureResult r1 = go(false);
+            pb::PressureResult r2 = go(false);
+            setrhs(rhs1);
+            pb::PressureResult r3 = go(true);
+            setrhs(rhs0);
+            stat[a] = pb::to_string(r1.status); meth[a] = r1.backend_status.method;
+            double t[5] = {r1.backend_status.setup_seconds, r1.backend_status.solve_seconds,
+                           r2.backend_status.setup_seconds + r2.backend_status.solve_seconds,
+                           r3.backend_status.setup_seconds + r3.backend_status.solve_seconds, 0.0};
+            ParallelDescriptor::ReduceRealMax(t, 4);
+            const double first = t[0] + t[1];
+            // MLMG builds lazily inside the first solve: setup = first solve - re-solve (rules item 4); HYPRE/FFT: their own setup clock
+            const double setup = (A.bk == pb::BackendKind::MLMG) ? std::max(0.0, first - t[2]) : t[0];
+            if (rep > 0) { rec[a].push_back({setup, first, t[2], t[3], double(r1.backend_status.iterations), double(r3.backend_status.iterations), r1.residual_check}); }
+        }
+    }
+    long rss_kb = 0;
+    { std::ifstream f("/proc/self/status"); std::string k; while (f >> k) { if (k == "VmHWM:") { f >> rss_kb; break; } } }
+    Long rmax = rss_kb, rsum = rss_kb;
+    ParallelDescriptor::ReduceLongMax(rmax); ParallelDescriptor::ReduceLongSum(rsum);
+    auto med = [&] (int a, int q) { std::vector<double> v; for (auto const& x : rec[a]) { v.push_back(x[q]); } std::sort(v.begin(), v.end()); return v.empty() ? -1.0 : v[v.size()/2]; };
+    Print() << std::setprecision(4);
+    for (int a = 0; a < na; ++a) {
+        const double su = med(a, 0), rs = med(a, 2);
+        Print() << "COST arm=\"" << arms[a].name << "\" status=" << stat[a] << " method=" << meth[a] << " iters=" << med(a, 4) << " warm_iters=" << med(a, 5)
+                << " setup=" << su << " first=" << med(a, 1) << " resolve=" << rs << " warm=" << med(a, 3)
+                << " amort1=" << su + 2*rs << " amort10=" << su/10 + 2*rs << " amort100=" << su/100 + 2*rs
+                << " true_rel=" << med(a, 6) << "\n";
+    }
+    Print() << "COST peak_rss_MB max_rank=" << rmax/1024.0 << " sum=" << rsum/1024.0 << " (process high-water mark over all arms)\n";
+}
+
 // mode=comp_pyramid (P3, docs/pressure/13): two levels (ratio 2), periodic x and y, Neumann z, and a three-step pyramid OBST
 // on odd fine planes (the steps of pyramid_48_4m scaled to n = 24; n = 48 uses that input's own indices). cross=0: level 1
 // covers the pyramid and one coarse cell around it; cross=1: level 1 stops at x = 1/2, so the obstacle crosses the C/F interface
@@ -2053,6 +2134,8 @@ void run_comp_pyramid (ParmParse& pp)
     c.bcd = {bxy, bxy, pb::BC::Neumann}; c.bchi = c.bcd;
     pb::PressureProblem p = make_problem(c, h);
     for (int l = 0; l < 2; ++l) { p.levels[l].cell_class = cls[l].get(); }
+    int cost = 0; pp.query("cost", cost);
+    if (cost) { run_pyr_cost(pp, c, h, p, tol_rel); return; }
 
     auto solve = [&] (pb::BackendKind bk, pb::HypreKrylov mk, std::vector<MultiFab>* out) {
         for (int l = 0; l < 2; ++l) { h.phi[l]->setVal(0.0); }
