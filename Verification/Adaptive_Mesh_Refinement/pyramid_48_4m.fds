@@ -1,13 +1,10 @@
-! P0 pyramid Poisson study (next-work r8 Active item 3): vortex ring (Re 800: Gamma 0.8 / nu 1e-3) over a three-step OBST pyramid on the INERT floor.
-! nu = 1e-3 (Re 800 per the study spec; vortex_ring_48_4m.fds has 1e-2). Pyramid edges on odd 1/96 indices, XB nudged outward by 1e-6.
-! 3-D vortex ring, 48^3 4m. Re/nu: VISCOSITY=1.0E-03 → ν=1.0E-03.
-! IC: Rosenhead Biot-Savart; Γ=-0.8, R=0.3, a=0.2, cz=0.6 → downward (−z).
-! BC: floor INERT (no-slip impermeable); sides PERIODIC; top MIRROR (OPEN deferred; expect periodic=(110)). PERIODIC_TEST=2 + UVW/CSVF = IC loader only.
-! Owner: --two-level-run --tag-vort auto --maxsize 8 --blocking 4; TAG_KEEP~0.85; fields RHO,U,V,W,OMEGA_Y.
-! Hint: undivided |ω| peak ~ 0.132629; try --tag-vort auto or [0.03316, 0.06631].
-! See Source/driver/notes/vortex-ring-owner-show.md.
+! Vortex ring (Re 800, viscosity 1e-3) hitting a three-step pyramid of OBSTs on the floor; 1 m box, 48^3 cells on 4 meshes (2x2x1).
+! Pyramid edges lie on odd 1/96 grid lines; XB nudged outward by 1e-6 so the grid snap is unambiguous.
+! Boundaries: x and y sides PERIODIC, floor (z=0) INERT no-slip wall, top (z=1) MIRROR.
+! Initial velocity: Rosenhead vortex ring (circulation -0.8, ring radius 0.3, core radius 0.2, centre z=0.6), moving down;
+! read from the &CSVF UVW file (PERIODIC_TEST=2 only switches on that loader).
 
-&HEAD CHID='pyramid_48_4m', TITLE='Vortex ring over 3-step OBST pyramid, 48^3 4m (2x2x1), P0 L0 baseline' /
+&HEAD CHID='pyramid_48_4m', TITLE='Vortex ring over a 3-step pyramid, 48^3, 4 meshes' /
 
 &MESH IJK=24,24,48, XB=0,0.5,0,0.5,0,1, MPI_PROCESS=0 /
 &MESH IJK=24,24,48, XB=0.5,1,0,0.5,0,1, MPI_PROCESS=1 /

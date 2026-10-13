@@ -25,6 +25,10 @@ run_case() {
   # initial-velocity CSVs: the 48^3 cases use the committed slices, the 96^3 case is generated on demand
   case $input in
     vortex_ring_48_4m.fds|pyramid_48_4m.fds) cp "$CASES"/vortex_ring_48_4m_uvw_m?.csv "$dir/" ;;
+    vortex_ring_48_4x4x1.fds)
+      [ -f "$dir/vortex_ring_48_4x4x1_uvw_m16.csv" ] || \
+        python3 "$REPO/Source/driver/tests/make_vortex_ring_case.py" 48 "$dir" --sx 4 --sy 4 --sz 1 >/dev/null
+      cp "$HERE/$input" "$dir/"; rm -f "$dir/vortex_ring_48_uvw.csv" ;;
     vortex_ring_96_2x2x1.fds)
       [ -f "$dir/vortex_ring_96_2x2x1_uvw_m4.csv" ] || \
         python3 "$REPO/Source/driver/tests/make_vortex_ring_case.py" 96 "$dir" --sx 2 --sy 2 --sz 1 >/dev/null
