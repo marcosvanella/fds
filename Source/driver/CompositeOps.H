@@ -12,6 +12,7 @@
 #include <AMReX_MultiFab.H>
 
 #include <array>
+#include <vector>
 
 #include "LevelRegistry.H"
 
@@ -21,6 +22,9 @@ namespace fdsamr {
 // Zero the face arrays names[d] of levels l0..nl-1 on every face touching a SOLID cell (SideData comp 0). sh = 0: face-centred (U, US, ...); sh = -1: cell-shaped
 // upper-face arrays (FVX, FVY, FVZ).
 void composite_zero_solid_faces(LevelRegistry& reg, int l0, int nl, const std::array<const char*, 3>& names, int sh);
+// Zero the cell fields `names` on the SOLID (OBST) cells of levels l0..nl-1: the projection does not solve there (beta = 0, all faces 0),
+// so a nonzero D/DS/DDDT in a solid fine cell is never removed and grows (pyramid L1 |div u - D| drift).
+void composite_zero_solid_cells(LevelRegistry& reg, int l0, int nl, const std::vector<const char*>& names);
 void composite_average_down_faces(LevelRegistry& reg, int nl, const std::array<const char*, 3>& names);
 
 // Ghost faces of level l >= 1 for the three face fields `names`: faces outside the fine boxes that no fine box owns get the coarse-interpolated value (normal-linear, constant

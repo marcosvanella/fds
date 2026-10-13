@@ -29,6 +29,20 @@ void composite_zero_solid_faces(LevelRegistry& reg, int l0, int nl, const std::a
     }
 }
 
+void composite_zero_solid_cells(LevelRegistry& reg, int l0, int nl, const std::vector<const char*>& names)
+{
+    for (int l = l0; l < nl; ++l) {
+        const amrex::iMultiFab& m = reg.side_data(l).mask();
+        for (const char* nm : names) {
+            amrex::MultiFab& f = reg.fields(l)[nm];
+            for (amrex::MFIter mfi(f); mfi.isValid(); ++mfi) {
+                const auto a = f.array(mfi); const auto s = m.const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (s(i, j, k)) a(i, j, k) = 0.0; });
+            }
+        }
+    }
+}
+
 void composite_average_down_faces(LevelRegistry& reg, int nl, const std::array<const char*, 3>& names)
 {
     for (int l = nl - 1; l >= 1; --l) {

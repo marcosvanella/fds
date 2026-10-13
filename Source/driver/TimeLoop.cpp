@@ -1357,6 +1357,7 @@ struct TimeLoop::Impl {
         if (!multi()) return;
         ProfScope prof_ad(4);
         composite_zero_solid_faces(*L.m_reg, 1, static_cast<int>(lc.size()), pred ? std::array<const char*, 3>{"US", "VS", "WS"} : std::array<const char*, 3>{"U", "V", "W"}, 0);
+        composite_zero_solid_cells(*L.m_reg, 1, static_cast<int>(lc.size()), {"D", "DS", "DDDT"});   // solid fine cells: D/DS/DDDT stay 0 (div u = 0 there)
         if (pred) composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"US", "VS", "WS"});
         else composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"U", "V", "W"});
     }
