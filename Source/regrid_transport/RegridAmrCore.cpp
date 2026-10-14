@@ -242,6 +242,9 @@ bool RegridAmrCore::regrid_dynamic(amrex::Real time)
     const int old_finest = finestLevel();
     std::vector<amrex::BoxArray> old_ba;
     for (int l = 0; l <= old_finest; ++l) old_ba.push_back(boxArray(l));
+    // conservative fine -> coarse sync first: the time loop leaves the covered coarse cells at their own coarse update, and a coarse cell the regrid uncovers
+    // (or that a new fine box prolongs from) would bring that stale value into the composite mass
+    if (transfer_ && old_finest > 0) transfer_->hierarchy_done(false);
     if (listener_) listener_->begin_regrid();
     regrid(0, time);
     if (listener_) listener_->end_regrid();
