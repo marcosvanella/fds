@@ -420,7 +420,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         fdsrt::ProjectionOptions po = pst.options;
         po.enabled = (o.projection != "OFF");
         loop.zero_closed_wall_normal();   // fine faces prolonged onto INERT/MIRROR, then the projection
-        pst.before(lv);
+        if (po.enabled) pst.before(lv);   // OFF: leave the level-0 IC as FDS set it (zeroing U alone, without a projection or US, breaks L0 mass)
         const fdsrt::ProjectionReport pr = fdsrt::project_after_regrid(lv, &solver, po);
         amrex::Print() << tag << " initial projection (" << o.projection << "): ran " << pr.ran << " solved " << pr.solved << " max|div u - D| before " << pr.div_before << " after " << pr.div_after
                        << " (level 0 " << (pr.div_after_level.empty() ? 0.0 : pr.div_after_level[0]) << ", level 1 " << (pr.div_after_level.size() > 1 ? pr.div_after_level[1] : 0.0) << "), accepted " << pr.accepted
