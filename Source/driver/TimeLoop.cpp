@@ -14,6 +14,7 @@
 #include "PostRegridProjection.H"
 
 #include <AMReX_BLassert.H>
+#include <AMReX_MultiFabUtil.H>
 #include <AMReX_ParallelContext.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_ParallelReduce.H>
@@ -46,7 +47,8 @@ void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* dat
 void fds_k_dens_post(double t, double dt, int nm);
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
-void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), level 0
+void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), any level
+void fds_k_rte_factor();
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt, int nm);
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
@@ -1823,7 +1825,8 @@ struct TimeLoop::Impl {
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
-        if (IP[9] > 0 || IP[10] || IP[25]) each_local([&](int nm) { fds_k_rad(L.m_t, nm); });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC, after WALL_BC, before DIVERGENCE_PART_1; level 0
+        if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) { each_local([&](int nm) { fds_k_rad(L.m_t, nm); }); });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC per box, after WALL_BC, before DIVERGENCE_PART_1
+        if (IP[10]) fds_k_rte_factor();   // main.f90 CALCULATE_RTE_SOURCE_CORRECTION_FACTOR
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();
@@ -2016,8 +2019,18 @@ struct TimeLoop::Impl {
             // FDS's own writers (CHID_devc.csv, _hrr.csv, _mass.csv, _steps.csv, _cpu.csv and the .out step block) on the box data; main.f90 patch 0006
             const double to0 = amrex::second();
             fds_hook_set_step(L.m_t, r.dt, L.m_icyc);
+            // Composite HRR: UPDATE_HRR sums Q*VC over the level-0 meshes, whose covered cells carry the coarse combustion of the averaged-down state. For the writers
+            // only, the covered level-0 Q is replaced by the volume average of the finer Q (uncovered L0 + all finer cells, each counted once) and restored afterwards.
+            std::vector<amrex::MultiFab> qsave;
+            const int nlq = static_cast<int>(lc.size());
+            const bool qavg = nlq > 1 && L.m_reg && lc[0].F->has("Q");
+            if (qavg) {
+                for (int l = 0; l < nlq - 1; ++l) { const amrex::MultiFab& q = (*lc[l].F)["Q"]; qsave.emplace_back(q.boxArray(), q.DistributionMap(), 1, 0); amrex::MultiFab::Copy(qsave.back(), q, 0, 0, 1, 0); }
+                for (int l = nlq - 2; l >= 0; --l) amrex::average_down((*lc[l + 1].F)["Q"], (*lc[l].F)["Q"], 0, 1, L.m_reg->level(l + 1).ref_ratio_from_parent);
+            }
             double dtd = 0.0;
             fds_setup(3, "", &dtd);
+            if (qavg) for (int l = 0; l < nlq - 1; ++l) amrex::MultiFab::Copy((*lc[l].F)["Q"], qsave[l], 0, 0, 1, 0);
             t_out += amrex::second() - to0;
         }
         if (!mms_done && (IP[6] == 7 || IP[6] == 11) && L.m_t >= RP[2]) { write_mms(L.m_t); mms_done = true; }

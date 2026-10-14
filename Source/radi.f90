@@ -1,3 +1,7 @@
+#ifdef WITH_AMREX
+! Patch 0022 (as 0008/0020): COMPUTE_RADIATION finds the data of a box through POINT_TO_BOX, so it runs on a box of a refinement level > 0 (radiation Stage R2).
+#define POINT_TO_MESH POINT_TO_BOX
+#endif
 MODULE SPECDATA
 
 USE PRECISION_PARAMETERS
