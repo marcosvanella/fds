@@ -59,6 +59,16 @@ ABSTRACT INTERFACE
 END INTERFACE
 PROCEDURE(SHADOW_IF), POINTER, SAVE :: SHADOW_PROC => NULL()
 
+!> Fine wall-flux devices (patch 0027): when registered (fds_fine_level.f90, with hidden fine walls), FDS_SETUP(3) calls it after the
+!> UPDATE_GLOBAL_OUTPUTS loop, so that wall devices on a fine-covered face read the hidden fine wall instead of level 0.
+ABSTRACT INTERFACE
+   SUBROUTINE FINE_DEVC_IF(T)
+      IMPORT :: EB
+      REAL(EB), INTENT(IN) :: T
+   END SUBROUTINE FINE_DEVC_IF
+END INTERFACE
+PROCEDURE(FINE_DEVC_IF), POINTER, PUBLIC, SAVE :: FINE_DEVC_PROC => NULL()
+
 CONTAINS
 
 !> Set or clear EXTERNAL_GHOSTS_FILLED.

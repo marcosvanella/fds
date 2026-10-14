@@ -67,6 +67,7 @@ of the tree (e.g. a `git worktree`), never in the shared checkout:
 | `0017-fine-wall-noflux.patch` | | already committed, do not apply |
 | `0018`–`0025` | | already committed, do not apply |
 | `0026-mesh-obj-wall-storage.patch` | `Source/mesh.f90`, `func.f90`, `wall.f90` | already committed, do not apply (needed by `fds_fine_level.f90` since `27ba12cdbe`) |
+| `0027-fine-devc-hook.patch` | `Source/main.f90` | already committed, do not apply (fine wall-flux devices hook) |
 | `0001`–`0012` | | already in the branch history |
 
 Check a patch with `git apply --check <patch>`: if it applies it is still needed. If `git apply --check -R <patch>` succeeds, it is already in.
@@ -74,7 +75,7 @@ Check a patch with `git apply --check <patch>`: if it applies it is still needed
 ```bash
 git worktree add --detach ../fds-amr-build HEAD
 cd ../fds-amr-build
-# no patch to apply at the current tip (all of 0001-0026 are committed)
+# no patch to apply at the current tip (all of 0001-0027 are committed)
 ```
 
 ### 2.2 GNU + Open MPI (verified)
