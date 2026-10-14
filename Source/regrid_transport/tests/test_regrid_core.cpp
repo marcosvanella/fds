@@ -3,7 +3,7 @@
 //     data rebuilt at every cycle as the composite state of the exact blob): conservation across each regrid, the feature stays on the finest level, tags
 //     outside the refinable region are discarded and counted, the tag buffer does not reach outside the region, hysteresis.
 //  B  the same run with a different distribution of boxes over ranks gives the same grids and bitwise the same data.
-//  C  negative controls: no tag buffer loses the feature; skipping the average-down before the regrid breaks the budget.
+//  C  negative controls: no tag buffer loses the feature; stale coarse data under the fine patches is repaired by the pre-regrid average-down.
 // The line "HASH hier=... data=..." is printed on rank 0; tests/run_regrid_rank_check.sh runs the test at 1 and 4 ranks and compares the lines.
 #include <AMReX.H>
 #include <AMReX_MultiFab.H>
@@ -273,7 +273,8 @@ int main(int, char** argv)
         const Run c1 = run(0, false, false, true);
         CHECK_MSG(c1.feature_uncovered > 0, "C: negative control, no tag buffer: feature cells leave the finest level (" + std::to_string(c1.feature_uncovered) + ")");
         const Run c2 = run(2, false, true, true);
-        CHECK_MSG(c2.worst_budget > 1e-6, "C: negative control, stale coarse data under the fine patches breaks the budget (change " + std::to_string(c2.worst_budget) + ")");
+        // since 0b5ef2cc02 regrid_dynamic averages down before the regrid too, so stale coarse values under the fine patches are repaired (this was a negative control)
+        CHECK_MSG(c2.worst_budget <= 1e-12, "C: stale coarse data under the fine patches no longer breaks the budget (pre-regrid average-down), change " + std::to_string(c2.worst_budget));
         const Run c3 = run(2, false, false, false);
         CHECK_MSG(c3.hier != a.hier || c3.stats.tags_set[1] != a.stats.tags_set[1], "C: hysteresis changes the tags (TAG_KEEP is active)");
         CHECK_MSG(a.stats.tags_set[1] >= c3.stats.tags_set[1], "C: with hysteresis at least as many cells stay tagged as without");

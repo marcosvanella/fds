@@ -1,4 +1,4 @@
-// test_celltransfer.cpp (R4 step 3): conservative limited prolongation of rho*Z_n (positivity-preserving, parent-sum clip) and the regrid budget.
+// test_celltransfer.cpp (R4 step 3): prolongation of rho*Z_n by injection (every child = parent) and the regrid budget.
 // Usage: test_celltransfer (run on 1 and 4 ranks). Fine cell volume is 1/(r_x r_y r_z), coarse cell volume 1.
 #include <AMReX.H>
 #include <AMReX_MultiFab.H>
@@ -189,7 +189,7 @@ int main(int, char** argv)
             const double wp = regrid_budget(s, c.f, c.name, true);
             CHECK_MSG(wp > 1e-11, c.name + ": negative control (one fine cell changed by 1e-3) is detected, relative change " + sci(wp));
         }
-        // (2) the operator on its own: per-parent conservation, bounds, mass fractions, DMP; unlimited central slopes would go negative on the rough data
+        // (2) the operator on its own: every child is the parent value in every component (bitwise), so each parent sum and the mass fractions are kept
         for (int rr : {2, 4}) {
             Setup s = make_setup(amrex::IntVect(rr), false);
             amrex::MultiFab C = make_coarse(s, rough);
@@ -197,33 +197,17 @@ int main(int, char** argv)
             amrex::MultiFab F(fba, amrex::DistributionMapping(fba), NC, 0);
             ProlongOpts opt;
             const ProlongStats st = fdsrt::prolong_conserved(F, C, s.cg, s.ratio, opt);
-            long bad_sum = 0, bad_dmp = 0, bad_unlim = 0, n_dmp = 0;
+            long bad = 0, n = 0;
             for (amrex::MFIter mfi(F); mfi.isValid(); ++mfi) {
                 auto a = F.const_array(mfi);
-                amrex::LoopOnCpu(amrex::coarsen(mfi.validbox(), s.ratio), [&](int i, int j, int k) {
-                    for (int n = 0; n < NC; ++n) {
-                        double sum = 0, lo = 1e300, hi = -1e300;
-                        for (int di = -1; di <= 1; ++di) for (int dj = -1; dj <= 1; ++dj) for (int dk = -1; dk <= 1; ++dk) { const double v = rough(i + di, j + dj, k + dk, n); lo = std::min(lo, v); hi = std::max(hi, v); }
-                        for (int kc = 0; kc < rr; ++kc) for (int jc = 0; jc < rr; ++jc) for (int ic = 0; ic < rr; ++ic) {
-                            const double v = a(i * rr + ic, j * rr + jc, k * rr + kc, n);
-                            sum += v; ++n_dmp; if (v < lo * (1 - 1e-13) || v > hi * (1 + 1e-13)) ++bad_dmp;
-                        }
-                        if (std::abs(sum - rr * rr * rr * rough(i, j, k, n)) > 1e-13 * rr * rr * rr * rough(i, j, k, n)) ++bad_sum;
-                        // what unlimited central slopes would give at the corner child: negative values appear on rough data
-                        double dev = 0; for (int d = 0; d < 3; ++d) { const int e[3] = {d == 0, d == 1, d == 2}; dev += std::abs(0.5 * (rough(i + e[0], j + e[1], k + e[2], n) - rough(i - e[0], j - e[1], k - e[2], n))) * (0.5 - 0.5 / rr); }
-                        if (rough(i, j, k, n) - dev < 0) ++bad_unlim;
-                    }
-                });
+                for (int c = 0; c < NC; ++c) amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { ++n; if (a(i, j, k, c) != rough(i / rr, j / rr, k / rr, c)) ++bad; });
             }
-            long v3[4] = {bad_sum, bad_dmp, bad_unlim, n_dmp}; amrex::ParallelAllReduce::Sum(v3, 4, amrex::ParallelContext::CommunicatorSub());
+            long v2[2] = {bad, n}; amrex::ParallelAllReduce::Sum(v2, 2, amrex::ParallelContext::CommunicatorSub());
             const std::string t = "operator ratio " + std::to_string(rr) + " rough data";
-            CHECK_MSG(v3[0] == 0, t + ": children average to the parent in every component, bad parents " + std::to_string(v3[0]));
-            CHECK_MSG(v3[1] == 0 && v3[3] > 0, t + ": children stay inside the min/max of the 3x3x3 neighbourhood (no new extremes), bad " + std::to_string(v3[1]));
-            CHECK_MSG(v3[2] > 0, t + ": negative control: unlimited central slopes would give negative values at " + std::to_string(v3[2]) + " parents");
-            CHECK_MSG(st.clips == 0 && check_mass_fractions(F) == 0, t + ": zero clips, mass fractions in [0,1] and summing to 1");
-            CHECK_MSG(st.limited > 0, t + ": the limiter was active");
+            CHECK_MSG(v2[0] == 0 && v2[1] > 0, t + ": every child equals its parent (bitwise), bad " + std::to_string(v2[0]));
+            CHECK_MSG(st.clips == 0 && st.limited == 0 && check_mass_fractions(F) == 0, t + ": no limiter, no clip, mass fractions in [0,1] and summing to 1");
         }
-        // (3) exact for a linear field, bitwise for a constant, independent of the box split
+        // (3) piecewise constant for a linear field, bitwise for a constant, independent of the box split
         {
             Setup s = make_setup(amrex::IntVect(4, 2, 2), false);
             const Fn lin = [](int i, int j, int k, int n) { return 5.0 + 0.3 * i + 0.2 * j + 0.1 * k + n; };
@@ -236,12 +220,11 @@ int main(int, char** argv)
             for (amrex::MFIter mfi(F); mfi.isValid(); ++mfi) {
                 auto a = F.const_array(mfi);
                 for (int n = 0; n < NC; ++n) amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
-                    const double x = (i + 0.5) / s.ratio[0] - 0.5, y = (j + 0.5) / s.ratio[1] - 0.5, z = (k + 0.5) / s.ratio[2] - 0.5;   // child centre in coarse-cell units
-                    err = std::max(err, std::abs(a(i, j, k, n) - lin(0, 0, 0, n) - 0.3 * x - 0.2 * y - 0.1 * z));
+                    err = std::max(err, std::abs(a(i, j, k, n) - lin(i / s.ratio[0], j / s.ratio[1], k / s.ratio[2], n)));
                 });
             }
             amrex::ParallelAllReduce::Max(err, amrex::ParallelContext::CommunicatorSub());
-            CHECK_MSG(err < 1e-13, "linear field is reproduced at the child centres, max error " + std::to_string(err));
+            CHECK_MSG(err == 0.0, "linear field: every child holds the parent value, max deviation " + std::to_string(err));
 
             amrex::MultiFab Cc = make_coarse(s, [](int, int, int, int n) { return 0.37 + n; });
             fdsrt::prolong_conserved(F, Cc, s.cg, s.ratio, opt);
@@ -258,27 +241,15 @@ int main(int, char** argv)
             amrex::MultiFab::Subtract(Fc, Fa, 0, 0, NC, 0);
             CHECK_MSG(Fc.norminf(0) == 0.0 && Fc.norminf(1) == 0.0 && Fc.norminf(2) == 0.0, "result does not depend on how the fine level is cut into boxes (bitwise)");
         }
-        // (4) clip: children below the floor are raised, the others rescaled, the parent sum is kept, every clip is counted; negative parent is counted as unfixable
+        // (4) no floor: a negative parent is injected as it is and nothing is counted
         {
-            double ch[4] = {-0.1, 0.5, 0.7, 0.9};   // sum 2.0 = 4 * 0.5
-            const int r = clip_children(ch, 4, 0.5, 0.0);
-            double sum = 0, mn = 1e9; for (double v : ch) { sum += v; mn = std::min(mn, v); }
-            CHECK_MSG(r == 1 && std::abs(sum - 2.0) < 1e-15 && mn >= 0.0, "clip_children: returns 1, children sum kept, none below the floor");
-            double ok[4] = {0.1, 0.2, 0.3, 0.4};
-            CHECK_MSG(clip_children(ok, 4, 0.25, 0.0) == 0 && ok[0] == 0.1 && ok[3] == 0.4, "clip_children: untouched when no child is below the floor");
-            double neg[4] = {-0.1, -0.1, -0.1, -0.1};
-            CHECK_MSG(clip_children(neg, 4, -0.1, 0.0) == 2 && neg[2] == -0.1, "clip_children: negative parent is reported (2) and kept piecewise constant");
             Setup s = make_setup(amrex::IntVect(2), false);
             amrex::MultiFab C = make_coarse(s, [](int i, int j, int k, int n) { return (i == 7 && j == 7 && k == 7 && n == 1) ? -0.2 : 0.5; });
             amrex::BoxArray fba = fine_ba_from_coarse_box(amrex::Box(amrex::IntVect(4, 4, 4), amrex::IntVect(11, 11, 11)), s.ratio, 16);
             amrex::MultiFab F(fba, amrex::DistributionMapping(fba), NC, 0);
             ProlongOpts opt;
             const ProlongStats st = fdsrt::prolong_conserved(F, C, s.cg, s.ratio, opt);
-            CHECK_MSG(st.clips >= 1 && st.unfixable == 1, "negative control: a negative parent is counted as a clip (" + std::to_string(st.clips) + ") and as unfixable (" + std::to_string(st.unfixable) + ")");
-            // and with the floor switched off nothing is counted
-            opt.use_floor = false;
-            const ProlongStats st2 = fdsrt::prolong_conserved(F, C, s.cg, s.ratio, opt);
-            CHECK_MSG(st2.clips == 0, "use_floor = false: no clip counted");
+            CHECK_MSG(st.clips == 0 && st.unfixable == 0 && F.min(1) == -0.2, "negative parent: injected unchanged (min " + std::to_string(F.min(1)) + "), no clip counted");
         }
     }
     const long nfail = fdstest::report("test_celltransfer");
