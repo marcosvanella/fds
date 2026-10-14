@@ -26,6 +26,9 @@ option(USE_OPENMP          "Use OpenMP"                               ON)
 # Optional AMReX driver (FDS-AMReX). OFF (default) leaves the FDS build unchanged.
 option(USE_AMREX           "Build the AMReX driver (Source/driver) instead of the stand-alone FDS executable" OFF)
 
+# MKL is opt-in: its FFTW wrappers override libfftw3 (breaks the AMReX FFT solver).
+option(FDS_USE_MKL         "Link Intel MKL (static by default)" OFF)
+
 # The existing FDS makefile links MKL statically, but this is optional and can
 # be changed to dynamic
 set(MKL_LINK static CACHE STRING "Linking method for MKL (static or dynamic)")
@@ -110,9 +113,11 @@ set(MKL_INTERFACE lp64)
 set(ENABLE_BLACS ON)
 # We don't need ScaLAPACK
 set(ENABLE_SCALAPACK OFF)
-# Use MKL if found
-find_package(MKL CONFIG)
-if (MKL_FOUND)
+# Use MKL only if requested and found
+if (FDS_USE_MKL)
+    find_package(MKL CONFIG)
+endif()
+if (FDS_USE_MKL AND MKL_FOUND)
     message(STATUS "${MKL_IMPORTED_TARGETS}")
     get_target_property(MKLS MKL::MKL INTERFACE_COMPILE_OPTIONS)
     message(STATUS "MKL Compile Options: ${MKLS}")

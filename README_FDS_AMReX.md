@@ -88,6 +88,10 @@ cmake --build build-gnu -j8          # executable: build-gnu/fds_amr
 This matches the reference builds (Release `-O3`, `USE_OPENMP=ON`, `USE_HYPRE=ON`, `USE_SUNDIALS=ON`). Use `-DBUILD_TESTING=ON` for the ctest unit tests.
 Run with one OpenMP thread: `export OMP_NUM_THREADS=1`.
 
+**MKL is off by default** (`FDS_USE_MKL=OFF`). Static MKL exports FFTW symbols that override the real
+`libfftw3` and break the AMReX FFT pressure solve. Add `-DFDS_USE_MKL=ON` only if you need MKL
+(e.g. the PARDISO/cluster-sparse solver) and do not use the AMReX FFT solver.
+
 ### 2.3 Intel oneAPI (icx/ifx) + Intel MPI (not verified here)
 Same line with the Intel wrappers. Build HYPRE and AMReX with the same wrappers:
 ```bash
