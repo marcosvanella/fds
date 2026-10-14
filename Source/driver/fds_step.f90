@@ -228,6 +228,21 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 ENDDO
 END SUBROUTINE FDS_P_BND_RATE
 
+!> Species production per unit heat release (kg/J), for the two-level species balance: COMBUSTION_MODEL sets Q = -RHO*SUM(H_F*DZ)/DT with DZ = NU_MW_O_MW_F*DZ_F for one
+!> reaction, so RHO*DZ(N)/DT = C(N)*Q with C(N) = NU_MW_O_MW_F(N)/(-SUM(H_F*NU_MW_O_MW_F)). Returns 0 (C = 0) unless there is exactly one reaction.
+FUNCTION FDS_P_REAC_COEF(NS,C) BIND(C,NAME='fds_p_reac_coef') RESULT(OK)
+USE TYPES, ONLY: REACTION,SPECIES_MIXTURE
+INTEGER(C_INT), VALUE :: NS
+REAL(C_DOUBLE), INTENT(OUT) :: C(NS)
+INTEGER(C_INT) :: OK
+REAL(EB) :: DEN
+C = 0._EB ; OK = 0
+IF (N_REACTIONS/=1 .OR. NS/=N_TRACKED_SPECIES) RETURN
+DEN = -SUM(SPECIES_MIXTURE(1:N_TRACKED_SPECIES)%H_F*REACTION(1)%NU_MW_O_MW_F(1:N_TRACKED_SPECIES))
+IF (ABS(DEN)<=0._EB) RETURN
+C = REACTION(1)%NU_MW_O_MW_F(1:N_TRACKED_SPECIES)/DEN ; OK = 1
+END FUNCTION FDS_P_REAC_COEF
+
 !> DENSITY(T,DT,NM) alone (unmodified; one box = the FDS per-mesh clip).
 SUBROUTINE FDS_P_DENS(T,DT,NM) BIND(C,NAME='fds_p_dens')
 REAL(C_DOUBLE), VALUE :: T,DT

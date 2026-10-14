@@ -25,7 +25,9 @@
 #include "TimeLoopWiring.H"
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
-extern "C" void fds_p_bnd_rate(int ns, double* r);   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
+extern "C" void fds_p_bnd_rate(int ns, double* r);
+extern "C" int fds_p_reac_coef(int ns, double* c);   // fds_step.f90: species production per unit heat release (one reaction), else 0
+extern "C" void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);   // T_END etc.   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
 extern "C" int fds_find_tracked_species(const char* name);  // fds_mesh_query.f90; 0-based ZZ index or -1
 
 namespace fdsamr {
@@ -55,6 +57,27 @@ std::vector<double> composite_mass(LevelRegistry& reg, int nl, int ns)
     }
     amrex::ParallelAllReduce::Sum(m.data(), static_cast<int>(m.size()), amrex::ParallelContext::CommunicatorSub());
     return m;
+}
+
+// Composite heat release rate (W): Q*vol over the uncovered level-0 cells and every finer cell (each point of the domain counted once).
+double composite_hrr(LevelRegistry& reg, int nl)
+{
+    double q = 0.0;
+    for (int l = 0; l < nl; ++l) {
+        Fields& F = reg.fields(l);
+        if (!F.has("Q")) return 0.0;
+        const Level& lv = reg.level(l);
+        const amrex::iMultiFab* cov = reg.covered_mask(l);
+        const double vol = lv.dx[0] * lv.dx[1] * lv.dx[2];
+        for (amrex::MFIter mfi(F["Q"]); mfi.isValid(); ++mfi) {
+            auto a = F["Q"].const_array(mfi);
+            amrex::Array4<const int> cv;
+            if (cov) cv = cov->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (!(cov && cv(i, j, k) != 0)) q += a(i, j, k) * vol; });
+        }
+    }
+    amrex::ParallelAllReduce::Sum(q, amrex::ParallelContext::CommunicatorSub());
+    return q;
 }
 
 std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl)
@@ -413,9 +436,15 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     const std::vector<double> m0 = composite_mass(reg, nl, ns);
     // Open-domain mass balance: inflow = the mass DENSITY moved through the level-0 wall faces (OPEN vents, MASS_FLUX/HRRPUA walls), summed over the steps.
     // Gate (CEO ruling): open case (through-flow > 1e-10 of the initial mass) |change - inflow| <= 1e-6 x cumulative through-flow; closed case <= 1e-10 x initial mass.
-    std::vector<double> inflow(1 + ns, 0.0), r(2 + ns);
+    // Open case: limit 1e-6 x (initial mass + cumulative through-flow), the mass that has been in the domain (1e-6 x through-flow alone was ~1e5 times tighter than intended early on).
+    // Species: the reaction source sum_n C(n) * Q is added to the inflow (COMBUSTION's M_DOT_PPP of step s enters RHO*Z in DENSITY of step s+1 with that step's DT).
+    std::vector<double> inflow(1 + ns, 0.0), r(2 + ns), reac(ns, 0.0), rc(std::max(ns, 1), 0.0);
     double through = 0.0;
-    auto mass_limit = [&] { return through > 1e-10 * m0[0] ? 1e-6 * through : 1e-10 * m0[0]; };
+    auto mass_limit = [&] { return through > 1e-10 * m0[0] ? 1e-6 * (m0[0] + through) : 1e-10 * m0[0]; };
+    const bool have_rc = ns > 0 && fds_p_reac_coef(ns, rc.data()) != 0;
+    double hrr_prev = composite_hrr(reg, nl), hrr_sum = 0.0, hrr_last = 0.0;
+    double t_end = 0.0, dtfill = 0.0, dtmin = 0.0, dt0 = 0.0; int nzone = 0;
+    fds_k_consts(&t_end, &dtfill, &dtmin, &dt0, &nzone);
     std::string logname = o.outdir + "/" + o.chid + "_multi_level.csv";
     std::FILE* lf = amrex::ParallelDescriptor::IOProcessor() ? std::fopen(logname.c_str(), "w") : nullptr;
     if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel,inflow\n"); }
@@ -429,6 +458,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         amrex::ParallelAllReduce::Sum(r.data(), 1 + ns, amrex::ParallelContext::CommunicatorSub());
         for (int n = 0; n <= ns; ++n) inflow[n] += r[n] * loop.steps().back().dt;
         through += r[1 + ns] * loop.steps().back().dt;
+        if (have_rc) for (int n = 0; n < ns; ++n) reac[n] += rc[n] * hrr_prev * loop.steps().back().dt;
         // Mid-run adaptive regrid (Role 3 call shape): gate on AmrParams.regrid_interval; unbind top-down via finest_bound;
         // regrid_dynamic brackets LevelListener — do NOT call reg.begin_regrid/end_regrid here.
         {
@@ -495,6 +525,10 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             for (int l = 0; l < nl_now; ++l) amrex::Print() << " L" << l << " " << (l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
             amrex::Print() << "\n";
         }
+        hrr_prev = composite_hrr(reg, nl_now);
+        hrr_sum += hrr_prev * loop.steps().back().dt; hrr_last = hrr_prev;
+        if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps)) amrex::Print() << tag << " HRR at step " << s << " composite " << hrr_prev / 1000.0 << " kW\n";
+        if (loop.time() >= t_end) { amrex::Print() << tag << ": T_END " << t_end << " reached at step " << s << " t " << loop.time() << "\n"; break; }
     }
     if (lf) std::fclose(lf);
     loop.write_perf();
@@ -508,15 +542,16 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // every species, also those starting at zero: |change - inflow| against the same limit as the mass
     double worst_species = 0.0;
     for (int n = 0; n < ns; ++n) {
-        const double res = m1[1 + n] - m0[1 + n] - inflow[1 + n];
+        const double res = m1[1 + n] - m0[1 + n] - inflow[1 + n] - reac[n];
         worst_species = std::max(worst_species, std::abs(res) / mass_limit());
-        amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " boundary inflow " << inflow[1 + n] << " balance residual " << res << " (/ limit " << std::abs(res) / mass_limit() << ")\n";
+        amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " boundary inflow " << inflow[1 + n] << " reaction source " << reac[n] << " balance residual " << res << " (/ limit " << std::abs(res) / mass_limit() << ")\n";
     }
+    amrex::Print() << tag << " RESULT composite HRR final " << hrr_last / 1000.0 << " kW, time mean " << (loop.time() > 0.0 ? hrr_sum / loop.time() / 1000.0 : 0.0) << " kW, t " << loop.time() << " (T_END " << t_end << ")\n";
     amrex::Print() << tag << " RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";
     // PASS gate (Architect): fine div <= 1e-9 and tracking L0 every step, |mass rel| <= 1e-10
     const bool gate = worst_fine <= 1e-9 && untracked == 0 && worst_mass_ratio <= 1.0 && worst_species <= 1.0;
     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked
-                   << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x through-flow, open" : "1e-10 x initial mass, closed") << ")\n";
+                   << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x (initial mass + through-flow), open" : "1e-10 x initial mass, closed") << ")\n";
     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
                    << ", fine H ghost cells set " << cr.h_ghost_cells << "\n";
     if (cr.res_checked > 0) amrex::Print() << tag << " RESULT pressure residual check: " << cr.res_checked << " solves checked, largest residual " << cr.res_check_max << ", largest limit " << cr.res_limit_max << " (round-off floor " << cr.res_floor_max << "), " << cr.res_failed << " above the limit\n";
