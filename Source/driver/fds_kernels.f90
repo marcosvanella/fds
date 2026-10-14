@@ -161,6 +161,9 @@ END SUBROUTINE FDS_K_COMB
 SUBROUTINE FDS_K_RAD(T,NM) BIND(C,NAME='fds_k_rad')
 REAL(C_DOUBLE), VALUE :: T
 INTEGER(C_INT), VALUE :: NM
+IF (RADIATION .AND. NM>NMESHES .AND. N_MPI_PROCESSES>1) THEN   ! the coarse-to-fine ghost intensity (radi.f90 RAD_CF_PACK) is a same-rank copy
+   WRITE(0,'(A)') 'fds_amr ERROR: radiation on fine levels runs on one MPI rank only (multi-rank coarse-to-fine intensity exchange is open)' ; ERROR STOP 1
+ENDIF
 CALL COMPUTE_RADIATION(T,NM,1)
 IF (N_REACTIONS>0 .OR. INIT_HRRPUV) CALL COMBUSTION_BC(NM)
 END SUBROUTINE FDS_K_RAD
