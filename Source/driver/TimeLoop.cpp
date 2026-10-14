@@ -2204,6 +2204,17 @@ struct TimeLoop::Impl {
         for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) es_old += fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
         if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
         e_old = e; have_e_old = true;
+        if (lc.size() == 2) {   // Q_CONV, Q_COND, Q_DIFF: replace the covered level-0 walls by the hidden fine walls (two levels only: the parent is level 0)
+            double q[10];
+            fds_fine_walls_sums(1, L.m_t, q);
+            for (int n = 0; n < 3; ++n) fds_p_add_qdot(4 + n, q[n] - q[3 + n]);   // Q_DOT is per rank (summed by FDS), in W
+            amrex::ParallelDescriptor::ReduceRealSum(q, 8);
+            amrex::ParallelDescriptor::ReduceRealMax(q[8]);
+            amrex::ParallelDescriptor::ReduceRealSum(q[9]);
+            if (L.m_icyc % 50 == 0)
+                amrex::Print() << "FINE-WALLS t " << L.m_t << " nwall " << q[9] << " sum(Q_CON_F*A) fine " << q[6] << " W, parent share " << q[7]
+                               << " W, identity max|dQ_CON_F| " << q[8] << " W/m2; Q_CONV/COND/DIFF fine-parent " << q[0] - q[3] << " " << q[1] - q[4] << " " << q[2] - q[5] << " W\n";
+        }
     }
 
     void outputs(const StepRecord& r)
