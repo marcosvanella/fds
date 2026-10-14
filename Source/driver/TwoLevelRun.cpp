@@ -1,3 +1,4 @@
+#include <memory>
 // TwoLevelRun.cpp: see TwoLevelRun.H.
 #include "ObstList.H"
 #include "TwoLevelRun.H"
@@ -521,6 +522,18 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         const std::vector<double> m = composite_mass(reg, nl_now, ns);
         const double dm = (m[0] - m0[0] - inflow[0]) / m0[0];   // mass balance residual: change minus boundary inflow
         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl_now);
+        // Solid fine cells are left out of the check (as FDS on level 0): a burner face gives its solid cell div u = U_wall/dz, not a gas cell's D.
+        std::vector<std::unique_ptr<amrex::iMultiFab>> skip(nl_now);
+        for (int l = 1; l < nl_now; ++l) {
+            const amrex::iMultiFab& sm = reg.side_data(l).mask();
+            skip[l].reset(new amrex::iMultiFab(sm.boxArray(), sm.DistributionMap(), 1, 0));
+            for (amrex::MFIter mfi(*skip[l]); mfi.isValid(); ++mfi) {
+                auto o = skip[l]->array(mfi); auto s0 = sm.const_array(mfi);
+                amrex::Array4<const int> c; if (lv[l].covered) c = lv[l].covered->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { o(i, j, k) = (s0(i, j, k) != 0 || (lv[l].covered && c(i, j, k) != 0)) ? 1 : 0; });
+            }
+            lv[l].covered = skip[l].get();
+        }
         const double dv = fdsrt::composite_divergence_error(lv, &bylev);
         loop.pressure_csv_div(s, bylev);   // P2 solver-study CSV (no-op without the flags)
         worst_mass = std::max(worst_mass, std::abs(dm));

@@ -130,6 +130,8 @@ int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, c
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
 void fds_fine_walls_sums(int lev, double t, double* q);
+int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90 (frozen/fine-wall-state.md)
+int fds_n_tracked_species();
 int fds_fine_walls_un(int lev, int ib, int pred, int nmax, int* n, int* ijkd, double* uf);   // fds_fine_level.f90: OBST wall face velocity (burner)
 int fds_fine_level_destroy(int lev);
 #endif
@@ -1296,12 +1298,15 @@ struct TimeLoop::Impl {
         comp_gen = layout_gen;
     }
     // Composite pressure solve of the stage: PRHS of every level, one solve, H (pred) / HS (corrector) of every level, the face gradient at the interface into the fine ghost cells.
-    void solve_composite(bool pred)
+    void solve_composite(bool pred, double dt)
     {
         ensure_comp();
         LevelRegistry& reg = *L.m_reg;
         const int nl = static_cast<int>(lc.size());
         composite_zero_solid_faces(reg, 1, nl, {"FVX", "FVY", "FVZ"}, -1);   // levels >= 1 only: level 0 keeps FDS's NO_FLUX FV (wall velocity, e.g. MASS_FLUX)   // no flux through a solid face: with U = 0 there, the face stays 0 (beta = 0 in the solve)
+#ifdef FDS_HAVE_FINE_LEVEL
+        fine_wall_fv(pred, dt);
+#endif
         level0_rhs_and_check();
         for (int l = 1; l < nl; ++l) composite_fine_pressure_rhs(*lc[l].F, *lc[l].lev, *crhs[l]);
         if (std::getenv("FDSTL_GHOSTDBG") && nl > 1) {   // composite right-hand side by level: its sum must vanish for a periodic domain
@@ -1434,7 +1439,7 @@ struct TimeLoop::Impl {
         select(0);
         each_local([&](int nm) { fds_p_rhs(t, dt, nm); });
         const double ts0 = amrex::second();
-        solve_composite(pred);
+        solve_composite(pred, dt);
         t_solve += amrex::second() - ts0;
         return 1;
     }
@@ -1467,6 +1472,35 @@ struct TimeLoop::Impl {
         for (int l = nl - 1; l >= 0; --l) fs.run_divergence_part1(l);
     }
 #ifdef FDS_HAVE_FINE_LEVEL
+    // Wall inflow of a fine burner face into the fine RHS (-div FV), as FDS NO_FLUX with the H term dropped (beta = 0 on the face):
+    // FV = -(UN - U)/dt (predictor), -2(UN - (U+US)/2)/dt (corrector); UN from fds_fine_walls_state (frozen/fine-wall-state.md), FV index = face - 1.
+    void fine_wall_fv(bool pred, double dt)
+    {
+        const char* fv[3] = {"FVX", "FVY", "FVZ"}; const char* u[3] = {"U", "V", "W"}; const char* us[3] = {"US", "VS", "WS"};
+        const int nz = fds_n_tracked_species(), ns = 5 + 2 * nz;
+        std::vector<int> ijkd; std::vector<double> st;
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+            Fields& F = L.m_reg->fields(l);
+            const amrex::iMultiFab& sm = L.m_reg->side_data(l).mask();
+            for (amrex::MFIter mfi(sm); mfi.isValid(); ++mfi) {
+                const amrex::Box vb = mfi.validbox();
+                const int nmax = static_cast<int>(3 * vb.numPts() + 64);
+                ijkd.resize(4 * nmax); st.resize(static_cast<std::size_t>(ns) * nmax);
+                int n = 0;
+                if (fds_fine_walls_state(l, mfi.index() + 1, pred ? 1 : 0, nz, nmax, &n, ijkd.data(), st.data()) != 0) die("fine_wall_fv: fds_fine_walls_state failed");
+                const amrex::IntVect lo = vb.smallEnd();
+                for (int w = 0; w < n; ++w) {
+                    const int D = ijkd[4 * w + 3], d = std::abs(D) - 1;
+                    amrex::IntVect c(lo[0] + ijkd[4 * w] - 1, lo[1] + ijkd[4 * w + 1] - 1, lo[2] + ijkd[4 * w + 2] - 1);
+                    if (D > 0) c[d] += 1;
+                    const double un = st[static_cast<std::size_t>(ns) * w], u0 = F[u[d]][mfi](c);
+                    const double dudt = pred ? (un - u0) / dt : 2.0 * (un - 0.5 * (u0 + F[us[d]][mfi](c))) / dt;
+                    amrex::IntVect cf = c; cf[d] -= 1;
+                    F[fv[d]][mfi](cf) = -dudt;
+                }
+            }
+        }
+    }
     // A fine OBST face with a nonzero wall velocity (MASS_FLUX burner) gets the parent wall's normal velocity back after the solid-face
     // zeroing, as FDS VELOCITY_BC sets the wall face to -SIGN(IOR)*U_NORMAL(_S). Box-local I,J,K (1-based) and direction D of the gas cell.
     void fine_wall_velocity(bool pred)
