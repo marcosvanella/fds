@@ -1,6 +1,10 @@
 #ifdef WITH_AMREX
 ! Patch 0022 (as 0008/0020): COMPUTE_RADIATION finds the data of a box through POINT_TO_BOX, so it runs on a box of a refinement level > 0 (radiation Stage R2).
 #define POINT_TO_MESH POINT_TO_BOX
+! A level-0 cell under a level-1 box is left out of the RTE source correction sums (the fine box counts that region).
+#define RTE_SUM_CELL(I,J,K) .NOT.RAD_COVERED(NM,I,J,K)
+#else
+#define RTE_SUM_CELL(I,J,K) .TRUE.
 #endif
 MODULE SPECDATA
 
@@ -4050,7 +4054,7 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                ENDIF
                BBF = BLACKBODY_FRACTION(WL_LOW(IBND),WL_HIGH(IBND),TMP(I,J,K))
                KFST4_GAS(I,J,K) = BBF*KAPPA_GAS(I,J,K)*FOUR_SIGMA*TMP(I,J,K)**4
-               IF (CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP) THEN ! Precomputation of quantities for the RTE source term correction
+               IF (CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP .AND. RTE_SUM_CELL(I,J,K)) THEN ! Precomputation of quantities for the RTE source term correction
                   VOL = R(I)*DX(I)*DY(J)*DZ(K)*ALPHA_CC
                   RAD_Q_SUM = RAD_Q_SUM + (BBF*CHI_R(I,J,K)*Q(I,J,K) + KAPPA_GAS(I,J,K)*UIID(I,J,K,IBND))*VOL
                   KFST4_SUM = KFST4_SUM + KFST4_GAS(I,J,K)*VOL
@@ -4086,7 +4090,7 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                                   KAPPA_SOOT(RHO(I,J,K)*SOOT_MASS_FRACTION,TMP(I,J,K))       ! Absorp coeff for the jth gas
 
                KFST4_GAS(I,J,K) = BBF*KAPPA_GAS(I,J,K)*FOUR_SIGMA*TMP(I,J,K)**4._EB
-               IF (CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP) THEN ! Precomputation of quantities for the RTE source term correction
+               IF (CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP .AND. RTE_SUM_CELL(I,J,K)) THEN ! Precomputation of quantities for the RTE source term correction
                   VOL = R(I)*DX(I)*DY(J)*DZ(K)*ALPHA_CC
                   RAD_Q_SUM = RAD_Q_SUM + (BBF*CHI_R(I,J,K)*Q(I,J,K) + KAPPA_GAS(I,J,K)*UIID(I,J,K,IBND))*VOL
                   KFST4_SUM = KFST4_SUM + KFST4_GAS(I,J,K)*VOL
@@ -4121,7 +4125,7 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                      IF (IC>0) ALPHA_CC = CUT_CELL(IC)%ALPHA_CC
                   ENDIF
                   KFST4_GAS(I,J,K) = KAPPA_GAS(I,J,K)*FOUR_SIGMA*TMP(I,J,K)**4
-                  IF (CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP) THEN
+                  IF (CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP .AND. RTE_SUM_CELL(I,J,K)) THEN
                      VOL = R(I)*DX(I)*DY(J)*DZ(K)*ALPHA_CC
                      RAD_Q_SUM_PARTIAL = RAD_Q_SUM_PARTIAL + (CHI_R(I,J,K)*Q(I,J,K)+KAPPA_GAS(I,J,K)*UII(I,J,K))*VOL
                      KFST4_SUM_PARTIAL = KFST4_SUM_PARTIAL + KFST4_GAS(I,J,K)*VOL
@@ -5385,6 +5389,21 @@ DO K=0,MF%KBP1 ; DO J=0,MF%JBP1 ; DO I=0,MF%IBP1
    ENDDO SEARCH
 ENDDO ; ENDDO ; ENDDO
 END FUNCTION RAD_CF_TABLE
+
+!> Level-0 cell (I,J,K) of mesh NM (the current mesh pointers) lies inside a box of level 1 (box extents are set on every rank).
+LOGICAL FUNCTION RAD_COVERED(NM,I,J,K)
+INTEGER, INTENT(IN) :: NM,I,J,K
+INTEGER :: IB
+RAD_COVERED = .FALSE.
+IF (NM>NMESHES .OR. .NOT.ALLOCATED(FINE_LEVEL)) RETURN
+IF (SIZE(FINE_LEVEL)<1) RETURN
+DO IB=1,FINE_LEVEL(1)%N_BOXES
+   ASSOCIATE(B=>FINE_LEVEL(1)%BOX(IB))
+   RAD_COVERED = XC(I)>B%XS .AND. XC(I)<B%XF .AND. YC(J)>B%YS .AND. YC(J)<B%YF .AND. ZC(K)>B%ZS .AND. ZC(K)<B%ZF
+   END ASSOCIATE
+   IF (RAD_COVERED) RETURN
+ENDDO
+END FUNCTION RAD_COVERED
 
 !> Level-0 mesh NM, angle N, band IBND: copy its intensity IL into the ghost tables of every fine box.
 SUBROUTINE RAD_CF_PACK(NM,N,IBND,IL)
