@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "LevelOps.H"
+#include "PressureBackendSolver.H"
 
 namespace fdsrt {
 
@@ -115,6 +116,33 @@ std::vector<ProjectionLevel> registry_projection_levels(fdsamr::LevelRegistry& r
     return lv;
 }
 
+// Mixed OPEN/SOLID domain face (pb face_neumann, as in the time-step solve): the normal face velocity of levels >= 1 is 0 over the SOLID
+// level-0 face cells. Prolonged values there are not zero, and the Neumann solve cannot change them (BcStep::zero_mixed_wall zeroes them later: div error).
+static void zero_neumann_face_velocity(std::vector<ProjectionLevel>& lv, const std::array<std::vector<int>, 6>& fn)
+{
+    const amrex::Box d0 = lv[0].geom.Domain();
+    amrex::IntVect r(1);
+    for (int l = 1; l < static_cast<int>(lv.size()); ++l) {
+        r *= lv[l].ref_ratio;
+        const amrex::Box dom = lv[l].geom.Domain();
+        for (int f = 0; f < 6; ++f) {
+            if (fn[f].empty()) continue;
+            const int d = f % 3, side = f / 3, t1 = d == 0 ? 1 : 0, t2 = d == 2 ? 1 : 2, e = side ? dom.bigEnd(d) + 1 : dom.smallEnd(d);
+            for (amrex::MFIter mfi(*lv[l].vel[d]); mfi.isValid(); ++mfi) {
+                amrex::Box b = mfi.validbox();
+                if (e < b.smallEnd(d) || e > b.bigEnd(d)) continue;
+                b.setRange(d, e);
+                auto u = lv[l].vel[d]->array(mfi);
+                amrex::LoopOnCpu(b, [&](int i, int j, int k) {
+                    const int c[3] = {i, j, k};
+                    const int a1 = amrex::coarsen(c[t1], r[t1]) - d0.smallEnd(t1), a2 = amrex::coarsen(c[t2], r[t2]) - d0.smallEnd(t2);
+                    if (fn[f][a1 + d0.length(t1) * a2] != 0) u(i, j, k) = 0.0;
+                });
+            }
+        }
+    }
+}
+
 void install_post_regrid_projection(RegridAmrCore& core, fdsamr::LevelRegistry& reg, PostRegridProjectionState& state)
 {
     RegridAmrCore* cp = &core;
@@ -123,6 +151,7 @@ void install_post_regrid_projection(RegridAmrCore& core, fdsamr::LevelRegistry& 
     core.set_post_regrid_hook([cp, rp, sp](const RegridOutcome&) {
         std::vector<ProjectionLevel> lv = registry_projection_levels(*rp, *cp, sp->D);
         if (sp->before) sp->before(lv);
+        if (const auto* pbs = dynamic_cast<const PressureBackendSolver*>(sp->solver)) zero_neumann_face_velocity(lv, pbs->face_neumann);
         ProjectionOptions o = sp->options;
         o.enabled = true;
         sp->last = project_after_regrid(lv, sp->solver, o);
