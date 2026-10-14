@@ -976,6 +976,28 @@ struct TimeLoop::Impl {
         return bd;
     }
 
+    // Dirichlet (OPEN) domain faces of a fine level: H ghost = 2 g - H(inside), g = the level-0 BXS..BZF that fold_composite folded into the fine RHS.
+    // The even mirror above is a Neumann ghost: the fine velocity correction then disagreed with the Dirichlet solve (div error along the face).
+    void dirichlet_fine_h_ghosts(const Level& lv, amrex::MultiFab& H)
+    {
+        std::array<std::unique_ptr<amrex::MultiFab>, 6> l0bd, own;
+        pack_l0_boundary_mfs(l0bd);
+        const pb::BoundaryData bd = make_bd_for_level(lv, l0bd, own);
+        const amrex::Box dom = lv.geom.Domain();
+        for (int f = 0; f < 6; ++f) {
+            if (static_cast<pb::BC>(bc_type[f]) != pb::BC::Dirichlet) continue;
+            const int d = f % 3, side = f / 3, e = side ? dom.bigEnd(d) : dom.smallEnd(d);
+            amrex::IntVect s(0); s[d] = side ? 1 : -1;
+            for (amrex::MFIter mfi(H); mfi.isValid(); ++mfi) {
+                amrex::Box b = mfi.validbox();
+                if ((side ? b.bigEnd(d) : b.smallEnd(d)) != e) continue;
+                b.setRange(d, e);
+                auto h = H.array(mfi); const auto g = bd.value[f]->const_array(mfi);
+                amrex::LoopOnCpu(b, [&](int i, int j, int k) { h(i + s[0], j + s[1], k + s[2]) = 2.0 * g(i, j, k) - h(i, j, k); });
+            }
+        }
+    }
+
     void fold_then_solve_level0(pb::PressureProblem& p, pb::PressureOptions& /*o*/)
     {
         std::array<std::unique_ptr<amrex::MultiFab>, 6> l0bd;
@@ -1299,6 +1321,7 @@ struct TimeLoop::Impl {
             } else {
                 crep.h_ghost_cells += composite_set_fine_h_ghosts(*lc[l].lev, H, grad[l]);
                 mirror_domain_edges(*lc[l].lev, H, -1);
+                dirichlet_fine_h_ghosts(*lc[l].lev, H);
             }
         }
         (void)reg;
@@ -2231,6 +2254,7 @@ long TimeLoop::clip_cells(int n, int l) const
 }
 void TimeLoop::prime_levels() { m->prime_levels(); }
 void TimeLoop::zero_closed_wall_normal() { m->zero_closed_wall_normal(); }
+const int* TimeLoop::pressure_bc() const { return m->bc_type; }
 void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
 void TimeLoop::write_perf() { m->write_perf(); }
 

@@ -134,6 +134,7 @@ public:
     void prime_levels();
     // Zero normal velocity on Neumann (INERT/MIRROR) domain faces of every bound level. Call before the initial projection.
     void zero_closed_wall_normal();
+    const int* pressure_bc() const;   // pb::BC per pb::face_index of the composite pressure solve (6 values)
     void set_flux_overwrite(bool on);
     void write_perf();   // <chid>_driver_perf.csv (and _driver_profile.txt with FDSTL_PROFILE) for a driver that steps with advance(); run() writes it at the end
     double time() const { return m_t; }
