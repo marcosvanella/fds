@@ -291,7 +291,59 @@ pressure iteration on the obstacle normal velocity. For the full baseline run us
 
 ---
 
-## 7. Where to start reviewing
+## 7. `simple_test` fire case (species / combustion)
+
+Propane burner in a small open compartment. Input: `Verification/Adaptive_Mesh_Refinement/simple_test.fds`
+(same physics as the Role-3 species gate runs). Single `&MESH` (36×24×24), so the run scripts default to `NP=1`.
+
+**Physics.** Species transport and mixing-controlled combustion (`&REAC FUEL='PROPANE'`), radiation off
+(`&RADI RADIATION=.FALSE.`), one `OPEN` vent, burner `SURF` (`HRRPUA=1000`) on a small `&OBST` face that stays on
+level 0 (D-010: stateful-wall coverage freeze; this burner has no `MATL_ID`, so the freeze does not bind it,
+but the burner geometry is on L0). `&AMR BLOCKING_FACTOR=2` is present; `--two-level-run` ignores `&AMR MAX_LEVEL`
+(use `--levels`).
+
+**Patches.** Needs the prime WALL_BC + flux-match gate + fine-level rebind path (Role-3 patches 0004 / 0005 / 0006).
+On current HEAD those land as `patches/0023-prime-wall-bc.patch`, `patches/0024-fluxmatch-gate.patch`,
+`patches/0025-fine-level-rebind.patch` (commits `93e321629b`, `d3699aa628`, `ff24969ae1`). No extra patch apply
+is required when building from that tip.
+
+**Scripts** (source `_common.sh`; short smoke `STEPS=10` by default):
+```bash
+cd Verification/Adaptive_Mesh_Refinement
+export FDS_AMR=/path/to/fds_amr
+./run_simple_test_l0.sh          # --levels 1
+./run_simple_test_l2.sh          # --levels 2 --regrid-every 5 --tag-vort auto
+./run_simple_test_l3.sh          # --levels 3 --regrid-every 5 --tag-vort auto
+```
+Exact long-run flags (pressure: default FFT on the single unmasked mesh at L0; composite MLMG once fine levels exist —
+same as the gate binaries, no `--pressure-backend` override):
+```bash
+# level 0 only (uniform), to T_END=5
+$FDS_AMR simple_test.fds --two-level-run --levels 1 --steps 900
+# 2-level adaptive (r5_wbc)
+$FDS_AMR simple_test.fds --two-level-run --levels 2 --steps 900 --regrid-every 5 --tag-vort auto
+# 3-level adaptive (r3lev)
+$FDS_AMR simple_test.fds --two-level-run --levels 3 --steps 2000 --regrid-every 5 --tag-vort auto
+```
+
+**Expected gate output (measured).** Limit for mass/species is `1e-6 × (initial mass + through-flow)` on an open domain;
+ratios are `|balance residual| / limit` (PASS ≤ 1). Divergence gate: worst fine-level `|div u − D|` ≤ 1e-9 and a
+count of steps with fine div > max(2·L0, 1e-10). Flux-match stale-register count must be 0.
+
+| Case | Script | Steps / stop | Wall time | Mass ratio | Z1 / Z2 / Z3 ratios | Worst \|div\| (level, step) | FLUXMATCH | Gate |
+|---|---|---|---|---|---|---|---|---|
+| L0 only | `run_simple_test_l0.sh` | 451 steps, `T_END=5` | ~11 min | 0.222 | 0.390 / 0.598 / 1.05e-11 | 1.70e-13 (L0) | n/a (no C/F; stale 0) | PASS |
+| 2-level | `run_simple_test_l2.sh` | 869 steps, `T_END=5` | ~5 min | 0.226 | 0.397 / 0.609 / 3.4e-11 | 1.38e-10 (fine; step 352) | stale 0 (when 0005 present) | FAIL only on fine-div step count (29) |
+| 3-level | `run_simple_test_l3.sh` | 2000 steps (`t=4.709`) | ~80 min | 0.226 | 1.496 / 0.552 / 1.075 | 0.217 (L1, step 1980); L0 3.61e-11; L2 7.72e-10 | ADV worst Z1/Z2/Z3/rho 0.769/0.0125/0.126/0.646; DIF 0.0394/0.00180/0.0394/1.6e-16; stale 0 | FAIL (species Z1/Z3 and L1 div spikes; 1335 fine-div steps) |
+
+Level-0 numbers are from a matching `fds_amr` binary with `--levels 1` (451 steps to `T_END=5`). 2-level and 3-level numbers are from the Role-3 species gate logs (`r5_wbc`, `r3lev`) on the binary with 0004+0005+0006.
+The 3-level run keeps mass at the same 0.226 ratio as 2-level and passes the flux-register stale gate (0), but
+regresses on species (Z1/Z3 > 1) and shows late L1 divergence spikes after regrids.
+
+---
+
+## 8. Where to start reviewing
+
 - `Source/driver/` (C++ driver: `main.cpp` flags, `TimeLoop.cpp`, `TwoLevelRun.cpp`), `Source/pressure_backend/` (FFT/MLMG/HYPRE behind one interface),
   `Source/regrid_transport/` (regrid, post-regrid projection).
 - Design: [`Manuals/FDS_AMReX_Design/README.md`](Manuals/FDS_AMReX_Design/README.md), ADR-001 (architecture, GPU K2), ADR-002 (time stepping), `pressure/`.
