@@ -50,7 +50,7 @@ void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
 void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), any level
 void fds_k_rte_factor();
-void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* w_ijk, const int* w_nic, const int* s_nm, const int* s_ijk, double** ils, double** ilr, int* nra, int* nsb);   // fds_kernels.f90
+void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* w_ijk, const int* w_nic, const int* s_nm, const int* s_ijk, const int* s_loc, double** ils, double** ilr, int* nra, int* nsb);   // fds_kernels.f90
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt, int nm);
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
@@ -1748,12 +1748,12 @@ struct TimeLoop::Impl {
                 }
             }
             rg_t = fdsrt::build_il_ghost_table(boxes, ratio, walls);
-            std::vector<int> wnm, wnic, snm, sijk;
+            std::vector<int> wnm, wnic, snm, sijk, sloc;
             for (std::size_t w = 0; w < walls.size(); ++w) { wnm.push_back(nm[walls[w].box]); wnic.push_back(rg_t.nic_min[w]); wnic.push_back(rg_t.nic_max[w]); }
-            for (int p = 0; p < rg_t.nicr(); ++p) { snm.push_back(nm[rg_t.ils_box[p] - 1]); sijk.push_back(rg_t.iio[p]); sijk.push_back(rg_t.jjo[p]); sijk.push_back(rg_t.kko[p]); }
-            fds_rad_ghost_set(rg_t.nicr(), static_cast<int>(walls.size()), *std::max_element(nm.begin(), nm.end()), wnm.data(), wijk.data(), wnic.data(), snm.data(), sijk.data(),
+            for (int p = 0; p < rg_t.nicr(); ++p) { snm.push_back(nm[rg_t.ils_box[p] - 1]); sijk.push_back(rg_t.iio[p]); sijk.push_back(rg_t.jjo[p]); sijk.push_back(rg_t.kko[p]); sloc.push_back(rg_rank[rg_t.ils_box[p] - 1] == amrex::ParallelDescriptor::MyProc()); }
+            fds_rad_ghost_set(rg_t.nicr(), static_cast<int>(walls.size()), *std::max_element(nm.begin(), nm.end()), wnm.data(), wijk.data(), wnic.data(), snm.data(), sijk.data(), sloc.data(),
                               &rg_ils, &rg_ilr, &rg_nra, &rg_nsb);
-            rg_gen = layout_gen;
+            rg_gen = layout_gen;   // new table: ILS holds the senders' isotropic intensity, exchanged below (no ambient ghost on the first update)
         }
         fdsrt::exchange_il_ghost(rg_t, rg_rank.data(), rg_nra, rg_nsb, rg_ils, rg_ilr);
     }

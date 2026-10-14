@@ -167,14 +167,16 @@ END SUBROUTINE FDS_K_RAD
 
 !> Ghost intensity table of the fine boxes (radi.f90 RAD_GHOST, patch 0022), from the driver's fdsrt::build_il_ghost_table: NW walls (receiver mesh W_NM, ascending;
 !> ghost cell W_IJK in the receiver's indices; positions W_NIC(1:2)), NICR positions (sender mesh S_NM, sender cell S_IJK). Allocates ILS/ILR (NICR,NRA,NSB) at the
-!> ambient intensity and returns their addresses for fdsrt::exchange_il_ghost.
-SUBROUTINE FDS_RAD_GHOST_SET(NICR,NW,NMMAX,W_NM,W_IJK,W_NIC,S_NM,S_IJK,ILS_P,ILR_P,NRA,NSB) BIND(C,NAME='fds_rad_ghost_set')
+!> isotropic intensity UII/(4 pi) of the sender cell where S_LOC=1 (local sender; ambient elsewhere, and in ILR until the driver's first exchange, which follows
+!> this call) and returns their addresses for fdsrt::exchange_il_ghost.
+SUBROUTINE FDS_RAD_GHOST_SET(NICR,NW,NMMAX,W_NM,W_IJK,W_NIC,S_NM,S_IJK,S_LOC,ILS_P,ILR_P,NRA,NSB) BIND(C,NAME='fds_rad_ghost_set')
 INTEGER(C_INT), VALUE :: NICR,NW,NMMAX
-INTEGER(C_INT), INTENT(IN) :: W_NM(NW),W_IJK(3,NW),W_NIC(2,NW),S_NM(NICR),S_IJK(3,NICR)
+INTEGER(C_INT), INTENT(IN) :: W_NM(NW),W_IJK(3,NW),W_NIC(2,NW),S_NM(NICR),S_IJK(3,NICR),S_LOC(NICR)
 TYPE(C_PTR), INTENT(OUT) :: ILS_P,ILR_P
 INTEGER(C_INT), INTENT(OUT) :: NRA,NSB
 INTEGER :: L,NM
 TYPE(RAD_GHOST_TYPE), POINTER :: G
+TYPE(MESH_TYPE), POINTER :: M
 G => RAD_GHOST
 IF (ALLOCATED(G%ILS)) DEALLOCATE(G%ILS,G%ILR,G%S_IJK,G%S_FIRST,G%S_POS,G%W_IJK,G%W_NIC,G%W_FIRST)
 NRA = NUMBER_RADIATION_ANGLES ; NSB = NUMBER_SPECTRAL_BANDS
@@ -191,6 +193,11 @@ INTEGER :: NXT(NMMAX)
 NXT = G%S_FIRST(1:NMMAX)
 DO L=1,NICR ; G%S_POS(NXT(S_NM(L))) = L ; NXT(S_NM(L)) = NXT(S_NM(L)) + 1 ; ENDDO
 END BLOCK
+DO L=1,NICR
+   IF (S_LOC(L)/=1) CYCLE
+   M => BOX_OBJ(S_NM(L))
+   G%ILS(L,:,:) = M%UII(S_IJK(1,L),S_IJK(2,L),S_IJK(3,L))/(4._EB*PI*NSB)
+ENDDO
 G%NICR = NICR
 ILS_P = C_LOC(G%ILS) ; ILR_P = C_LOC(G%ILR)
 END SUBROUTINE FDS_RAD_GHOST_SET
