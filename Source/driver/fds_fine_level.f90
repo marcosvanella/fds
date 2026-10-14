@@ -42,7 +42,7 @@ LOGICAL :: Z0_SET
 IERR = 0 ; NM0 = 0
 IF (LEV<1) THEN ; IERR = 1 ; RETURN ; ENDIF
 IF (.NOT.ALLOCATED(FINE_LEVEL)) ALLOCATE(FINE_LEVEL(0))
-IF (LEV<SIZE(FINE_LEVEL)) THEN ; IERR = 1 ; RETURN ; ENDIF           ! only the top level may be (re)made: the mesh numbers of the levels above would move
+IF (LEV<SIZE(FINE_LEVEL)) THEN ; IF (ANY(FINE_LEVEL(LEV+1:)%N_BOXES/=0)) THEN ; IERR = 1 ; RETURN ; ENDIF ; ENDIF           ! only the top level may be (re)made: the mesh numbers of the levels above would move
 IF (LEV>SIZE(FINE_LEVEL)+1) THEN ; IERR = 1 ; RETURN ; ENDIF
 IF (LEV==SIZE(FINE_LEVEL)+1) THEN
    ALLOCATE(TMP(LEV))
@@ -108,7 +108,8 @@ INTEGER(C_INT) :: IERR
 
 IERR = 0
 IF (.NOT.ALLOCATED(FINE_LEVEL)) THEN ; IERR = 1 ; RETURN ; ENDIF
-IF (LEV/=SIZE(FINE_LEVEL) .OR. LEV<1) THEN ; IERR = 1 ; RETURN ; ENDIF
+IF (LEV>SIZE(FINE_LEVEL) .OR. LEV<1) THEN ; IERR = 1 ; RETURN ; ENDIF
+IF (ANY(FINE_LEVEL(LEV+1:)%N_BOXES/=0)) THEN ; IERR = 1 ; RETURN ; ENDIF   ! top bound level: the levels above were destroyed first (FINE_LEVEL keeps its size)
 IF (ALLOCATED(FINE_LEVEL(LEV)%BOX)) DEALLOCATE(FINE_LEVEL(LEV)%BOX)
 IF (ALLOCATED(FINE_LEVEL(LEV)%VIEW)) DEALLOCATE(FINE_LEVEL(LEV)%VIEW)
 FINE_LEVEL(LEV)%N_BOXES = 0

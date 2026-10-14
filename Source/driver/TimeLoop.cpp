@@ -326,6 +326,7 @@ struct TimeLoop::Impl {
         ++layout_gen;
         own.resize(lev - 1);
         if (static_cast<int>(sfx.size()) > lev) sfx.resize(lev);   // the stage flux arrays of the level are re-registered with the next bind
+        if (lc.size() == 1) { select(0); for (int k = 0; k < 2; ++k) { flux_set_override(k, {}); flux_set_mode(k, 0); } }   // no fine level left: level 0 must not keep the old interface override lists
         dt_new.resize(total_boxes()); chg.resize(total_boxes());
         select(0);
 #else
