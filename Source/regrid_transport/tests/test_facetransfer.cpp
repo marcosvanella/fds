@@ -317,6 +317,84 @@ void run_case(const std::string& name, amrex::IntVect cn, amrex::IntVect ratio, 
     }
 }
 
+// Owner ruling: after prolongation EACH fine child cell has div u = D_parent (injected D), not only the children's mean.
+// Smooth nonzero-D coarse field (different divergence per coarse cell, all three directions, periodic seam); D_parent = the coarse cell divergence.
+// (1) fresh prolongation: every child cell (box edges/corners, seam included) has div u = D_parent to round-off, checked as |div u - D| with D injected on the fine level.
+// (2) prolong_faces_level with old fine data: the copied faces keep their OWN values, so cells touching them keep their own divergence; reported, not asserted equal.
+void check_injected_D()
+{
+    const amrex::IntVect cn(16), R(2);
+    const amrex::Box fregion_c(amrex::IntVect(2, 3, 4), amrex::IntVect(9, 10, 11));
+    Setup s;
+    make(s, cn, R, fregion_c, 0);
+    const double pi2 = 6.283185307179586;
+    for (int d = 0; d < 3; ++d)
+        for (amrex::MFIter mfi(s.C[d]); mfi.isValid(); ++mfi) {
+            auto a = s.C[d].array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {   // periodic in the 16-cell period; face coordinate (i,j,k)/16
+                const double x = i / 16.0, y = j / 16.0, z = k / 16.0;
+                a(i, j, k) = (d == 0 ? std::sin(pi2 * x) * (1.0 + 0.3 * std::cos(pi2 * y)) : d == 1 ? 0.7 * std::sin(pi2 * (y + 0.1)) * std::cos(pi2 * z) : 0.5 * std::sin(2 * pi2 * z) + 0.4 * std::cos(pi2 * x)) * 3.0 + 0.2 * hrand(i % 16, j % 16, k % 16, d, 9) * 0.0;
+            });
+        }
+    for (int d = 0; d < 3; ++d) s.C[d].FillBoundary(s.cg.periodicity());
+    // D_parent on the coarse level (cell divergence), then onto the fine level by injection
+    amrex::MultiFab Dc(s.cba, s.cdm, 1, 0), Df(s.fba, s.fdm, 1, 0);
+    const double rdx = 1.0 / s.cg.CellSize(0);
+    for (amrex::MFIter mfi(Dc); mfi.isValid(); ++mfi) {
+        auto u = s.C[0].const_array(mfi), v = s.C[1].const_array(mfi), w = s.C[2].const_array(mfi); auto dd = Dc.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { dd(i, j, k) = ((u(i + 1, j, k) - u(i, j, k)) + (v(i, j + 1, k) - v(i, j, k)) + (w(i, j, k + 1) - w(i, j, k))) * rdx; });
+    }
+    amrex::MultiFab Dt(amrex::BoxArray(s.fba).coarsen(R), s.fdm, 1, 0);
+    Dt.ParallelCopy(Dc, 0, 0, 1, 0, 0, s.cg.periodicity());
+    for (amrex::MFIter mfi(Df); mfi.isValid(); ++mfi) {
+        auto dt = Dt.const_array(mfi); auto df = Df.array(mfi);
+        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { const amrex::IntVect c = amrex::coarsen(amrex::IntVect(i, j, k), R); df(i, j, k) = dt(c[0], c[1], c[2]); });
+    }
+    const std::array<amrex::MultiFab*, 3> fine{&s.F[0], &s.F[1], &s.F[2]};
+    const std::array<const amrex::MultiFab*, 3> crse{&s.C[0], &s.C[1], &s.C[2]};
+    prolong_faces_level(fine, crse, s.cg, R);
+    double e = max_divergence_error_local({&s.F[0], &s.F[1], &s.F[2]}, s.fg, &Df);
+    amrex::ParallelDescriptor::ReduceRealMax(e);
+    double dmax = Dc.norminf(0);
+    if (amrex::ParallelDescriptor::IOProcessor()) std::printf("  injected D: max|D_parent| %.3e, fresh prolongation max|div u - D_parent| over all child cells %.2e\n", dmax, e);
+    CHECK_MSG(dmax > 1.0, "injected-D case has a nonzero D_parent");
+    CHECK_MSG(e <= 1e-12 * dmax, "every child cell has div u = D_parent (injected D) to round-off, got " + std::to_string(e));
+    // (2) old fine data: previous level = the low half-box shifted by one coarse cell in x, with its own (different) face values
+    {
+        amrex::Box ob = s.fba[0];
+        ob.shift(0, R[0]);
+        amrex::BoxArray oba{amrex::BoxList(ob)};
+        amrex::DistributionMapping odm(oba);
+        std::array<amrex::MultiFab, 3> O;
+        for (int d = 0; d < 3; ++d) {
+            O[d].define(amrex::convert(oba, amrex::IntVect::TheDimensionVector(d)), odm, 1, 0);
+            for (amrex::MFIter mfi(O[d]); mfi.isValid(); ++mfi) { auto a = O[d].array(mfi); amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { a(i, j, k) = hrand(i, j, k, d, 5); }); }
+        }
+        for (int d = 0; d < 3; ++d) s.F[d].setVal(-999.0);
+        prolong_faces_level(fine, crse, s.cg, R, {&O[0], &O[1], &O[2]});
+        // per child cell: does its divergence equal D_parent? count cells touching a copied (old) face separately
+        long n_touch = 0, n_touch_bad = 0, n_new = 0, n_new_bad = 0;
+        for (amrex::MFIter mfi(Df); mfi.isValid(); ++mfi) {
+            auto u = s.F[0].const_array(mfi), v = s.F[1].const_array(mfi), w = s.F[2].const_array(mfi); auto df = Df.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                const double rf = 1.0 / s.fg.CellSize(0);
+                const double div = ((u(i + 1, j, k) - u(i, j, k)) + (v(i, j + 1, k) - v(i, j, k)) + (w(i, j, k + 1) - w(i, j, k))) * rf;
+                const bool bad = std::abs(div - df(i, j, k)) > 1e-12 * dmax;
+                const amrex::Box cell(amrex::IntVect(i, j, k), amrex::IntVect(i, j, k));
+                bool touch = false;
+                for (int d = 0; d < 3; ++d) { const amrex::Box fb = amrex::convert(cell, amrex::IntVect::TheDimensionVector(d)); touch = touch || amrex::convert(oba, amrex::IntVect::TheDimensionVector(d)).intersects(fb) ; }
+                if (touch) { ++n_touch; n_touch_bad += bad; } else { ++n_new; n_new_bad += bad; }
+            });
+        }
+        long x[4] = {n_touch, n_touch_bad, n_new, n_new_bad};
+        amrex::ParallelDescriptor::ReduceLongSum(x, 4);
+        if (amrex::ParallelDescriptor::IOProcessor())
+            std::printf("  old-fine copy (prolong_faces_level with old_fine): cells touching copied faces %ld, of which div u != D_parent %ld; other cells %ld, of which div u != D_parent %ld\n", x[0], x[1], x[2], x[3]);
+        CHECK_MSG(x[0] > 0 && x[1] > 0, "REPORT: cells touching copied old-fine faces keep their own divergence (gap vs D_parent): " + std::to_string(x[1]) + " of " + std::to_string(x[0]));
+        CHECK_MSG(x[3] == 0, "cells not touching a copied old-fine face have div u = D_parent: " + std::to_string(x[3]) + " bad");
+    }
+}
+
 }  // namespace
 
 int main(int, char** argv)
@@ -333,6 +411,7 @@ int main(int, char** argv)
         // 2-D ratio (4,1,4)
         run_case("2-D (1 cell in y) ratio (4,1,4)", amrex::IntVect(16, 1, 16), amrex::IntVect(4, 1, 4), amrex::Box(amrex::IntVect(4, 0, 2), amrex::IntVect(11, 0, 9)), 2, 1e-12);
     }
+    check_injected_D();
     const long nfail = fdstest::report("test_facetransfer");
     amrex::Finalize();
     return nfail == 0 ? 0 : 1;
