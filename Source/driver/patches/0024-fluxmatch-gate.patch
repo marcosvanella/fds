@@ -1,0 +1,90 @@
+diff --git a/Source/driver/TimeLoop.H b/Source/driver/TimeLoop.H
+index 996ea3833a..c5505e43cf 100644
+--- a/Source/driver/TimeLoop.H
++++ b/Source/driver/TimeLoop.H
+@@ -21,6 +21,7 @@
+ #include <vector>
+ 
+ #include "Fields.H"
++#include "FluxStageRunner.H"
+ #include "GhostExchange.H"
+ #include "LevelRegistry.H"
+ #include "SideData.H"
+@@ -138,6 +139,9 @@ public:
+     const int* pressure_bc() const;   // pb::BC per pb::face_index of the composite pressure solve (6 values)
+     std::array<std::vector<int>, 6> pressure_face_neumann() const;   // pb::PressureProblem::face_neumann of that solve (mixed OPEN/SOLID faces)
+     void set_flux_overwrite(bool on);
++    // coarse-fine flux matching of the current hierarchy (FluxStageRunner StageStats: pre per kind and scalar, stale registers); nullptr before the first multi-level stage
++    const fdsrt::StageStats* flux_match() const;
++    void reset_flux_match();
+     void write_perf();   // <chid>_driver_perf.csv (and _driver_profile.txt with FDSTL_PROFILE) for a driver that steps with advance(); run() writes it at the end
+     double time() const { return m_t; }
+     double dt() const { return m_dt; }
+diff --git a/Source/driver/TimeLoop.cpp b/Source/driver/TimeLoop.cpp
+index c4bfa1abe5..1fa6fb6d0d 100644
+--- a/Source/driver/TimeLoop.cpp
++++ b/Source/driver/TimeLoop.cpp
+@@ -2407,6 +2407,8 @@ std::array<std::vector<int>, 6> TimeLoop::pressure_face_neumann() const
+     return p.face_neumann;
+ }
+ void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
++const fdsrt::StageStats* TimeLoop::flux_match() const { return m->runner ? &m->runner->stats() : nullptr; }
++void TimeLoop::reset_flux_match() { if (m->runner) m->runner->reset_match(); }
+ void TimeLoop::write_perf() { m->write_perf(); }
+ 
+ bool TimeLoop::advance() { const double t0 = amrex::second(); const bool ok = m->advance(); m->t_loop += amrex::second() - t0; return ok; }
+diff --git a/Source/driver/TwoLevelRun.cpp b/Source/driver/TwoLevelRun.cpp
+index aed86cec2c..a974528019 100644
+--- a/Source/driver/TwoLevelRun.cpp
++++ b/Source/driver/TwoLevelRun.cpp
+@@ -452,6 +452,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
+     double worst_mass = 0.0, worst_mass_ratio = 0.0, worst_div = 0.0, worst_fine = 0.0;   // worst_fine: max|div u - D| over levels >= 1
+     int untracked = 0;                                               // steps with fine div > max(2*L0, 1e-10)
+     std::vector<double> bylev;
++    std::vector<double> fm_worst[2];
++    long stale_regs = 0;
+     int nl_now = nl;
+     for (int s = 1; s <= o.steps; ++s) {
+         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
+@@ -495,6 +497,26 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
+             const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
+             write_rho_vel_plotfile(plt, reg, loop, nl_now);
+         }
++        // coarse-fine flux matching on the first steps after a regrid (prime + 2 steps): per kind and scalar the coarse-minus-fine-sum mismatch the override removed,
++        // and read-out arrays / runner grids not of the current hierarchy (stale flux registers; gate: 0)
++        {
++            const int ri = core.amr_params().regrid_interval;
++            const fdsrt::StageStats* fm = nl_now > 1 ? loop.flux_match() : nullptr;
++            if (fm && ri > 0 && s % ri == std::min(2, ri - 1)) {
++                for (int k = 0; k < 2; ++k) {
++                    std::vector<double> p = fm->pre[k];
++                    for (double& x : p) amrex::ParallelAllReduce::Max(x, amrex::ParallelContext::CommunicatorSub());
++                    long st = fm->stale[k];
++                    amrex::ParallelAllReduce::Sum(st, amrex::ParallelContext::CommunicatorSub());
++                    stale_regs += st;
++                    if (fm_worst[k].size() < p.size()) fm_worst[k].resize(p.size(), 0.0);
++                    amrex::Print() << tag << " FLUXMATCH step " << s << (k ? " DIF" : " ADV") << " stale " << st << " coarse-fine before override:";
++                    for (std::size_t n = 0; n < p.size(); ++n) { fm_worst[k][n] = std::max(fm_worst[k][n], p[n]); amrex::Print() << " " << (n + 1 == p.size() ? "rho" : "Z" + std::to_string(n + 1)) << " " << p[n]; }
++                    amrex::Print() << "\n";
++                }
++                loop.reset_flux_match();
++            }
++        }
+         const std::vector<double> m = composite_mass(reg, nl_now, ns);
+         const double dm = (m[0] - m0[0] - inflow[0]) / m0[0];   // mass balance residual: change minus boundary inflow
+         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl_now);
+@@ -550,7 +572,13 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
+     amrex::Print() << tag << " RESULT composite HRR final " << hrr_last / 1000.0 << " kW, time mean " << (loop.time() > 0.0 ? hrr_sum / loop.time() / 1000.0 : 0.0) << " kW, t " << loop.time() << " (T_END " << t_end << ")\n";
+     amrex::Print() << tag << " RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";
+     // PASS gate (Architect): fine div <= 1e-9 and tracking L0 every step, |mass rel| <= 1e-10
+-    const bool gate = worst_fine <= 1e-9 && untracked == 0 && worst_mass_ratio <= 1.0 && worst_species <= 1.0;
++    for (int k = 0; k < 2; ++k) {
++        amrex::Print() << tag << " RESULT flux matching " << (k ? "DIF" : "ADV") << " worst coarse-fine mismatch before override:";
++        for (std::size_t n = 0; n < fm_worst[k].size(); ++n) amrex::Print() << " " << (n + 1 == fm_worst[k].size() ? "rho" : "Z" + std::to_string(n + 1)) << " " << fm_worst[k][n];
++        amrex::Print() << "; after override 0 by construction (hook writes the list values)\n";
++    }
++    amrex::Print() << tag << " RESULT flux registers: stale (old-hierarchy) read-out arrays " << stale_regs << " (gate: 0)\n";
++    const bool gate = worst_fine <= 1e-9 && untracked == 0 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0;
+     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked
+                    << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x (initial mass + through-flow), open" : "1e-10 x initial mass, closed") << ")\n";
+     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel

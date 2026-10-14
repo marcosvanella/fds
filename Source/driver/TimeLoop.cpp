@@ -2410,6 +2410,8 @@ std::array<std::vector<int>, 6> TimeLoop::pressure_face_neumann() const
     return p.face_neumann;
 }
 void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
+const fdsrt::StageStats* TimeLoop::flux_match() const { return m->runner ? &m->runner->stats() : nullptr; }
+void TimeLoop::reset_flux_match() { if (m->runner) m->runner->reset_match(); }
 void TimeLoop::write_perf() { m->write_perf(); }
 
 bool TimeLoop::advance() { const double t0 = amrex::second(); const bool ok = m->advance(); m->t_loop += amrex::second() - t0; return ok; }
