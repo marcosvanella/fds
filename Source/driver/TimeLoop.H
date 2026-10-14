@@ -144,6 +144,7 @@ public:
     void set_rho_limits(double rmin, double rmax) { m_rmin = rmin; m_rmax = rmax; }
     // P3-C11/C12 clip budget (pred+corr into one step). N 1-based tracked species; L 0-based level.
     double clip_mass(int n, int l) const;
+    double clip_species(int n) const;   // cumulative rho*Z of tracked species n (0-based) moved by the D-031 clip, uncovered cells of every level (kg)
     long clip_cells(int n, int l) const;
 
 private:

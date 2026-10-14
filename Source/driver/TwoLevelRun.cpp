@@ -542,9 +542,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // every species, also those starting at zero: |change - inflow| against the same limit as the mass
     double worst_species = 0.0;
     for (int n = 0; n < ns; ++n) {
-        const double res = m1[1 + n] - m0[1 + n] - inflow[1 + n] - reac[n];
+        const double res = m1[1 + n] - m0[1 + n] - inflow[1 + n] - reac[n] - loop.clip_species(n);   // the D-031 clip moves rho*Z between species (FDS renormalisation)
         worst_species = std::max(worst_species, std::abs(res) / mass_limit());
-        amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " boundary inflow " << inflow[1 + n] << " reaction source " << reac[n] << " balance residual " << res << " (/ limit " << std::abs(res) / mass_limit() << ")\n";
+        amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " boundary inflow " << inflow[1 + n] << " reaction source " << reac[n] << " clip " << loop.clip_species(n) << " balance residual " << res << " (/ limit " << std::abs(res) / mass_limit() << ")\n";
     }
     amrex::Print() << tag << " RESULT composite HRR final " << hrr_last / 1000.0 << " kW, time mean " << (loop.time() > 0.0 ? hrr_sum / loop.time() / 1000.0 : 0.0) << " kW, t " << loop.time() << " (T_END " << t_end << ")\n";
     amrex::Print() << tag << " RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";

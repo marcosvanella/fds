@@ -160,6 +160,25 @@ struct TimeLoop::Impl {
     double zone_rel_step = 0;
     // P3-C11/C12: per-step clip budget [L*nt + (N-1)]; pred+corr accumulate; reset at advance() start
     std::vector<double> clip_mass_acc;
+    // Species budget of the D-031 clip (rho*Z of each tracked species moved by clip_level: density clip redistribution and the renormalisation into the largest
+    // species are not species-conservative, as in FDS). Uncovered cells; the predictor's change enters the corrector with weight 1/2 (only its last pass counts).
+    std::vector<double> clip_species_acc, clip_species_pred;
+    std::vector<double> clip_species_sums(bool pred)
+    {
+        const amrex::MultiFab& RZ = (*c->F)[pred ? "ZZS" : "ZZ"];
+        const int lev = static_cast<int>(c - lc.data());
+        const amrex::iMultiFab* cov = L.m_reg ? L.m_reg->covered_mask(lev) : nullptr;
+        const double vol = c->lev->dx[0] * c->lev->dx[1] * c->lev->dx[2];
+        std::vector<double> m(nt, 0.0);
+        for (amrex::MFIter mfi(RZ); mfi.isValid(); ++mfi) {
+            const auto z = RZ.const_array(mfi);
+            amrex::Array4<const int> cv;
+            if (cov) cv = cov->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (cov && cv(i, j, k) != 0) return; for (int n = 0; n < nt; ++n) m[n] += z(i, j, k, n) * vol; });
+        }
+        amrex::ParallelAllReduce::Sum(m.data(), nt, amrex::ParallelContext::CommunicatorSub());
+        return m;
+    }
     std::vector<long> clip_cells_acc;
     void ensure_clip_budget()
     {
@@ -795,7 +814,18 @@ struct TimeLoop::Impl {
         };
         if (pcd) { dumpfab(pred ? "preclip_p_RHOS" : "preclip_c_RHO", (*c->F)[pred ? "RHOS" : "RHO"]); dumpfab(pred ? "preclip_p_ZZS" : "preclip_c_ZZ", (*c->F)[pred ? "ZZS" : "ZZ"]); }
         std::vector<int> flags;
+        const std::vector<double> zb = clip_species_sums(pred);
         clip_level(pred, flags);
+        {
+            const std::vector<double> za = clip_species_sums(pred);
+            const std::size_t need = static_cast<std::size_t>(nt) * lc.size(), off = static_cast<std::size_t>(nt) * static_cast<std::size_t>(c - lc.data());
+            if (clip_species_acc.size() < static_cast<std::size_t>(nt)) clip_species_acc.resize(nt, 0.0);
+            if (clip_species_pred.size() < need) clip_species_pred.resize(need, 0.0);
+            for (int n = 0; n < nt; ++n) {
+                if (pred) clip_species_pred[off + n] = 0.5 * (za[n] - zb[n]);
+                else { clip_species_acc[n] += clip_species_pred[off + n] + (za[n] - zb[n]); clip_species_pred[off + n] = 0.0; }
+            }
+        }
         if (pcd) {
             double dmax = 0.0; long nz = 0;
             for (amrex::MFIter mfi(*c->drho); mfi.isValid(); ++mfi) { const amrex::FArrayBox& fab = (*c->drho)[mfi]; const double* p = fab.dataPtr(); const long np = fab.box().numPts(); for (long q = 0; q < np; ++q) { if (p[q] != 0.0) ++nz; dmax = std::max(dmax, std::abs(p[q])); } }
@@ -2251,6 +2281,7 @@ void TimeLoop::pressure_csv_div(int step, const std::vector<double>& div_by_leve
 {
     for (std::size_t l = 0; m->pcsv && l < div_by_level.size(); ++l) std::fprintf(m->pcsv, "%d,end,%zu,,,,,,,,,,,,,,%.3e\n", step, l, div_by_level[l]);
 }
+double TimeLoop::clip_species(int n) const { return n >= 0 && n < static_cast<int>(m->clip_species_acc.size()) ? m->clip_species_acc[n] : 0.0; }
 double TimeLoop::clip_mass(int n, int l) const
 {
     if (n < 1 || l < 0 || m->nt <= 0) return 0.0;
