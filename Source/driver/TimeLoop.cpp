@@ -1770,9 +1770,9 @@ struct TimeLoop::Impl {
     // Radiation ghost intensity of the fine boxes (radi.f90 RAD_GHOST, patch 0022): FR-062/L1251 table of every face ghost cell of every fine box (built once per layout;
     // the sender is a box of the receiver's level if one covers the ghost, else the coarser level), then the ILS -> ILR copy across ranks after each update.
     fdsrt::IlGhostTable rg_t; std::vector<int> rg_rank; double* rg_ils = nullptr; double* rg_ilr = nullptr; int rg_gen = -1, rg_nra = 0, rg_nsb = 0;
-    void rad_ghost_exchange()
+    void rad_ghost_table()   // before the radiation sweeps: a regrid must not leave the old table (old boxes' ghost cells) in use for the first update
     {
-        if (rg_gen != layout_gen) {
+        if (lc.size() > 1 && rg_gen != layout_gen) {
             std::vector<fdsrt::IlBox> boxes; std::vector<int> nm; std::vector<amrex::IntVect> ratio; std::vector<fdsrt::IlWall> walls; std::vector<int> wijk;
             rg_rank.clear();
             for (std::size_t l = 0; l < lc.size(); ++l) {
@@ -1797,10 +1797,11 @@ struct TimeLoop::Impl {
             for (int p = 0; p < rg_t.nicr(); ++p) { snm.push_back(nm[rg_t.ils_box[p] - 1]); sijk.push_back(rg_t.iio[p]); sijk.push_back(rg_t.jjo[p]); sijk.push_back(rg_t.kko[p]); sloc.push_back(rg_rank[rg_t.ils_box[p] - 1] == amrex::ParallelDescriptor::MyProc()); }
             fds_rad_ghost_set(rg_t.nicr(), static_cast<int>(walls.size()), *std::max_element(nm.begin(), nm.end()), wnm.data(), wijk.data(), wnic.data(), snm.data(), sijk.data(), sloc.data(),
                               &rg_ils, &rg_ilr, &rg_nra, &rg_nsb);
-            rg_gen = layout_gen;   // new table: ILS holds the senders' isotropic intensity, exchanged below (no ambient ghost on the first update)
+            rg_gen = layout_gen;   // new table: ILS holds the senders' isotropic intensity; exchanged at once (no ambient ghost on the first update)
+            rad_ghost_exchange();
         }
-        fdsrt::exchange_il_ghost(rg_t, rg_rank.data(), rg_nra, rg_nsb, rg_ils, rg_ilr);
     }
+    void rad_ghost_exchange() { fdsrt::exchange_il_ghost(rg_t, rg_rank.data(), rg_nra, rg_nsb, rg_ils, rg_ilr); }
     void s_wall_bc(bool pred) { wseam_upload("WALL_BC"); c->bc->wall_bc(pred ? 1 : 0, L.m_t, L.m_dt); wseam_check("WALL_BC"); }
     void s_div1() { if (fluxchk && (fluxchk_kinds & 2)) { fluxchk_div1(); return; } div1_plain(); }
     void s_div2() { each_local([&](int nm) { fds_k_div2(L.m_dt, nm); }); }
@@ -1934,6 +1935,7 @@ struct TimeLoop::Impl {
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
+        if (IP[10]) rad_ghost_table();   // fine-box ghost intensity table for the current layout
         if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) { each_local([&](int nm) { fds_k_rad(L.m_t, nm); }); });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC per box, after WALL_BC, before DIVERGENCE_PART_1
         if (IP[10]) fds_k_rte_factor();   // main.f90 CALCULATE_RTE_SOURCE_CORRECTION_FACTOR
         if (IP[10] && lc.size() > 1) rad_ghost_exchange();   // fine-box face ghost intensity (ILS -> ILR, all ranks; lagged like MESH_EXCHANGE(2))
