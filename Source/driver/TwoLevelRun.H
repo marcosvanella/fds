@@ -19,6 +19,7 @@ struct TwoLevelOptions {
     int max_level = 1;               // finest level index (1 = two levels; 2 = three levels). Levels are bound 1..max_level.
     int ratio = 2;                   // refinement ratio in the directions with more than one cell (same at every level)
     int patch[4] = {4, 11, 4, 11};   // level-0 cells tagged to create level 1: x lo, x hi, z lo, z hi (y: the whole domain)
+    bool init_patch = false;         // --init-patch: adaptive runs also tag patch/patch2 at the initial regrid only (later regrids may remove them)
     int patch2[4] = {6, 9, 6, 9};    // level-0 cells of the nested region tagged on levels >= 1 (must lie inside patch); used when max_level >= 2
     int maxsize = 16;                // MAX_GRID_SIZE of fine levels (fine cells)
     int blocking = 4;                // BLOCKING_FACTOR

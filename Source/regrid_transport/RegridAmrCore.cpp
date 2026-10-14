@@ -141,6 +141,7 @@ void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time
         TagFields f = tag_fields_fn_(lev);
         amrex::iMultiFab cv = covered_mask(lev);
         apply_tag_criteria(tags, params_, f, &cv);
+        if (force_tag_fn_ && tag_fn_) tag_fn_(lev, tags, time);
     } else if (tag_fn_) {
         tag_fn_(lev, tags, time);
     }

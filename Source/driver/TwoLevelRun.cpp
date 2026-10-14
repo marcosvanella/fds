@@ -348,12 +348,14 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     fdsrt::install_post_regrid_projection(core, reg, pst);   // D-063: the hook of RegridAmrCore::regrid_dynamic
     loop.zero_closed_wall_normal();   // IC: Neumann faces carry no net volume flux into the first projection
     // One AmrCore::regrid grows at most one new fine level; repeat until max_level (or stuck).
+    core.set_force_tag_function(o.init_patch && o.regrid_every > 0);   // --init-patch: patch/patch2 forced at step 0 only
     for (int pass = 0; pass < o.max_level; ++pass) {
         if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
         core.regrid_dynamic(0.0);
         if (core.finestLevel() >= o.max_level) break;
         if (pass > 0 && !core.last_outcome().changed) break;
     }
+    core.set_force_tag_function(false);
     probe("after regrid_dynamic");
     const int finest = core.finestLevel();
     if (finest != o.max_level) {

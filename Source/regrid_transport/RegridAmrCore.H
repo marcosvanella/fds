@@ -65,6 +65,8 @@ public:
     // Preferred path: AmrParams TAG_* keys + set_tag_fields (ErrorEst calls apply_tag_criteria). set_tag_function is the fallback for unit tests
     // that build a TagCriterion by hand (used only when no TAG_* criterion is set).
     void set_tag_function(TagFn f) { tag_fn_ = std::move(f); }
+    // Also apply set_tag_function on top of the TAG_* criteria (driver: step-0 forced initial patch, --init-patch; off again after the initial regrid)
+    void set_force_tag_function(bool on) { force_tag_fn_ = on; }
     // --tag-obst NBUF: force-tag every OBST of pb::obst_list() (ObstMask.H) on each level below the top, rounded outward and grown by NBUF level-0 cells (<0: off)
     void set_tag_obst(int nbuf) { tag_obst_nbuf_ = nbuf; }
     // D-010: no tags within NBUF level-0 cells of a stateful wall (pb::nofine_list; -1 off). Clustering then takes only tagged cells
@@ -125,6 +127,7 @@ private:
     LevelListener* listener_ = nullptr;
     LevelDataTransfer* transfer_ = nullptr;
     TagFn tag_fn_;
+    bool force_tag_fn_ = false;
     int tag_obst_nbuf_ = -1;
     int nofine_nbuf_ = -1;
     TagFieldsFn tag_fields_fn_;
