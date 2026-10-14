@@ -1,0 +1,21 @@
+&HEAD CHID='open_burner', TITLE='simple_test (HRRPUA burner on an OBST, OPEN vent on x-hi) with AMR BLOCKING_FACTOR=2: OPEN-face two-level regression'  / 
+
+&MESH IJK=36,24,24, XB=0.0,3.6,0.0,2.4,0.0,2.4 / 
+
+&TIME T_END=60.0 /
+&RADI RADIATION=.FALSE. /
+
+&REAC FUEL='PROPANE', SOOT_YIELD=0.01 /  
+
+&SURF ID='BURNER', HRRPUA=1000., COLOR='RED' /
+
+&OBST XB=0.0,0.4,1.0,1.4,0.0,0.2 /
+&VENT XB=0.0,0.4,1.0,1.4,0.2,0.2, SURF_ID='BURNER' /
+
+&VENT XB=3.6,3.6,0.8,1.6,0.0,2.0, SURF_ID='OPEN' / 
+
+
+
+&AMR BLOCKING_FACTOR=2 /
+&TAIL /
+

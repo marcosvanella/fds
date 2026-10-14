@@ -1,0 +1,11 @@
+&HEAD CHID='st_tracer', TITLE='simple_test, non-reacting: tracer injected through the burner VENT, OPEN outlet' /
+&MESH IJK=36,24,24, XB=0.0,3.6,0.0,2.4,0.0,2.4 /
+&TIME T_END=60.0 /
+&RADI RADIATION=.FALSE. /
+&SPEC ID='TRACER', MW=29.0 /
+&SURF ID='BURNER', MASS_FLUX(1)=0.02, SPEC_ID(1)='TRACER', TAU_MF(1)=0.0, COLOR='RED' /
+&OBST XB=0.0,0.4,1.0,1.4,0.0,0.2 /
+&VENT XB=0.0,0.4,1.0,1.4,0.2,0.2, SURF_ID='BURNER' /
+&VENT XB=3.6,3.6,0.8,1.6,0.0,2.0, SURF_ID='OPEN' /
+&AMR BLOCKING_FACTOR=2 /
+&TAIL /

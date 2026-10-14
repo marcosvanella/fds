@@ -57,8 +57,10 @@ void PressureBackendSolver::rebuild(const std::vector<ProjectionLevel>& levels)
     }
     for (int d = 0; d < 3; ++d) {
         const pb::BC b = levels[0].geom.isPeriodic(d) ? pb::BC::Periodic : pb::BC::Neumann;
-        m.bc[pb::face_index(d, 0)] = b;
-        m.bc[pb::face_index(d, 1)] = b;
+        for (int side = 0; side < 2; ++side) {
+            const int f = pb::face_index(d, side);
+            m.bc[f] = face_bc[f] >= 0 ? static_cast<pb::BC>(face_bc[f]) : b;
+        }
     }
     m.cls.clear();
     if (!pb::obst_list().empty()) {
