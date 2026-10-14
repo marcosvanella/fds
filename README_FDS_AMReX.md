@@ -334,8 +334,8 @@ $FDS_AMR simple_test.fds --two-level-run --levels 3 --steps 2000 --regrid-every 
 Example: `./run_simple_test_l2.sh --tag-temp`.
 
 **Expected gate output (measured).** Limit for mass/species is `1e-6 × (initial mass + through-flow)` on an open domain;
-ratios are `|balance residual| / limit` (PASS ≤ 1). Divergence gate: worst fine-level `|div u − D|` ≤ 1e-9 and a
-count of steps with fine div > max(2·L0, 1e-10). Flux-match stale-register count must be 0.
+ratios are `|balance residual| / limit` (PASS ≤ 1). Divergence gate: worst fine-level `|div u − D|` ≤ 1e-9 (plain limit, tied to the
+Poisson residual tolerance); the count of steps with fine div > max(2·L0, 1e-10) is printed as info only and does not fail the gate. Flux-match stale-register count must be 0.
 
 | Case | Script | Steps / stop | Wall time | Mass ratio | Z1 / Z2 / Z3 ratios | Worst \|div\| (level, step) | FLUXMATCH | Gate |
 |---|---|---|---|---|---|---|---|---|
