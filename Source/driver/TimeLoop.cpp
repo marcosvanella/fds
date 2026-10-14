@@ -84,7 +84,7 @@ void fds_p_get(int nm, const char* name, double* buf, long ntot, int* ierr);
 void fds_p_mfd(int nm);
 int fds_p_dens_skip();   // fds_step.f90: 1 when DENSITY returns at once (ICYC<=1 etc.): no level clip then
 void fds_p_zero_dot();
-void fds_p_esums(int nm, const int* mask, double* s);
+void fds_p_esums(int nm, const int* mask, double* s);   // s: one value
 void fds_p_add_qdot(int n, double v);
 double fds_p_enthalpy_sum(int nm);
 void fds_p_get_qr(int nm, double* buf, long ntot);
@@ -2149,17 +2149,16 @@ struct TimeLoop::Impl {
         return s;
     }
 
-    // Composite Q_ENTH, Q_CONV, Q_COND, Q_DIFF of the HRR file: UPDATE_HRR (inside fds_setup(3)) sums them over the level-0 meshes only. The walls: add to Q_DOT the
-    // sums over the finer cells not covered by a still finer level, minus the covered coarser cells, so each region is counted once. Q_ENTH: replace UPDATE_HRR's
-    // d/dt of the level-0 integral of rho*h_s by d/dt of the composite one, E (energy_sums). After a regrid (prime_levels) e_old is E on the new hierarchy, so the
-    // regrid change of E (fine-from-coarse interpolation, coarse under removed fine cells) is left out of Q_ENTH.
+    // Composite Q_ENTH of the HRR file: UPDATE_HRR (inside fds_setup(3)) takes d/dt of the level-0 integral of rho*h_s; replace it by d/dt of the composite one,
+    // E (energy_sums: the finer cells not covered by a still finer level instead of the covered coarser ones). After a regrid (prime_levels) e_old is E on the new
+    // hierarchy, so the regrid change of E is left out of Q_ENTH. Q_CONV/Q_COND/Q_DIFF stay level-0 sums: a fine box has no wall cells (fds_fine_level.f90).
     double e_old = 0.0;
     bool have_e_old = false;
-    // E (composite) and E0 (level 0 alone, as UPDATE_HRR); w = composite wall terms minus the level-0 ones (Q_DOT(4:6)).
-    void energy_sums(double& e, double& e0, double w[3])
+    // E (composite) and E0 (level 0 alone, as UPDATE_HRR).
+    void energy_sums(double& e, double& e0)
     {
         const int nl = static_cast<int>(lc.size());
-        e = e0 = 0.0; w[0] = w[1] = w[2] = 0.0;
+        e = e0 = 0.0;
         for (int l = 0; l < nl; ++l) {
             const amrex::MultiFab& q = (*lc[l].F)["Q"];
             amrex::iMultiFab cov(q.boxArray(), q.DistributionMap(), 1, 0);
@@ -2171,18 +2170,18 @@ struct TimeLoop::Impl {
                 const int nm = lc[l].fds0 + mfi.index() + 1;
                 std::vector<int> m(static_cast<std::size_t>(vb.numPts()));
                 std::size_t n = 0;
-                double t[4];
+                double t = 0.0;
                 if (l == 0) {   // level 0: all cells (E0), then remove the covered ones
                     std::fill(m.begin(), m.end(), 1);
-                    fds_p_esums(nm, m.data(), t);
-                    e0 += t[0]; e += t[0];
+                    fds_p_esums(nm, m.data(), &t);
+                    e0 += t; e += t;
                     amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 1 : 0; });
-                    fds_p_esums(nm, m.data(), t);
-                    e -= t[0]; for (int a = 0; a < 3; ++a) w[a] -= t[1 + a];
+                    fds_p_esums(nm, m.data(), &t);
+                    e -= t;
                 } else {        // finer: add the cells not covered by the next level
                     amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 0 : 1; });
-                    fds_p_esums(nm, m.data(), t);
-                    e += t[0]; for (int a = 0; a < 3; ++a) w[a] += t[1 + a];
+                    fds_p_esums(nm, m.data(), &t);
+                    e += t;
                 }
             }
         }
@@ -2190,17 +2189,16 @@ struct TimeLoop::Impl {
     void energy_snapshot()
     {
         if (lc.size() < 2 || !L.m_reg || !fds_outputs) return;
-        double e0, w[3];
-        energy_sums(e_old, e0, w);
+        double e0;
+        energy_sums(e_old, e0);
         have_e_old = true;
     }
     void composite_energy(double dt)
     {
-        double e, e0, w[3];
-        energy_sums(e, e0, w);
+        double e, e0;
+        energy_sums(e, e0);
         double es_old = 0.0;   // UPDATE_HRR's ENTHALPY_SUM_OLD (local level-0 meshes)
         for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) es_old += fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
-        for (int a = 0; a < 3; ++a) fds_p_add_qdot(4 + a, w[a]);
         if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
         e_old = e; have_e_old = true;
     }
