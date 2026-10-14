@@ -128,6 +128,8 @@ int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext,
 #ifdef FDS_HAVE_FINE_LEVEL
 int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
+void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
+void fds_fine_walls_sums(int lev, double t, double* q);
 int fds_fine_level_destroy(int lev);
 #endif
 int fds_wseam_refresh(int nm);
@@ -299,6 +301,7 @@ struct TimeLoop::Impl {
         {   // CELL%SOLID of the fine cells from SideData comp 0
             const amrex::iMultiFab& sm = L.m_reg->side_data(lev).mask();
             for (amrex::MFIter mfi(sm); mfi.isValid(); ++mfi) fds_fine_set_solid(lev, mfi.index() + 1, sm[mfi].dataPtr());
+            for (amrex::MFIter mfi(sm); mfi.isValid(); ++mfi) fds_fine_walls_build(lev, mfi.index() + 1);   // hidden walls, not seen by the kernels
         }
         own.resize(lev);
         OwnLevel& o = own[lev - 1];
