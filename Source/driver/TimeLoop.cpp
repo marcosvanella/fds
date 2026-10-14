@@ -1681,6 +1681,9 @@ struct TimeLoop::Impl {
                 for (const char* nm : {"D", "DS"}) { const amrex::MultiFab& f = (*lc[l].F)[nm]; keep.emplace_back(new amrex::MultiFab(f.boxArray(), f.DistributionMap(), f.nComp(), f.nGrow())); amrex::MultiFab::Copy(*keep.back(), f, 0, 0, f.nComp(), f.nGrow()); }
             zone_save();
             fds_p_init_div();   // as before the stage DIVERGENCE_PART_1 (the full-prime path does the same)
+            // DIVERGENCE_PART_1 reads the wall-cell values of WALL_BC (after the velocity flux): stale ones from the old hierarchy moved rho*Z between species
+            for_levels([&](int) { s_vflux(false); });
+            for_levels([&](int) { s_wall_bc(false); });
             divergence1_all();
             zone_restore();
             int q = 0;
