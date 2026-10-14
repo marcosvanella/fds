@@ -117,6 +117,17 @@ INTEGER :: ERROR
 #endif
 
 #ifdef WITH_AMREX
+IF (MODE==4) THEN
+   ! Radiation intensity exchange at interpolated boundaries of the level-0 meshes for the C++ driver (MAIN_LOOP after the corrector, ~1200),
+   ! called after COMPUTE_RADIATION of every level-0 mesh; any point before the next COMPUTE_RADIATION gives the same result.
+   IF (RADIATION .AND. EXCHANGE_RADIATION .AND. RADIATION_ITERATIONS==1) THEN
+      DO ANG_INC_COUNTER=1,ANGLE_INCREMENT
+         CALL MESH_EXCHANGE(2)
+         IF (ICYC>1) EXIT
+      ENDDO
+   ENDIF
+   RETURN
+ENDIF
 IF (MODE==3) THEN
    ! End-of-step outputs for the C++ driver: the same calls, in the same order, as the end of MAIN_LOOP (UPDATE_GLOBAL_OUTPUTS per mesh,
    ! EXCHANGE_GLOBAL_OUTPUTS, UPDATE_CONTROLS, DUMP_GLOBAL_OUTPUTS, WRITE_DIAGNOSTICS). The driver has set T, DT, ICYC (FDS_HOOK_SET_STEP)

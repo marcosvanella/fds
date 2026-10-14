@@ -333,7 +333,6 @@ struct TimeLoop::Impl {
         fds_p_params(IP, RP);
         check_scope();
         nbox = static_cast<int>(l0.ba.size());
-        if (IP[10] && nbox > 1) die("radiation: one level-0 box only (Stage R1; multi-box intensity exchange and fine levels are Stage R2)");
         ns = l0.dom.n_total;
         nt = l0.dom.n_tracked;
         double t_end, dtfill, dtmin, dt0; int nz;
@@ -1827,6 +1826,7 @@ struct TimeLoop::Impl {
         for_levels([&](int) { s_wall_bc(false); });
         if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) { each_local([&](int nm) { fds_k_rad(L.m_t, nm); }); });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC per box, after WALL_BC, before DIVERGENCE_PART_1
         if (IP[10]) fds_k_rte_factor();   // main.f90 CALCULATE_RTE_SOURCE_CORRECTION_FACTOR
+        if (IP[10]) { double d; fds_setup(4, "", &d); }   // main.f90 MESH_EXCHANGE(2): lagged intensity exchange between level-0 meshes (IL_S -> IL_R)
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();
