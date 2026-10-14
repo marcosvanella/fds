@@ -99,6 +99,56 @@ consumers must not divide by it. The values switch from parent B1 to the fine wa
 | **total** |  | **~3.5 days** |
 | later | walls live in the fine kernels (WALL_BC, velocity BC, radiation) | 2 weeks or more, separate note |
 
+### R9. Owner rule: every OBST on every level (thin OBSTs)
+
+Rule (owner): an OBST resolved on a fine level but thinner than a cell of a coarser level must not vanish there; on that level it becomes a
+zero-thickness (thin) obstruction, as FDS does. Level 0 stays FDS's own.
+
+**What FDS already does on L0 (read.f90, READ_OBST):**
+- Snap: `OB%I1 = NINT(GINV(XB1-XS)*RDXI)`, `OB%I2 = NINT(GINV(XB2-XS)*RDXI)` (read.f90:11157-11162), same for J, K.
+- Without THICKEN, an OBST thinner than `0.25*DX` that still snapped to two different faces is collapsed onto the nearer face, `I1=I2`
+  (read.f90:11175-11181, and :11192, :11209 for J, K).
+- Collapsed in **one** direction: kept as a zero-thickness OBST; `OB%THIN = .TRUE.` when the input length is below `0.5*DX`
+  (read.f90:11315-11317). Its two faces become wall cells on both gas sides of that face plane.
+- Collapsed in **two or three** directions (a rod or a point at that resolution): thrown out (read.f90:11220-11225, "Throw out obstructions
+  that are too small"). Such an OBST does vanish on L0. That conflicts with the owner rule, and we cannot change it without touching L0
+  (owner decision D1 below).
+- An OBST thinner than a cell that straddles a face can snap to a full cell (`I1/=I2`, thickness `>=0.25*DX`): FDS thickens it. Same rule at
+  every level.
+- `THICKEN=.TRUE.` (read.f90:11167-11172) makes a collapsed OBST one cell thick instead.
+
+So on L0 FDS keeps thin OBSTs as zero-thickness walls in the one-direction case, and drops them only in the rod/point case.
+
+**What the driver does today on levels >= 1 (a gap):** `pb::obst_cells` (ObstMask.H) returns an empty box when any direction snaps to zero
+thickness, so a thin OBST marks no cell on a fine or intermediate level. It is also absent from the fine face mask and from the hidden walls.
+A sheet OBST that is thin on L1 is lost on L1 today.
+
+**Proposed per-level rule (each level uses FDS's rule at its own dx):** for level l, snap the input XB with FDS NINT at dx_l, apply the
+`0.25*dx` collapse rule:
+- 0 collapsed directions: solid cells (today).
+- 1 collapsed direction: a **thin OBST**. No solid cells. In `SideData`, both faces at that plane get the wall code on the two gas cells
+  (comps 1..6), so the pressure/transport masks block the face. The wall builder creates two walls (IOR +-d), one per gas side, with the
+  OBST's `SURF_INDEX(+-d)`, exactly as FDS does for THIN.
+- 2-3 collapsed directions: dropped, as on L0 (D1).
+- THICKEN: one cell thick, as FDS.
+
+**3-level runs:** an OBST can be solid on L2, thin on L1, and thin or gone on L0. Each level carries its own representation. The covered L1
+cells under L2 are overwritten by average-down, so the L1 thin wall matters only where L1 is uncovered, and at the L1-L2 interface.
+- **Interface rule:** the interface must not cut an OBST whose representation differs between the two levels (solid vs thin, or different
+  snapped extent). Otherwise the two levels disagree on which faces are blocked.
+- **Tagging:** any OBST whose snap result (class or extent) differs between level l and level l+1 is a `--tag-obst-snap` candidate at level l,
+  grown by NBUF cells of level l. That includes every OBST that is thin on a coarse level and solid on a finer one, and every OBST dropped on
+  L0 but present on a finer level.
+- **Composite sums:** a thin L0 OBST under fine cells is a parent wall pair; its fine solid faces are case P only where the planes coincide,
+  otherwise case N (R3).
+
+**Code impact** (adds to R4): `ObstMask.H` per-level class (solid / thin / dropped) and face-mask marking for thin planes, about 40 lines.
+The builder's thin-plane walls are about 30 lines. `snap_differs()` compares class and extent, about 10 lines. Effort: +0.5 day (total about
+4 days).
+
+**Test:** a sheet OBST of 1/4 coarse cell in simple_test (e.g. a baffle `XB=1.80,1.83,...`), three levels. On every level the face count of
+the thin plane equals a single-mesh FDS run at that level's dx (thin walls both sides). L0 is bit-identical. Mass PASS.
+
 ### R8. Questions for the Solid Phase Lead and the owner
 
 1. [SP] Case N source wall "same OBST and IOR, nearest L0 wall": acceptable, or wait for the FR-046 face key?
@@ -160,3 +210,16 @@ Findings:
 9. K_G and RHO_D_F for OPEN and Q_DIFF are parent values (coarse film state). Small error; acceptable, note it.
 10. Parent mesh search in FDS_FINE_WALLS_BUILD is O(cells x meshes); acceptable at build/regrid only.
 11. Patch 0026 is L0 bit-identical when MESH_OBJ is unassociated; the risk is upstream drift (S2), not correctness.
+
+## Owner decisions
+
+- **D1** OBSTs that collapse in two or three directions on L0 (rods/points) are dropped by FDS (read.f90:11220-11225). Keep L0 as FDS's own
+  (they stay absent on L0 and are always tagged to the finest level), or treat this as an accepted exception to "every OBST on every level"?
+- **D2** Level 0 is never re-snapped or masked by the driver (R2 point 2).
+- **D3** Levels >= 1 follow FDS's snap rule at their own dx, including thin (zero-thickness) OBSTs as blocked faces with two walls (R9).
+- **D4** `--tag-obst-snap NBUF`: the coarse-fine interface must not cut an OBST whose representation differs between the two levels. Opt-in
+  (default off) or default on?
+- **D5** Faces with no parent face (R3 case N/D): history source = the nearest L0 wall of the same OBST and IOR, else SURF input. Needs the
+  Solid Lead's sign-off (R8 items 1 and 2).
+- **D6** Live fine walls (in the fine kernels) are a separate decision, not part of this note.
+
