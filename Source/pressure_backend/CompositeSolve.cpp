@@ -155,21 +155,62 @@ void build_impl (PressureWorkspace::Impl& W, PressureProblem const& p)
     Vector<BoxArray> bas(W.eba.begin(), W.eba.end());
     Vector<DistributionMapping> dms(W.dm.begin(), W.dm.end());
     W.mlmg.reset();
-    W.mlp = std::make_unique<MLPoisson>(geoms, bas, dms, info);
+    W.face_neumann = p.face_neumann;
+    const bool robin = has_face_neumann(p);
+    if (robin) {
+        // Mixed domain faces: MLABecLaplacian with A = 0, B = -1 (the MLPoisson operator) and Robin a phi + b dphi/dn = 0 on the flagged
+        // faces: a = 1, b = 0 (Dirichlet) except b = 1, a = 0 (Neumann) over the face_neumann cells of levels >= 1.
+        auto op = std::make_unique<MLABecLaplacian>(geoms, bas, dms, info);
+        op->setScalars(0.0, -1.0);
+        for (int l = 0; l < n; ++l) { op->setACoeffs(l, 0.0); op->setBCoeffs(l, 1.0); }
+        W.mlp = std::move(op);
+    } else {
+        W.mlp = std::make_unique<MLPoisson>(geoms, bas, dms, info);
+    }
     W.mlp->setMaxOrder(2);
     Array<LinOpBCType,AMREX_SPACEDIM> lo{lin_bc(ebc[face_index(0,0)]), lin_bc(ebc[face_index(1,0)]), lin_bc(ebc[face_index(2,0)])};
     Array<LinOpBCType,AMREX_SPACEDIM> hi{lin_bc(ebc[face_index(0,1)]), lin_bc(ebc[face_index(1,1)]), lin_bc(ebc[face_index(2,1)])};
+    for (int d = 0; d < 3 && robin; ++d) {
+        if (!p.face_neumann[face_index(d,0)].empty()) { lo[d] = LinOpBCType::Robin; }
+        if (!p.face_neumann[face_index(d,1)].empty()) { hi[d] = LinOpBCType::Robin; }
+    }
     W.mlp->setDomainBC(lo, hi);
     // Homogeneous Dirichlet values (nullptr) on every level. The coarse-fine boundary of level l > 0 is
     // filled by MLMG from level l-1 at every solve.
-    for (int l = 0; l < n; ++l) { W.mlp->setLevelBC(l, nullptr); }
+    for (int l = 0; l < n; ++l) {
+        if (!robin) { W.mlp->setLevelBC(l, nullptr); continue; }
+        MultiFab ra(W.eba[l], W.dm[l], 1, 1), rb(W.eba[l], W.dm[l], 1, 1), rf(W.eba[l], W.dm[l], 1, 1);
+        ra.setVal(1.0); rb.setVal(0.0); rf.setVal(0.0);
+        const Box dom = W.egeom[l].Domain();
+        for (int f = 0; f < 6 && l > 0; ++f) {
+            if (p.face_neumann[f].empty()) { continue; }
+            const int d = f % 3, side = f / 3, e = side ? dom.bigEnd(d) + 1 : dom.smallEnd(d) - 1;
+            for (MFIter mfi(ra); mfi.isValid(); ++mfi) {
+                Box g = mfi.growntilebox(1);
+                if (e < g.smallEnd(d) || e > g.bigEnd(d)) { continue; }
+                g.setRange(d, e);
+                auto const& A = ra.array(mfi); auto const& B = rb.array(mfi);
+                amrex::LoopOnCpu(g, [&] (int i, int j, int k) {
+                    IntVect iv(i,j,k); iv[d] = side ? dom.bigEnd(d) : dom.smallEnd(d);
+                    if (face_neumann_at(p, l, f, iv)) { A(i,j,k) = 0.0; B(i,j,k) = 1.0; }
+                });
+            }
+        }
+        W.mlp->setLevelBC(l, nullptr, &ra, &rb, &rf);
+    }
     W.mlmg = std::make_unique<MLMG>(*W.mlp);
+}
+
+// MLABecLaplacian folds the Robin terms into its A coefficients at every prepareForSolve and needs setScalars before each one.
+void refresh_robin (PressureWorkspace::Impl& W)
+{
+    if (auto* op = dynamic_cast<MLABecLaplacian*>(W.mlp.get())) { op->setScalars(0.0, -1.0); }
 }
 
 bool impl_matches (PressureWorkspace::Impl const& W, PressureProblem const& p)
 {
     const int n = static_cast<int>(p.levels.size());
-    if (W.nlev != n || W.bc != p.bc) { return false; }
+    if (W.nlev != n || W.bc != p.bc || W.face_neumann != p.face_neumann) { return false; }
     for (int l = 0; l < n; ++l) {
         PressureLevel const& L = p.levels[l];
         if (!(W.ba[l] == L.ba) || !(W.dm[l] == L.dm) || !same_geometry(W.geom[l], L.geom)) { return false; }
@@ -241,6 +282,9 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     }
     if (has_zero_mask(p.uncovered)) { s.message = "composite with a caller-supplied covered-cell mask is not built: covered cells are derived from the level BoxArrays"; return s; }
     const bool masked = composite_is_masked(p);
+    if (has_face_neumann(p) && (masked || requested == BackendKind::HYPRE)) {
+        s.message = "composite with a mixed domain face (face_neumann) is built on unmasked MLMG only (Robin BC); HYPRE and masked composite are not built"; return s;
+    }
 #if !defined(PB_WITH_HYPRE) || !defined(AMREX_USE_HYPRE)
     if (masked && requested == BackendKind::MLMG) {
         s.message = "composite with masked cells on MLMG needs the HYPRE bottom solver (pressure/13 ruling 6): built without HYPRE"; return s;
@@ -260,6 +304,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     int nhidden = 0, hd = -1;
     for (int d = 0; d < 3; ++d) { if (dom0.length(d) == 1) { ++nhidden; hd = d; } }
     if (nhidden > 1) { s.message = "composite with more than one one-cell direction is not built"; return s; }
+    if (hd >= 0 && has_face_neumann(p)) { s.message = "composite with a mixed domain face (face_neumann) and a one-cell direction is not built"; return s; }
     if (hd >= 0) {
         // D-057: only a one-cell y is the FDS TWO_D case (its term is dropped, Dirichlet faces act as Neumann: effective_bc).
         if (hd != 1 && (p.bc[face_index(hd,0)] == BC::Dirichlet || p.bc[face_index(hd,1)] == BC::Dirichlet)) {
@@ -289,6 +334,13 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
 std::string validate_composite (PressureProblem const& p, bool structural)
 {
     const int n = static_cast<int>(p.levels.size());
+    for (int f = 0; f < 6 && n > 0; ++f) {
+        if (p.face_neumann[f].empty()) { continue; }
+        const Box dom = p.levels[0].geom.Domain();
+        const int d = f % 3, t1 = (d == 0) ? 1 : 0, t2 = (d == 2) ? 1 : 2;
+        if (p.bc[f] != BC::Dirichlet) { return "face_neumann is set on a face that is not Dirichlet"; }
+        if (static_cast<Long>(p.face_neumann[f].size()) != static_cast<Long>(dom.length(t1)) * dom.length(t2)) { return "face_neumann size differs from the level-0 face cell count"; }
+    }
     for (int l = 0; l < n; ++l) {
         PressureLevel const& L = p.levels[l];
         const std::string tag = "level " + std::to_string(l) + ": ";
@@ -1643,6 +1695,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     for (auto const& m : (ext ? bx : b)) { pb_.push_back(m.get()); }
     BackendStatus bs;
     if (!use_hypre) {
+        refresh_robin(W);
         bs = mlmg_solve(mlmg, pphi, pb_, o.mlmg_krylov, Real(o.tol_rel), o.max_iter);
         bs.setup_seconds = setup_s; bs.plan_reused = (setup_s == 0.0);
         R.backend_status = bs;
@@ -1735,6 +1788,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
         }
         Vector<MultiFab*> pres = ptrs(ext ? resx : res);
         Vector<MultiFab*> pphi_r = ptrs(ext ? phix : phv);
+        refresh_robin(W);
         mlmg.compResidual(pres, pphi_r, pb_);
         if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *resx[l], *res[l]); } }
         ResidualSums S;

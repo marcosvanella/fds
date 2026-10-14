@@ -127,6 +127,7 @@ void BcStep::exchange(int code, bool predictor)
             for (int d = 0; d < 3; ++d) if (sp.nodal(d)) nd = d;
             const bool vel = n == "U" || n == "V" || n == "W" || n == "US" || n == "VS" || n == "WS";
             mirror_domain_edges(m_l0, m_F[n], nd, vel ? vel_bc : FaceBc{});
+            if (vel && nd >= 0) zero_mixed_wall(m_F[n], nd, false);
         }
     }
 }
@@ -148,6 +149,31 @@ void BcStep::zero_wall_flux()
                 if (s.ok()) amrex::LoopOnCpu(s, [&](int i, int j, int k) { a(i, j, k) = 0.0; });
             }
         }
+    for (int d = 0; d < 3; ++d) zero_mixed_wall(m_F[fv[d]], d, true);   // mixed face: FV = 0 over the SOLID cells
+}
+
+void BcStep::zero_mixed_wall(amrex::MultiFab& mf, int d, bool cell_shaped)
+{
+    const amrex::Box dom = m_l0.geom.Domain();
+    const int t1 = d == 0 ? 1 : 0, t2 = d == 2 ? 1 : 2;
+    const int r1 = dom.length(t1) / l0_len[t1], r2 = dom.length(t2) / l0_len[t2];
+    for (int side = 0; side < 2; ++side) {
+        const std::vector<int>& w = face_wtype[2 * d + side];
+        if (w.empty()) continue;
+        const int plane = cell_shaped ? (side == 0 ? dom.smallEnd(d) - 1 : dom.bigEnd(d)) : (side == 0 ? dom.smallEnd(d) : dom.bigEnd(d) + 1);
+        for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+            amrex::Box s = mf[mfi].box();
+            if (plane < s.smallEnd(d) || plane > s.bigEnd(d)) continue;
+            s.setRange(d, plane);
+            auto a = mf.array(mfi);
+            amrex::LoopOnCpu(s, [&](int i, int j, int k) {
+                const int c[3] = {i, j, k};
+                const int a1 = amrex::coarsen(c[t1] - dom.smallEnd(t1), r1), a2 = amrex::coarsen(c[t2] - dom.smallEnd(t2), r2);
+                if (a1 < 0 || a2 < 0 || a1 >= l0_len[t1] || a2 >= l0_len[t2]) return;
+                if (w[a1 + l0_len[t1] * a2] == 1) a(i, j, k) = 0.0;   // SOLID_BOUNDARY
+            });
+        }
+    }
 }
 
 void BcStep::after_exchange(int code, double t, double dt)

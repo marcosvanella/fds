@@ -336,6 +336,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     probe("after first prime");
     fdsrt::PressureBackendSolver solver;
     std::copy(loop.pressure_bc(), loop.pressure_bc() + 6, solver.face_bc.begin());   // OPEN faces Dirichlet as in the time-step solve
+    solver.face_neumann = loop.pressure_face_neumann();   // mixed face: Neumann over its SOLID cells, as in the time-step solve
     fdsrt::PostRegridProjectionState pst;
     pst.solver = &solver;
     pst.D = [&](int l) { return &reg.fields(l)["D"]; };

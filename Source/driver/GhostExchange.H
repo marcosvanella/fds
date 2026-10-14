@@ -81,6 +81,11 @@ public:
     std::function<void(bool)> iface_hook;
     CfGhostHook cf_ghost_hook;   // optional, see CfGhostRequest
     FaceBc vel_bc{};             // level > 0: wall type of the domain faces for U, V, W, US, VS, WS (mirror_domain_edges); default {}: the plain mirror. TimeLoop sets it (patch 0015)
+    // level > 0, a domain face with mixed level-0 wall types (vel_bc 0, e.g. an OPEN vent in a solid wall): the level-0 wall type of each face cell (row-major over the two
+    // tangential directions of the level-0 domain, l0_len cells per direction; empty = not mixed). The normal velocity and FV are 0 on the fine faces over a SOLID cell (TimeLoop sets it).
+    std::array<std::vector<int>, 6> face_wtype;
+    amrex::IntVect l0_len{1, 1, 1};
+    void zero_mixed_wall(amrex::MultiFab& mf, int d, bool cell_shaped);
     // ghost_exchange(F, code, predictor) followed by cf_ghost_hook (if set). The time loop calls this at every exchange position.
     void exchange(int code, bool predictor = true);
     // level > 0: FVX/FVY/FVZ = 0 on the INERT/MIRROR wall faces of vel_bc (what NO_FLUX does on level 0 for W = WS = 0 and the mirrored H ghost; a fine box has no wall cell).

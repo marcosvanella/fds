@@ -100,6 +100,7 @@ void fds_p_zone_volume_set(int iz, double v);
 int fds_p_vent_count(int nm);
 void fds_p_vent_get(int nm, int nv, int* ip, double* rp);
 void fds_get_face_bc(int nm, int* code);   // fds_mesh_query.f90 (patch 0015)
+void fds_get_face_wall_types(int nm, int f, int n1, int n2, int* t);   // fds_mesh_query.f90 (mixed face)
 void fds_p_iter_init();
 void fds_p_iter_inc();
 int fds_p_iter_baro();
@@ -195,6 +196,7 @@ struct TimeLoop::Impl {
     int passes = 0;
     int bc_type[6] = {0, 0, 0, 0, 0, 0};   // pb::BC per domain face (side*3+dir)
     FaceBc vel_bc{};                        // wall type per domain face (2*dir+side) for the fine-level velocity ghosts (BcStep::vel_bc, patch 0015)
+    std::array<std::vector<int>, 6> face_wtype;   // mixed domain face: level-0 wall type per face cell (BcStep::face_wtype)
     bool solve_dir[3] = {true, true, true};
     std::string dir;
     std::vector<std::string> log_steps;
@@ -304,6 +306,7 @@ struct TimeLoop::Impl {
         // BcStep calls the FDS routines with the FDS mesh number of the bound box (the registry Level carries offset 0)
         o.bc->ext_ghost = true;   // requirement of levels > 0 (BcStep::exchange): the driver saves the face velocities, MATCH_VELOCITY is not run
         o.bc->vel_bc = vel_bc;    // fine boxes have no wall cells: the domain-face wall type of level 0 (patch 0015)
+        o.bc->face_wtype = face_wtype; o.bc->l0_len = l0.geom.Domain().length();   // mixed face: per level-0 face cell
         LevelCtx x;
         x.lev = &Lv; x.F = &F; x.bc = o.bc.get(); x.sd = &L.m_reg->side_data(lev); x.drho = o.drho.get(); x.dzz = o.dzz.get();
         x.nbox = nb; x.fds0 = nm0; x.off = total_boxes();
@@ -450,6 +453,22 @@ struct TimeLoop::Impl {
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] codes before reduce %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), code[0], code[1], code[2], code[3], code[4], code[5]);
         for (int f = 0; f < 6; ++f) all_max(code[f]);
         for (int f = 0; f < 6; ++f) { all_max(whi[f]); all_max(wlo[f]); vel_bc[f] = whi[f] == -wlo[f] ? whi[f] : 0; }   // one type over the whole face, else 0 (plain mirror)
+        for (int f = 0; f < 6; ++f) {   // mixed face: the level-0 wall type per face cell (BcStep::face_wtype)
+            face_wtype[f].clear();
+            if (vel_bc[f] != 0 || whi[f] < 0) continue;
+            const int d = f / 2, t1 = d == 0 ? 1 : 0, t2 = d == 2 ? 1 : 2, n1 = dom.length(t1);
+            std::vector<int> m(static_cast<std::size_t>(n1) * dom.length(t2), -1);
+            for (int i = 0; i < nbox; ++i) {
+                const amrex::Box vb = l0.ba[i];
+                if (!local(i) || (f % 2 ? vb.bigEnd(d) != dom.bigEnd(d) : vb.smallEnd(d) != dom.smallEnd(d))) continue;
+                const int l1 = vb.length(t1), l2 = vb.length(t2);
+                std::vector<int> t(static_cast<std::size_t>(l1) * l2);
+                fds_get_face_wall_types(i + 1, f + 1, l1, l2, t.data());
+                for (int b = 0; b < l2; ++b) for (int a = 0; a < l1; ++a) { int& x = m[(vb.smallEnd(t1) - dom.smallEnd(t1) + a) + n1 * (vb.smallEnd(t2) - dom.smallEnd(t2) + b)]; x = std::max(x, t[a + l1 * b]); }
+            }
+            amrex::ParallelAllReduce::Max(m.data(), static_cast<int>(m.size()), amrex::ParallelContext::CommunicatorSub());
+            face_wtype[f] = m;
+        }
         if (!L.m_o.quiet) amrex::Print() << "driver set-up: fine-level wall types -x..+z (1 INERT, 3 MIRROR, else plain mirror) " << vel_bc[0] << " " << vel_bc[1] << " " << vel_bc[2] << " " << vel_bc[3] << " " << vel_bc[4] << " " << vel_bc[5] << "\n";
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] codes %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), code[0], code[1], code[2], code[3], code[4], code[5]);
         DirBc dm[3];
@@ -1013,6 +1032,19 @@ struct TimeLoop::Impl {
         return bd;
     }
 
+    // Mixed Dirichlet face: Neumann over the SOLID level-0 face cells in the composite solve (pb face_neumann; U and FV are 0 there, BcStep::zero_mixed_wall).
+    void set_face_neumann(pb::PressureProblem& p) const
+    {
+        for (int d = 0; d < 3; ++d)
+            for (int side = 0; side < 2; ++side) {
+                const std::vector<int>& w = face_wtype[2 * d + side];
+                const int pf = pb::face_index(d, side);
+                if (w.empty() || p.bc[pf] != pb::BC::Dirichlet || std::find(w.begin(), w.end(), 1) == w.end()) continue;
+                p.face_neumann[pf].resize(w.size());
+                for (std::size_t c = 0; c < w.size(); ++c) p.face_neumann[pf][c] = w[c] == 1 ? 1 : 0;   // SOLID_BOUNDARY
+            }
+    }
+
     // Dirichlet (OPEN) domain faces of a fine level: H ghost = 2 g - H(inside), g = the level-0 BXS..BZF that fold_composite folded into the fine RHS.
     // The even mirror above is a Neumann ghost: the fine velocity correction then disagreed with the Dirichlet solve (div error along the face).
     void dirichlet_fine_h_ghosts(const Level& lv, amrex::MultiFab& H)
@@ -1030,7 +1062,14 @@ struct TimeLoop::Impl {
                 if ((side ? b.bigEnd(d) : b.smallEnd(d)) != e) continue;
                 b.setRange(d, e);
                 auto h = H.array(mfi); const auto g = bd.value[f]->const_array(mfi);
-                amrex::LoopOnCpu(b, [&](int i, int j, int k) { h(i + s[0], j + s[1], k + s[2]) = 2.0 * g(i, j, k) - h(i, j, k); });
+                const std::vector<int>& w = face_wtype[2 * d + side];   // mixed face: even mirror (Neumann) over the SOLID level-0 cells
+                const amrex::Box d0 = l0.geom.Domain();
+                const int t1 = d == 0 ? 1 : 0, t2 = d == 2 ? 1 : 2, r1 = dom.length(t1) / d0.length(t1), r2 = dom.length(t2) / d0.length(t2);
+                amrex::LoopOnCpu(b, [&](int i, int j, int k) {
+                    const int c[3] = {i, j, k};
+                    const bool wall = !w.empty() && w[amrex::coarsen(c[t1], r1) - d0.smallEnd(t1) + d0.length(t1) * (amrex::coarsen(c[t2], r2) - d0.smallEnd(t2))] == 1;
+                    h(i + s[0], j + s[1], k + s[2]) = wall ? h(i, j, k) : 2.0 * g(i, j, k) - h(i, j, k);
+                });
             }
         }
     }
@@ -1296,6 +1335,7 @@ struct TimeLoop::Impl {
         }
         pb::PressureProblem p;
         for (int f = 0; f < 6; ++f) p.bc[f] = static_cast<pb::BC>(bc_type[f]);
+        set_face_neumann(p);
         p.levels.resize(nl);
         for (int l = 0; l < nl; ++l) {
             pb::PressureLevel& pl = p.levels[l];
@@ -2340,6 +2380,13 @@ long TimeLoop::clip_cells(int n, int l) const
 void TimeLoop::prime_levels() { m->prime_levels(); }
 void TimeLoop::zero_closed_wall_normal() { m->zero_closed_wall_normal(); }
 const int* TimeLoop::pressure_bc() const { return m->bc_type; }
+std::array<std::vector<int>, 6> TimeLoop::pressure_face_neumann() const
+{
+    pb::PressureProblem p;
+    for (int f = 0; f < 6; ++f) p.bc[f] = static_cast<pb::BC>(m->bc_type[f]);
+    m->set_face_neumann(p);
+    return p.face_neumann;
+}
 void TimeLoop::set_flux_overwrite(bool on) { m->comp_overwrite = on; m->comp_gen = -1; }
 void TimeLoop::write_perf() { m->write_perf(); }
 

@@ -2487,6 +2487,90 @@ void run_comp_bcdata_l1 (ParmParse& pp)
     }
 }
 
+// mode=comp_mixed: mixed domain face (PressureProblem::face_neumann, the Robin composite MLMG). Layout 3 (level 1 touches z-hi), x,y periodic,
+// z-lo Neumann, z-hi Dirichlet. (1) Flags only outside the level-1 footprint: phi equals the plain Dirichlet solve (level 0 keeps `bc`).
+// (2) Every z-hi cell flagged: Ok, the level-1 face gradient on z-hi is 0 and div(grad) = rhs on every level-1 cell (no flux through the
+// wall). Negative control: the plain solve has a non-zero level-1 z-hi gradient. (3) HYPRE with a flag: NotBuilt.
+void run_comp_mixed (ParmParse& pp)
+{
+    Cfg c; c.n = 16; c.mgs = 8; c.layout = 3;
+    pp.query("n", c.n); pp.query("mgs", c.mgs);
+    c.bcd = {pb::BC::Periodic, pb::BC::Periodic, pb::BC::Neumann};
+    c.bchi = {pb::BC::Periodic, pb::BC::Periodic, pb::BC::Dirichlet};
+    Hier h = build_hier(c, 0);
+    pb::PressureOptions o; o.verbose = 0; o.tol_rel = 1e-12;
+    apply_backend_opts(pp, o);
+    const int fz = pb::face_index(2,1);
+    const Box dom0 = h.geom[0].Domain();
+    const int n0 = dom0.length(0), n1 = dom0.length(1);
+    auto solve = [&] (std::vector<int> const& flags, std::vector<std::unique_ptr<MultiFab>>& phi_out, double& gz, double& dv) {
+        for (auto& q : h.phi) { q->setVal(Real(0)); }
+        pb::PressureProblem p = make_problem(c, h);
+        p.face_neumann[fz] = flags;
+        pb::PressureResult r = pb::solve_pressure(p, o, nullptr);
+        ccheck(r.status == pb::Status::Ok && std::isfinite(r.residual_rel2) && r.residual_rel2 < 1e-9, "comp_mixed solve Ok, true residual " + r.message);
+        phi_out.clear();
+        for (int l = 0; l < c.nlev; ++l) { phi_out.push_back(std::make_unique<MultiFab>(h.ba[l], h.dm[l], 1, 0)); MultiFab::Copy(*phi_out[l], *h.phi[l], 0, 0, 1, 0); }
+        std::vector<std::array<std::unique_ptr<MultiFab>,3>> g(c.nlev);
+        std::vector<std::array<MultiFab*,3>> gp(c.nlev);
+        for (int l = 0; l < c.nlev; ++l) {
+            for (int d = 0; d < 3; ++d) { g[l][d] = std::make_unique<MultiFab>(amrex::convert(h.ba[l], IntVect::TheDimensionVector(d)), h.dm[l], 1, 0); gp[l][d] = g[l][d].get(); }
+        }
+        ccheck(pb::face_gradient_composite(p, gp).status == pb::Status::Ok, "comp_mixed face gradient Ok");
+        const int L = c.nlev - 1;
+        const Box dom = h.geom[L].Domain();
+        const auto dx = h.geom[L].CellSizeArray();
+        gz = 0.0; dv = 0.0;
+        for (MFIter mfi(*h.rhs[L]); mfi.isValid(); ++mfi) {
+            auto const& b = h.rhs[L]->const_array(mfi);
+            auto const& gx = g[L][0]->const_array(mfi); auto const& gy = g[L][1]->const_array(mfi); auto const& gzz = g[L][2]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                const double d = (gx(i+1,j,k) - gx(i,j,k)) / dx[0] + (gy(i,j+1,k) - gy(i,j,k)) / dx[1] + (gzz(i,j,k+1) - gzz(i,j,k)) / dx[2];
+                dv = std::max(dv, std::abs(d - double(b(i,j,k))));
+                if (k == dom.bigEnd(2)) { gz = std::max(gz, std::abs(double(gzz(i,j,k+1)))); }
+            });
+        }
+        ParallelDescriptor::ReduceRealMax(gz); ParallelDescriptor::ReduceRealMax(dv);
+        Print() << "COMP_MIXED status=" << pb::to_string(r.status) << " backend=" << r.backend << " true_rel2=" << r.residual_rel2
+                << " max|L1 grad z-hi|=" << gz << " max|L1 div grad - rhs|=" << dv << "\n";
+    };
+    double bmax = 0.0;
+    for (int l = 0; l < c.nlev; ++l) { bmax = std::max(bmax, double(h.rhs[l]->norm0(0))); }
+    // Level-1 footprint on level 0 (x,y).
+    BoxArray cf = h.ba[1]; cf.coarsen(h.ratio[1]);
+    std::vector<int> outside(static_cast<std::size_t>(n0) * n1, 1), all(outside.size(), 1);
+    for (int b = 0; b < static_cast<int>(cf.size()); ++b) {
+        for (int j = cf[b].smallEnd(1); j <= cf[b].bigEnd(1); ++j) { for (int i = cf[b].smallEnd(0); i <= cf[b].bigEnd(0); ++i) { outside[i + n0 * j] = 0; } }
+    }
+    std::vector<std::unique_ptr<MultiFab>> ref, phi1, phi2;
+    double gz0, dv0, gz1, dv1, gz2, dv2;
+    solve({}, ref, gz0, dv0);
+    solve(outside, phi1, gz1, dv1);
+    double dphi = 0.0, pmax = 0.0;
+    for (int l = 0; l < c.nlev; ++l) {
+        MultiFab dd(h.ba[l], h.dm[l], 1, 0);
+        MultiFab::LinComb(dd, Real(1), *phi1[l], 0, Real(-1), *ref[l], 0, 0, 1, 0);
+        dphi = std::max(dphi, double(dd.norm0(0))); pmax = std::max(pmax, double(ref[l]->norm0(0)));
+    }
+    Print() << "COMP_MIXED flags outside the fine footprint: max|phi - phi_dirichlet| / max|phi| = " << dphi / pmax << "\n";
+    ccheck(std::isfinite(dphi) && std::isfinite(pmax) && pmax > 0.0, "finite phi");
+    ccheck(dphi <= 1e-8 * pmax, "flags outside the level-1 footprint: same phi as the plain Dirichlet face");
+    ccheck(dv0 <= 1e-8 * bmax, "plain solve: level-1 div(grad) = rhs");
+    ccheck(gz0 > 1e-3 * pmax / h.geom[1].CellSize(2), "negative control: the plain Dirichlet face has a level-1 z-hi gradient");
+    solve(all, phi2, gz2, dv2);
+    double p2 = 0.0;
+    for (int l = 0; l < c.nlev; ++l) { p2 = std::max(p2, double(phi2[l]->norm0(0))); }
+    ccheck(std::isfinite(p2) && p2 > 0.0 && std::isfinite(gz2) && std::isfinite(dv2), "flagged face: finite non-zero phi");
+    ccheck(gz2 == 0.0, "flagged face: level-1 z-hi gradient is 0");
+    ccheck(dv2 <= 1e-8 * bmax, "flagged face: level-1 div(grad) = rhs (no flux through the wall)");
+    pb::PressureProblem p = make_problem(c, h);
+    p.face_neumann[fz] = all;
+    pb::PressureOptions oh = o; oh.backend = pb::BackendKind::HYPRE;
+    const pb::PressureResult rh = pb::solve_pressure(p, oh, nullptr);
+    Print() << "COMP_MIXED HYPRE status=" << pb::to_string(rh.status) << "\n";
+    ccheck(rh.status == pb::Status::NotBuilt, "HYPRE with face_neumann is NotBuilt");
+}
+
 // mode=comp_seam: vortex_ring_re100_wall at blocking 8, where level 1 reaches the periodic x,y faces. Layout 1 puts the fine
 // patch on the low corner: C/F faces across the periodic seams and fine cells on the Neumann z-lo wall. Wall data g = a on
 // both z faces, rhs + c0 (nonzero mean). At mgs 4 and 8: removed mean = composite mean of the folded rhs, div(face gradient)
@@ -2596,6 +2680,7 @@ int run_composite_mode (std::string const& mode, ParmParse& pp)
     else if (mode == "comp_bcdata") { run_comp_bcdata(pp); }
     else if (mode == "comp_bcdata_l1") { run_comp_bcdata_l1(pp); }
     else if (mode == "comp_seam") { run_comp_seam(pp); }
+    else if (mode == "comp_mixed") { run_comp_mixed(pp); }
     else if (mode == "comp_sel") { run_comp_sel(pp); }
     else if (mode == "comp_ws") { run_comp_ws(pp); }
     else if (mode == "comp_gauge") { run_comp_gauge(pp); }

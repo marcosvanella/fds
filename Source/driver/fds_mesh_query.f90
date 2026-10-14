@@ -98,6 +98,27 @@ DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
 ENDDO
 END SUBROUTINE FDS_GET_FACE_BC
 
+!> \brief Wall type (WALL BOUNDARY_TYPE, cons.f90: 1 SOLID, 2 OPEN, 3 MIRROR) of each external wall cell of face F (1..6 = -x,+x,-y,+y,-z,+z) of local mesh NM, for the
+!> fine-level velocity BC of a face with mixed wall types (FDS_GET_FACE_BC = 0): T(N1,N2) over the tangential cells (y,z of an x face; x,z; x,y), -1 where there is none.
+SUBROUTINE FDS_GET_FACE_WALL_TYPES(NM,F,N1,N2,T) BIND(C,NAME='fds_get_face_wall_types')
+INTEGER(C_INT), VALUE :: NM,F,N1,N2
+INTEGER(C_INT), INTENT(OUT) :: T(N1,N2)
+INTEGER :: IW,IO,A,B
+T = -1
+DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
+   IO = MESHES(NM)%BOUNDARY_COORD(MESHES(NM)%WALL(IW)%BC_INDEX)%IOR
+   IF (2*ABS(IO)-MERGE(1,0,IO>0)/=F) CYCLE
+   ASSOCIATE(BC=>MESHES(NM)%BOUNDARY_COORD(MESHES(NM)%WALL(IW)%BC_INDEX))
+   SELECT CASE(ABS(IO))
+      CASE(1) ; A = BC%JJG ; B = BC%KKG
+      CASE(2) ; A = BC%IIG ; B = BC%KKG
+      CASE DEFAULT ; A = BC%IIG ; B = BC%JJG
+   END SELECT
+   IF (A>=1 .AND. A<=N1 .AND. B>=1 .AND. B<=N2) T(A,B) = MESHES(NM)%WALL(IW)%BOUNDARY_TYPE
+   END ASSOCIATE
+ENDDO
+END SUBROUTINE FDS_GET_FACE_WALL_TYPES
+
 !> \brief 0-based ZZ component for tracked species / tracer ID (SPECIES_MIXTURE%ID), or -1 if unknown.
 !> NAME is a NUL-terminated C string. Passive search is exact on TRIM(ID) (case-sensitive, as FDS namelist IDs).
 FUNCTION FDS_FIND_TRACKED_SPECIES(NAME) BIND(C,NAME='fds_find_tracked_species') RESULT(IDX)

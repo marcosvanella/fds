@@ -14,6 +14,7 @@
 #define FDSRT_PRESSUREBACKENDSOLVER_H_
 
 #include <array>
+#include <vector>
 #include <memory>
 
 #include "PostRegridProjection.H"
@@ -28,6 +29,7 @@ public:
     void rebuild(const std::vector<ProjectionLevel>& levels) override;
     SolveReport solve(const std::vector<const amrex::MultiFab*>& rhs, std::vector<std::array<amrex::MultiFab*, 3>>& grad, double tol_rel, double tol_abs, int max_iter) override;
     std::array<int, 6> face_bc{-1, -1, -1, -1, -1, -1};
+    std::array<std::vector<int>, 6> face_neumann;   // pb::PressureProblem::face_neumann (mixed OPEN/SOLID face, as in the time-step solve)
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

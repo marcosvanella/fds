@@ -134,6 +134,12 @@ struct PressureProblem {
     // AMReX geometry cannot express it, so the driver sets this flag; true is NotBuilt.
     bool cylindrical = false;
     std::array<BC,6> bc = {BC::Neumann, BC::Neumann, BC::Neumann, BC::Neumann, BC::Neumann, BC::Neumann};
+    // Mixed domain face (composite, levels >= 1): face_neumann[face_index(d,side)] is empty (the face is uniform per `bc`) or holds one flag
+    // per level-0 face cell of a Dirichlet face, row-major over the tangential directions (t1 = d == 0 ? y : x fastest, t2 = d == 2 ? y : z;
+    // level-0 Domain lengths). 1 = Neumann (a solid wall cell: no flux, no folded data), 0 = Dirichlet. A fine cell takes the flag of the
+    // level-0 cell under it; level 0 keeps `bc` (FDS folds its own values there). Composite MLMG only (Robin BC); HYPRE, masked composite
+    // and a one-cell direction with a flag set are NotBuilt.
+    std::array<std::vector<int>,6> face_neumann;
 
     // Coefficients: M1 supports the unit operator only (nullptr). Non-null is NotBuilt.
     amrex::MultiFab const* cell_coef_a = nullptr;
@@ -471,6 +477,10 @@ Status fold_boundary_data (PressureProblem const& p,
                            std::vector<BoundaryData> const& bd_levels,
                            std::vector<amrex::MultiFab*>& rhs_levels,
                            std::string* message = nullptr);
+
+// 1 when cell iv of composite level `lev` (>= 1) lies over a flagged cell of face f (PressureProblem::face_neumann), else 0.
+int face_neumann_at (PressureProblem const& p, int lev, int f, amrex::IntVect const& iv);
+bool has_face_neumann (PressureProblem const& p);
 
 const char* to_string (Status s);
 const char* to_string (BC b);

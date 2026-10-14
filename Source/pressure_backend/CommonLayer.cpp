@@ -502,10 +502,31 @@ void apply_operator (PressureProblem const& p, MultiFab& phi, MultiFab& out)
     }
 }
 
-// Fold into one level's rhs (shared by single-level and composite overloads). Uses that level's h and Domain.
+bool has_face_neumann (PressureProblem const& p)
+{
+    for (auto const& v : p.face_neumann) { for (int x : v) { if (x != 0) { return true; } } }
+    return false;
+}
+
+int face_neumann_at (PressureProblem const& p, int lev, int f, IntVect const& iv)
+{
+    auto const& v = p.face_neumann[f];
+    if (lev < 1 || v.empty() || p.levels.empty()) { return 0; }
+    IntVect r(1);
+    for (int l = 1; l <= lev; ++l) { r *= p.levels[l].ref_ratio; }
+    const Box dom = p.levels[0].geom.Domain();
+    const int d = f % 3, t1 = (d == 0) ? 1 : 0, t2 = (d == 2) ? 1 : 2;
+    const int a1 = amrex::coarsen(iv[t1], r[t1]) - dom.smallEnd(t1), a2 = amrex::coarsen(iv[t2], r[t2]) - dom.smallEnd(t2);
+    if (a1 < 0 || a2 < 0 || a1 >= dom.length(t1) || a2 >= dom.length(t2)) { return 0; }
+    return v[a1 + dom.length(t1) * a2] != 0 ? 1 : 0;
+}
+
+// Fold into one level's rhs (shared by single-level and composite overloads). Uses that level's h and Domain. mp (composite, level lev):
+// no fold on the face_neumann cells.
 static Status fold_one_level (std::array<BC,6> const& bc, Geometry const& geom,
                               BoxArray const& ba, DistributionMapping const& dm,
-                              BoundaryData const& bd, MultiFab& rhs, std::string* message)
+                              BoundaryData const& bd, MultiFab& rhs, std::string* message,
+                              PressureProblem const* mp = nullptr, int lev = 0)
 {
     auto fail = [&] (Status st, std::string const& m) { if (message) { *message = m; } return st; };
     if (rhs.boxArray() != ba || !(rhs.DistributionMap() == dm)) {
@@ -545,7 +566,11 @@ static Status fold_one_level (std::array<BC,6> const& bc, Geometry const& geom,
                 auto const& t = tmp.const_array(mfi);
                 const Real cst = bd.value[f] ? Real(0) : bd.constant[f];
                 const bool use_arr = (bd.value[f] != nullptr);
-                amrex::LoopOnCpu(b, [&] (int i, int j, int k) { r(i,j,k) += coef * (use_arr ? t(i,j,k) : cst); });
+                const bool skip = mp && bc[f] == BC::Dirichlet && lev > 0 && !mp->face_neumann[f].empty();
+                amrex::LoopOnCpu(b, [&] (int i, int j, int k) {
+                    if (skip && face_neumann_at(*mp, lev, f, IntVect(i,j,k))) { return; }
+                    r(i,j,k) += coef * (use_arr ? t(i,j,k) : cst);
+                });
             }
         }
     }
@@ -583,7 +608,7 @@ Status fold_boundary_data (PressureProblem const& p,
     for (std::size_t l = 0; l < nl; ++l) {
         if (!rhs_levels[l]) { return fail(Status::InvalidInput, "fold_boundary_data(per-level): null rhs"); }
         BoundaryData const& bd = bd_levels.size() == 1 ? bd_levels[0] : bd_levels[l];
-        Status st = fold_one_level(p.bc, p.levels[l].geom, p.levels[l].ba, p.levels[l].dm, bd, *rhs_levels[l], message);
+        Status st = fold_one_level(p.bc, p.levels[l].geom, p.levels[l].ba, p.levels[l].dm, bd, *rhs_levels[l], message, &p, static_cast<int>(l));
         if (st != Status::Ok) { return st; }
     }
     if (message) { message->clear(); }

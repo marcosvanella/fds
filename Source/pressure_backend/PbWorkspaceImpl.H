@@ -40,7 +40,8 @@ struct PressureWorkspace::Impl {
     std::vector<std::unique_ptr<iMultiFab>> unc;      // 1 = uncovered
     std::vector<Real> vol;                            // cell volume per level
     std::vector<Long> nunc;                           // number of uncovered cells per level
-    std::unique_ptr<MLPoisson> mlp;
+    std::unique_ptr<MLCellLinOp> mlp;                 // MLPoisson, or MLABecLaplacian (A = 0, B = -1) with Robin faces for face_neumann
+    std::array<std::vector<int>,6> face_neumann;      // p.face_neumann this hierarchy was built for
     std::unique_ptr<MLMG> mlmg;                       // refers to *mlp: declared after it, destroyed first
     // Single level: the FFT backend object, which owns the cached FFT::Poisson plan (null until needed).
     std::unique_ptr<PressureBackend> fft;

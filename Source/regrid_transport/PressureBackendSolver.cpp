@@ -18,12 +18,14 @@ struct PressureBackendSolver::Impl {
     std::vector<amrex::MultiFab> phi;       // owned solution storage, valid cells + one ghost layer
     std::vector<amrex::MultiFab> rhs0;      // zero right-hand sides: layout carriers for rebuild
     std::array<pb::BC, 6> bc;
+    std::array<std::vector<int>, 6> fn;   // face_neumann
     std::vector<std::unique_ptr<amrex::iMultiFab>> cls;   // OBST cell_class per level (empty: no OBST loaded)
 
     pb::PressureProblem problem(const std::vector<const amrex::MultiFab*>* rhs)
     {
         pb::PressureProblem p;
         p.bc = bc;
+        p.face_neumann = fn;
         for (size_t l = 0; l < ba.size(); ++l) {
             pb::PressureLevel L;
             L.ba = ba[l]; L.dm = dm[l]; L.geom = geom[l]; L.ref_ratio = ratio[l];
@@ -62,6 +64,7 @@ void PressureBackendSolver::rebuild(const std::vector<ProjectionLevel>& levels)
             m.bc[f] = face_bc[f] >= 0 ? static_cast<pb::BC>(face_bc[f]) : b;
         }
     }
+    m.fn = face_neumann;
     m.cls.clear();
     if (!pb::obst_list().empty()) {
         for (size_t l = 0; l < m.ba.size(); ++l) m.cls.push_back(l == 0 ? nullptr : pb::build_obst_class(m.geom[l], static_cast<int>(l), m.ba[l], m.dm[l]));   // L0: FDS's own OBST (TimeLoop.cpp)
