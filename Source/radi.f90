@@ -5367,15 +5367,20 @@ END FUNCTION KAPPA_SOOT
 
 #ifdef WITH_AMREX
 
-!> Level-0 cell (I,J,K) of mesh NM (the current mesh pointers) lies inside a box of level 1 (box extents are set on every rank).
+!> Cell (I,J,K) of box NM (the current mesh pointers; level L) lies inside a box of level L+1 (box extents are set on every rank).
 LOGICAL FUNCTION RAD_COVERED(NM,I,J,K)
 INTEGER, INTENT(IN) :: NM,I,J,K
-INTEGER :: IB
+INTEGER :: IB,L
 RAD_COVERED = .FALSE.
-IF (NM>NMESHES .OR. .NOT.ALLOCATED(FINE_LEVEL)) RETURN
-IF (SIZE(FINE_LEVEL)<1) RETURN
-DO IB=1,FINE_LEVEL(1)%N_BOXES
-   ASSOCIATE(B=>FINE_LEVEL(1)%BOX(IB))
+IF (.NOT.ALLOCATED(FINE_LEVEL)) RETURN
+L = 0   ! level of NM
+DO IB=1,SIZE(FINE_LEVEL)
+   IF (NM>FINE_LEVEL(IB)%NM0 .AND. NM<=FINE_LEVEL(IB)%NM0+FINE_LEVEL(IB)%N_BOXES) L = IB
+ENDDO
+IF (NM>NMESHES .AND. L==0) RETURN
+IF (SIZE(FINE_LEVEL)<L+1) RETURN
+DO IB=1,FINE_LEVEL(L+1)%N_BOXES
+   ASSOCIATE(B=>FINE_LEVEL(L+1)%BOX(IB))
    RAD_COVERED = XC(I)>B%XS .AND. XC(I)<B%XF .AND. YC(J)>B%YS .AND. YC(J)<B%YF .AND. ZC(K)>B%ZS .AND. ZC(K)<B%ZF
    END ASSOCIATE
    IF (RAD_COVERED) RETURN

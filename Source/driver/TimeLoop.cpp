@@ -1936,9 +1936,11 @@ struct TimeLoop::Impl {
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
         if (IP[10]) rad_ghost_table();   // fine-box ghost intensity table for the current layout
-        if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) { each_local([&](int nm) { fds_k_rad(L.m_t, nm); }); });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC per box, after WALL_BC, before DIVERGENCE_PART_1
+        if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) {
+            each_local([&](int nm) { fds_k_rad(L.m_t, nm); });
+            if (IP[10] && lc.size() > 1) rad_ghost_exchange();   // ILS -> ILR (all ranks) after each level: level L+1 sees this update's level-L intensity of the same angle subset; same-level faces lag one update, as MESH_EXCHANGE(2)
+        });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC per box, after WALL_BC, before DIVERGENCE_PART_1
         if (IP[10]) fds_k_rte_factor();   // main.f90 CALCULATE_RTE_SOURCE_CORRECTION_FACTOR
-        if (IP[10] && lc.size() > 1) rad_ghost_exchange();   // fine-box face ghost intensity (ILS -> ILR, all ranks; lagged like MESH_EXCHANGE(2))
         if (IP[10]) { double d; fds_setup(4, "", &d); }   // main.f90 MESH_EXCHANGE(2): lagged intensity exchange between level-0 meshes (IL_S -> IL_R)
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
