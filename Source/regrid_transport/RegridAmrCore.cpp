@@ -185,6 +185,15 @@ void RegridAmrCore::ManualTagsPlacement(int lev, amrex::TagBoxArray& tags, const
     for (const RegionBox& rb : h_.levels[lev].taggable) allowed.push_back(amrex::coarsen(to_amrex(rb.box), bf_lev[lev]));
     const long removed = clip_tags_to_boxes(tags, allowed);
     if (stats_.buffer_blocks_discarded.size() > static_cast<size_t>(lev)) stats_.buffer_blocks_discarded[lev] += removed;
+    // D-010: stateful walls stay on level 0. Last step before clustering (after the tag buffer): clear the tags within NBUF level-0 cells of them
+    if (nofine_nbuf_ < 0) return;
+    int cum = 1;
+    for (int l = 0; l < lev; ++l) cum *= amrex::AmrCore::refRatio(l)[0];
+    for (auto const& xb : pb::nofine_list()) {
+        const amrex::Box b = amrex::coarsen(pb::obst_tag_box(Geom(lev), xb, nofine_nbuf_ * cum), bf_lev[lev]);
+        for (amrex::MFIter mfi(tags); mfi.isValid(); ++mfi)
+            if (b.intersects(tags[mfi].box())) tags[mfi].setVal<amrex::RunOn::Host>(amrex::TagBox::CLEAR, b & tags[mfi].box());
+    }
 }
 
 amrex::iMultiFab RegridAmrCore::covered_mask(int lev) const

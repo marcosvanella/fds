@@ -4,18 +4,13 @@
 #include "../pressure_backend/ObstMask.H"
 #include <AMReX_ParallelDescriptor.H>
 
-extern "C" { int fds_obst_count (); void fds_obst_xb (int n, double* xb); }
+extern "C" { int fds_obst_count (); void fds_obst_xb (int n, double* xb); int fds_stateful_vents (int n, double* xb); }
 
 namespace fdsamr {
 
-inline void load_obst_list ()
+// local XB list (6 per entry) -> global list on every rank
+inline void gather_xb (std::vector<double> const& loc, std::vector<std::array<double, 6>>& L)
 {
-    static bool done = false;
-    if (done) { return; }
-    done = true;
-    const int n = fds_obst_count();
-    std::vector<double> loc(6 * static_cast<size_t>(n));
-    if (n > 0) { fds_obst_xb(n, loc.data()); }
     const int np = amrex::ParallelDescriptor::NProcs();
     std::vector<int> cnt(np, 0), off(np, 0);
     int m = static_cast<int>(loc.size());
@@ -32,9 +27,23 @@ inline void load_obst_list ()
 #else
     all = loc;
 #endif
-    auto& L = pb::obst_list();
     L.clear();
     for (int i = 0; i + 5 < tot; i += 6) { L.push_back({all[i], all[i+1], all[i+2], all[i+3], all[i+4], all[i+5]}); }
+}
+
+// pb::obst_list() (OBST XB) and pb::nofine_list() (stateful VENT XB, D-010), once
+inline void load_obst_list ()
+{
+    static bool done = false;
+    if (done) { return; }
+    done = true;
+    const int n = fds_obst_count();
+    std::vector<double> loc(6 * static_cast<size_t>(n));
+    if (n > 0) { fds_obst_xb(n, loc.data()); }
+    gather_xb(loc, pb::obst_list());
+    loc.assign(6 * static_cast<size_t>(fds_stateful_vents(0, nullptr)), 0.0);
+    if (!loc.empty()) { fds_stateful_vents(static_cast<int>(loc.size() / 6), loc.data()); }
+    gather_xb(loc, pb::nofine_list());
 }
 
 }  // namespace fdsamr

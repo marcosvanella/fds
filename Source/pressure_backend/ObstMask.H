@@ -13,6 +13,8 @@
 namespace pb {
 
 inline std::vector<std::array<double, 6>>& obst_list () { static std::vector<std::array<double, 6>> v; return v; }
+// D-010: XB of the stateful walls (burner VENTs etc.) that stay on level 0; RegridAmrCore clears the tags around them
+inline std::vector<std::array<double, 6>>& nofine_list () { static std::vector<std::array<double, 6>> v; return v; }
 
 // Cell-index box of one XB at the level of `geom` (FDS NINT rounding); empty when any direction snaps to zero thickness.
 inline amrex::Box obst_cells (amrex::Geometry const& geom, std::array<double, 6> const& xb)

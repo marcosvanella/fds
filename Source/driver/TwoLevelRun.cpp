@@ -25,7 +25,7 @@
 #include "TimeLoopWiring.H"
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
-extern "C" void fds_p_bnd_rate(int ns, double* r);   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean), total and per tracked species
+extern "C" void fds_p_bnd_rate(int ns, double* r);   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
 extern "C" int fds_find_tracked_species(const char* name);  // fds_mesh_query.f90; 0-based ZZ index or -1
 
 namespace fdsamr {
@@ -301,6 +301,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     });
     load_obst_list();
     core.set_tag_obst(o.tag_obst);
+    core.set_nofine(o.nofine);
+    if (o.nofine >= 0 && !pb::nofine_list().empty()) amrex::Print() << tag << ": D-010 " << pb::nofine_list().size() << " stateful VENT(s) stay on level 0 (no-refine buffer " << o.nofine << " level-0 cells)\n";
     core.init_static(reg, false, fdsrt::RegridAmrCore::DmFn(), &l0.dm);
     probe("after init_static");
 
@@ -409,11 +411,14 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // ---- the run
     const std::vector<double> m0 = composite_mass(reg, nl, ns);
     // Open-domain mass balance: inflow = the mass DENSITY moved through the level-0 wall faces (OPEN vents, MASS_FLUX/HRRPUA walls), summed over the steps.
-    std::vector<double> inflow(1 + ns, 0.0), r(1 + ns);
+    // Gate (CEO ruling): open case (through-flow > 1e-10 of the initial mass) |change - inflow| <= 1e-6 x cumulative through-flow; closed case <= 1e-10 x initial mass.
+    std::vector<double> inflow(1 + ns, 0.0), r(2 + ns);
+    double through = 0.0;
+    auto mass_limit = [&] { return through > 1e-10 * m0[0] ? 1e-6 * through : 1e-10 * m0[0]; };
     std::string logname = o.outdir + "/" + o.chid + "_multi_level.csv";
     std::FILE* lf = amrex::ParallelDescriptor::IOProcessor() ? std::fopen(logname.c_str(), "w") : nullptr;
     if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel,inflow\n"); }
-    double worst_mass = 0.0, worst_div = 0.0, worst_fine = 0.0;   // worst_fine: max|div u - D| over levels >= 1
+    double worst_mass = 0.0, worst_mass_ratio = 0.0, worst_div = 0.0, worst_fine = 0.0;   // worst_fine: max|div u - D| over levels >= 1
     int untracked = 0;                                               // steps with fine div > max(2*L0, 1e-10)
     std::vector<double> bylev;
     int nl_now = nl;
@@ -422,6 +427,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         fds_p_bnd_rate(ns, r.data());
         amrex::ParallelAllReduce::Sum(r.data(), 1 + ns, amrex::ParallelContext::CommunicatorSub());
         for (int n = 0; n <= ns; ++n) inflow[n] += r[n] * loop.steps().back().dt;
+        through += r[1 + ns] * loop.steps().back().dt;
         // Mid-run adaptive regrid (Role 3 call shape): gate on AmrParams.regrid_interval; unbind top-down via finest_bound;
         // regrid_dynamic brackets LevelListener — do NOT call reg.begin_regrid/end_regrid here.
         {
@@ -463,6 +469,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         const double dv = fdsrt::composite_divergence_error(lv, &bylev);
         loop.pressure_csv_div(s, bylev);   // P2 solver-study CSV (no-op without the flags)
         worst_mass = std::max(worst_mass, std::abs(dm));
+        worst_mass_ratio = std::max(worst_mass_ratio, std::abs(m[0] - m0[0] - inflow[0]) / mass_limit());
         worst_div = std::max(worst_div, dv);
         if (bylev.size() > 1) {
             const double f = *std::max_element(bylev.begin() + 1, bylev.end());
@@ -496,19 +503,19 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     const std::vector<double> m1 = composite_mass(reg, loop.num_levels(), ns);
     const fdsamr::TimeLoop::CompositeReport& cr = loop.composite_report();
-    amrex::Print() << tag << " RESULT steps " << loop.steps().size() << " composite mass " << m0[0] << " -> " << m1[0] << " boundary inflow " << inflow[0] << " balance residual / initial mass " << (m1[0] - m0[0] - inflow[0]) / m0[0] << " (worst over steps " << worst_mass << ")\n";
-    // every species, also those starting at zero: residual of (change - inflow), normalised by the initial total mass
+    amrex::Print() << tag << " RESULT steps " << loop.steps().size() << " composite mass " << m0[0] << " -> " << m1[0] << " boundary inflow " << inflow[0] << " (through-flow " << through << ") balance residual / initial mass " << (m1[0] - m0[0] - inflow[0]) / m0[0] << " (worst over steps " << worst_mass << "), residual / limit worst " << worst_mass_ratio << "\n";
+    // every species, also those starting at zero: |change - inflow| against the same limit as the mass
     double worst_species = 0.0;
     for (int n = 0; n < ns; ++n) {
-        const double r = (m1[1 + n] - m0[1 + n] - inflow[1 + n]) / m0[0];
-        worst_species = std::max(worst_species, std::abs(r));
-        amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " boundary inflow " << inflow[1 + n] << " balance residual / initial mass " << r << "\n";
+        const double res = m1[1 + n] - m0[1 + n] - inflow[1 + n];
+        worst_species = std::max(worst_species, std::abs(res) / mass_limit());
+        amrex::Print() << tag << " RESULT composite rho*Z" << n + 1 << " " << m0[1 + n] << " -> " << m1[1 + n] << " boundary inflow " << inflow[1 + n] << " balance residual " << res << " (/ limit " << std::abs(res) / mass_limit() << ")\n";
     }
     amrex::Print() << tag << " RESULT max|div u - D| over uncovered cells, worst over steps " << worst_div << "\n";
     // PASS gate (Architect): fine div <= 1e-9 and tracking L0 every step, |mass rel| <= 1e-10
-    const bool gate = worst_fine <= 1e-9 && untracked == 0 && worst_mass <= 1e-10 && worst_species <= 1e-10;
+    const bool gate = worst_fine <= 1e-9 && untracked == 0 && worst_mass_ratio <= 1.0 && worst_species <= 1.0;
     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked
-                   << ", worst |mass balance| " << worst_mass << " (<= 1e-10), final |species balance| " << worst_species << " (<= 1e-10)\n";
+                   << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x through-flow, open" : "1e-10 x initial mass, closed") << ")\n";
     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
                    << ", fine H ghost cells set " << cr.h_ghost_cells << "\n";
     if (cr.res_checked > 0) amrex::Print() << tag << " RESULT pressure residual check: " << cr.res_checked << " solves checked, largest residual " << cr.res_check_max << ", largest limit " << cr.res_limit_max << " (round-off floor " << cr.res_floor_max << "), " << cr.res_failed << " above the limit\n";

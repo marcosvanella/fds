@@ -18,6 +18,7 @@
 #include "Hierarchy.H"
 #include "RegridInterface.H"
 #include "TagOps.H"
+#include "../pressure_backend/ObstMask.H"
 
 namespace fdsrt {
 
@@ -66,6 +67,9 @@ public:
     void set_tag_function(TagFn f) { tag_fn_ = std::move(f); }
     // --tag-obst NBUF: force-tag every OBST of pb::obst_list() (ObstMask.H) on each level below the top, rounded outward and grown by NBUF level-0 cells (<0: off)
     void set_tag_obst(int nbuf) { tag_obst_nbuf_ = nbuf; }
+    // D-010: no tags within NBUF level-0 cells of a stateful wall (pb::nofine_list; -1 off). Clustering then takes only tagged cells
+    // (grid efficiency 1), else a box around a tagged region would cover the cleared hole.
+    void set_nofine(int nbuf) { nofine_nbuf_ = nbuf; if (nbuf >= 0 && !pb::nofine_list().empty()) SetGridEff(1.0); }
     using TagFieldsFn = std::function<TagFields(int lev)>;
     void set_tag_fields(TagFieldsFn f) { tag_fields_fn_ = std::move(f); }
     const AmrParams& amr_params() const { return params_; }
@@ -122,6 +126,7 @@ private:
     LevelDataTransfer* transfer_ = nullptr;
     TagFn tag_fn_;
     int tag_obst_nbuf_ = -1;
+    int nofine_nbuf_ = -1;
     TagFieldsFn tag_fields_fn_;
     DmFn dm_fn_;
     amrex::DistributionMapping level0_dm_;
