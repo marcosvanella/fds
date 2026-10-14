@@ -23,7 +23,7 @@ USE VELO, ONLY: COMPUTE_VISCOSITY,VELOCITY_FLUX,VELOCITY_PREDICTOR,VELOCITY_CORR
 USE MASS, ONLY: MASS_FINITE_DIFFERENCES,DENSITY
 USE DIVG, ONLY: DIVERGENCE_PART_1,DIVERGENCE_PART_2
 USE FIRE, ONLY: COMBUSTION_LOAD_BALANCED,COMBUSTION_BC
-USE RAD, ONLY: COMPUTE_RADIATION
+USE RAD, ONLY: COMPUTE_RADIATION,RAD_GHOST,RAD_GHOST_TYPE
 USE OUTPUT_CLOCKS, ONLY: RADF_COUNTER
 USE FDS_DENSITY_SPLIT, ONLY: DENSITY_PRE_CLIP,DENSITY_POST_CLIP
 
@@ -157,16 +157,43 @@ LOWER_MESH_INDEX = LU(1) ; UPPER_MESH_INDEX = LU(2)
 END SUBROUTINE FDS_K_COMB
 
 !> main.f90 corrector after WALL_BC: COMPUTE_RADIATION (one iteration; RADIATION off: QR=-CHI_R*Q only) and COMBUSTION_BC on mesh NM of any level (radi.f90 patch 0022).
-!> No intensity exchange between boxes (MESH_EXCHANGE(2)): a fine box sees no inflow intensity at its box faces (Stage R2 open item).
+!> Fine-box face ghost intensity: RAD_GHOST (patch 0022), exchanged by the driver after the update.
 SUBROUTINE FDS_K_RAD(T,NM) BIND(C,NAME='fds_k_rad')
 REAL(C_DOUBLE), VALUE :: T
 INTEGER(C_INT), VALUE :: NM
-IF (RADIATION .AND. NM>NMESHES .AND. N_MPI_PROCESSES>1) THEN   ! the coarse-to-fine ghost intensity (radi.f90 RAD_CF_PACK) is a same-rank copy
-   WRITE(0,'(A)') 'fds_amr ERROR: radiation on fine levels runs on one MPI rank only (multi-rank coarse-to-fine intensity exchange is open)' ; ERROR STOP 1
-ENDIF
 CALL COMPUTE_RADIATION(T,NM,1)
 IF (N_REACTIONS>0 .OR. INIT_HRRPUV) CALL COMBUSTION_BC(NM)
 END SUBROUTINE FDS_K_RAD
+
+!> Ghost intensity table of the fine boxes (radi.f90 RAD_GHOST, patch 0022), from the driver's fdsrt::build_il_ghost_table: NW walls (receiver mesh W_NM, ascending;
+!> ghost cell W_IJK in the receiver's indices; positions W_NIC(1:2)), NICR positions (sender mesh S_NM, sender cell S_IJK). Allocates ILS/ILR (NICR,NRA,NSB) at the
+!> ambient intensity and returns their addresses for fdsrt::exchange_il_ghost.
+SUBROUTINE FDS_RAD_GHOST_SET(NICR,NW,NMMAX,W_NM,W_IJK,W_NIC,S_NM,S_IJK,ILS_P,ILR_P,NRA,NSB) BIND(C,NAME='fds_rad_ghost_set')
+INTEGER(C_INT), VALUE :: NICR,NW,NMMAX
+INTEGER(C_INT), INTENT(IN) :: W_NM(NW),W_IJK(3,NW),W_NIC(2,NW),S_NM(NICR),S_IJK(3,NICR)
+TYPE(C_PTR), INTENT(OUT) :: ILS_P,ILR_P
+INTEGER(C_INT), INTENT(OUT) :: NRA,NSB
+INTEGER :: L,NM
+TYPE(RAD_GHOST_TYPE), POINTER :: G
+G => RAD_GHOST
+IF (ALLOCATED(G%ILS)) DEALLOCATE(G%ILS,G%ILR,G%S_IJK,G%S_FIRST,G%S_POS,G%W_IJK,G%W_NIC,G%W_FIRST)
+NRA = NUMBER_RADIATION_ANGLES ; NSB = NUMBER_SPECTRAL_BANDS
+ALLOCATE(G%ILS(MAX(1,NICR),NRA,NSB),G%ILR(MAX(1,NICR),NRA,NSB)) ; G%ILS = SIGMA*TMPA4/PI ; G%ILR = G%ILS
+ALLOCATE(G%S_IJK(3,NICR),G%S_POS(NICR),G%S_FIRST(NMMAX+1),G%W_IJK(3,NW),G%W_NIC(2,NW),G%W_FIRST(NMMAX+1))
+G%S_IJK = S_IJK ; G%W_IJK = W_IJK ; G%W_NIC = W_NIC
+G%S_FIRST = 0 ; G%W_FIRST = 0   ! counting sort: positions by sender mesh, wall ranges by receiver mesh
+DO L=1,NICR ; G%S_FIRST(S_NM(L)+1) = G%S_FIRST(S_NM(L)+1) + 1 ; ENDDO
+DO L=1,NW   ; G%W_FIRST(W_NM(L)+1) = G%W_FIRST(W_NM(L)+1) + 1 ; ENDDO
+G%S_FIRST(1) = 1 ; G%W_FIRST(1) = 1
+DO NM=2,NMMAX+1 ; G%S_FIRST(NM) = G%S_FIRST(NM) + G%S_FIRST(NM-1) ; G%W_FIRST(NM) = G%W_FIRST(NM) + G%W_FIRST(NM-1) ; ENDDO
+BLOCK
+INTEGER :: NXT(NMMAX)
+NXT = G%S_FIRST(1:NMMAX)
+DO L=1,NICR ; G%S_POS(NXT(S_NM(L))) = L ; NXT(S_NM(L)) = NXT(S_NM(L)) + 1 ; ENDDO
+END BLOCK
+G%NICR = NICR
+ILS_P = C_LOC(G%ILS) ; ILR_P = C_LOC(G%ILR)
+END SUBROUTINE FDS_RAD_GHOST_SET
 
 !> main.f90 CALCULATE_RTE_SOURCE_CORRECTION_FACTOR, once per corrector after FDS_K_RAD of every box (sums over the boxes of this rank, then all ranks).
 SUBROUTINE FDS_K_RTE_FACTOR() BIND(C,NAME='fds_k_rte_factor')

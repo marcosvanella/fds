@@ -60,6 +60,7 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/CompositeOps.cpp
     ${CMAKE_CURRENT_LIST_DIR}/TwoLevelRun.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/PressureBackendSolver.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../regrid_transport/IlGhost.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CommonLayer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/PressureIface.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/FFTBackend.cpp

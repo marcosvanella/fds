@@ -2788,14 +2788,17 @@ INTEGER :: N_RADCAL_ARRAY_SIZE                     !< Number of radcal species p
 INTEGER :: RADCAL_SPECIES_INDEX(16)                !< Mapping of radcal species present to radcal calling function
 CHARACTER(LABEL_LENGTH) :: RADCAL_SPECIES_ID(16)='NULL'!< Name of radcal species
 #ifdef WITH_AMREX
-!> Patch 0022: coarse-to-fine ghost intensity of a fine box (NM > NMESHES). Its face ghost cells take, per angle and band, the intensity of the
-!> level-0 cell that contains them (constant prolongation; sampled in the level-0 sweep, which runs before the fine boxes in the same corrector).
-TYPE RAD_CF_TYPE
-   REAL(EB) :: X0(3)=-1.E30_EB                   !< first cell centre of the box the table was built for (rebuilt after a regrid)
-   INTEGER, ALLOCATABLE :: G(:,:)                !< (7,NG): fine ghost I,J,K; level-0 mesh, IC,JC,KC
-   REAL(EB), ALLOCATABLE :: ILG(:,:,:)           !< (NG,angle,band) ghost intensity
-END TYPE RAD_CF_TYPE
-TYPE(RAD_CF_TYPE), ALLOCATABLE, TARGET :: RAD_CF(:)
+!> Patch 0022: ghost intensity of the fine boxes (NM > NMESHES), FR-062/L1251 table (regrid_transport IlGhost: build_il_ghost_table, exchange_il_ghost)
+!> set by the driver (fds_rad_ghost_set). Every box packs ILS at its sender cells during its sweep (as IL_S); after the update the driver copies ILS
+!> into ILR across ranks (lagged, as MESH_EXCHANGE(2)); a fine box sets each face ghost cell to the mean of its ILR positions (as an INTERPOLATED wall).
+TYPE RAD_GHOST_TYPE
+   INTEGER :: NICR=0
+   INTEGER, ALLOCATABLE :: S_IJK(:,:),S_FIRST(:),S_POS(:)   !< sender cell per position; mesh NM: S_POS(S_FIRST(NM):S_FIRST(NM+1)-1)
+   INTEGER, ALLOCATABLE :: W_IJK(:,:),W_NIC(:,:),W_FIRST(:)  !< ghost cell, NIC_MIN/MAX per wall; mesh NM: W_FIRST(NM):W_FIRST(NM+1)-1
+   REAL(EB), ALLOCATABLE :: ILS(:,:,:),ILR(:,:,:)                   !< (NICR,angle,band)
+END TYPE RAD_GHOST_TYPE
+TYPE(RAD_GHOST_TYPE), TARGET, SAVE :: RAD_GHOST
+PUBLIC RAD_GHOST,RAD_GHOST_TYPE
 #endif
 
 CONTAINS
@@ -4389,13 +4392,14 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
             ENDDO WALL_LOOP1
             !$OMP END PARALLEL DO
 #ifdef WITH_AMREX
-            IF (NM>NMESHES .AND. ALLOCATED(RAD_CF)) THEN   ! fine box: face ghost intensity from level 0 (patch 0022), table built by RAD_CF_PACK
-               IF (SIZE(RAD_CF)>=NM) THEN
-                  IF (ALLOCATED(RAD_CF(NM)%G)) THEN
-                     DO LL=1,SIZE(RAD_CF(NM)%G,2)
-                        IL(RAD_CF(NM)%G(1,LL),RAD_CF(NM)%G(2,LL),RAD_CF(NM)%G(3,LL)) = RAD_CF(NM)%ILG(LL,N,IBND)
-                     ENDDO
-                  ENDIF
+            IF (NM>NMESHES .AND. RAD_GHOST%NICR>0) THEN   ! fine box: face ghost intensity, mean of its ILR positions (patch 0022)
+               IF (NM<SIZE(RAD_GHOST%W_FIRST)) THEN
+                  DO LL=RAD_GHOST%W_FIRST(NM),RAD_GHOST%W_FIRST(NM+1)-1
+                     IF (RAD_GHOST%W_NIC(2,LL)<RAD_GHOST%W_NIC(1,LL)) CYCLE
+                     ASSOCIATE(W=>RAD_GHOST%W_IJK(:,LL),N1=>RAD_GHOST%W_NIC(1,LL),N2=>RAD_GHOST%W_NIC(2,LL))
+                     IL(W(1),W(2),W(3)) = SUM(RAD_GHOST%ILR(N1:N2,N,IBND))/REAL(N2-N1+1,EB)
+                     END ASSOCIATE
+                  ENDDO
                ENDIF
             ENDIF
 #endif
@@ -4853,7 +4857,14 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
             ! IL_S is an array holding the intensities IL of cells just outside of mesh NOM.
 
 #ifdef WITH_AMREX
-            IF (NM<=NMESHES) CALL RAD_CF_PACK(NM,N,IBND,IL)
+            IF (RAD_GHOST%NICR>0) THEN   ! pack ILS at the sender cells of this box (patch 0022)
+               IF (NM<SIZE(RAD_GHOST%S_FIRST)) THEN
+                  DO LL=RAD_GHOST%S_FIRST(NM),RAD_GHOST%S_FIRST(NM+1)-1
+                     NOM = RAD_GHOST%S_POS(LL)
+                     RAD_GHOST%ILS(NOM,N,IBND) = IL(RAD_GHOST%S_IJK(1,NOM),RAD_GHOST%S_IJK(2,NOM),RAD_GHOST%S_IJK(3,NOM))
+                  ENDDO
+               ENDIF
+            ENDIF
 #endif
             INTERPOLATION_LOOP: DO NOM=1,NMESHES
                IF (NM==NOM) CYCLE INTERPOLATION_LOOP
@@ -5355,40 +5366,6 @@ KAPPA_SOOT = SOOT_MASS_CONCENTRATION*(1232.4_EB+0.591552_EB*(TTMP-2000._EB))
 END FUNCTION KAPPA_SOOT
 
 #ifdef WITH_AMREX
-!> Table of fine box NF (object MF): its face ghost cells and the level-0 cell containing each (an interior cell if any mesh has one, else a ghost cell).
-FUNCTION RAD_CF_TABLE(NF,MF) RESULT(CF)
-INTEGER, INTENT(IN) :: NF
-TYPE(MESH_TYPE), INTENT(IN) :: MF
-TYPE(RAD_CF_TYPE), POINTER :: CF
-TYPE(RAD_CF_TYPE), ALLOCATABLE :: TMP(:)
-INTEGER :: I,J,K,L,NG,F,PASS,N0,IJK(3)
-REAL(EB) :: XYZ(3)
-IF (.NOT.ALLOCATED(RAD_CF)) ALLOCATE(RAD_CF(NF))
-IF (SIZE(RAD_CF)<NF) THEN ; ALLOCATE(TMP(NF)) ; TMP(1:SIZE(RAD_CF)) = RAD_CF ; CALL MOVE_ALLOC(TMP,RAD_CF) ; ENDIF
-CF => RAD_CF(NF)
-NG = 2*(MF%JBAR*MF%KBAR+MF%IBAR*MF%KBAR+MF%IBAR*MF%JBAR)
-IF (ALLOCATED(CF%G)) THEN
-   IF (ALL(CF%X0==[MF%XC(1),MF%YC(1),MF%ZC(1)]) .AND. SIZE(CF%G,2)==NG) RETURN
-   DEALLOCATE(CF%G,CF%ILG)
-ENDIF
-CF%X0 = [MF%XC(1),MF%YC(1),MF%ZC(1)]
-ALLOCATE(CF%G(7,NG),CF%ILG(NG,NUMBER_RADIATION_ANGLES,NUMBER_SPECTRAL_BANDS)) ; CF%ILG = RPI_SIGMA*TMPA4
-L = 0
-DO K=0,MF%KBP1 ; DO J=0,MF%JBP1 ; DO I=0,MF%IBP1
-   F = COUNT([I==0.OR.I==MF%IBP1, J==0.OR.J==MF%JBP1, K==0.OR.K==MF%KBP1])
-   IF (F/=1) CYCLE   ! face ghost cells only (the sweep reads face neighbours)
-   L = L + 1 ; CF%G(1:3,L) = [I,J,K] ; CF%G(4,L) = 0
-   XYZ = [MF%XC(I),MF%YC(J),MF%ZC(K)]
-   SEARCH: DO PASS=1,2
-      DO N0=1,NMESHES
-         IJK = FLOOR((XYZ-[MESHES(N0)%XS,MESHES(N0)%YS,MESHES(N0)%ZS])*[MESHES(N0)%RDXI,MESHES(N0)%RDETA,MESHES(N0)%RDZETA]) + 1
-         IF (PASS==1 .AND. ANY(IJK<1 .OR. IJK>[MESHES(N0)%IBAR,MESHES(N0)%JBAR,MESHES(N0)%KBAR])) CYCLE
-         IF (ANY(IJK<0 .OR. IJK>[MESHES(N0)%IBP1,MESHES(N0)%JBP1,MESHES(N0)%KBP1])) CYCLE
-         CF%G(4,L) = N0 ; CF%G(5:7,L) = IJK ; EXIT SEARCH
-      ENDDO
-   ENDDO SEARCH
-ENDDO ; ENDDO ; ENDDO
-END FUNCTION RAD_CF_TABLE
 
 !> Level-0 cell (I,J,K) of mesh NM (the current mesh pointers) lies inside a box of level 1 (box extents are set on every rank).
 LOGICAL FUNCTION RAD_COVERED(NM,I,J,K)
@@ -5405,22 +5382,6 @@ DO IB=1,FINE_LEVEL(1)%N_BOXES
 ENDDO
 END FUNCTION RAD_COVERED
 
-!> Level-0 mesh NM, angle N, band IBND: copy its intensity IL into the ghost tables of every fine box.
-SUBROUTINE RAD_CF_PACK(NM,N,IBND,IL)
-INTEGER, INTENT(IN) :: NM,N,IBND
-REAL(EB), INTENT(IN) :: IL(0:,0:,0:)
-TYPE(RAD_CF_TYPE), POINTER :: CF
-INTEGER :: LEV,IB,L
-IF (.NOT.ALLOCATED(FINE_LEVEL)) RETURN
-DO LEV=1,SIZE(FINE_LEVEL)
-   DO IB=1,FINE_LEVEL(LEV)%N_BOXES
-      CF => RAD_CF_TABLE(FINE_LEVEL(LEV)%NM0+IB,FINE_LEVEL(LEV)%BOX(IB))
-      DO L=1,SIZE(CF%G,2)
-         IF (CF%G(4,L)==NM) CF%ILG(L,N,IBND) = IL(CF%G(5,L),CF%G(6,L),CF%G(7,L))
-      ENDDO
-   ENDDO
-ENDDO
-END SUBROUTINE RAD_CF_PACK
 #endif
 
 END MODULE RAD

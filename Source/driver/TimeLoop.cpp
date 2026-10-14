@@ -12,6 +12,7 @@
 #include "FluxStageRunner.H"
 #include "DriverAdapter.H"
 #include "PostRegridProjection.H"
+#include "IlGhost.H"
 
 #include <AMReX_BLassert.H>
 #include <AMReX_MultiFabUtil.H>
@@ -49,6 +50,7 @@ void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
 void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), any level
 void fds_k_rte_factor();
+void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* w_ijk, const int* w_nic, const int* s_nm, const int* s_ijk, double** ils, double** ilr, int* nra, int* nsb);   // fds_kernels.f90
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt, int nm);
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
@@ -1721,6 +1723,40 @@ struct TimeLoop::Impl {
         each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(L.m_t, L.m_dt, nm, pred ? 0 : 1); });
         iface(false);
     }
+    // Radiation ghost intensity of the fine boxes (radi.f90 RAD_GHOST, patch 0022): FR-062/L1251 table of every face ghost cell of every fine box (built once per layout;
+    // the sender is a box of the receiver's level if one covers the ghost, else the coarser level), then the ILS -> ILR copy across ranks after each update.
+    fdsrt::IlGhostTable rg_t; std::vector<int> rg_rank; double* rg_ils = nullptr; double* rg_ilr = nullptr; int rg_gen = -1, rg_nra = 0, rg_nsb = 0;
+    void rad_ghost_exchange()
+    {
+        if (rg_gen != layout_gen) {
+            std::vector<fdsrt::IlBox> boxes; std::vector<int> nm; std::vector<amrex::IntVect> ratio; std::vector<fdsrt::IlWall> walls; std::vector<int> wijk;
+            rg_rank.clear();
+            for (std::size_t l = 0; l < lc.size(); ++l) {
+                if (l > 0) ratio.push_back(lc[l].lev->ref_ratio_from_parent);
+                for (int i = 0; i < lc[l].nbox; ++i) {
+                    const amrex::Box b = lc[l].lev->ba[i];
+                    boxes.push_back({static_cast<int>(l), b}); nm.push_back(lc[l].fds0 + i + 1); rg_rank.push_back(lc[l].lev->dm[i]);
+                    if (l == 0) continue;
+                    for (int d = 0; d < 3; ++d) for (int side = 0; side < 2; ++side) {   // face ghost cells, receiver order (walls of one box consecutive)
+                        amrex::Box f = side ? amrex::adjCellHi(b, d) : amrex::adjCellLo(b, d);
+                        for (amrex::BoxIterator it(f); it.ok(); ++it) {
+                            const amrex::IntVect g = it();
+                            walls.push_back({static_cast<int>(boxes.size()) - 1, side ? -(d + 1) : d + 1, g});
+                            for (int q = 0; q < 3; ++q) wijk.push_back(g[q] - b.smallEnd(q) + 1);
+                        }
+                    }
+                }
+            }
+            rg_t = fdsrt::build_il_ghost_table(boxes, ratio, walls);
+            std::vector<int> wnm, wnic, snm, sijk;
+            for (std::size_t w = 0; w < walls.size(); ++w) { wnm.push_back(nm[walls[w].box]); wnic.push_back(rg_t.nic_min[w]); wnic.push_back(rg_t.nic_max[w]); }
+            for (int p = 0; p < rg_t.nicr(); ++p) { snm.push_back(nm[rg_t.ils_box[p] - 1]); sijk.push_back(rg_t.iio[p]); sijk.push_back(rg_t.jjo[p]); sijk.push_back(rg_t.kko[p]); }
+            fds_rad_ghost_set(rg_t.nicr(), static_cast<int>(walls.size()), *std::max_element(nm.begin(), nm.end()), wnm.data(), wijk.data(), wnic.data(), snm.data(), sijk.data(),
+                              &rg_ils, &rg_ilr, &rg_nra, &rg_nsb);
+            rg_gen = layout_gen;
+        }
+        fdsrt::exchange_il_ghost(rg_t, rg_rank.data(), rg_nra, rg_nsb, rg_ils, rg_ilr);
+    }
     void s_wall_bc(bool pred) { wseam_upload("WALL_BC"); c->bc->wall_bc(pred ? 1 : 0, L.m_t, L.m_dt); wseam_check("WALL_BC"); }
     void s_div1() { if (fluxchk && (fluxchk_kinds & 2)) { fluxchk_div1(); return; } div1_plain(); }
     void s_div2() { each_local([&](int nm) { fds_k_div2(L.m_dt, nm); }); }
@@ -1856,6 +1892,7 @@ struct TimeLoop::Impl {
         for_levels([&](int) { s_wall_bc(false); });
         if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) { each_local([&](int nm) { fds_k_rad(L.m_t, nm); }); });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC per box, after WALL_BC, before DIVERGENCE_PART_1
         if (IP[10]) fds_k_rte_factor();   // main.f90 CALCULATE_RTE_SOURCE_CORRECTION_FACTOR
+        if (IP[10] && lc.size() > 1) rad_ghost_exchange();   // fine-box face ghost intensity (ILS -> ILR, all ranks; lagged like MESH_EXCHANGE(2))
         if (IP[10]) { double d; fds_setup(4, "", &d); }   // main.f90 MESH_EXCHANGE(2): lagged intensity exchange between level-0 meshes (IL_S -> IL_R)
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
