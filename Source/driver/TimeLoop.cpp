@@ -46,7 +46,7 @@ void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* dat
 void fds_k_dens_post(double t, double dt, int nm);
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
-void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION, level 0 (Stage R1)
+void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), level 0
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt);
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
@@ -1794,13 +1794,13 @@ struct TimeLoop::Impl {
         stage_raw("c_prevflux", {"RHOS", "US", "VS", "WS", "MU", "KRES", "H", "HS", "ZZS", "TMP", "RHO"});
         for_levels([&](int) { s_vflux(false); });
         stage("c_vflux", {"FVX", "FVZ"});
-        if (IP[9] > 0) fds_k_comb(t, dt);   // main.f90: COMBUSTION_LOAD_BALANCED and COMBUSTION_BC after VELOCITY_FLUX, before WALL_BC/DIVERGENCE_PART_1
+        if (IP[9] > 0) fds_k_comb(t, dt);   // main.f90 ~1060: COMBUSTION_LOAD_BALANCED after VELOCITY_FLUX, before WALL_BC
         // WP1b / 7.13b: edge tables + vorticity/stress work arrays right after VELOCITY_FLUX (corrector); FDSTL_STAGES=<icyc>
         stage_scratch("c_vfluxE", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"DS", 3}, {"FVX", 3}, {"FVY", 3}, {"FVZ", 3}, {"ED_OMEGA", 2}, {"ED_TAU", 2}, {"CE_EDGE_INDEX", 4}});
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
-        if (IP[10]) each_local([&](int nm) { fds_k_rad(L.m_t, nm); });   // main.f90 ~1121: after WALL_BC, before DIVERGENCE_PART_1; level 0 only
+        if (IP[9] > 0 || IP[10] || IP[25]) each_local([&](int nm) { fds_k_rad(L.m_t, nm); });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC, after WALL_BC, before DIVERGENCE_PART_1; level 0
         if (wall_counter == IP[21]) wall_counter = 0;
         fds_p_set_wall_counter(wall_counter);
         fds_p_init_div();

@@ -132,7 +132,7 @@ REAL(EB), INTENT(IN) :: XS,XF,YS,YF,ZS,ZF
 INTEGER :: I,J,K,IC,NC,IBP1,JBP1,KBP1,N_LOWER_SCALARS
 
 IF (RADIATION .OR. N_LAGRANGIAN_CLASSES>0 .OR. N_LP_ARRAY_INDICES>0) THEN
-   WRITE(0,'(A)') 'fds_amr ERROR in BUILD_FINE_BOX: fine-level boxes do not support particles or radiation yet.' ; ERROR STOP 1
+   WRITE(0,'(A)') 'fds_amr ERROR in BUILD_FINE_BOX: fine-level boxes do not support particles or radiation yet (radiation on level >0 is Stage R2).' ; ERROR STOP 1
 ENDIF
 N_LOWER_SCALARS = MERGE(0,1,FLUX_LIMITER_MW_CORRECTION)   ! as in INITIALIZE_MESH_VARIABLES_1
 ! the largest box dimensions are sizes of automatic arrays in the kernels (VELOCITY_FLUX: GX(0:IBAR_MAX), GY, GZ): a fine box larger than every level-0 mesh must raise them
