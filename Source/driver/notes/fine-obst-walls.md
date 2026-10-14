@@ -184,29 +184,31 @@ fds_fine_level.f90) and gives every fine box the single zone. Multi-zone cases d
 3. **Coarse covered cells are bookkeeping only:** filled by average-down of the fine conserved fields (rho, rho*Z, rho*h_s). An L0 cell that
    is solid on L0 but gas on the fine level gets the fine average and is not part of L0's FDS update. An L0 gas cell that is partly solid on
    the fine level gets the gas-volume-weighted fine average. Uncovered L0 stays FDS's own.
-4. **Derefinement (fine to coarse when a box disappears):** the cells that change status (fine gas becoming coarse solid or vice versa, the
-   re-snap volume) are handled so that zone mass and energy are conserved and T and Z do not jump:
-   - A coarse cell that becomes gas gets the zone-mean state of the fine cells it covered: rho, Z, T from the mass-weighted fine average
-     (T is consistent with rho, Z and the zone PBAR via the equation of state).
-   - Mass and energy in fine gas that falls inside a coarse solid cell (volume lost) are moved to the neighbouring coarse gas cells of the
-     same zone, mass-weighted, as a density change at fixed T and Z. The zone's PBAR follows from the composite volume change
-     (`P V = m R T` at fixed T). No T or Z jump; a pressure jump is allowed, as the volume really changed.
-   - Refinement is the mirror: fine cells under a coarse solid that become gas get the adjacent same-zone state; the mass they need comes
-     from the same zone's neighbours.
-   - The gate checks per-zone mass and energy before/after each regrid to round-off, and that max|dT| and max|dZ| over unchanged cells are
-     exactly 0.
+4. **Derefinement / OBST re-snap (owner correction, supersedes conservation):** preserve the **intensive** state: Z (species mass
+   fractions), T, background pressure PBAR (per zone) and the divergence D. Do **not** enforce zone mass or energy conservation here.
+   - A coarse cell that becomes gas (it was solid on the coarse level, gas on the fine level) takes T and Z as the gas-volume-weighted average of
+     the fine gas cells it covered. rho then follows from the equation of state at the zone's unchanged PBAR: `rho = PBAR/(R(Z) T)`. D is the
+     covered fine average (average-down, as for any covered cell).
+   - Fine gas that falls inside a coarse solid cell simply disappears with its volume. Neighbouring cells are not changed.
+   - Refinement (the mirror case): fine cells under a coarse solid that become gas get T and Z from the adjacent same-zone gas cells, and rho
+     from the EOS at PBAR.
+   - Result: no jump in T, Z, PBAR or D. The total and per-zone mass (and energy) change by the volume difference times rho. That change is
+     accepted and **reported as a diagnostic**: a `REGRID ZONE-MASS` log line per regrid and zone with dm and dm/m. It is excluded from the
+     mass gate the same way as the boundary inflow (the gate subtracts it).
+   - The gate checks that max|dT|, max|dZ| and max|dD| over unchanged cells are exactly 0 across a regrid, and that PBAR is unchanged.
 5. Thin coarse OBSTs never open: a coarse thin plane under a fine box is also a fine thin plane or fine solid cells at the same position
    (or the interface is kept off it by `--tag-obst-snap`, R9). So a zone can never leak through a level change.
 
 **Code impact** (adds to R4): zone inheritance flood fill in the builder (~60 lines, fds_fine_level.f90), lifting IERR 3 (~10), composite
-zone volume and zone integrals in the pressure-zone path (~40, TimeLoop.cpp/CompositeOps), regrid transfer for status-changing cells (~80,
+zone volume and zone integrals in the pressure-zone path (~40, TimeLoop.cpp/CompositeOps), regrid fill for status-changing cells at fixed T/Z/PBAR (~60,
 regrid_transport CellTransfer), per-zone gate lines (~30). About +1.5 days (total about 5.5 days).
 
 **Test:** a closed compartment whose dividing wall is thinner than a coarse cell. In simple_test geometry, a `&ZONE` on each side of a wall
 `XB=1.80,1.83,0,2.4,0,2.4`, with no leak and a burner on one side, 2 and 3 levels, `--regrid-every 5`.
 - L0: the wall is a thin OBST (read.f90:11315), and FDS gives two zones (func.f90:5763-5778).
 - Each level: zone IDs match L0 cell by cell (comparing the covering L0 cell).
-- Per-zone mass and energy are conserved to round-off through every regrid. T and Z are unchanged in cells whose status did not change.
+- Across every regrid: T, Z and D are unchanged in cells whose status did not change, and PBAR is unchanged. The per-zone mass change is
+  reported (diagnostic) and equals the re-snapped volume times rho.
 - The zone without the burner has `D_PBAR_DT = 0` to round-off (no leak through the wall).
 - Variant: shift the wall by half a coarse cell, so the coarse plane changes. Same checks, and the zone volume reported from the finest level
   matches FDS fine within one fine cell layer.
@@ -289,6 +291,6 @@ Findings:
   L0 zones), and are never renumbered at regrid (R10).
 - **D8** Zone volume and zone integrals are composite: each gas cell is counted at its finest covering level. Coarse covered cells are
   average-down bookkeeping only.
-- **D9** Regrid transfer of cells whose solid/gas status changes moves mass and energy within the zone at fixed T and Z (pressure may jump
-  with the real volume change). Accept the pressure jump, or require PBAR continuity instead (that would need a T or rho change)?
-
+- **D9** At derefinement or OBST re-snap, preserve the intensive state (Z, T, PBAR, D) and do not enforce zone mass/energy
+  conservation. The mass change from the volume difference is accepted and reported as a diagnostic per regrid and zone, and excluded
+  from the mass gate (owner correction).
