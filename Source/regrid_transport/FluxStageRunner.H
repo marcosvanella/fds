@@ -37,6 +37,12 @@ struct StageLevel {
 struct StageStats {
     long adv_entries = 0, dif_entries = 0;       // face entries set on this rank, summed over levels and boxes (a face shared by two coarse boxes counts twice)
     long calls = 0;                              // calls of set_overrides
+    // Coarse-fine flux matching, per kind (0 ADV, 1 DIF), reset with reset_match():
+    //   pre[k][n]: max |coarse face flux of the coarse read-out - area-weighted sum of the fine faces| over the interface faces (what the override corrects),
+    //              component n = scalar n+1, the last entry = rho (sum over the scalars);
+    //   stale[k]:  read-out arrays or runner levels whose BoxArray is not the current one (old-hierarchy flux registers); must stay 0.
+    std::vector<double> pre[2];
+    long stale[2] = {0, 0};
 };
 
 class FluxStageRunner {
@@ -48,6 +54,7 @@ public:
     bool overwrite() const { return overwrite_; }
     void set_overwrite(bool on) { overwrite_ = on; }
     const StageStats& stats() const { return stats_; }
+    void reset_match() { stats_.pre[0].clear(); stats_.pre[1].clear(); stats_.stale[0] = stats_.stale[1] = 0; }
 
     // Reads fa.stage_flux(l+1, kind, d) for l = finest-1 .. 0 and calls fa.set_flux_override(l, kind, lists) for EVERY level 0..finest (the finest level gets an
     // empty set, which also clears the lists of the previous stage). Valid after the read-out of `kind` on all levels (see the order above).
@@ -57,6 +64,7 @@ public:
     std::vector<std::vector<FluxOverride>> lists_for_level(const FluxAccess& fa, int level, FluxKind kind, OverrideStats* st = nullptr) const;
 
 private:
+    void match(const FluxAccess& fa, int level, FluxKind kind, const std::vector<std::vector<FluxOverride>>& lists);
     std::vector<StageLevel> lv_;
     bool overwrite_;
     StageStats stats_;
