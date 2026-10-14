@@ -1673,6 +1673,21 @@ struct TimeLoop::Impl {
         select(0);
         probe("after after-4");
         nan_report("exchange 4");
+        // The next predictor's DENSITY reads DEL_RHO_D_DEL_Z of the last corrector DIVERGENCE_PART_1: on a new fine box it does not exist and on level 0 it was made with the old
+        // coarse-fine faces (DIF override of the old hierarchy), so the first step after a regrid moved rho*Z between species. Redo it on the new hierarchy (with the DIF override); keep D, DS.
+        if (nl > 1 && !full && !std::getenv("FDSTL_NO_PRIME_DIV1")) {
+            std::vector<std::unique_ptr<amrex::MultiFab>> keep;
+            for (int l = 0; l < nl; ++l)
+                for (const char* nm : {"D", "DS"}) { const amrex::MultiFab& f = (*lc[l].F)[nm]; keep.emplace_back(new amrex::MultiFab(f.boxArray(), f.DistributionMap(), f.nComp(), f.nGrow())); amrex::MultiFab::Copy(*keep.back(), f, 0, 0, f.nComp(), f.nGrow()); }
+            zone_save();
+            fds_p_init_div();   // as before the stage DIVERGENCE_PART_1 (the full-prime path does the same)
+            divergence1_all();
+            zone_restore();
+            int q = 0;
+            for (int l = 0; l < nl; ++l)
+                for (const char* nm : {"D", "DS"}) { amrex::MultiFab& f = (*lc[l].F)[nm]; amrex::MultiFab::Copy(f, *keep[q], 0, 0, f.nComp(), f.nGrow()); ++q; }
+            nan_report("div1 (DEL_RHO_D_DEL_Z)");
+        }
         if (!full) return;
         for_levels([&](int) { s_vflux(false); });
         nan_report("vflux");
