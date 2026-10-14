@@ -316,8 +316,8 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     }
     if (has_zero_mask(p.uncovered)) { s.message = "composite with a caller-supplied covered-cell mask is not built: covered cells are derived from the level BoxArrays"; return s; }
     const bool masked = composite_is_masked(p);
-    if (has_face_neumann(p) && (masked || requested == BackendKind::HYPRE)) {
-        s.message = "composite with a mixed domain face (face_neumann) is built on unmasked MLMG only (Robin BC); HYPRE and masked composite are not built"; return s;
+    if (has_face_neumann(p) && requested == BackendKind::HYPRE) {
+        s.message = "composite with a mixed domain face (face_neumann) is built on MLMG only (Robin BC unmasked, beta = 0 boundary faces masked); HYPRE is not built"; return s;
     }
 #if !defined(PB_WITH_HYPRE) || !defined(AMREX_USE_HYPRE)
     if (masked && requested == BackendKind::MLMG) {
@@ -360,7 +360,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     }
     s.ok = true;
     if (requested == BackendKind::HYPRE) { s.kind = BackendKind::HYPRE; }
-    else if (requested == BackendKind::Auto && composite_is_masked(p)) { s.kind = BackendKind::HYPRE; }  // D-092 product: Auto → HYPRE
+    else if (requested == BackendKind::Auto && composite_is_masked(p) && !has_face_neumann(p)) { s.kind = BackendKind::HYPRE; }  // D-092 product: Auto → HYPRE
     else { s.kind = BackendKind::MLMG; }
     return s;
 }
@@ -982,8 +982,9 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
                     IntVect hi(i,j,k), lo(i,j,k); lo[d] -= 1;
                     auto open = [] (int v) { return v == CellGas || v == -2; };     // covered faces are overwritten by the fine average
                     bool g;
-                    if (!per && hi[d] == dom.smallEnd(d)) { g = open(c(hi[0],hi[1],hi[2])); }
-                    else if (!per && lo[d] == dom.bigEnd(d)) { g = open(c(lo[0],lo[1],lo[2])); }
+                    // mixed domain face (face_neumann, levels >= 1): beta = 0 on the flagged boundary faces, i.e. Neumann under the Dirichlet BC
+                    if (!per && hi[d] == dom.smallEnd(d)) { g = open(c(hi[0],hi[1],hi[2])) && !face_neumann_at(p, l, face_index(d,0), hi); }
+                    else if (!per && lo[d] == dom.bigEnd(d)) { g = open(c(lo[0],lo[1],lo[2])) && !face_neumann_at(p, l, face_index(d,1), lo); }
                     else { g = open(c(hi[0],hi[1],hi[2])) && open(c(lo[0],lo[1],lo[2])); }
                     b(i,j,k) = g ? Real(1) : Real(0);
                 });

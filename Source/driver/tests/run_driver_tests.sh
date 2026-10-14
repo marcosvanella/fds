@@ -39,6 +39,7 @@ bash "$HERE/run_step_sequence_check.sh" "$BLD" "$BLD/run/stepseq" || rc=1   # T,
 bash "$HERE/run_exchange_code_check.sh" "$(cd "$HERE/.." && pwd)" || rc=1
 bash "$HERE/run_obst_burner_check.sh" "$BLD" "$BLD/run/obstburner" || rc=1   # L0-only OBST + MASS_FLUX burner, two levels: div and no L0 clipping
 bash "$HERE/run_open_vent_check.sh" "$BLD" "$BLD/run/openvent" || rc=1   # OPEN face (Dirichlet) two levels: fine H ghost, post-regrid projection BC
+bash "$HERE/run_fine_burner_check.sh" "$BLD" "$BLD/run/fineburner" || rc=1   # burner OBST on the fine level + OPEN door: masked MLMG, mixed face, wall velocity
 if [ "${DRIVER_THREE_LEVEL_CHECK:-0}" = 1 ]; then bash "$HERE/run_three_level_check.sh" "$BLD" "$BLD/run/threelevel" 10 || rc=1; fi
 if [ "${DRIVER_DENSITY_CHECK:-0}" = 1 ]; then bash "$HERE/run_two_level_density_check.sh" "$BLD" "$BLD/run/density" || rc=1; fi
 [ $rc = 0 ] && echo "ALL DRIVER TESTS PASS" || echo "DRIVER TESTS FAILED"

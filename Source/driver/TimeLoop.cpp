@@ -130,6 +130,7 @@ int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, c
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
 void fds_fine_walls_sums(int lev, double t, double* q);
+int fds_fine_walls_un(int lev, int ib, int pred, int nmax, int* n, int* ijkd, double* uf);   // fds_fine_level.f90: OBST wall face velocity (burner)
 int fds_fine_level_destroy(int lev);
 #endif
 int fds_wseam_refresh(int nm);
@@ -1465,12 +1466,40 @@ struct TimeLoop::Impl {
         }
         for (int l = nl - 1; l >= 0; --l) fs.run_divergence_part1(l);
     }
+#ifdef FDS_HAVE_FINE_LEVEL
+    // A fine OBST face with a nonzero wall velocity (MASS_FLUX burner) gets the parent wall's normal velocity back after the solid-face
+    // zeroing, as FDS VELOCITY_BC sets the wall face to -SIGN(IOR)*U_NORMAL(_S). Box-local I,J,K (1-based) and direction D of the gas cell.
+    void fine_wall_velocity(bool pred)
+    {
+        const char* nm[3] = {pred ? "US" : "U", pred ? "VS" : "V", pred ? "WS" : "W"};
+        std::vector<int> ijkd; std::vector<double> uf;
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+            const amrex::iMultiFab& sm = L.m_reg->side_data(l).mask();
+            for (amrex::MFIter mfi(sm); mfi.isValid(); ++mfi) {
+                const int nmax = static_cast<int>(2 * mfi.validbox().numPts() * 3 / 2 + 64);
+                ijkd.resize(4 * nmax); uf.resize(nmax);
+                int n = 0;
+                fds_fine_walls_un(l, mfi.index() + 1, pred ? 1 : 0, nmax, &n, ijkd.data(), uf.data());
+                const amrex::Box vb = mfi.validbox(); const amrex::IntVect lo = vb.smallEnd();
+                for (int w = 0; w < n; ++w) {
+                    const int D = ijkd[4 * w + 3], d = std::abs(D) - 1;
+                    amrex::IntVect c(lo[0] + ijkd[4 * w] - 1, lo[1] + ijkd[4 * w + 1] - 1, lo[2] + ijkd[4 * w + 2] - 1);
+                    if (D > 0) c[d] += 1;
+                    L.m_reg->fields(l)[nm[d]][mfi](c) = uf[w];
+                }
+            }
+        }
+    }
+#endif
     void avg_down_vel(bool pred)
     {
         if (!multi()) return;
         ProfScope prof_ad(4);
         composite_zero_solid_faces(*L.m_reg, 1, static_cast<int>(lc.size()), pred ? std::array<const char*, 3>{"US", "VS", "WS"} : std::array<const char*, 3>{"U", "V", "W"}, 0);
         composite_zero_solid_cells(*L.m_reg, 1, static_cast<int>(lc.size()), {"D", "DS", "DDDT"});   // solid fine cells: D/DS/DDDT stay 0 (div u = 0 there)
+#ifdef FDS_HAVE_FINE_LEVEL
+        fine_wall_velocity(pred);
+#endif
         if (pred) composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"US", "VS", "WS"});
         else composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"U", "V", "W"});
     }

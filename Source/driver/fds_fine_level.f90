@@ -460,6 +460,35 @@ END ASSOCIATE
 DEALLOCATE(T)
 END SUBROUTINE FDS_FINE_WALLS_BUILD
 
+!> Face velocity of the hidden OBST walls of local box IB of level LEV (e.g. a MASS_FLUX burner on the fine level): for each wall with a nonzero parent U_NORMAL_S (PRED=1)
+!> or U_NORMAL, the fine cell and wall direction IJKD(:,N) = I,J,K,D and UF(N) = -SIGN(IOR)*U_NORMAL of the level-0 parent wall (the normal velocity in +axis direction, as FDS sets
+!> it on a wall face). Domain-boundary walls are skipped (the driver's vel_bc mirror handles them). N <= NMAX.
+SUBROUTINE FDS_FINE_WALLS_UN(LEV,IB,PRED,NMAX,N,IJKD,UF) BIND(C,NAME='fds_fine_walls_un')
+INTEGER(C_INT), VALUE :: LEV,IB,PRED,NMAX
+INTEGER(C_INT), INTENT(OUT) :: N,IJKD(4,NMAX)
+REAL(C_DOUBLE), INTENT(OUT) :: UF(NMAX)
+INTEGER :: IW,IW0,NM0
+REAL(EB) :: UN
+TYPE(MESH_TYPE), POINTER :: WM
+N = 0
+IF (.NOT.ALLOCATED(FWALL)) RETURN
+IF (SIZE(FWALL)<LEV) RETURN
+IF (.NOT.ALLOCATED(FWALL(LEV)%B)) RETURN
+WM => FWALL(LEV)%B(IB)%W
+IF (.NOT.ASSOCIATED(WM)) RETURN
+DO IW=1,FWALL(LEV)%B(IB)%NW
+   NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
+   IF (IW0<=MESHES(NM0)%N_EXTERNAL_WALL_CELLS) CYCLE
+   ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX), BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
+   UN = MERGE(B1%U_NORMAL_S,B1%U_NORMAL,PRED==1)
+   IF (UN==0._EB .OR. N>=NMAX) CYCLE
+   N = N+1
+   IJKD(:,N) = (/BC%IIG,BC%JJG,BC%KKG,-BC%IOR/)
+   UF(N) = -SIGN(1,BC%IOR)*UN
+   END ASSOCIATE
+ENDDO
+END SUBROUTINE FDS_FINE_WALLS_UN
+
 !> RDN and AREA of hidden wall BC of fine box R (as INIT_WALL_CELL).
 SUBROUTINE FWALL_GEOM(R,BC,RDN,AREA)
 USE TYPES, ONLY: BOUNDARY_COORD_TYPE

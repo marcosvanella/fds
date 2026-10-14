@@ -2570,6 +2570,48 @@ void run_comp_mixed (ParmParse& pp)
     const pb::PressureResult rh = pb::solve_pressure(p, oh, nullptr);
     Print() << "COMP_MIXED HYPRE status=" << pb::to_string(rh.status) << "\n";
     ccheck(rh.status == pb::Status::NotBuilt, "HYPRE with face_neumann is NotBuilt");
+    // (4) Masked composite + mixed face: a 2x2x2 level-1 Solid block (a burner OBST) inside the fine patch, away from the face. Auto -> masked
+    // MLMG (beta = 0 on the flagged boundary faces): Ok, level-1 z-hi gradient 0, div(grad) = rhs on gas level-1 cells; HYPRE NotBuilt.
+    {
+        const Box fb = h.ba[1].minimalBox();
+        IntVect c0 = fb.smallEnd() + (fb.bigEnd() - fb.smallEnd()) / 2; c0[2] = fb.smallEnd(2) + 2;
+        const Box blk(c0, c0 + IntVect(1));
+        iMultiFab cls(h.ba[1], h.dm[1], 1, 1);
+        cls.setVal(0); for (MFIter mfi(cls); mfi.isValid(); ++mfi) { cls[mfi].setVal<RunOn::Host>(1, blk & mfi.validbox()); }
+        for (auto& q : h.phi) { q->setVal(Real(0)); }
+        pb::PressureProblem pm = make_problem(c, h);
+        pm.face_neumann[fz] = all;
+        pm.levels[1].cell_class = &cls;
+        // rhs = 0 on the Solid cells (identity rows)
+        MultiFab rs(h.ba[1], h.dm[1], 1, 0); MultiFab::Copy(rs, *h.rhs[1], 0, 0, 1, 0);
+        for (MFIter mfi(*h.rhs[1]); mfi.isValid(); ++mfi) { (*h.rhs[1])[mfi].setVal<RunOn::Host>(0.0, blk & mfi.validbox()); }
+        const pb::PressureResult rm = pb::solve_pressure(pm, o, nullptr);
+        Print() << "COMP_MIXED masked status=" << pb::to_string(rm.status) << " backend=" << rm.backend << " method=" << rm.backend_status.method << " true_rel2=" << rm.residual_rel2 << " " << rm.message << "\n";
+        ccheck(rm.status == pb::Status::Ok && rm.backend == "MLMG" && std::isfinite(rm.residual_rel2) && rm.residual_rel2 < 1e-9, "masked + mixed face: MLMG Ok");
+        std::vector<std::array<std::unique_ptr<MultiFab>,3>> g(c.nlev);
+        std::vector<std::array<MultiFab*,3>> gp(c.nlev);
+        for (int l = 0; l < c.nlev; ++l) for (int d = 0; d < 3; ++d) { g[l][d] = std::make_unique<MultiFab>(amrex::convert(h.ba[l], IntVect::TheDimensionVector(d)), h.dm[l], 1, 0); gp[l][d] = g[l][d].get(); }
+        ccheck(pb::face_gradient_composite(pm, gp).status == pb::Status::Ok, "masked + mixed face: face gradient Ok");
+        const Box dom = h.geom[1].Domain(); const auto dx = h.geom[1].CellSizeArray();
+        double gzm = 0.0, dvm = 0.0, gs = 0.0;
+        for (MFIter mfi(*h.rhs[1]); mfi.isValid(); ++mfi) {
+            auto const& b = h.rhs[1]->const_array(mfi); auto const& cl = cls.const_array(mfi);
+            auto const& gx = g[1][0]->const_array(mfi); auto const& gy = g[1][1]->const_array(mfi); auto const& gzz = g[1][2]->const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (k == dom.bigEnd(2)) { gzm = std::max(gzm, std::abs(double(gzz(i,j,k+1)))); }
+                if (cl(i,j,k) != 0) { gs = std::max({gs, std::abs(double(gx(i,j,k))), std::abs(double(gx(i+1,j,k))), std::abs(double(gzz(i,j,k))), std::abs(double(gzz(i,j,k+1)))}); return; }
+                const double d = (gx(i+1,j,k) - gx(i,j,k)) / dx[0] + (gy(i,j+1,k) - gy(i,j,k)) / dx[1] + (gzz(i,j,k+1) - gzz(i,j,k)) / dx[2];
+                dvm = std::max(dvm, std::abs(d - double(b(i,j,k))));
+            });
+        }
+        ParallelDescriptor::ReduceRealMax(gzm); ParallelDescriptor::ReduceRealMax(dvm); ParallelDescriptor::ReduceRealMax(gs);
+        Print() << "COMP_MIXED masked max|L1 grad z-hi|=" << gzm << " max|grad on Solid faces|=" << gs << " max|L1 div grad - rhs| (gas)=" << dvm << "\n";
+        ccheck(gzm == 0.0 && gs == 0.0, "masked + mixed face: no flux through the wall cells or the Solid block");
+        ccheck(dvm <= 1e-8 * bmax, "masked + mixed face: level-1 div(grad) = rhs on gas cells");
+        pb::PressureOptions oh2 = o; oh2.backend = pb::BackendKind::HYPRE;
+        ccheck(pb::solve_pressure(pm, oh2, nullptr).status == pb::Status::NotBuilt, "masked + mixed face: HYPRE NotBuilt");
+        MultiFab::Copy(*h.rhs[1], rs, 0, 0, 1, 0);
+    }
 }
 
 // mode=comp_seam: vortex_ring_re100_wall at blocking 8, where level 1 reaches the periodic x,y faces. Layout 1 puts the fine
