@@ -47,10 +47,11 @@ std::vector<double> composite_mass(LevelRegistry& reg, int nl, int ns)
         for (amrex::MFIter mfi(F["RHO"]); mfi.isValid(); ++mfi) {
             auto r = F["RHO"].const_array(mfi);
             auto z = F["ZZ"].const_array(mfi);
-            amrex::Array4<const int> cv;
+            amrex::Array4<const int> cv, sd;
             if (cov) cv = cov->const_array(mfi);
+            if (l > 0) sd = reg.side_data(l).mask().const_array(mfi);   // fine OBST cells hold the burner wall state (TimeLoop fine_burner_state), not gas
             amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
-                if (cov && cv(i, j, k) != 0) return;
+                if ((cov && cv(i, j, k) != 0) || (l > 0 && sd(i, j, k, 0) != 0)) return;
                 m[0] += r(i, j, k) * vol;
                 for (int n = 0; n < ns; ++n) m[1 + n] += r(i, j, k) * z(i, j, k, n) * vol;
             });

@@ -4,6 +4,7 @@
 //  (a) Passive scalars: N_TOTAL_SCALARS beyond the tracked species are handled by Fields.cpp (ZZ/ZZS carry ncomp = N_TOTAL_SCALARS); every copy, exchange and clip
 //      here loops over all components, the D-031 clip special-cases only the tracked species.
 //  (b) Only uniform Cartesian metrics are used (R(I)/RRN(I) dropped); CYLINDRICAL and TRN* meshes are rejected (IR-002), the pressure call-through assumes IPS=0.
+#include <set>
 #include "ObstList.H"
 #include "TimeLoop.H"
 #include "LevelRegistry.H"
@@ -133,6 +134,7 @@ void fds_fine_walls_sums(int lev, double t, int chk, double* q);
 int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90 (frozen/fine-wall-state.md)
 int fds_n_tracked_species();
 int fds_fine_walls_un(int lev, int ib, int pred, int nmax, int* n, int* ijkd, double* uf);   // fds_fine_level.f90: OBST wall face velocity (burner)
+int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90: parent wall state of fine burner faces
 int fds_fine_level_destroy(int lev);
 #endif
 int fds_wseam_refresh(int nm);
@@ -646,6 +648,9 @@ struct TimeLoop::Impl {
                         ++n;
                     }
                 }
+#ifdef FDS_HAVE_FINE_LEVEL
+            burner_overrides(kind, dir, idx, val, n, k, lo);
+#endif
             const int r = fds_flux_set_override(nm, kind, n, dir.data(), idx.data(), ns, val.data());
             if (r != 0) die(std::string("flux override rejected (") + (r == 2 ? "a face outside the valid range of the box" : "bad argument") + ") on box " + std::to_string(mfi.index()));
         }
@@ -1472,6 +1477,69 @@ struct TimeLoop::Impl {
         for (int l = nl - 1; l >= 0; --l) fs.run_divergence_part1(l);
     }
 #ifdef FDS_HAVE_FINE_LEVEL
+    // Fine burner faces (fds_fine_walls_state, after the level-0 WALL_BC of the stage): the two solid cells behind each face get the parent's RHO_F, TMP_F,
+    // ZZ_F (advection and D stencils); the faces themselves go into every ADV/DIF override list of the fine box: ADV = M_DOT_G_PP_ADJUST (+axis sign), DIF = 0.
+    struct BurnerFaces { std::vector<int> ijkd; std::vector<double> s; int n = 0; std::vector<int> sf; };   // sf: other gas/solid faces (dir, FDS i,j,k): ADV = DIF = 0 as FDS walls
+    std::vector<std::vector<BurnerFaces>> burner;   // [level][local box, MFIter order]
+    void fine_burner_state(bool pred)
+    {
+        burner.assign(lc.size(), {});
+        const int w = 5 + 2 * nt;
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+            Fields& F = *lc[l].F;
+            for (amrex::MFIter mfi(L.m_reg->side_data(l).mask()); mfi.isValid(); ++mfi) {
+                BurnerFaces& b = burner[l].emplace_back();
+                const int nmax = static_cast<int>(mfi.validbox().numPts() / 4 + 64);
+                b.ijkd.resize(4 * nmax); b.s.resize(static_cast<std::size_t>(w) * nmax);
+                if (fds_fine_walls_state(l, mfi.index() + 1, pred ? 1 : 0, nt, nmax, &b.n, b.ijkd.data(), b.s.data()) != 0) die("fds_fine_walls_state failed");
+                const amrex::Box vb = mfi.validbox(); const amrex::IntVect lo = vb.smallEnd();
+                {   // every other gas/solid face of the box: FDS zeroes the diffusive flux on a wall face (divg.f90 CASE DEFAULT), the fine kernels have no wall there
+                    const auto sm = L.m_reg->side_data(l).mask().const_array(mfi);
+                    std::set<std::array<int, 4>> bf;
+                    for (int f = 0; f < b.n; ++f) { const int D = b.ijkd[4 * f + 3], d = std::abs(D) - 1; std::array<int, 4> a{d, b.ijkd[4 * f], b.ijkd[4 * f + 1], b.ijkd[4 * f + 2]}; if (D < 0) a[1 + d] -= 1; bf.insert(a); }
+                    for (int d = 0; d < 3; ++d) {
+                        amrex::Box fb = vb; fb.surroundingNodes(d);
+                        amrex::LoopOnCpu(fb, [&](int i, int j, int k) {
+                            amrex::IntVect hi(i, j, k), lw = hi; lw[d] -= 1;
+                            if (!vb.contains(hi) && !vb.contains(lw)) return;
+                            const bool sh = vb.contains(hi) ? sm(hi, 0) != 0 : false, sl = vb.contains(lw) ? sm(lw, 0) != 0 : false;
+                            if (sh == sl || !vb.contains(hi) || !vb.contains(lw)) return;
+                            std::array<int, 4> a{d, i - lo[0] + (d == 0 ? 0 : 1), j - lo[1] + (d == 1 ? 0 : 1), k - lo[2] + (d == 2 ? 0 : 1)};
+                            if (!bf.count(a)) b.sf.insert(b.sf.end(), a.begin(), a.end());
+                        });
+                    }
+                }
+                for (int f = 0; f < b.n; ++f) {
+                    const int D = b.ijkd[4 * f + 3], d = std::abs(D) - 1, sg = D > 0 ? 1 : -1;
+                    const double* v = &b.s[static_cast<std::size_t>(w) * f];
+                    for (int g = 1; g <= 2; ++g) {
+                        amrex::IntVect c(lo[0] + b.ijkd[4 * f] - 1, lo[1] + b.ijkd[4 * f + 1] - 1, lo[2] + b.ijkd[4 * f + 2] - 1);
+                        c[d] += sg * g;
+                        if (!F["RHO"][mfi].box().contains(c)) continue;
+                        F["RHO"][mfi](c) = F["RHOS"][mfi](c) = v[3]; F["TMP"][mfi](c) = v[4];
+                        for (int n = 0; n < nt; ++n) F["ZZ"][mfi](c, n) = F["ZZS"][mfi](c, n) = v[5 + n];
+                    }
+                }
+            }
+        }
+    }
+    void burner_overrides(int kind, std::vector<int>& dir, std::vector<int>& idx, std::vector<double>& val, int& n, int k, const amrex::IntVect& lo)
+    {
+        const int l = static_cast<int>(c - lc.data());
+        if (l < 1 || l >= static_cast<int>(burner.size()) || k >= static_cast<int>(burner[l].size())) return;
+        const BurnerFaces& b = burner[l][k];
+        for (int f = 0; f < b.n; ++f) {
+            const int D = b.ijkd[4 * f + 3], d = std::abs(D) - 1;
+            dir.push_back(d);
+            for (int e = 0; e < 3; ++e) idx.push_back(b.ijkd[4 * f + e] - (e == d && D < 0 ? 1 : 0));   // FDS face index: box-local; low face of cell I is face I-1
+            for (int q = 0; q < ns; ++q) val.push_back(kind == 0 && q < nt ? (D < 0 ? 1.0 : -1.0) * b.s[static_cast<std::size_t>(5 + 2 * nt) * f + 5 + nt + q] : 0.0);
+            ++n;
+        }
+        for (std::size_t f = 0; f < b.sf.size(); f += 4) { dir.push_back(b.sf[f]); idx.insert(idx.end(), b.sf.begin() + f + 1, b.sf.begin() + f + 4); val.insert(val.end(), ns, 0.0); ++n; }
+        (void)lo;
+    }
+#endif
+#ifdef FDS_HAVE_FINE_LEVEL
     // Wall inflow of a fine burner face into the fine RHS (-div FV), as FDS NO_FLUX with the H term dropped (beta = 0 on the face):
     // FV = -(UN - U)/dt (predictor), -2(UN - (U+US)/2)/dt (corrector); UN from fds_fine_walls_state (frozen/fine-wall-state.md), FV index = face - 1.
     void fine_wall_fv(bool pred, double dt)
@@ -1954,6 +2022,9 @@ struct TimeLoop::Impl {
             ghost_report("pd_vflux");
             fds_p_init_div();
             for_levels([&](int) { s_wall_bc(true); });
+#ifdef FDS_HAVE_FINE_LEVEL
+            if (multi()) fine_burner_state(true);
+#endif
             ghost_report("pd_wallbc");
             if (std::getenv("FDSTL_WALLS") && L.m_icyc == std::atoi(std::getenv("FDSTL_WALLS")) && passes == 1)
                 {   // SCRATCH PATCH: print plane FDSTL_WALLS_K (default 5, <0 = all planes); FDSTL_WALLTAB=1 also writes walltab_b<box>.bin (all external + internal walls)
@@ -2024,6 +2095,9 @@ struct TimeLoop::Impl {
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
+#ifdef FDS_HAVE_FINE_LEVEL
+        if (multi()) fine_burner_state(false);
+#endif
         if (IP[10]) rad_ghost_table();   // fine-box ghost intensity table for the current layout
         if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) {
             each_local([&](int nm) { fds_k_rad(L.m_t, nm); });
