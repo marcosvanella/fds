@@ -81,6 +81,20 @@ consumers must not divide by it. The values switch from parent B1 to the fine wa
 
 ### R6. Test plan
 
+0. **Owner's primary acceptance test (run first).**
+   - **Setup:** an isothermal case (no fire, no heat sources, `TMPA` everywhere) with one or more closed compartments, separated by thin OBST
+     walls thinner than a coarse cell (e.g. `XB=1.80,1.83,...` at coarse dx 0.1 m). Each compartment is its own `&ZONE`.
+   - **Hierarchy:** driven through refinement and derefinement/re-snap with forced tags that move every few steps (`--regrid-every 2`), so
+     each wall is alternately fine (solid cells or a fine thin plane) and coarse (a thin plane). Variant: the wall is shifted so that its coarse
+     plane moves at re-snap. Run with 2 and 3 levels.
+   - **Pass:**
+     - T stays isothermal: uniform and unchanged to round-off on every level after every regrid.
+     - Z unchanged to round-off.
+     - Background pressure PBAR of every zone unchanged to round-off.
+     - Zones stay separate: zone IDs match the L0 IDs cell by cell, and no flow or mass crosses a wall.
+   - **Diagnostic (not a pass criterion):** the total and per-zone mass change at each regrid (`REGRID ZONE-MASS`, R10 item 4), expected to be
+     the re-snapped volume times rho.
+   - L0-only run bit-identical.
 1. **simple_test burner fine** (`--tag-obst 1 --nofine -1 --patch 0 7 0 7`): coarse-aligned burner, so every wall is case P; inventory = L0
    inventory refined (4 fine faces per coarse face, same SURF); Role 2's `run_fine_burner_check.sh` numbers unchanged; L0 bit-identical.
 2. **simple_test, burner shifted by half a fine cell**: case N faces exist; burner mass flux on fine faces = HRRPUA*A/dH within 1e-12 relative;
