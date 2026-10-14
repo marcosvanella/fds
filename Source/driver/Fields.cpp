@@ -33,6 +33,7 @@ const std::vector<FieldSpec> kTable = {
     {"MU_DNS", Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :563
     {"RSUM",   Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :599
     {"Q",      Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :581
+    {"QR",     Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :678 (radiation source, kept between radiation updates)
     {"CSD2",   Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :572
     {"FVX",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :543 (cell-shaped momentum flux terms)
     {"FVY",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :544
@@ -41,7 +42,7 @@ const std::vector<FieldSpec> kTable = {
 };
 
 const std::vector<std::string> kDefault = {"RHO", "RHOS", "TMP", "ZZ", "ZZS", "U", "V", "W", "US", "VS", "WS",
-                                           "H", "HS", "KRES", "D", "DS", "DDDT", "MU", "RSUM", "Q", "FVX", "FVY", "FVZ"};
+                                           "H", "HS", "KRES", "D", "DS", "DDDT", "MU", "RSUM", "Q", "QR", "FVX", "FVY", "FVZ"};
 
 // Per-box scratch: stays in Fortran/side data of the shim (S3), never a MultiFab (p1-findings section 3).
 const char* const kScratch[] = {"FX", "FY", "FZ", "ADV_FX", "ADV_FY", "ADV_FZ", "DIF_FX", "DIF_FY", "DIF_FZ",

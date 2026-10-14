@@ -84,6 +84,10 @@ void fds_p_get(int nm, const char* name, double* buf, long ntot, int* ierr);
 void fds_p_mfd(int nm);
 int fds_p_dens_skip();   // fds_step.f90: 1 when DENSITY returns at once (ICYC<=1 etc.): no level clip then
 void fds_p_zero_dot();
+void fds_p_esums(int nm, const int* mask, double* s);
+void fds_p_add_qdot(int n, double v);
+double fds_p_enthalpy_sum(int nm);
+void fds_p_get_qr(int nm, double* buf, long ntot);
 void fds_p_dens_pre(double t, double dt, int nm);
 void fds_p_init_div();
 void fds_p_zone_get(int n, double* d, double* p, double* u);
@@ -2145,6 +2149,62 @@ struct TimeLoop::Impl {
         return s;
     }
 
+    // Composite Q_ENTH, Q_CONV, Q_COND, Q_DIFF of the HRR file: UPDATE_HRR (inside fds_setup(3)) sums them over the level-0 meshes only. The walls: add to Q_DOT the
+    // sums over the finer cells not covered by a still finer level, minus the covered coarser cells, so each region is counted once. Q_ENTH: replace UPDATE_HRR's
+    // d/dt of the level-0 integral of rho*h_s by d/dt of the composite one, E (energy_sums). After a regrid (prime_levels) e_old is E on the new hierarchy, so the
+    // regrid change of E (fine-from-coarse interpolation, coarse under removed fine cells) is left out of Q_ENTH.
+    double e_old = 0.0;
+    bool have_e_old = false;
+    // E (composite) and E0 (level 0 alone, as UPDATE_HRR); w = composite wall terms minus the level-0 ones (Q_DOT(4:6)).
+    void energy_sums(double& e, double& e0, double w[3])
+    {
+        const int nl = static_cast<int>(lc.size());
+        e = e0 = 0.0; w[0] = w[1] = w[2] = 0.0;
+        for (int l = 0; l < nl; ++l) {
+            const amrex::MultiFab& q = (*lc[l].F)["Q"];
+            amrex::iMultiFab cov(q.boxArray(), q.DistributionMap(), 1, 0);
+            if (l + 1 < nl) cov = amrex::makeFineMask(q.boxArray(), q.DistributionMap(), (*lc[l + 1].F)["Q"].boxArray(), L.m_reg->level(l + 1).ref_ratio_from_parent, 0, 1);
+            else cov.setVal(0);
+            for (amrex::MFIter mfi(cov); mfi.isValid(); ++mfi) {
+                const amrex::Box vb = mfi.validbox();
+                auto c = cov.const_array(mfi);
+                const int nm = lc[l].fds0 + mfi.index() + 1;
+                std::vector<int> m(static_cast<std::size_t>(vb.numPts()));
+                std::size_t n = 0;
+                double t[4];
+                if (l == 0) {   // level 0: all cells (E0), then remove the covered ones
+                    std::fill(m.begin(), m.end(), 1);
+                    fds_p_esums(nm, m.data(), t);
+                    e0 += t[0]; e += t[0];
+                    amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 1 : 0; });
+                    fds_p_esums(nm, m.data(), t);
+                    e -= t[0]; for (int a = 0; a < 3; ++a) w[a] -= t[1 + a];
+                } else {        // finer: add the cells not covered by the next level
+                    amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 0 : 1; });
+                    fds_p_esums(nm, m.data(), t);
+                    e += t[0]; for (int a = 0; a < 3; ++a) w[a] += t[1 + a];
+                }
+            }
+        }
+    }
+    void energy_snapshot()
+    {
+        if (lc.size() < 2 || !L.m_reg || !fds_outputs) return;
+        double e0, w[3];
+        energy_sums(e_old, e0, w);
+        have_e_old = true;
+    }
+    void composite_energy(double dt)
+    {
+        double e, e0, w[3];
+        energy_sums(e, e0, w);
+        double es_old = 0.0;   // UPDATE_HRR's ENTHALPY_SUM_OLD (local level-0 meshes)
+        for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) es_old += fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
+        for (int a = 0; a < 3; ++a) fds_p_add_qdot(4 + a, w[a]);
+        if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
+        e_old = e; have_e_old = true;
+    }
+
     void outputs(const StepRecord& r)
     {
         log_steps.push_back([&] { char b[256]; std::snprintf(b, sizeof b, "%d,%.17E,%.17E,%d,%d,%d,%.6E,%.6E,%.6E,%.6E,%.3E", r.step, L.m_t, r.dt, r.passes, r.it_pred, r.it_corr, r.perr_pred, r.verr_pred, r.perr_corr, r.verr_corr, r.zone_rel); return std::string(b); }());
@@ -2155,16 +2215,27 @@ struct TimeLoop::Impl {
             fds_hook_set_step(L.m_t, r.dt, L.m_icyc);
             // Composite HRR: UPDATE_HRR sums Q*VC over the level-0 meshes, whose covered cells carry the coarse combustion of the averaged-down state. For the writers
             // only, the covered level-0 Q is replaced by the volume average of the finer Q (uncovered L0 + all finer cells, each counted once) and restored afterwards.
+            // Same for QR (Q_RADI): the covered level-0 QR is the coarse radiation of the averaged-down state, while HRR is the composite one.
             std::vector<amrex::MultiFab> qsave;
             const int nlq = static_cast<int>(lc.size());
-            const bool qavg = nlq > 1 && L.m_reg && lc[0].F->has("Q");
-            if (qavg) {
-                for (int l = 0; l < nlq - 1; ++l) { const amrex::MultiFab& q = (*lc[l].F)["Q"]; qsave.emplace_back(q.boxArray(), q.DistributionMap(), 1, 0); amrex::MultiFab::Copy(qsave.back(), q, 0, 0, 1, 0); }
-                for (int l = nlq - 2; l >= 0; --l) amrex::average_down((*lc[l + 1].F)["Q"], (*lc[l].F)["Q"], 0, 1, L.m_reg->level(l + 1).ref_ratio_from_parent);
-            }
+            std::vector<const char*> qnames;
+            if (nlq > 1 && L.m_reg) for (const char* nm : {"Q", "QR"}) if (lc[0].F->has(nm)) qnames.push_back(nm);
+            if (!qnames.empty() && lc[0].F->has("QR"))   // a fine box's radiation writes its own QR array, not the MultiFab: copy it in first
+                for (int l = 1; l < nlq; ++l)
+                    for (amrex::MFIter mfi((*lc[l].F)["QR"]); mfi.isValid(); ++mfi) {
+                        amrex::FArrayBox& f = (*lc[l].F)["QR"][mfi];
+                        fds_p_get_qr(lc[l].fds0 + mfi.index() + 1, f.dataPtr(), static_cast<long>(f.box().numPts()));
+                    }
+            for (const char* nm : qnames)
+                for (int l = 0; l < nlq - 1; ++l) { const amrex::MultiFab& q = (*lc[l].F)[nm]; qsave.emplace_back(q.boxArray(), q.DistributionMap(), 1, 0); amrex::MultiFab::Copy(qsave.back(), q, 0, 0, 1, 0); }
+            for (const char* nm : qnames)
+                for (int l = nlq - 2; l >= 0; --l) amrex::average_down((*lc[l + 1].F)[nm], (*lc[l].F)[nm], 0, 1, L.m_reg->level(l + 1).ref_ratio_from_parent);
+            if (nlq > 1 && L.m_reg) composite_energy(r.dt);
             double dtd = 0.0;
             fds_setup(3, "", &dtd);
-            if (qavg) for (int l = 0; l < nlq - 1; ++l) amrex::MultiFab::Copy((*lc[l].F)["Q"], qsave[l], 0, 0, 1, 0);
+            std::size_t qi = 0;
+            for (const char* nm : qnames)
+                for (int l = 0; l < nlq - 1; ++l) amrex::MultiFab::Copy((*lc[l].F)[nm], qsave[qi++], 0, 0, 1, 0);
             t_out += amrex::second() - to0;
         }
         if (!mms_done && (IP[6] == 7 || IP[6] == 11) && L.m_t >= RP[2]) { write_mms(L.m_t); mms_done = true; }
@@ -2400,7 +2471,7 @@ long TimeLoop::clip_cells(int n, int l) const
     if (idx >= static_cast<int>(m->clip_cells_acc.size())) return 0;
     return m->clip_cells_acc[idx];
 }
-void TimeLoop::prime_levels() { m->prime_levels(); }
+void TimeLoop::prime_levels() { m->prime_levels(); m->energy_snapshot(); }
 void TimeLoop::zero_closed_wall_normal() { m->zero_closed_wall_normal(); }
 const int* TimeLoop::pressure_bc() const { return m->bc_type; }
 std::array<std::vector<int>, 6> TimeLoop::pressure_face_neumann() const
