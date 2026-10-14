@@ -243,6 +243,19 @@ IF (ABS(DEN)<=0._EB) RETURN
 C = REACTION(1)%NU_MW_O_MW_F(1:N_TRACKED_SPECIES)/DEN ; OK = 1
 END FUNCTION FDS_P_REAC_COEF
 
+!> 1 when DENSITY returns without updating RHO/ZZ (SOLID_PHASE_ONLY, or the first step ICYC<=1 of a default PERIODIC_TEST, or PERIODIC_TEST 5/8), as the guard
+!> at the top of DENSITY (mass.f90) and of both D-031 halves: the driver's level clip must then not run either (ZZ still holds mass fractions, not RHO*ZZ).
+FUNCTION FDS_P_DENS_SKIP() BIND(C,NAME='fds_p_dens_skip') RESULT(S)
+INTEGER(C_INT) :: S
+S = 0
+IF (SOLID_PHASE_ONLY) S = 1
+SELECT CASE (PERIODIC_TEST)
+   CASE DEFAULT ; IF (ICYC<=1) S = 1
+   CASE (5,8)   ; S = 1
+   CASE (4,7,11,21,22)
+END SELECT
+END FUNCTION FDS_P_DENS_SKIP
+
 !> DENSITY(T,DT,NM) alone (unmodified; one box = the FDS per-mesh clip).
 SUBROUTINE FDS_P_DENS(T,DT,NM) BIND(C,NAME='fds_p_dens')
 REAL(C_DOUBLE), VALUE :: T,DT

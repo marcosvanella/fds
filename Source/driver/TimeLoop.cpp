@@ -82,6 +82,7 @@ void fds_p_params(int* ip, double* rp);
 void fds_p_mesh_info(int nm, int* ip, double* rp);
 void fds_p_get(int nm, const char* name, double* buf, long ntot, int* ierr);
 void fds_p_mfd(int nm);
+int fds_p_dens_skip();   // fds_step.f90: 1 when DENSITY returns at once (ICYC<=1 etc.): no level clip then
 void fds_p_zero_dot();
 void fds_p_dens_pre(double t, double dt, int nm);
 void fds_p_init_div();
@@ -817,7 +818,10 @@ struct TimeLoop::Impl {
         if (pcd) { dumpfab(pred ? "preclip_p_RHOS" : "preclip_c_RHO", (*c->F)[pred ? "RHOS" : "RHO"]); dumpfab(pred ? "preclip_p_ZZS" : "preclip_c_ZZ", (*c->F)[pred ? "ZZS" : "ZZ"]); }
         std::vector<int> flags;
         const std::vector<double> zb = clip_species_sums(pred);
-        clip_level(pred, flags);
+        // DENSITY returns at once on the first step (ICYC<=1, mass.f90 guard): ZZ/ZZS still hold mass fractions, so the level clip (which treats them as RHO*ZZ and
+        // renormalises them to RHO) must not run either; it turned Y_air=1 into RHO in an &INIT hot region (rho = rho^2 at step 2).
+        if (fds_p_dens_skip() != 0) flags.assign(c->nbox, 0);
+        else clip_level(pred, flags);
         {
             const std::vector<double> za = clip_species_sums(pred);
             const std::size_t need = static_cast<std::size_t>(nt) * lc.size(), off = static_cast<std::size_t>(nt) * static_cast<std::size_t>(c - lc.data());
