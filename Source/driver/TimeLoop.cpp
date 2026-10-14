@@ -129,7 +129,7 @@ int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext,
 int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
-void fds_fine_walls_sums(int lev, double t, double* q);
+void fds_fine_walls_sums(int lev, double t, int chk, double* q);
 int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90 (frozen/fine-wall-state.md)
 int fds_n_tracked_species();
 int fds_fine_walls_un(int lev, int ib, int pred, int nmax, int* n, int* ijkd, double* uf);   // fds_fine_level.f90: OBST wall face velocity (burner)
@@ -2268,15 +2268,18 @@ struct TimeLoop::Impl {
         if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
         e_old = e; have_e_old = true;
         if (lc.size() == 2) {   // Q_CONV, Q_COND, Q_DIFF: replace the covered level-0 walls by the hidden fine walls (two levels only: the parent is level 0)
-            double q[10];
-            fds_fine_walls_sums(1, L.m_t, q);
+            const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only
+            double q[12];
+            fds_fine_walls_sums(1, L.m_t, prt ? 1 : 0, q);
             for (int n = 0; n < 3; ++n) fds_p_add_qdot(4 + n, q[n] - q[3 + n]);   // Q_DOT is per rank (summed by FDS), in W
-            amrex::ParallelDescriptor::ReduceRealSum(q, 8);
-            amrex::ParallelDescriptor::ReduceRealMax(q[8]);
-            amrex::ParallelDescriptor::ReduceRealSum(q[9]);
-            if (L.m_icyc % 50 == 0)
+            if (prt) {
+                amrex::ParallelDescriptor::ReduceRealSum(q, 8);
+                amrex::ParallelDescriptor::ReduceRealMax(q[8]);
+                amrex::ParallelDescriptor::ReduceRealSum(&q[9], 3);
                 amrex::Print() << "FINE-WALLS t " << L.m_t << " nwall " << q[9] << " sum(Q_CON_F*A) fine " << q[6] << " W, parent share " << q[7]
-                               << " W, identity max|dQ_CON_F| " << q[8] << " W/m2; Q_CONV/COND/DIFF fine-parent " << q[0] - q[3] << " " << q[1] - q[4] << " " << q[2] - q[5] << " W\n";
+                               << " W, identity max|dQ_CON_F| " << q[8] << " W/m2; Q_CONV/COND/DIFF fine-parent " << q[0] - q[3] << " " << q[1] - q[4] << " " << q[2] - q[5]
+                               << " W; fine wall area " << q[10] << " of L0 solid " << q[11] << " m2\n";
+            }
         }
     }
 
