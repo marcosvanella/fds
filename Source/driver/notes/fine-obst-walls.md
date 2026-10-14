@@ -149,6 +149,69 @@ The builder's thin-plane walls are about 30 lines. `snap_differs()` compares cla
 **Test:** a sheet OBST of 1/4 coarse cell in simple_test (e.g. a baffle `XB=1.80,1.83,...`), three levels. On every level the face count of
 the thin plane equals a single-mesh FDS run at that level's dx (thin walls both sides). L0 is bit-identical. Mass PASS.
 
+### R10. Pressure zones and volume
+
+Owner rules: (a) closed compartments (pressure zones) stay separate on every level, and a thin or zero-thickness coarse OBST still seals
+them. (b) Re-snapping an OBST to a different coarse grid plane changes the room volume. Whatever we do must not change T or Z.
+
+**How FDS assigns and seals zones (L0, unchanged):**
+- `INITIALIZE_PRESSURE_ZONES` (main.f90:2713) calls `ASSIGN_PRESSURE_ZONE` for each `&ZONE` XYZ (main.f90:2742) and again for the mesh
+  interfaces (main.f90:2787, 2988, 3011).
+- `ASSIGN_PRESSURE_ZONE` (func.f90:5661-5832) is a flood fill over gas cells:
+  - It does not march into non-removable solid cells (func.f90:5721-5722).
+  - It **does not cross a thin OBST face**: for each direction it checks every OBST with `I1==I2` (or J, K) on that face and cycles
+    (func.f90:5763-5778). A zero-thickness OBST therefore seals two zones on L0, provided it survived the snap (R9: it collapses in one
+    direction only).
+  - Overlap of two ZONEs is a setup error (main.f90:2743-2745).
+- So on L0, FDS's own rounding already gives sealed zones with thin walls. The volume of each zone is the L0 gas-cell volume. Re-snapping a
+  wall to a different coarse plane changes it by up to one coarse cell layer of wall area.
+
+**Today in the driver (a gap):** `FDS_FINE_LEVEL_CREATE` refuses a rank whose level-0 meshes hold more than one pressure zone (IERR 3,
+fds_fine_level.f90) and gives every fine box the single zone. Multi-zone cases do not run with fine levels yet.
+
+**Proposed rules:**
+1. **Zone IDs come from L0 and are inherited, never flood-filled again on a fine level.** A fine gas cell takes the zone of the covering L0
+   gas cell. Where the fine snap differs (a fine gas cell under an L0 solid cell, or on the other side of an L0 thin plane), it takes the
+   zone of the L0 gas cell it is connected to through fine gas faces that do not cross a fine solid or thin face. This is a flood fill
+   restricted to the fine box, seeded from L0, run at build/regrid. A fine cell that connects to two different L0 zones is a build error:
+   the fine walls would open two compartments to each other.
+   - Same IDs on every level and at every regrid. No new zone numbers. The thin-OBST seal applies on every level through R9's per-level
+     thin faces (blocked face mask + two walls).
+   - Intermediate levels (3-level runs) inherit from their parent level the same way.
+2. **Zone volume is defined from the finest covering level.** `V_z` = the sum of uncovered gas-cell volumes over all levels, each cell
+   counted at its finest covering level (composite volume, the same mask as the composite energy sums in TimeLoop `energy_sums`). This is
+   used for the zone's `D_PBAR_DT` (the composite pressure-zone integrals). On L0-only runs it is FDS's volume (bit-identical).
+3. **Coarse covered cells are bookkeeping only:** filled by average-down of the fine conserved fields (rho, rho*Z, rho*h_s). An L0 cell that
+   is solid on L0 but gas on the fine level gets the fine average and is not part of L0's FDS update. An L0 gas cell that is partly solid on
+   the fine level gets the gas-volume-weighted fine average. Uncovered L0 stays FDS's own.
+4. **Derefinement (fine to coarse when a box disappears):** the cells that change status (fine gas becoming coarse solid or vice versa, the
+   re-snap volume) are handled so that zone mass and energy are conserved and T and Z do not jump:
+   - A coarse cell that becomes gas gets the zone-mean state of the fine cells it covered: rho, Z, T from the mass-weighted fine average
+     (T is consistent with rho, Z and the zone PBAR via the equation of state).
+   - Mass and energy in fine gas that falls inside a coarse solid cell (volume lost) are moved to the neighbouring coarse gas cells of the
+     same zone, mass-weighted, as a density change at fixed T and Z. The zone's PBAR follows from the composite volume change
+     (`P V = m R T` at fixed T). No T or Z jump; a pressure jump is allowed, as the volume really changed.
+   - Refinement is the mirror: fine cells under a coarse solid that become gas get the adjacent same-zone state; the mass they need comes
+     from the same zone's neighbours.
+   - The gate checks per-zone mass and energy before/after each regrid to round-off, and that max|dT| and max|dZ| over unchanged cells are
+     exactly 0.
+5. Thin coarse OBSTs never open: a coarse thin plane under a fine box is also a fine thin plane or fine solid cells at the same position
+   (or the interface is kept off it by `--tag-obst-snap`, R9). So a zone can never leak through a level change.
+
+**Code impact** (adds to R4): zone inheritance flood fill in the builder (~60 lines, fds_fine_level.f90), lifting IERR 3 (~10), composite
+zone volume and zone integrals in the pressure-zone path (~40, TimeLoop.cpp/CompositeOps), regrid transfer for status-changing cells (~80,
+regrid_transport CellTransfer), per-zone gate lines (~30). About +1.5 days (total about 5.5 days).
+
+**Test:** a closed compartment whose dividing wall is thinner than a coarse cell. In simple_test geometry, a `&ZONE` on each side of a wall
+`XB=1.80,1.83,0,2.4,0,2.4`, with no leak and a burner on one side, 2 and 3 levels, `--regrid-every 5`.
+- L0: the wall is a thin OBST (read.f90:11315), and FDS gives two zones (func.f90:5763-5778).
+- Each level: zone IDs match L0 cell by cell (comparing the covering L0 cell).
+- Per-zone mass and energy are conserved to round-off through every regrid. T and Z are unchanged in cells whose status did not change.
+- The zone without the burner has `D_PBAR_DT = 0` to round-off (no leak through the wall).
+- Variant: shift the wall by half a coarse cell, so the coarse plane changes. Same checks, and the zone volume reported from the finest level
+  matches FDS fine within one fine cell layer.
+- L0-only run bit-identical.
+
 ### R8. Questions for the Solid Phase Lead and the owner
 
 1. [SP] Case N source wall "same OBST and IOR, nearest L0 wall": acceptable, or wait for the FR-046 face key?
@@ -222,4 +285,10 @@ Findings:
 - **D5** Faces with no parent face (R3 case N/D): history source = the nearest L0 wall of the same OBST and IOR, else SURF input. Needs the
   Solid Lead's sign-off (R8 items 1 and 2).
 - **D6** Live fine walls (in the fine kernels) are a separate decision, not part of this note.
+- **D7** Pressure-zone IDs come from L0 and are inherited by every level (seeded flood fill inside fine boxes, error if a fine cell joins two
+  L0 zones), and are never renumbered at regrid (R10).
+- **D8** Zone volume and zone integrals are composite: each gas cell is counted at its finest covering level. Coarse covered cells are
+  average-down bookkeeping only.
+- **D9** Regrid transfer of cells whose solid/gas status changes moves mass and energy within the zone at fixed T and Z (pressure may jump
+  with the real volume change). Accept the pressure jump, or require PBAR continuity instead (that would need a T or rho change)?
 
