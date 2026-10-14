@@ -229,6 +229,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     } else if (o.regrid_every > 0) {
         amr << ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=0.05, TAG_KEEP=0.8";
     }
+    if (o.regrid_every > 0 && !std::isnan(o.tag_temp)) amr << ", TAG_TMP_ABOVE=" << std::setprecision(17) << o.tag_temp - 293.15;   // --tag-temp (TMPA 293.15 = TagFields::tmp_ambient)
     amr << " /\n";
     // Vortex adaptive: whole-domain refinable region so the ring can leave the static patch.
     // --levels 1 (max_level 0): level 0 alone through the same loop and plotfiles, no &AMR_REGION (its LEVEL must be >= 1)

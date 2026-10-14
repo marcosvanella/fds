@@ -330,6 +330,9 @@ $FDS_AMR simple_test.fds --two-level-run --levels 2 --steps 900 --regrid-every 5
 $FDS_AMR simple_test.fds --two-level-run --levels 3 --steps 2000 --regrid-every 5 --tag-vort auto
 ```
 
+**Optional `--tag-temp [T]`** (default off; `T` defaults to 400 K): also tag level cells with `TMP > T` (as `TAG_TMP_ABOVE = T - 293.15`, OR with `--tag-vort`), so the hot plume and ceiling layer stay refined. Adaptive runs only (`--regrid-every > 0`). The burner and the D-010 no-refine buffer (`--nofine`, default 2 level-0 cells) stay on level 0.
+Example: `./run_simple_test_l2.sh --tag-temp`.
+
 **Expected gate output (measured).** Limit for mass/species is `1e-6 × (initial mass + through-flow)` on an open domain;
 ratios are `|balance residual| / limit` (PASS ≤ 1). Divergence gate: worst fine-level `|div u − D|` ≤ 1e-9 and a
 count of steps with fine div > max(2·L0, 1e-10). Flux-match stale-register count must be 0.

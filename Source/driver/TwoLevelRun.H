@@ -38,6 +38,7 @@ struct TwoLevelOptions {
     // tag_vort_auto: thr = 0.45 * max|VORT| on level 0, recomputed at every regrid (VORT rescaled; AmrParams thr is the t=0 value); TAG_KEEP=0.85 (tight core).
     double tag_vort = std::numeric_limits<double>::quiet_NaN();
     bool tag_vort_auto = false;
+    double tag_temp = std::numeric_limits<double>::quiet_NaN();   // --tag-temp [T]: also tag TMP > T K (default 400), OR with the other TAG_*; NaN off
 };
 
 // Returns the number of failed checks (0 = completed). Prints one line per step: composite mass, drift, max |div u - D| by level.
