@@ -160,6 +160,7 @@ pb_add_test(pb_comp_bcdata           compbcdata)
 pb_add_test(pb_comp_bcdata_l1        compbcdatal1)
 pb_add_test(pb_comp_seam             compseam)
 pb_add_test(pb_comp_mixed_face       compmixedface)
+pb_add_test(pb_comp_fft_bottom       compfftbottom)
 # A-71 D1/D7: hallways (doc 06 section 8) through the product masked path at max_grid_size 32 and 64 (long).
 pb_add_test(pb_masked_hallways maskedgeo)
 set_tests_properties(pb_masked_hallways PROPERTIES LABELS long TIMEOUT 900)

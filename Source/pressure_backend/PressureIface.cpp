@@ -1,4 +1,5 @@
 // Selector and the full solve_pressure() wrapper (common layer around a backend).
+#include <cstdlib>
 #include "PressureIface.H"
 #include <AMReX_ParmParse.H>
 #include "PressureBackend.H"
@@ -179,6 +180,8 @@ void query_options (PressureOptions& o)
     ph.query("symmetric_cf", h.symmetric_cf);
     ParmParse pp("pressure");
     kry(pp, "mlmg_krylov", o.mlmg_krylov);
+    pp.query("mlmg_fft_bottom", o.mlmg_fft_bottom);
+    if (const char* e = std::getenv("PB_MLMG_FFT_BOTTOM")) { o.mlmg_fft_bottom = std::atoi(e) != 0; }   // drivers that do not parse ParmParse from argv
     pp.query("tol_rel", o.tol_rel); pp.query("max_iter", o.max_iter); pp.query("warm_start", o.use_initial_guess);
 }
 

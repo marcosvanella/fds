@@ -250,6 +250,10 @@ struct PressureOptions {
     // MLMG: Auto / None = V-cycles (the masked single level: Auto = GMRES, D7); PCG / GMRES / BiCGSTAB = AMReX Krylov solver with one
     // V-cycle per iteration as the preconditioner. PCG on a composite problem is InvalidInput. FFT takes Auto only.
     Krylov mlmg_krylov = Krylov::Auto;
+    // Composite MLMG: exact FFT solve (amrex::FFT::Poisson) on the coarsest MG level of level 0 instead of the default bottom solver. Used only
+    // when the problem is unmasked, has no face_neumann and no one-cell direction, the bottom level has at most one box per rank, and mlmg_krylov is
+    // BiCGSTAB or GMRES (plain V-cycles with it stagnated on vortex_ring_48_4m); else ignored. Off by default: it did not win (frozen/fft-bottom.md).
+    bool mlmg_fft_bottom = false;
     double tol_rel = 1.0e-12;                     // backend relative tolerance
     int max_iter = 200;                           // backend iteration cap
     bool use_initial_guess = false;               // false: start from zero
@@ -428,7 +432,7 @@ private:
 PressureResult solve_pressure (PressureProblem const& p, PressureOptions const& o, PressureWorkspace* ws = nullptr);
 // Run-time options from ParmParse (solver study, pressure/13): hypre.{krylov=auto|none|pcg|gmres|bicgstab, coarsen_type, relax_type, num_sweeps,
 // strong_threshold, interp_type, agg_levels, agg_interp_type, pmax_elmts, keep_transpose, coarse_relax, max_levels, gmres_kdim} and
-// pressure.{mlmg_krylov (same names), tol_rel, max_iter, warm_start (0: zero initial guess, the default; 1: previous solution)}. Unset keys keep o.
+// pressure.{mlmg_krylov (same names), mlmg_fft_bottom (also env PB_MLMG_FFT_BOTTOM), tol_rel, max_iter, warm_start (0: zero initial guess, the default; 1: previous solution)}. Unset keys keep o.
 void query_options (PressureOptions& o);
 
 // Face-centred dphi/dn of the composite solution, one component, valid faces, for every level, in the sign

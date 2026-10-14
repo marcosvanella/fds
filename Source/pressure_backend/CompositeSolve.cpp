@@ -9,6 +9,7 @@
 #include <AMReX_MLABecLaplacian.H>
 #include <AMReX_MLMG.H>
 #include <AMReX_MLPoisson.H>
+#include <AMReX_FFT_Poisson.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_ParallelDescriptor.H>
@@ -95,6 +96,39 @@ std::unique_ptr<iMultiFab> make_uncovered (BoxArray const& ba, DistributionMappi
     return m;
 }
 
+// MLPoisson with an FFT bottom (PressureOptions::mlmg_fft_bottom): BottomSolver::custom solves the coarsest MG level of AMR level 0 exactly with
+// amrex::FFT::Poisson (same 7-point operator and homogeneous BCs). The plan is built on the first bottom solve.
+class FftBottomPoisson final : public MLPoisson {
+public:
+    using MLPoisson::MLPoisson;
+    [[nodiscard]] bool supportCustomBottomSolver () const override { return true; }
+    // Bottom level: at most one box per rank, and periodic / Neumann / Dirichlet faces only.
+    bool fft_bottom_ok () const
+    {
+        const int mg = NMGLevels(0) - 1;
+        if (static_cast<int>(m_grids[0][mg].size()) > ParallelDescriptor::NProcs()) { return false; }
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+            for (auto t : {m_lobc[0][d], m_hibc[0][d]}) {
+                if (t != LinOpBCType::Periodic && t != LinOpBCType::Neumann && t != LinOpBCType::Dirichlet) { return false; }
+            }
+        }
+        return true;
+    }
+    void customBottomSolve (MLMG* mlmg, MultiFab& x, MultiFab const& b, Real, Real, int) override
+    {
+        if (!m_fft) {
+            Array<std::pair<FFT::Boundary,FFT::Boundary>,AMREX_SPACEDIM> bc;
+            auto fb = [] (LinOpBCType t) { return t == LinOpBCType::Periodic ? FFT::Boundary::periodic : t == LinOpBCType::Neumann ? FFT::Boundary::even : FFT::Boundary::odd; };
+            for (int d = 0; d < AMREX_SPACEDIM; ++d) { bc[d] = {fb(m_lobc[0][d]), fb(m_hibc[0][d])}; }
+            m_fft = std::make_unique<FFT::Poisson<MultiFab>>(Geom(0, NMGLevels(0) - 1), bc);
+        }
+        m_fft->solve(x, b);
+        mlmg->postCG(0, 1);
+    }
+private:
+    std::unique_ptr<FFT::Poisson<MultiFab>> m_fft;
+};
+
 void build_impl (PressureWorkspace::Impl& W, PressureProblem const& p)
 {
     const int n = static_cast<int>(p.levels.size());
@@ -165,7 +199,7 @@ void build_impl (PressureWorkspace::Impl& W, PressureProblem const& p)
         for (int l = 0; l < n; ++l) { op->setACoeffs(l, 0.0); op->setBCoeffs(l, 1.0); }
         W.mlp = std::move(op);
     } else {
-        W.mlp = std::make_unique<MLPoisson>(geoms, bas, dms, info);
+        W.mlp = std::make_unique<FftBottomPoisson>(geoms, bas, dms, info);
     }
     W.mlp->setMaxOrder(2);
     Array<LinOpBCType,AMREX_SPACEDIM> lo{lin_bc(ebc[face_index(0,0)]), lin_bc(ebc[face_index(1,0)]), lin_bc(ebc[face_index(2,0)])};
@@ -1696,7 +1730,13 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     BackendStatus bs;
     if (!use_hypre) {
         refresh_robin(W);
-        bs = mlmg_solve(mlmg, pphi, pb_, o.mlmg_krylov, Real(o.tol_rel), o.max_iter);
+        auto* fbp = dynamic_cast<FftBottomPoisson*>(W.mlp.get());
+        // Krylov only: under plain V-cycles the FFT bottom stagnated at true residual ~1e-7 on vortex_ring_48_4m (200 iterations; harness cases converge).
+        const bool krylov = o.mlmg_krylov == Krylov::BiCGSTAB || o.mlmg_krylov == Krylov::GMRES;
+        const bool fft_bottom = o.mlmg_fft_bottom && krylov && fbp && !ext && fbp->fft_bottom_ok();
+        mlmg.setBottomSolver(fft_bottom ? BottomSolver::custom : BottomSolver::Default);
+        bs = mlmg_solve(mlmg, pphi, pb_, o.mlmg_krylov, Real(o.tol_rel), o.max_iter, fft_bottom);   // the FFT bottom is a fixed linear map: kept under Krylov
+        if (fft_bottom) { bs.method += "+FFT bottom"; }
         bs.setup_seconds = setup_s; bs.plan_reused = (setup_s == 0.0);
         R.backend_status = bs;
         if (ext) { for (int l = 0; l < nlev; ++l) { plane_from_ext(W, *phix[l], *phi[l]); } }

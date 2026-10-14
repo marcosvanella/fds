@@ -568,7 +568,7 @@ void run_comp (ParmParse& pp)
     Print() << std::setprecision(6) << "COMP n=" << c.n << " nlev=" << c.nlev << " ratio=" << c.ratio << " full=" << full
             << " plane2d=" << plane << " bc=" << bcs << " nranks=" << ParallelDescriptor::NProcs() << " mgs=" << c.mgs
             << " nboxes=" << nboxes
-            << " ncells=" << ncells << " status=" << pb::to_string(r.status) << " iters=" << r.backend_status.iterations
+            << " ncells=" << ncells << " status=" << pb::to_string(r.status) << " iters=" << r.backend_status.iterations << " method=" << r.backend_status.method
             << " own_res=" << r.backend_status.own_residual << " true_rel2=" << r.residual_rel2
             << " true_relmax=" << r.residual_relmax << " residual_ok=" << (r.residual_ok ? 1 : 0)
             << " nwarn=" << r.warnings.size() << " err_l2=" << ee.l2 << " err_linf=" << ee.linf
@@ -1431,6 +1431,7 @@ void apply_backend_opts (ParmParse& pp, pb::PressureOptions& o)
     pp.query("coarsen", o.hypre.coarsen_type); pp.query("relax", o.hypre.relax_type); pp.query("sweeps", o.hypre.num_sweeps);
     pp.query("strong", o.hypre.strong_threshold); pp.query("interp", o.hypre.interp_type); pp.query("agg", o.hypre.agg_levels);
     pp.query("max_iter", o.max_iter);
+    pp.query("fftbottom", o.mlmg_fft_bottom);
 }
 
 // HYPRE vs MLMG on the same composite problem: agreement, iteration counts, timing, run-to-run repeatability.

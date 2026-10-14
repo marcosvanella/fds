@@ -462,6 +462,22 @@ def compmixedface():
         print(out)
         ok(rc == 0, f"comp_mixed np={np_}: harness checks")
 
+def compfftbottom():
+    # opt-in FFT bottom (PressureOptions::mlmg_fft_bottom) on the composite MLMG: used, same solution and residual as the default bottom
+    import re
+    for bc in ("neumann", "dirichlet", "periodic"):
+        res = {}
+        for fb in (0, 1):
+            rc, out = run(2, mode="comp", n=32, nlev=2, bc=bc, mgs=16, backend="mlmg", mlmg_krylov="bicgstab", fftbottom=fb, verbose=0)
+            print(out)
+            ok(rc == 0, f"comp fftbottom={fb} {bc}: harness checks")
+            m = re.search(r"method=(BiCGSTAB(\+FFT bottom)?) .*true_rel2=(\S+) .*err_l2=(\S+)", out)
+            ok(m is not None, f"comp fftbottom={fb} {bc}: COMP line")
+            if m: res[fb] = (m.group(1), float(m.group(3)), float(m.group(4)))
+        if len(res) == 2:
+            ok(res[1][0] == "BiCGSTAB+FFT bottom" and res[0][0] == "BiCGSTAB", f"{bc}: FFT bottom used only on request")
+            ok(res[1][1] <= 1e-11 and abs(res[1][2] - res[0][2]) <= 1e-9 * res[0][2], f"{bc}: same solution as the default bottom")
+
 def compseam():
     # blocking-8 vortex_ring_re100_wall: fine patch on the periodic seam (C/F across x,y), wall data on z, rhs mean != 0; mgs 4 vs 8
     for be in ("mlmg", "hypre"):
@@ -1180,7 +1196,7 @@ def hypre160():
  "repeat": repeat, "singular": singular, "ulmat": ulmat, "ulmatgauge": ulmatgauge, "meankind": meankind,
  "compconv": compconv, "compfull": compfull, "compdecomp": compdecomp, "comp3": comp3, "comp4r3": comp4r3, "compgrad": compgrad, "compshape": compshape, "compmixed": compmixed,
  "compns2d": compns2d, "compsel": compsel, "compws": compws, "compgauge": compgauge, "meankind_uniform": meankind_uniform, "compgaugedecomp": compgaugedecomp, "trigger1": trigger1, "comptrigger": comptrigger, "fftcache": fftcache, "mixedfaces": mixedfaces, "bcdata_exact": bcdata_exact, "bcdata_mms": bcdata_mms, "pressure_bc_map": pressure_bc_map,
- "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "krylov": krylov, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compbcdatal1": compbcdatal1, "compseam": compseam, "compmixedface": compmixedface, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "compmlmg": compmlmg, "obstmask": obstmask, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
+ "hypsingle": hypsingle, "hypci": hypci, "hypcomp": hypcomp, "hypcache": hypcache, "krylov": krylov, "hypresid": hypresid, "rescheck": rescheck, "reslimit": reslimit, "hypresidcomp": hypresidcomp, "resid_e3_worst": resid_e3_worst, "resid_e3_near": resid_e3_near, "masked": masked, "compbcdata": compbcdata, "compbcdatal1": compbcdatal1, "compseam": compseam, "compfftbottom": compfftbottom, "compmixedface": compmixedface, "compmasked4r3": compmasked4r3, "compmasked": compmasked, "compmlmg": compmlmg, "obstmask": obstmask, "maskedgeo": maskedgeo, "e1mlmg": e1mlmg, "gaugeindep": gaugeindep, "hypre160": hypre160}[A.cmd]()
 if fails:
     print("FAILED:", *fails, sep="\n  "); sys.exit(1)
 print("ALL PASS")
