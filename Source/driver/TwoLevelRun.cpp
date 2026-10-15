@@ -27,6 +27,7 @@
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
 extern "C" void fds_p_bnd_rate(int ns, double* r);
+extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR over leaf walls (diagnostic)
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
 extern "C" int fds_p_reac_coef(int ns, double* c);   // fds_step.f90: species production per unit heat release (one reaction), else 0
 extern "C" void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);   // T_END etc.   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
@@ -454,7 +455,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     fds_k_consts(&t_end, &dtfill, &dtmin, &dt0, &nzone);
     std::string logname = o.outdir + "/" + o.chid + "_multi_level.csv";
     std::FILE* lf = amrex::ParallelDescriptor::IOProcessor() ? std::fopen(logname.c_str(), "w") : nullptr;
-    if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel,inflow\n"); }
+    if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel,inflow%s\n", nl == 2 ? ",mlr_l0,mlr_leaf" : ""); }
     double worst_mass = 0.0, worst_mass_ratio = 0.0, worst_div = 0.0, worst_fine = 0.0;   // worst_fine: max|div u - D| over levels >= 1
     int untracked = 0;                                               // steps with fine div > max(2*L0, 1e-10)
     std::vector<double> bylev;
@@ -595,7 +596,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 }
             std::fprintf(lf, "%d,%.9g,%.9g,%.17g,%.6e,%.6e", s, loop.time(), dts, m[0], dm, dv);
             for (int l = 0; l < nl_now; ++l) std::fprintf(lf, ",%.6e", l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
-            std::fprintf(lf, ",%.3e,%.9e\n", loop.composite_report().removed_rel, inflow[0]);
+            std::fprintf(lf, ",%.3e,%.9e", loop.composite_report().removed_rel, inflow[0]);
+            if (nl == 2) { double fm[3]; fds_fine_fuel_mdot(1, fm); amrex::ParallelAllReduce::Sum(fm, 3, amrex::ParallelContext::CommunicatorSub()); std::fprintf(lf, ",%.9e,%.9e", fm[0], fm[0] - fm[1] + fm[2]); }
+            std::fprintf(lf, "\n");
         }
         if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps)) {
             amrex::Print() << tag << " step " << s << " t " << loop.time() << " dt " << dts << " composite mass change " << dm << " max|div u - D| " << dv;

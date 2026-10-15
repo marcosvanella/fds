@@ -20,7 +20,7 @@ USE FDS_KERNELS, ONLY: FDS_K_RESERVE_BOXES
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
-PUBLIC :: BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_SUMS
+PUBLIC :: BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_SUMS,FDS_FINE_FUEL_MDOT
 
 !> Hidden fine-level wall cells (patch 0026): per local box a separate mesh object W holding only WALL/BOUNDARY_COORD/BOUNDARY_PROP1/2 (the box itself keeps WALL(0:0), so the
 !> kernels never see them), and per wall the level-0 parent wall (mesh PNM, wall PIW) whose face contains it. Used for the composite HRR-file wall terms only.
@@ -542,6 +542,43 @@ SELECT CASE(ABS(BC%IOR))
    CASE(3) ; RDN = R%RDZN(MIN(BC%KK,BC%KKG)) ; AREA = R%DX(BC%IIG)*R%DY(BC%JJG)
 END SELECT
 END SUBROUTINE FWALL_GEOM
+
+!> Fuel mass loss rate (kg/s, rank-local) over the LEAF burner walls of a two-level run: R(1) level-0 SOLID walls (dump.f90 WALL_LOOP2 sum, SUM_N M_DOT_G_PP_ADJUST*AREA),
+!> R(2) the covered share of those (fine area/parent area), R(3) the hidden fine walls of level LEV (parent's ADJUST x fine AREA). Leaf = R(1)-R(2)+R(3). Diagnostic only.
+SUBROUTINE FDS_FINE_FUEL_MDOT(LEV,R) BIND(C,NAME='fds_fine_fuel_mdot')
+USE GLOBAL_CONSTANTS, ONLY: SOLID_BOUNDARY
+INTEGER(C_INT), VALUE :: LEV
+REAL(C_DOUBLE), INTENT(OUT) :: R(3)
+INTEGER :: IB,IW,NM0,IW0
+REAL(EB) :: RDN,AREA,MD
+TYPE(MESH_TYPE), POINTER :: WM
+R = 0._EB
+DO NM0=1,SIZE(MESHES)
+   IF (.NOT.ALLOCATED(MESHES(NM0)%CELL_INDEX)) CYCLE
+   DO IW=1,MESHES(NM0)%N_EXTERNAL_WALL_CELLS+MESHES(NM0)%N_INTERNAL_WALL_CELLS
+      IF (MESHES(NM0)%WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+      ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW)%B1_INDEX))
+      R(1) = R(1) + SUM(B1%M_DOT_G_PP_ADJUST(1:N_TRACKED_SPECIES))*B1%AREA
+      END ASSOCIATE
+   ENDDO
+ENDDO
+IF (.NOT.ALLOCATED(FWALL)) RETURN
+IF (SIZE(FWALL)<LEV) RETURN
+IF (.NOT.ALLOCATED(FWALL(LEV)%B)) RETURN
+DO IB=1,SIZE(FWALL(LEV)%B)
+   WM => FWALL(LEV)%B(IB)%W
+   IF (.NOT.ASSOCIATED(WM)) CYCLE
+   DO IW=1,FWALL(LEV)%B(IB)%NW
+      NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
+      IF (MESHES(NM0)%WALL(IW0)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+      ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
+      MD = SUM(B1%M_DOT_G_PP_ADJUST(1:N_TRACKED_SPECIES))
+      CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),BC,RDN,AREA)
+      R(2) = R(2) + MD*AREA ; R(3) = R(3) + MD*AREA
+      END ASSOCIATE
+   ENDDO
+ENDDO
+END SUBROUTINE FDS_FINE_FUEL_MDOT
 
 !> Wall terms of the HRR file (UPDATE_HRR's Q_CONV, Q_COND, Q_DIFF) on the hidden walls of the local boxes of level LEV at time T, and the same terms of their level-0 parent
 !> walls, weighted by the covered fraction of the parent face. The fine walls get the parent's surface state (B1 copied: TMP_F, U_NORMAL, ZZ_F, RHO_F, RHO_D_F, K_G, ...) and
