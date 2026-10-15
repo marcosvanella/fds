@@ -18,6 +18,7 @@ namespace fdsamr {
 
 namespace {
 const char* const kCell[] = {"RHO", "RHOS", "TMP", "ZZ", "ZZS"};
+const char* const kKeep[] = {"Q", "D", "DS", "RSUM", "MU", "KRES", "H", "HS"};   // stage arrays kept bitwise on retained fine cells (derive refills only the new ones)
 const char* const kFace[3][2] = {{"U", "US"}, {"V", "VS"}, {"W", "WS"}};
 
 // rho*Z_n on `ba`/`dm`, ncomp = ns, `ng` ghost layers computed from the ghost layers of RHO and ZZ (ng <= 2).
@@ -105,6 +106,7 @@ void RegistryTransfer::prolong(int level, bool remade)
     }
     // ---- TMP: parent value (fallback; `derive` may recompute it from the equation of state)
     inject(Fc["TMP"], Ff["TMP"], ratio);
+    inject(Fc["Q"], Ff["Q"], ratio);   // heat release rate per volume (W/m3) is intensive: parent value; the first DIVERGENCE_PART_1 adds it
 
     // ---- face velocities
     {
@@ -137,6 +139,7 @@ void RegistryTransfer::prolong(int level, bool remade)
         m_st.copied_old_cells += n;
     }
     if (derive) derive(level);
+    if (Fo) for (const char* nm : kKeep) if (Ff.has(nm) && Fo->has(nm)) Ff[nm].ParallelCopy((*Fo)[nm], 0, 0, Ff[nm].nComp(), 0, 0);   // after derive: retained cells keep their own values
 }
 
 void RegistryTransfer::hierarchy_done(bool initial)
