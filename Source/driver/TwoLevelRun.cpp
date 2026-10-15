@@ -85,6 +85,86 @@ double composite_hrr(LevelRegistry& reg, int nl)
     return q;
 }
 
+
+// Diagnostic (FDSTL_LEAFDIAG=N, default off): one line per level over the leaf gas cells (uncovered, not fine OBST): species mass sum(rho Z vol), Z and sum(Z)-1 range, TMP and RHO range, Q*V,
+// and the cell of max TMP / min RHO / max Q. old_ba != nullptr: only the cells of levels >= 1 that were not in the old level (new cells), plus their max |TMP, RHO, Z - parent value|.
+void leaf_diag(LevelRegistry& reg, const char* what, int s, double t, int ns, const std::vector<amrex::BoxArray>* old_ba = nullptr)
+{
+    for (int l = 0; l < reg.num_levels(); ++l) {
+        if (old_ba && l < 1) continue;
+        Fields& F = reg.fields(l);
+        const amrex::iMultiFab* cov = reg.covered_mask(l);
+        const double vol = reg.level(l).dx[0] * reg.level(l).dx[1] * reg.level(l).dx[2];
+        const amrex::IntVect rr = l > 0 ? reg.level(l).ref_ratio_from_parent : amrex::IntVect(1);
+        std::unique_ptr<amrex::MultiFab> pT, pR, pZ;   // parent values on the coarsened fine boxes
+        if (old_ba) {
+            const amrex::BoxArray cba = amrex::BoxArray(F["TMP"].boxArray()).coarsen(rr);
+            pT.reset(new amrex::MultiFab(cba, F["TMP"].DistributionMap(), 1, 0)); pT->ParallelCopy(reg.fields(l - 1)["TMP"], 0, 0, 1);
+            pR.reset(new amrex::MultiFab(cba, F["TMP"].DistributionMap(), 1, 0)); pR->ParallelCopy(reg.fields(l - 1)["RHO"], 0, 0, 1);
+            pZ.reset(new amrex::MultiFab(cba, F["TMP"].DistributionMap(), ns, 0)); pZ->ParallelCopy(reg.fields(l - 1)["ZZ"], 0, 0, ns);
+        }
+        // v: 0 n, 1 QV, 2 Tmin, 3 Tmax, 4 Rmin, 5 Rmax, 6 Smin, 7 Smax, 8 dT, 9 dR, 10 dZ, then m(ns), Zmin(ns), Zmax(ns)
+        std::vector<double> v(11 + 3 * ns, 0.0);
+        v[2] = v[4] = v[6] = v[11 + ns] = 1e300; v[3] = v[5] = v[7] = v[11 + 2 * ns] = -1e300;
+        for (int n = 0; n < ns; ++n) { v[11 + ns + n] = 1e300; v[11 + 2 * ns + n] = -1e300; }
+        amrex::IntVect lt(-1), lr(-1), lq(-1); double qmax = -1e300;
+        for (amrex::MFIter mfi(F["RHO"]); mfi.isValid(); ++mfi) {
+            auto r = F["RHO"].const_array(mfi); auto z = F["ZZ"].const_array(mfi); auto tm = F["TMP"].const_array(mfi); auto q = F["Q"].const_array(mfi);
+            amrex::Array4<const int> cv, sd; amrex::Array4<const amrex::Real> a, b, c;
+            if (cov) cv = cov->const_array(mfi);
+            if (l > 0) sd = reg.side_data(l).mask().const_array(mfi);
+            if (old_ba) { a = pT->const_array(mfi); b = pR->const_array(mfi); c = pZ->const_array(mfi); }
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                if ((cov && cv(i, j, k) != 0) || (l > 0 && sd(i, j, k, 0) != 0)) return;
+                if (old_ba && (*old_ba)[l].contains(amrex::IntVect(i, j, k))) return;
+                ++v[0]; v[1] += q(i, j, k) * vol;
+                if (tm(i, j, k) < v[2]) v[2] = tm(i, j, k);
+                if (tm(i, j, k) > v[3]) { v[3] = tm(i, j, k); lt = amrex::IntVect(i, j, k); }
+                if (r(i, j, k) < v[4]) { v[4] = r(i, j, k); lr = amrex::IntVect(i, j, k); }
+                v[5] = std::max(v[5], r(i, j, k));
+                if (q(i, j, k) > qmax) { qmax = q(i, j, k); lq = amrex::IntVect(i, j, k); }
+                double sz = 0.0;
+                for (int n = 0; n < ns; ++n) {
+                    sz += z(i, j, k, n); v[11 + n] += r(i, j, k) * z(i, j, k, n) * vol;
+                    v[11 + ns + n] = std::min(v[11 + ns + n], z(i, j, k, n)); v[11 + 2 * ns + n] = std::max(v[11 + 2 * ns + n], z(i, j, k, n));
+                }
+                v[6] = std::min(v[6], sz - 1.0); v[7] = std::max(v[7], sz - 1.0);
+                if (old_ba) {
+                    const amrex::IntVect pc = amrex::coarsen(amrex::IntVect(i, j, k), rr);
+                    v[8] = std::max(v[8], std::abs(tm(i, j, k) - a(pc)));
+                    v[9] = std::max(v[9], std::abs(r(i, j, k) - b(pc)));
+                    for (int n = 0; n < ns; ++n) v[10] = std::max(v[10], std::abs(z(i, j, k, n) - c(pc, n)));
+                }
+            });
+        }
+        // sums, then mins, then maxes over ranks (locations are those of rank-local extremes: exact for one rank)
+        std::vector<double> sm = {v[0], v[1], v[8], v[9], v[10]}, mn = {v[2], v[4], v[6]}, mx = {v[3], v[5], v[7]};
+        for (int n = 0; n < ns; ++n) { sm.push_back(v[11 + n]); mn.push_back(v[11 + ns + n]); mx.push_back(v[11 + 2 * ns + n]); }
+        const double dT = v[8], dR = v[9], dZ = v[10];
+        amrex::ParallelAllReduce::Sum(sm.data(), 2, amrex::ParallelContext::CommunicatorSub());
+        amrex::ParallelAllReduce::Sum(sm.data() + 5, ns, amrex::ParallelContext::CommunicatorSub());
+        amrex::ParallelAllReduce::Min(mn.data(), static_cast<int>(mn.size()), amrex::ParallelContext::CommunicatorSub());
+        amrex::ParallelAllReduce::Max(mx.data(), static_cast<int>(mx.size()), amrex::ParallelContext::CommunicatorSub());
+        double dm3[3] = {dT, dR, dZ}; amrex::ParallelAllReduce::Max(dm3, 3, amrex::ParallelContext::CommunicatorSub());
+        if (sm[0] == 0) continue;
+        std::ostringstream os; os << std::setprecision(10);
+        os << "[leafdiag] " << what << " step " << s << " t " << t << " L" << l << " n " << sm[0] << " QV " << sm[1] << " TMP " << mn[0] << " " << mx[0] << " @" << lt << " RHO " << mn[1] << " " << mx[1]
+           << " @" << lr << " Qmax @" << lq << " sumZ-1 " << mn[2] << " " << mx[2];
+        for (int n = 0; n < ns; ++n) os << " | Z" << n + 1 << " m " << sm[5 + n] << " min " << mn[3 + n] << " max " << mx[3 + n];
+        if (old_ba) os << " | vs parent max|dT| " << dm3[0] << " max|dRHO| " << dm3[1] << " max|dZ| " << dm3[2];
+        amrex::Print() << os.str() << "\n";
+    }
+}
+
+void leaf_boxes(LevelRegistry& reg, const char* what, int s)
+{
+    for (int l = 1; l < reg.num_levels(); ++l) {
+        std::ostringstream os; os << "[leafdiag] boxes " << what << " step " << s << " L" << l << " n " << reg.level(l).ba.size() << ":";
+        for (int i = 0; i < static_cast<int>(reg.level(l).ba.size()); ++i) os << " " << reg.level(l).ba[i];
+        amrex::Print() << os.str() << "\n";
+    }
+}
+
 std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl)
 {
     std::vector<fdsrt::ProjectionLevel> lv;
@@ -466,6 +546,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     long stale_regs = 0;
     int nl_now = nl;
     double deref_worst = 0.0, deref_div = 0.0; int deref_n = 0;   // ISO-DR gate: worst relative change of T/Z/p0 over derefining regrids, worst div u - D after them
+    const int ldiag = std::getenv("FDSTL_LEAFDIAG") ? std::max(1, std::atoi(std::getenv("FDSTL_LEAFDIAG"))) : 0;
     for (int s = 1; s <= o.steps; ++s) {
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         fds_p_bnd_rate(ns, r.data());
@@ -487,6 +568,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 if (fz0) { snap_z.reset(new amrex::MultiFab(fz0->boxArray(), fz0->DistributionMap(), fz0->nComp(), 0)); amrex::MultiFab::Copy(*snap_z, *fz0, 0, 0, fz0->nComp(), 0); }
                 std::vector<std::vector<double>> snap_p(reg.level(0).ba.size());
                 for (int i = 0; i < static_cast<int>(snap_p.size()); ++i) if (reg.level(0).dm[i] == amrex::ParallelDescriptor::MyProc()) { snap_p[i].assign(4096, 0.0); int n = 0; fds_p_pbar(i + 1, 4096, snap_p[i].data(), &n); snap_p[i].resize(n); }
+                std::vector<amrex::BoxArray> old_ba;
+                if (ldiag) { leaf_diag(reg, "pre-regrid", s, loop.time(), ns); leaf_boxes(reg, "pre-regrid", s); for (int l = 0; l < reg.num_levels(); ++l) old_ba.push_back(reg.level(l).ba); }
                 const int fb = loop.finest_bound();
                 for (int l = fb; l >= 1; --l) loop.unbind_level(l);
                 if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
@@ -501,6 +584,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     loop.set_flux_overwrite(o.overwrite);
                 }
                 if (changed || rebound) loop.prime_levels();
+                if (ldiag) { leaf_diag(reg, "post-regrid", s, loop.time(), ns); leaf_boxes(reg, "post-regrid", s); old_ba.resize(std::max<std::size_t>(old_ba.size(), reg.num_levels())); leaf_diag(reg, "new-cells", s, loop.time(), ns, &old_ba); }
                 if (finest < fb0) {   // derefinement: relative change of T, each Z and the background pressure at level 0, and div u - D of the remaining levels
                     auto relmax = [](const amrex::MultiFab& a, const amrex::MultiFab& b0, int nc) {
                         std::vector<double> w(nc, 0.0);
@@ -610,6 +694,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             for (int l = 0; l < nl_now; ++l) amrex::Print() << " L" << l << " " << (l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
             amrex::Print() << "\n";
         }
+        if (ldiag && s % ldiag == 0) leaf_diag(reg, "step", s, loop.time(), ns);
         hrr_prev = composite_hrr(reg, nl_now);
         hrr_sum += hrr_prev * loop.steps().back().dt; hrr_last = hrr_prev;
         if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps)) amrex::Print() << tag << " HRR at step " << s << " composite " << hrr_prev / 1000.0 << " kW\n";
