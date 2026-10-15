@@ -38,6 +38,7 @@
 #include <initializer_list>
 
 #include "ExactSum.H"
+#include "OutputPlan.H"
 #include "FdsSetup.H"
 #include "PressureIface.H"
 
@@ -86,6 +87,9 @@ void fds_p_mfd(int nm);
 int fds_p_dens_skip();   // fds_step.f90: 1 when DENSITY returns at once (ICYC<=1 etc.): no level clip then
 void fds_p_zero_dot();
 void fds_p_esums(int nm, const int* mask, double* s);   // s: one value
+void fds_p_msums(int nm, const int* mask, double* s);   // s(0:N_SPECIES+N_TRACKED_SPECIES), as UPDATE_MASS
+int fds_p_nmass();
+void fds_p_add_mass(double dt, const double* v);
 void fds_p_add_qdot(int n, double v);
 double fds_p_enthalpy_sum(int nm);
 void fds_p_get_qr(int nm, double* buf, long ntot);
@@ -2313,7 +2317,11 @@ struct TimeLoop::Impl {
         const double dv = l0.dx[0] * l0.dx[1] * l0.dx[2];
         std::vector<double> m(nt);
         double tot = 0.0;
-        for (int n = 0; n < nt; ++n) { m[n] = exact_sum_product(F["RHO"], 0, F["ZZ"], n, dv); tot += m[n]; }
+        if (lc.size() > 1 && L.m_reg) {   // leaf mass: every uncovered cell of every level once (not the level-0 average-down of the covered cells)
+            const std::vector<double> c = composite_mass_exact(*L.m_reg, static_cast<int>(lc.size()), nt, true);
+            for (int n = 0; n < nt; ++n) { m[n] = c[1 + n]; tot += m[n]; }
+        } else
+            for (int n = 0; n < nt; ++n) { m[n] = exact_sum_product(F["RHO"], 0, F["ZZ"], n, dv); tot += m[n]; }
         char b[64];
         std::string s;
         std::snprintf(b, sizeof b, "%.7E,%.15E", t, tot); s += b;
@@ -2326,11 +2334,13 @@ struct TimeLoop::Impl {
     // hierarchy, so the regrid change of E is left out of Q_ENTH. Q_CONV/Q_COND/Q_DIFF stay level-0 sums: a fine box has no wall cells (fds_fine_level.f90).
     double e_old = 0.0;
     bool have_e_old = false;
-    // E (composite) and E0 (level 0 alone, as UPDATE_HRR).
-    void energy_sums(double& e, double& e0)
+    // Leaf sums of an nc-component per-box quantity f(nm, mask, out): leaf = every cell not covered by a finer level (each point once), l0 = level 0 alone (as UPDATE_HRR/UPDATE_MASS).
+    template <class Fn>
+    void leaf_sums(int nc, Fn f, double* leaf, double* l0)
     {
         const int nl = static_cast<int>(lc.size());
-        e = e0 = 0.0;
+        std::fill(leaf, leaf + nc, 0.0); std::fill(l0, l0 + nc, 0.0);
+        std::vector<double> t(nc);
         for (int l = 0; l < nl; ++l) {
             const amrex::MultiFab& q = (*lc[l].F)["Q"];
             amrex::iMultiFab cov(q.boxArray(), q.DistributionMap(), 1, 0);
@@ -2342,21 +2352,31 @@ struct TimeLoop::Impl {
                 const int nm = lc[l].fds0 + mfi.index() + 1;
                 std::vector<int> m(static_cast<std::size_t>(vb.numPts()));
                 std::size_t n = 0;
-                double t = 0.0;
-                if (l == 0) {   // level 0: all cells (E0), then remove the covered ones
+                if (l == 0) {   // level 0: all cells (l0), then remove the covered ones
                     std::fill(m.begin(), m.end(), 1);
-                    fds_p_esums(nm, m.data(), &t);
-                    e0 += t; e += t;
+                    f(nm, m.data(), t.data());
+                    for (int i = 0; i < nc; ++i) { l0[i] += t[i]; leaf[i] += t[i]; }
                     amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 1 : 0; });
-                    fds_p_esums(nm, m.data(), &t);
-                    e -= t;
+                    f(nm, m.data(), t.data());
+                    for (int i = 0; i < nc; ++i) leaf[i] -= t[i];
                 } else {        // finer: add the cells not covered by the next level
                     amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 0 : 1; });
-                    fds_p_esums(nm, m.data(), &t);
-                    e += t;
+                    f(nm, m.data(), t.data());
+                    for (int i = 0; i < nc; ++i) leaf[i] += t[i];
                 }
             }
         }
+    }
+    // E (composite) and E0 (level 0 alone, as UPDATE_HRR).
+    void energy_sums(double& e, double& e0) { leaf_sums(1, [](int nm, const int* m, double* o) { fds_p_esums(nm, m, o); }, &e, &e0); }
+    // _mass.csv: UPDATE_MASS integrates the level-0 cells (covered ones hold the average-down); add dt*(leaf - level 0) to MASS_DT.
+    void composite_mass_file(double dt)
+    {
+        const int nc = fds_p_nmass();
+        std::vector<double> leaf(nc), l0(nc);
+        leaf_sums(nc, [](int nm, const int* m, double* o) { fds_p_msums(nm, m, o); }, leaf.data(), l0.data());
+        for (int i = 0; i < nc; ++i) leaf[i] -= l0[i];
+        fds_p_add_mass(dt, leaf.data());
     }
     void energy_snapshot()
     {
@@ -2414,7 +2434,7 @@ struct TimeLoop::Impl {
                 for (int l = 0; l < nlq - 1; ++l) { const amrex::MultiFab& q = (*lc[l].F)[nm]; qsave.emplace_back(q.boxArray(), q.DistributionMap(), 1, 0); amrex::MultiFab::Copy(qsave.back(), q, 0, 0, 1, 0); }
             for (const char* nm : qnames)
                 for (int l = nlq - 2; l >= 0; --l) amrex::average_down((*lc[l + 1].F)[nm], (*lc[l].F)[nm], 0, 1, L.m_reg->level(l + 1).ref_ratio_from_parent);
-            if (nlq > 1 && L.m_reg) composite_energy(r.dt);
+            if (nlq > 1 && L.m_reg) { composite_energy(r.dt); composite_mass_file(r.dt); }
             double dtd = 0.0;
             fds_setup(3, "", &dtd);
             std::size_t qi = 0;

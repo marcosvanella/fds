@@ -155,17 +155,31 @@ void OutputPlan::fill(const LevelRegistry& reg)
     }
 }
 
-std::vector<double> composite_mass_exact(const LevelRegistry& reg, int nl, int ns)
+std::vector<double> composite_mass_exact(const LevelRegistry& reg, int nl, int ns, bool skip_fine_solid)
 {
     std::vector<double> m(1 + ns, 0.0);
     std::vector<const amrex::MultiFab*> rhos;
     std::vector<double> vols;
+    std::vector<amrex::iMultiFab> skip(nl);   // leaf mask: covered by a finer level, or (skip_fine_solid) a fine OBST cell that holds the burner wall state, not gas
     std::vector<const amrex::iMultiFab*> covs;
     for (int l = 0; l < nl; ++l) {
         rhos.push_back(&reg.fields(l)["RHO"]);
         const double* dx = reg.level(l).dx;
         vols.push_back(dx[0] * dx[1] * dx[2]);
-        covs.push_back(reg.covered_mask(l));
+        const amrex::iMultiFab* cv = reg.covered_mask(l);
+        if (l > 0 && skip_fine_solid) {
+            const amrex::iMultiFab& sd = const_cast<LevelRegistry&>(reg).side_data(l).mask();
+            skip[l].define(sd.boxArray(), sd.DistributionMap(), 1, 0);
+            for (amrex::MFIter mfi(skip[l]); mfi.isValid(); ++mfi) {
+                auto o = skip[l].array(mfi);
+                auto s = sd.const_array(mfi);
+                amrex::Array4<const int> c;
+                if (cv) c = cv->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { o(i, j, k) = (s(i, j, k, 0) != 0 || (cv && c(i, j, k) != 0)) ? 1 : 0; });
+            }
+            cv = &skip[l];
+        }
+        covs.push_back(cv);
     }
     m[0] = exact_sum_hierarchy(rhos, 0, vols, covs);
     for (int n = 0; n < ns; ++n) {

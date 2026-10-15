@@ -62,7 +62,8 @@ private:
 };
 
 // D6: exact composite mass (RHO and RHO*ZZ_n) over uncovered cells of levels 0..nl-1. Uses ExactSum hierarchy / uncovered product.
-std::vector<double> composite_mass_exact(const LevelRegistry& reg, int nl, int ns);
+// skip_fine_solid also leaves out the fine OBST cells (SideData mask), as the driver's gate mass does.
+std::vector<double> composite_mass_exact(const LevelRegistry& reg, int nl, int ns, bool skip_fine_solid = false);
 
 }  // namespace fdsamr
 
