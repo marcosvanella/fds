@@ -39,7 +39,7 @@ USE HDF5
 #endif
 USE COMP_FUNCTIONS, ONLY : SHUTDOWN
 #ifdef WITH_AMREX
-USE FDS_AMREX_HOOKS, ONLY: N_OUT_MESHES
+USE FDS_AMREX_HOOKS, ONLY: N_OUT_MESHES,LEAF_COVERED_PROC,LEAF_BOX_PROC,LEAF_FINEST_PROC
 #endif
 
 IMPLICIT NONE (TYPE,EXTERNAL)
@@ -7788,7 +7788,7 @@ REAL(EB), INTENT(IN) :: T,DT
 INTEGER, INTENT(IN) :: NM
 REAL(EB) :: VALUE,VOL,AREA,CFACE_AREA,XI,YJ,ZK,X_CENTER,Y_CENTER,Z_CENTER,WGT,EPS_X1,EPS_X2,EPS_Y1,EPS_Y2,EPS_Z1,EPS_Z2,&
             WALL_VALUE,WALL_WGT
-INTEGER :: N,I,J,K,IW,ICC,ICF,SURF_INDEX,LP_INDEX,IP,AXIS
+INTEGER :: N,I,J,K,IW,ICC,ICF,SURF_INDEX,LP_INDEX,IP,AXIS,IR(6),NBX,IBX,IL,JL,KL
 TYPE (BOUNDARY_PROP1_TYPE), POINTER :: B1
 TYPE (BOUNDARY_COORD_TYPE), POINTER :: BC
 TYPE (PROPERTY_TYPE), POINTER :: PY
@@ -7974,10 +7974,22 @@ DEVICE_LOOP: DO N=1,N_DEVC
                I = MIN( IBP1, MAX(0, DV%I(1)) )
                J = MIN( JBP1, MAX(0, DV%J(1)) )
                K = MIN( KBP1, MAX(0, DV%K(1)) )
-               SDV%VALUE_1 = GAS_PHASE_OUTPUT(T,DT,NM,I,J,K,DV%QUANTITY_INDEX(1),Y_INDEX=DV%Y_INDEX,Z_INDEX=DV%Z_INDEX,&
+               NBX = NM
+#ifdef WITH_AMREX
+               ! Leaf cell: a point under a finer level reads the finest cell there (POINT_TO_BOX for the call)
+               IF (ASSOCIATED(LEAF_COVERED_PROC)) THEN
+                  IF (LEAF_COVERED_PROC(NM,XC(I),YC(J),ZC(K))) NBX = LEAF_FINEST_PROC(DV%X,DV%Y,DV%Z,IL,JL,KL)
+                  IF (NBX==0) NBX = NM
+                  IF (NBX/=NM) THEN ; CALL POINT_TO_BOX(NBX) ; I = IL ; J = JL ; K = KL ; ENDIF
+               ENDIF
+#endif
+               SDV%VALUE_1 = GAS_PHASE_OUTPUT(T,DT,NBX,I,J,K,DV%QUANTITY_INDEX(1),Y_INDEX=DV%Y_INDEX,Z_INDEX=DV%Z_INDEX,&
                                               ELEM_INDX=DV%ELEM_INDEX,PART_INDEX=DV%PART_CLASS_INDEX,VELO_INDEX=DV%VELO_INDEX,&
                                               PIPE_INDEX=DV%PIPE_INDEX,PROP_INDEX=DV%PROP_INDEX,REAC_INDEX=DV%REAC_INDEX,&
                                               DEVC_INDEX=N)
+#ifdef WITH_AMREX
+               IF (NBX/=NM) CALL POINT_TO_MESH(NM)
+#endif
 
                IF (DV%N_QUANTITY>1) &
                   SDV%VALUE_2 = GAS_PHASE_OUTPUT(T,DT,NM,DV%I(2),DV%J(2),DV%K(2),DV%QUANTITY_INDEX(2),Y_INDEX=DV%Y_INDEX,&
@@ -7987,9 +7999,17 @@ DEVICE_LOOP: DO N=1,N_DEVC
 
             CASE DEFAULT GAS_STATS_SELECT
 
-               K_DEVICE_CELL_LOOP: DO K=SDV%K1,SDV%K2
-                  J_DEVICE_CELL_LOOP: DO J=SDV%J1,SDV%J2
-                     I_DEVICE_CELL_LOOP: DO I=SDV%I1,SDV%I2
+               ! Leaf cells only: the level-0 cells under a finer level are skipped and the fine boxes follow (IBX>0) with the cells of the device extent in them
+               IR = (/SDV%I1,SDV%I2,SDV%J1,SDV%J2,SDV%K1,SDV%K2/) ; NBX = NM ; IBX = 0
+               LEAF_BOX_LOOP: DO
+               K_DEVICE_CELL_LOOP: DO K=IR(5),IR(6)
+                  J_DEVICE_CELL_LOOP: DO J=IR(3),IR(4)
+                     I_DEVICE_CELL_LOOP: DO I=IR(1),IR(2)
+#ifdef WITH_AMREX
+                        IF (ASSOCIATED(LEAF_COVERED_PROC)) THEN
+                           IF (LEAF_COVERED_PROC(NBX,XC(I),YC(J),ZC(K))) CYCLE I_DEVICE_CELL_LOOP
+                        ENDIF
+#endif
                         IF (CELL(CELL_INDEX(I,J,K))%SOLID .AND. &
                            OUTPUT_QUANTITY(DV%QUANTITY_INDEX(1))%CELL_POSITION/=CELL_FACE) CYCLE I_DEVICE_CELL_LOOP
                         VOL = DX(I)*RC(I)*DY(J)*DZ(K)
@@ -8026,7 +8046,7 @@ DEVICE_LOOP: DO N=1,N_DEVC
                            VOL = VOL/DY(J)
                         ENDIF
 
-                        VALUE = GAS_PHASE_OUTPUT(T,DT,NM,I,J,K,DV%QUANTITY_INDEX(1),Y_INDEX=DV%Y_INDEX,Z_INDEX=DV%Z_INDEX,&
+                        VALUE = GAS_PHASE_OUTPUT(T,DT,NBX,I,J,K,DV%QUANTITY_INDEX(1),Y_INDEX=DV%Y_INDEX,Z_INDEX=DV%Z_INDEX,&
                                                  ELEM_INDX=DV%ELEM_INDEX,PART_INDEX=DV%PART_CLASS_INDEX,VELO_INDEX=DV%VELO_INDEX,&
                                                  PIPE_INDEX=DV%PIPE_INDEX,PROP_INDEX=DV%PROP_INDEX,REAC_INDEX=DV%REAC_INDEX,&
                                                  DEVC_INDEX=N)
@@ -8106,6 +8126,18 @@ DEVICE_LOOP: DO N=1,N_DEVC
                      ENDDO I_DEVICE_CELL_LOOP
                   ENDDO J_DEVICE_CELL_LOOP
                ENDDO K_DEVICE_CELL_LOOP
+#ifdef WITH_AMREX
+               IBX = IBX+1
+               IF (.NOT.ASSOCIATED(LEAF_BOX_PROC)) EXIT LEAF_BOX_LOOP
+               NBX = LEAF_BOX_PROC(IBX,SDV%X1,SDV%X2,SDV%Y1,SDV%Y2,SDV%Z1,SDV%Z2,IR)
+               IF (NBX==0) EXIT LEAF_BOX_LOOP
+               CALL POINT_TO_BOX(NBX)
+               ENDDO LEAF_BOX_LOOP
+               IF (IBX>1) CALL POINT_TO_MESH(NM)
+#else
+               EXIT LEAF_BOX_LOOP
+               ENDDO LEAF_BOX_LOOP
+#endif
 
          END SELECT GAS_STATS_SELECT
 

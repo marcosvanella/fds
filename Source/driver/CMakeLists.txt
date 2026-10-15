@@ -116,6 +116,7 @@ if (_fds_mesh_src MATCHES "FINE_LEVEL_TYPE")
     # Fine-level mesh objects (BUILD_FINE_BOX, fds_fine_level_create/destroy) for TimeLoop::bind_level; FDS_HAVE_FINE_LEVEL tells the C++ side that they exist.
     target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/fds_fine_level.f90)
     set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_fine_level.f90 PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
+    target_sources(fds PRIVATE ${CMAKE_CURRENT_LIST_DIR}/fds_leaf_devc.f90)   # leaf-cell device hooks
     target_compile_definitions(fds PRIVATE FDS_HAVE_FINE_LEVEL)
 endif()
 

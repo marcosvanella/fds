@@ -131,6 +131,7 @@ void fds_p_set_wall_counter(int n);
 void fds_flux_reserve(int ntot);
 int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext, void* p);   // fds_box_obj.f90: 0 ok, 3 no fine-level support in this tree
 #ifdef FDS_HAVE_FINE_LEVEL
+void fds_leaf_register();   // fds_leaf_devc.f90: leaf-cell hooks of the gas devices
 int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
@@ -294,6 +295,7 @@ struct TimeLoop::Impl {
             const int ierr = fds_fine_level_create(lev, nb, ijk.data(), xb.data(), loc.data(), &nm0);
             if (ierr != 0) die("bind_level(" + std::to_string(lev) + "): fds_fine_level_create failed (code " + std::to_string(ierr) + (ierr == 3 ? ": the level-0 meshes of this rank have more than one pressure zone" : "") + ")");
         }
+        fds_leaf_register();
         for (const auto& sp : field_table()) {
             const int which = view_code(sp.name);
             if (which == 0 || !F.has(sp.name)) continue;
