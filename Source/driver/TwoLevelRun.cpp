@@ -590,6 +590,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
         const double dts = loop.steps().empty() ? 0.0 : loop.steps().back().dt;
         // CLIP_MASS / CLIP_CELLS (P3-C11/C12): every dump step when P3-C01 CSV path is active (emit zeros too).
+        double fm[3] = {0.0, 0.0, 0.0};   // leaf fuel MLR (diagnostic): collective, so every rank takes part (lf is open on rank 0 only)
+        if (nl == 2) { fds_fine_fuel_mdot(1, fm); amrex::ParallelAllReduce::Sum(fm, 3, amrex::ParallelContext::CommunicatorSub()); }
         if (lf) {
             const int ntr = l0.dom.n_tracked;
             for (int l = 0; l < nl_now; ++l)
@@ -600,7 +602,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             std::fprintf(lf, "%d,%.9g,%.9g,%.17g,%.6e,%.6e", s, loop.time(), dts, m[0], dm, dv);
             for (int l = 0; l < nl_now; ++l) std::fprintf(lf, ",%.6e", l < static_cast<int>(bylev.size()) ? bylev[l] : 0.0);
             std::fprintf(lf, ",%.3e,%.9e", loop.composite_report().removed_rel, inflow[0]);
-            if (nl == 2) { double fm[3]; fds_fine_fuel_mdot(1, fm); amrex::ParallelAllReduce::Sum(fm, 3, amrex::ParallelContext::CommunicatorSub()); std::fprintf(lf, ",%.9e,%.9e", fm[0], fm[0] - fm[1] + fm[2]); }
+            if (nl == 2) std::fprintf(lf, ",%.9e,%.9e", fm[0], fm[0] - fm[1] + fm[2]);
             std::fprintf(lf, "\n");
         }
         if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps)) {
