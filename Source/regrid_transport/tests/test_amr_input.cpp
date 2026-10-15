@@ -32,20 +32,19 @@ int main()
         AmrParams p = parse(
             "this is a comment & with an ampersand\n"
             "&AMR MAX_LEVEL=2, REF_RATIO=2,4, REGRID_INTERVAL=8, BLOCKING_FACTOR=4,8,16, MAX_GRID_SIZE=32,64,64,\n"
-            "     N_ERROR_BUF=2, N_PROPER=1, GRID_EFF=0.8, OUTPUT_LEVEL_CAP=1, VELOCITY_TRANSFER='FACE_LINEAR' /\n"
+            "     N_ERROR_BUF=2, N_PROPER=1, GRID_EFF=0.8, OUTPUT_LEVEL_CAP=1 /\n"
             "&AMR_REGION XB=0,1,0,1,0,2, LEVEL=2 /\n&AMR_REGION XB=0.5,1,0,1,0,1 /\n&TAIL /\n&AMR MAX_LEVEL=9 /\n", r);
         CHECK(r.ok());
         CHECK(p.present && p.max_level == 2);
         CHECK(p.ref_ratio_at(0) == 2 && p.ref_ratio_at(1) == 4);
         CHECK(p.regrid_interval == 8 && p.n_error_buf == 2 && p.grid_eff == 0.8 && p.output_level() == 1);
         CHECK(p.blocking_factor_at(2) == 16 && p.max_grid_size_at(0) == 32);
-        CHECK(p.velocity_transfer == VelocityTransfer::FaceLinear);
         CHECK(p.regions.size() == 2 && p.regions[0].level == 2 && p.regions[1].level == -1 && p.regions[1].xb[0] == 0.5);
     }
-    {  // defaults when only MAX_LEVEL is given: ratio 2, FaceDivFree (provisional default, FR-012)
+    {  // defaults when only MAX_LEVEL is given: ratio 2
         Report r;
         AmrParams p = parse("&AMR MAX_LEVEL=1 /", r);
-        CHECK(r.ok() && p.ref_ratio_at(0) == 2 && p.velocity_transfer == VelocityTransfer::FaceDivFree && p.output_level() == 1);
+        CHECK(r.ok() && p.ref_ratio_at(0) == 2 && p.output_level() == 1);
     }
     {  // refinement ratios other than 2 and 4 are rejected (FR-010)
         for (int rr : {1, 3, 5, 8}) {
@@ -92,7 +91,7 @@ int main()
         parse("&AMR MAX_LEVEL=1, GRID_EFF=1.5, N_PROPER=0, REGRID_INTERVAL=-1, N_ERROR_BUF=-1, OUTPUT_LEVEL_CAP=3 /", r7);
         CHECK(r7.errors.size() == 5);
         Report r8;
-        parse("&AMR MAX_LEVEL=1, VELOCITY_TRANSFER='NOPE' /", r8);
+        parse("&AMR MAX_LEVEL=1, VELOCITY_TRANSFER='FACE_LINEAR' /", r8);   // removed option: unknown key
         CHECK(r8.has_error_containing("VELOCITY_TRANSFER"));
         {   // POST_REGRID_PROJECTION (D-063): default AUTO, ON/OFF/logicals accepted, anything else is an error
             Report ra, rb, rc, rd, re;

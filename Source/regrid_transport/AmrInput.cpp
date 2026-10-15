@@ -209,7 +209,7 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
 {
     AmrParams p;
     const std::vector<std::string> keys = {"MAX_LEVEL", "REF_RATIO", "REGRID_INTERVAL", "BLOCKING_FACTOR", "MAX_GRID_SIZE", "N_ERROR_BUF",
-                                           "N_PROPER", "GRID_EFF", "OUTPUT_LEVEL_CAP", "VELOCITY_TRANSFER", "POST_REGRID_PROJECTION",
+                                           "N_PROPER", "GRID_EFF", "OUTPUT_LEVEL_CAP", "POST_REGRID_PROJECTION",
                                            "TAG_TMP_DIFF", "TAG_TMP_ABOVE", "TAG_RHO_DIFF", "TAG_SPEC_ID", "TAG_SPEC_DIFF", "TAG_HRRPUV", "TAG_VORT", "TAG_KEEP"};
     int n_amr = 0;
     for (const auto& g : scan_namelists(text)) {
@@ -229,14 +229,6 @@ AmrParams parse_amr_params(const std::string& text, Report& rep)
             get_int(g, "N_PROPER", p.n_proper, rep);
             get_double(g, "GRID_EFF", p.grid_eff, rep);
             get_int(g, "OUTPUT_LEVEL_CAP", p.output_level_cap, rep);
-            auto vt = g.values.find("VELOCITY_TRANSFER");
-            if (vt != g.values.end()) {
-                std::string v = vt->second.size() == 1 ? upper(vt->second[0]) : std::string();
-                if (v == "FACE_DIV_FREE") p.velocity_transfer = VelocityTransfer::FaceDivFree;
-                else if (v == "FACE_LINEAR") p.velocity_transfer = VelocityTransfer::FaceLinear;
-                else if (v == "FACE_CONSERVATIVE") p.velocity_transfer = VelocityTransfer::FaceConservative;
-                else rep.error(at_line(g) + "VELOCITY_TRANSFER must be 'FACE_DIV_FREE', 'FACE_LINEAR' or 'FACE_CONSERVATIVE'");
-            }
             auto pr = g.values.find("POST_REGRID_PROJECTION");
             if (pr != g.values.end()) {
                 std::string v = pr->second.size() == 1 ? upper(pr->second[0]) : std::string();

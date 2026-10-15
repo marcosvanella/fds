@@ -32,7 +32,6 @@ struct RegionSpec {
     int level = -1;  // finest level allowed in this box; -1 in the input means MAX_LEVEL
 };
 
-enum class VelocityTransfer { FaceDivFree, FaceLinear, FaceConservative };
 
 // POST_REGRID_PROJECTION (ruling D-063): Auto = run the composite projection after a regrid that creates new fine faces next to retained fine faces
 // (some level >= 1 keeps part of its old grids and also gets new cells); On = after every regrid that changed the grids; Off = never (the Phase 3 behaviour before D-063).
@@ -50,7 +49,6 @@ struct AmrParams {
     int n_proper = 1;            // N_PROPER: proper-nesting width in coarse cells
     double grid_eff = 0.7;       // GRID_EFF: grid efficiency of the clustering
     int output_level_cap = -1;   // OUTPUT_LEVEL_CAP (L_out, IR-008 (b)); -1 = MAX_LEVEL
-    VelocityTransfer velocity_transfer = VelocityTransfer::FaceDivFree;  // VELOCITY_TRANSFER, provisional default (FR-012)
     PostRegridProjection post_regrid_projection = PostRegridProjection::Auto;  // POST_REGRID_PROJECTION: 'AUTO' (default, D-063), 'ON' or 'OFF'
     bool exact_sums = false;     // &MISC EXACT_SUMS: read so that the line is accepted; the AMR code ignores it (its sums follow the FDS-order default of D-028/D-053)
     std::vector<RegionSpec> regions;        // &AMR_REGION lines
