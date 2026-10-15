@@ -1700,7 +1700,7 @@ struct TimeLoop::Impl {
         for (int l = 0; l < static_cast<int>(lc.size()); ++l)
             for (const char* nm : {"RHO", "RHOS", "TMP", "RSUM", "ZZ", "ZZS"}) {
                 const amrex::MultiFab& mf = (*lc[l].F)[nm];
-                amrex::Print() << "GHOSTDBG " << tag << " L" << l << " " << nm << " valid [" << mf.min(0, 0) << ", " << mf.max(0, 0) << "] with ghosts [" << mf.min(0, mf.nGrow()) << ", " << mf.max(0, mf.nGrow()) << "]\n";
+                amrex::Print() << "GHOSTDBG [per level, covered cells included] " << tag << " L" << l << " " << nm << " valid [" << mf.min(0, 0) << ", " << mf.max(0, 0) << "] with ghosts [" << mf.min(0, mf.nGrow()) << ", " << mf.max(0, mf.nGrow()) << "]\n";
             }
     }
     // FDSTL_GHOSTDBG: max |div u - D*| over the uncovered cells by level, for the predicted (US.., DS) or the corrected (U.., D) velocity
@@ -1776,7 +1776,7 @@ struct TimeLoop::Impl {
             for (const char* nm : {"U", "W", "US", "WS", "FVX", "FVZ", "H", "HS", "D", "DS", "DDDT", "MU", "KRES"}) {
                 if (!lc[l].F->has(nm)) continue;
                 const amrex::MultiFab& mf = (*lc[l].F)[nm];
-                amrex::Print() << "RANGE " << tag << " L" << l << " " << nm << " [" << mf.min(0, 0) << ", " << mf.max(0, 0) << "]\n";
+                amrex::Print() << "RANGE [per level, covered cells included] " << tag << " L" << l << " " << nm << " [" << mf.min(0, 0) << ", " << mf.max(0, 0) << "]\n";
             }
     }
     void nan_fields(const char* tag)
@@ -2395,6 +2395,8 @@ struct TimeLoop::Impl {
         for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) es_old += fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
         if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
         e_old = e; have_e_old = true;
+        static bool warned3 = false;
+        if (lc.size() > 2 && !warned3 && amrex::ParallelDescriptor::IOProcessor()) { warned3 = true; std::fprintf(stderr, "WARNING: hrr.csv Q_CONV/Q_COND/Q_DIFF are level-0 wall sums (hidden fine walls exist for level 1 only); levels above 1 are not leaf in these three columns\n"); }
         if (lc.size() == 2) {   // Q_CONV, Q_COND, Q_DIFF: replace the covered level-0 walls by the hidden fine walls (two levels only: the parent is level 0)
             const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only
             double q[12];
@@ -2505,7 +2507,7 @@ struct TimeLoop::Impl {
             double e = fs.max_divergence_error(0);
             all_max(e);
             const double dmax = L.m_reg->fields(0)["D"].norminf(0, 0, false);   // scale of D (valid cells)
-            amrex::Print() << "DIVERR level 0: max |div u - D| over the valid cells = " << std::setprecision(6) << e << " (1/s), max |D| = " << dmax << "\n";
+            amrex::Print() << "DIVERR level 0 only (covered cells included): max |div u - D| over the valid cells = " << std::setprecision(6) << e << " (1/s), max |D| = " << dmax << "\n";
         }
         if (fluxchk) {
             double mx0 = fluxchk_max[0], mx1 = fluxchk_max[1];

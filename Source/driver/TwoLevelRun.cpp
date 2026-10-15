@@ -63,7 +63,7 @@ std::vector<double> composite_mass(LevelRegistry& reg, int nl, int ns)
     return m;
 }
 
-// Composite heat release rate (W): Q*vol over the uncovered level-0 cells and every finer cell (each point of the domain counted once).
+// Composite heat release rate (W): Q*vol over the uncovered level-0 cells and every finer gas cell (each point of the domain counted once; fine OBST cells masked).
 double composite_hrr(LevelRegistry& reg, int nl)
 {
     double q = 0.0;
@@ -75,9 +75,10 @@ double composite_hrr(LevelRegistry& reg, int nl)
         const double vol = lv.dx[0] * lv.dx[1] * lv.dx[2];
         for (amrex::MFIter mfi(F["Q"]); mfi.isValid(); ++mfi) {
             auto a = F["Q"].const_array(mfi);
-            amrex::Array4<const int> cv;
+            amrex::Array4<const int> cv, sd;
             if (cov) cv = cov->const_array(mfi);
-            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (!(cov && cv(i, j, k) != 0)) q += a(i, j, k) * vol; });
+            if (l > 0) sd = reg.side_data(l).mask().const_array(mfi);   // fine OBST cells (as composite_mass)
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (!(cov && cv(i, j, k) != 0) && !(l > 0 && sd(i, j, k, 0) != 0)) q += a(i, j, k) * vol; });
         }
     }
     amrex::ParallelAllReduce::Sum(q, amrex::ParallelContext::CommunicatorSub());
@@ -226,7 +227,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         fill_undivided_vorticity(reg, 1);   // L0 |ω| before AmrParams (auto thr needs max)
         if (o.tag_vort_auto) {
             // Owner overnight: 0.45*max hugs ring core tighter than 0.35 (less fat L1).
-            tag_vort_thr = 0.45 * reg.fields(0)["VORT"].max(0, 0);   // MultiFab::max is global
+            tag_vort_thr = 0.45 * reg.fields(0)["VORT"].max(0, 0);   // MultiFab::max is global; level 0 by design: a tagging threshold fixed before any fine level exists, not an output statistic
             amrex::Print() << tag << ": TAG_VORT auto thr = 0.45 * max|VORT|_L0 = " << tag_vort_thr << "\n";
         }
         amr << ", TAG_VORT=" << std::setprecision(17) << tag_vort_thr << ", TAG_KEEP=0.85";
@@ -416,7 +417,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             for (const char* nm : {"RHO", "TMP", "ZZ", "D", "DS", "DDDT", "KRES", "MU", "U", "V", "W"}) {
                 if (!reg.fields(l).has(nm)) continue;
                 const amrex::MultiFab& mf = reg.fields(l)[nm];
-                amrex::Print() << "TLDIAG prime L" << l << " " << nm << " min " << mf.min(0, 0) << " max " << mf.max(0, 0) << (mf.contains_nan() ? " NAN" : "") << "\n";
+                amrex::Print() << "TLDIAG prime [covered cells included] L" << l << " " << nm << " min " << mf.min(0, 0) << " max " << mf.max(0, 0) << (mf.contains_nan() ? " NAN" : "") << "\n";
             }
     }
     {
