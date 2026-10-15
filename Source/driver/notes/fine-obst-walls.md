@@ -308,3 +308,177 @@ Findings:
 - **D9** At derefinement or OBST re-snap, preserve the intensive state (Z, T, PBAR, D) and do not enforce zone mass/energy
   conservation. The mass change from the volume difference is accepted and reported as a diagnostic per regrid and zone, and excluded
   from the mass gate (owner correction).
+
+---
+
+# N-level extension (Role 1 design, 2026-10-15)
+
+Status: DESIGN ONLY. Owner lifted the hold on fine OBST walls and asked for N levels, not a level-1 patch. No code was touched; the level>=2
+segfault in `fds_fine_walls_build` is being diagnosed by other executors. Section numbers continue R1-R10 above; this part is R11-R19.
+Solid Phase side (R16): written from S1/S2 and this note only. The Solid Lead has not been consulted; items marked [SP] need sign-off.
+
+## R11. Where the code is level-1 only today (the inventory of special cases)
+
+Read from `fds_fine_level.f90` and `TimeLoop.cpp` at HEAD:
+
+1. `FDS_FINE_WALLS_BUILD(LEV,IB)` finds the parent by scanning `MESHES(1:SIZE(MESHES))`, i.e. level-0 meshes only, then `GET_IJK` on the L0
+   mesh. The "parent" is always L0, whatever LEV is. For LEV>=2 the covering L0 cell is not the level that the fine box was refined from:
+   the ghost/interface logic, the `PNM/PIW` parent index and the `T(6,...)` table assume a level-0 wall exists. This is the likely
+   crash path (no L0 wall for a face that is interior to a refined L1 region); the executors own the actual fix.
+2. `FDS_FINE_WALLS_SUMS(LEV,...)` takes `FR = A_fine/A_parent` against an L0 parent wall `PNM/PIW`.
+3. `TimeLoop::composite_energy` calls `fds_fine_walls_sums(1, ...)` only when `lc.size()==2`; with 3+ levels it prints a warning and the
+   three columns stay level-0 sums (not leaf).
+4. `FINE_DEVC`, `LEAF_WALL_COUNT/LEAF_WALL/LEAF_WALL_COVERED` hooks are bound from level 1 builds; they iterate `FWALL(:)` (already
+   level-indexed: `FWALL(LEV)%B(IB)`, good) but the covered test is "under a level-1 box".
+5. `fds_fine_walls_state/_un` (burner faces, Role 2 accessors) take `lev` but select by the L0 parent rule; the callers pass `l` already.
+6. The OBST snap (`ObstMask.H`, R9) and `SideData` are already per-level; the thin-plane marking (R9) is still to be implemented.
+7. Create/destroy ordering: `FDS_FINE_LEVEL_CREATE` only lets the top level be (re)made (`ANY(N_BOXES(LEV+1:)/=0)` -> IERR 1), so a level's
+   walls can be rebuilt only when all finer levels are gone. Compatible with a level-looped build, but see R14 (regrid order).
+8. IERR 3: multi-zone L0 rank refused (R10).
+
+None of these is design-essential; they all come from "parent = L0". The fix is one idea: **the parent of a level-l wall is whatever
+level l-1 holds at that face, and the source wall is found by walking down the chain.**
+
+## R12. One level-looped wall path (D-N1)
+
+**Rule.** For every level l >= 1 and every box, the builder runs the same code. There is no `if (lev==1)`. Level 0 keeps FDS's own walls.
+
+Inputs per level l (all already per-level or exportable): the box's fine `CELL_INDEX` solid flags (from `SideData`, snapped by FDS NINT at dx_l,
+R1), the per-level thin-plane list (R9), the global OBST/VENT lists (R4 exports), the domain boundary.
+
+Per fine gas cell and direction D (the R3 rule, unchanged): a wall if the neighbour is a level-l solid cell, a thin plane on that face, or the
+domain boundary; never on a coarse-fine face. Classification P/N/D as R3, with "parent" redefined:
+
+- **Parent wall** of a level-l face = the level-(l-1) wall on the covering face, if any. It is found by the *geometric covering chain*: face
+  centre -> covering cell on level l-1 (box containing it, searched in `FINE_LEVEL(l-1)%BOX`, or in `MESHES` when l-1 = 0) -> the wall of the
+  same IOR on that cell. The parent level-(l-1) wall may itself be hidden (l-1 >= 1) or real (l-1 = 0). Storage: `PNM` = mesh index
+  (global numbering already used by `NM0+IB`), `PIW` = wall index in that mesh, `PLEV` = parent level (new, 1 integer).
+- **Source wall** (history, R3 case N/D): walk up the chain `l-1, l-2, ... 0` until a wall of the same OBST/IOR (or same domain face and SURF)
+  exists; take the nearest one at the *lowest* level that has it (history lives only on L0 by S1, so the walk ends at L0; a chain without an
+  L0 wall is "no source" as in R3). `SRCNM/SRCIW` is stored once at build, so the per-step read is O(1) and level independent.
+- **Burner VENT stateful on L0** (D-010): the history is read from the L0 source wall at any level. No wall state is stored at any level
+  above 0 (S1 stands unchanged for N levels).
+
+**Search cost.** Replace the O(cells x meshes) scan by a per-level box lookup (AMReX BoxArray on level l-1 via a small C++ callback, or a
+Fortran loop over `FINE_LEVEL(l-1)%BOX`, then `MESHES` for l-1=0). Build/regrid only. Fortran loop first (about 15 lines).
+
+**Where the code goes.** Same three routines (build, state, sums); `FWALL(LEV)%B(IB)` already generalizes; the level-1 specifics are removed:
+the `MESHES` scan becomes `FWALL_PARENT(LEV,...)`, a helper that takes level, point, IOR.
+
+## R13. Leaf-only sums for N levels (D-N2)
+
+Current: composite = L0 - sum FR*parent + fine, FR = A_fine/A_parent, two levels. Generalize with a **leaf** definition:
+
+- A wall is *leaf* if no finer-level fluid face covers any part of it. L0 real walls: leaf when not covered by an L1 box face.
+  Hidden level-l walls: leaf when not covered by a level-(l+1) box (their covered fraction goes to the child).
+- For each level l >= 1 hidden wall w with parent p (level l-1): the contribution
+  `S(w) = sum_over_leaf_faces(w) value*A` and the parent carries **`-FR*p`** where FR = A_covered_by_children / A_p is evaluated per
+  level pair. Chain invariant: the terms telescope. Total = sum over leaf walls only. Implementation: a single loop over levels from the finest
+  to level 1; for each level add `+ sum leaf-part(w)` and subtract the covered share of the parent. Because each level's covered fraction
+  is taken against its own parent, a 3-level pyramid gives L0 - FR1*p0 + (L1 - FR2*p1) + L2 = leaf set, with no double count.
+- N faces (no parent): add their value, no parent share (R3). Thin plane walls: both IORs, as for any wall.
+- Covered fractions use fine **gas** faces only (R3 closes findings 5b/6), now from level l+1 box faces under the level-l wall.
+- Quantities: Q_CONV, Q_COND, Q_DIFF (UPDATE_HRR signs, S3 finding 1). The same leaf loop feeds: **wall devices** (`FINE_DEVC` iterates
+  all `FWALL(LEV)` levels; covered L(l) walls are excluded by `LEAF_WALL_COVERED` on any finer box), **MLR** (burner mass loss from leaf walls;
+  parent M_DOT_G_PP_ADJUST conserved per R3/S1), **gate inflow** (the composite mass gate counts leaf-wall mass flux; covered coarse faces
+  contribute none, case N burners count at their level) and **wall-statistics** hooks (`LEAF_WALL_COUNT/LEAF_WALL/LEAF_WALL_COVERED` take a
+  level argument and apply the "no finer box covers it" test).
+- `TimeLoop::composite_energy`: remove the `lc.size()==2` branch and the three-level warning; call `fds_fine_walls_sums(l, ...)` for
+  l = 1..finest and add the vector; `Q(12)` diagnostic remains L0-based (covered fraction per level printed as `nwall_l`).
+- Reduction: one `ReduceRealSum` over the summed vector, unchanged.
+
+## R14. Regrid, bind order, derefinement (D-N3)
+
+1. **Order.** Walls are a function of (solid cells at each level, parent chain). Rebuild a level's walls whenever its box set or its parent's
+   box set changes. Processing order: finest destroyed first (already enforced by IERR 1), rebuilt coarse to fine. A 1-level change at l
+   forces re-bind of l+1.. because their parent walls (PNM/PIW) point into level l's wall arrays. Do not carry parent indices across a regrid.
+2. **Derefinement of level l+1 with OBST re-snap.** The level-l walls of the former parent become leaf; their covered fraction goes to 0.
+   Nothing is carried. Fluid state follows R10 item 4 (intensive state preserved, mass changes by volume, reported).
+3. **Intermediate-level thin planes.** A thin plane on L1 under L2 is bookkeeping; the L2 plane/solid is the active one. When L2 is dropped,
+   the L1 plane must exist (R9 rule: every OBST on every level), so no gap appears. Test below.
+4. **Moving boxes** still forbid thick/ONE_D faces (S1). For static hierarchies they stay on L0 (D-010).
+
+## R15. Zones, volume, level-0 identity (D-N4)
+
+- Zone IDs: R10 rule 1 applies per level through the chain: level l inherits from level l-1 (not directly from L0), seeded flood fill inside
+  the box, error on a fine cell connecting two zones. IERR 3 is replaced by this.
+- Volume: composite, each gas cell at its finest covering level (R10 rule 2). Generalizes by "finest level covering this cell" without
+  change; use the same covering mask as the leaf mask in R13, so zone volume and wall sums share one definition.
+- Level 0 bit-identity: unchanged (R5). L0 code paths are not touched; `MESH_OBJ` null outside fine routines. Single-level run byte compare
+  and OMP=1 two-level comparison against the previous HEAD still hold for the lev==1 cases; the loop must reproduce today's L1 inventory
+  exactly (test M1).
+
+## R16. Solid Phase: ONE_D/solid state and history for new fine faces (D-N5) [SP]
+
+Based on S1/S2 and this note; the Solid Lead has not confirmed. Proposed, all level independent:
+
+- **Nothing is stored above L0.** TMP_F, Q_CON_F, HTC, U_TANG, TMP_G, RHO_G, ZZ_G, B2 are recomputed from fine gas each step (S1 column 1/2).
+  History (T_IGN, ramp clocks, M_DOT_G_PP_ADJUST, Q_RAD_IN) is read from the **L0 source wall** found through the chain (R12). For a new fine
+  face (no source): `SF%T_IGN`, adjust 1, `EMISSIVITY*SIGMA*TMPA^4` (R3 rules, unchanged).
+- **ONE_D / thermally thick on fine faces:** unsupported at any level above 0 (error), as S1. A thick OBST face refined to level l stays
+  coarse-owned: its L0 wall provides the thermal BC; the fine face reads TMP_F from the L0 source. This is the "static hierarchy" reading of D-010;
+  moving boxes over thick walls are an error. If the Solid Lead later wants fine ONE_D, the history is the problem (new fine faces have no
+  profile): the only well-defined init is "copy and interpolate the L0 profile", which is a separate decision (not proposed here).
+- **Upstream layout fit (S2):** the new work adds fields only to the driver-side `FWALL` records (PLEV, SRCNM, SRCIW). No new upstream hunks.
+  The existing three hunks stay one line each; if upstream splits ONE_D and ALLOCATE_STORAGE changes, apply S2's fallback (allocate BOUNDARY_*
+  directly). The chain walk reads only `B1_INDEX` and named B1 fields of the L0 wall (S2 rule).
+- **Questions for the Solid Lead** (add to R8): (6) is "read L0 source wall at any level" acceptable for 3+ levels? (7) For thin OBST on a coarse
+  level that has no burner state, is `SURF` input enough? (8) Confirm that no ONE_D on levels >= 1 is acceptable for the owner's sealed-compartment
+  tests (these are inert/isothermal, so the answer should be yes).
+- Coordination: the Solid Lead may not respond; the design above is complete without new demands on solid code. If no answer arrives, the
+  default is as above (nothing stored above L0, thick = error).
+
+## R17. Sizing, files, milestones, tests
+
+**Estimate (builds on R7, whose A+B steps are about 5.5 days with R9/R10):** the N-level generalization itself adds the parent-chain helper (about
+60 lines Fortran), the loop in `composite_energy` and leaf hooks (about 40 lines), the zone chain (already in R10), and per-level wall counts.
+**About +2 days**, so about **7.5 days total** (R7 5.5 + 2), and 1 day of that is test infrastructure. Review and Solid Lead round trip +0.5 day,
+done in parallel. Fits on the upstream layout change because only the three driver routines read wall storage.
+
+| Milestone | Content | Test (pass) | Days |
+|---|---|---|---|
+| M0 | wait for the crash fix; add the chain helper without behavior change (lev=1 uses it) | L1 inventory identical to HEAD (wall list compare); L0 bit-identical; `--levels 2` Q lines unchanged | 0.5 |
+| M1 | level-looped builder + exports (R4), no thin yet, P/N/D at any level | **3-level pyramid** (`pyramid_48_4m.fds` variant, half-cell steps at each level): per-IOR wall counts per level equal a single-mesh FDS at that dx; no segfault at L2; closed-domain mass PASS | 1.5 |
+| M2 | leaf sums for N levels (R13) incl. devices, MLR, gate | 3-level static box: composite Q_CONV/COND/DIFF identity: sum over leaf = L0 - covered + fine (exact to round-off); area check: sum of leaf wall areas = same case with levels collapsed; remove 3-level warning | 1.5 |
+| M3 | thin planes per level (R9) + zones through the chain (R10) | thin baffle `XB=1.80,1.83,...`: face count per level = FDS at that dx; zone IDs match covering parent cell by cell; zone without burner D_PBAR_DT = 0 | 1.5 |
+| M4 | regrid: derefinement and OBST re-snap (R14, R10 item 4) | **Owner primary test (R6.0)** with 3 levels, `--regrid-every 2` moving tags: T, Z, PBAR unchanged to round-off every regrid, zones separate, REGRID ZONE-MASS diagnostic equals volume x rho; shifted-wall variant | 1.5 |
+| M5 | burner / N faces (R3) at levels >=2, `--tag-obst-snap` | burner shifted half fine cell at L2: mass flux HRRPUA*A/dH within 1e-12; gate PASS | 1 |
+| review | Solid Lead and Role 2 | questions R16 | 0.5 |
+
+Always-on gates per milestone: L0-only run byte identical; OMP=1 two-level lines/devc against previous HEAD; unit tests (`driver_unit_tests`).
+
+## R18. Risks
+
+1. **Parent-chain across regrid** (high): stale PNM/PIW if a level l-1 is rebuilt without rebuilding level l. Mitigation: rebuild l..finest together;
+   assert parent mesh/wall index in range at build; never cache across regrid.
+2. **Leaf double count at 3 levels** (high): wall covered partly by L2 but wall of L1 itself covered partly L1->L0. Mitigation: telescoping per level
+   pair (R13), tested by the exact identity in M2 against a collapsed hierarchy.
+3. **Crash fix collision** (medium): the executors changing `fds_fine_walls_build` in parallel. Mitigation: M0 starts after their commit;
+   this design needs the crash cause; if it is "no L0 parent for L2 faces" it is R11 item 1 and their fix is subsumed by M0.
+4. **Thin planes on intermediate levels** (medium): L1 thin but L2 solid, interface cuts. Mitigation: `--tag-obst-snap` default on for
+   hierarchies >= 3 levels (see D4).
+5. **Upstream WALL/ONE_D change** (medium): see S2; hidden fine-wall hunks are 3 lines; fallback documented.
+6. **Zone inheritance error cases** (medium): fine cell joining two zones, or rank holding multiple zones (IERR 3 lifted) with MPI: zones across
+   ranks need the same IDs; start single-rank, MPI after.
+7. **Rod/point OBSTs dropped on L0** (low/known): D1.
+8. **Derefinement physics**: intensive state kept, mass changes (D9); repeated regrids drift total mass by design; diagnostics only.
+9. **Performance**: per-step source-wall reads O(1); builder O(boxes) per level; negligible.
+10. **No ONE_D above L0**: limits thermally thick fine walls to the L0 owner; an owner who wants fine thick walls needs a new design.
+
+## R19. Status and recommendation for each open decision
+
+| D | Status | Recommendation |
+|---|---|---|
+| D1 rod/point OBST dropped on L0 | Open (owner) | Accept exception: FDS drops them on L0; always tag them to the finest level they exist on and log. Cannot be fixed without touching L0. |
+| D2 L0 never re-snapped/masked | Settled in the note (R2 pt 2); owner has implied it ("level 0 bit-identical") | Confirm: yes. |
+| D3 levels >=1 follow FDS snap, thin as blocked faces with two walls | Agreed in note, not yet implemented | Adopt; N-level: each level uses its own dx (R9). |
+| D4 `--tag-obst-snap` | Open | Default **on** whenever levels >= 3 or any OBST snap differs; off otherwise (existing baselines hold). Cheap and prevents interface-cuts-OBST at intermediate levels. |
+| D5 no-parent faces history source = nearest L0 wall of same OBST/IOR, else SURF input | Needs Solid Lead sign-off (R8 1-2, R16) | Adopt with the chain walk; fall back to SURF input; no response = proceed as designed. |
+| D6 live fine walls in fine kernels | Out of scope, separate | Keep hidden walls; design leaves a clean upgrade path (leaf walls are already the right set). |
+| D7 zone IDs from L0, inherited per level, never renumbered | Agreed in note | Adopt; implement via level-(l-1) chain (R15), lift IERR 3. |
+| D8 composite zone volume from finest level | Agreed | Adopt; same mask as the R13 leaf definition. |
+| D9 derefinement keeps T/Z/PBAR/D, mass change diagnostic only | Owner decided | Adopt as written; gate test M4. |
+
+New decisions introduced here (need owner yes/no): **D-N1** one level-looped builder with chain parents (R12); **D-N2** leaf sums by telescoping
+per level pair (R13); **D-N3** rebuild l..finest together at regrid, nothing cached (R14); **D-N4** zone inheritance via level l-1 (R15);
+**D-N5** nothing stored above L0, thick/ONE_D unsupported above L0 (R16, [SP]).
