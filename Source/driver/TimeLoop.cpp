@@ -93,6 +93,7 @@ void fds_p_add_mass(double dt, const double* v);
 void fds_p_add_qdot(int n, double v);
 double fds_p_enthalpy_sum(int nm);
 void fds_p_get_qr(int nm, double* buf, long ntot);
+int fds_p_pend(int nm, int mode, double* buf, long ntot);
 void fds_p_dens_pre(double t, double dt, int nm);
 void fds_p_init_div();
 void fds_p_zone_get(int n, double* d, double* p, double* u);
@@ -332,14 +333,90 @@ struct TimeLoop::Impl {
         ++layout_gen;
         dt_new.resize(total_boxes(), L.m_dt);
         chg.resize(total_boxes(), 0);
+        pend_restore(lev);
         fine_burner_state(false);   // burner face lists of the new box layout: the first stage after a (re)bind applies them in its flux override, a list kept from the old layout has faces outside the new boxes
         select(0);
 #endif
+    }
+    // Pending reaction source over a regrid: COMBUSTION of the last step wrote M_DOT_PPP / D_SOURCE, DENSITY and DIVERGENCE of the next step consume them, but the rebuilt fine box
+    // objects start with zeros, so the fuel of that step would burn twice (it is also in the transferred state's reactants). unbind_level keeps the source of the old fine boxes,
+    // bind_level puts it back on the overlap of old and new boxes; a new fine cell takes the value of its parent cell (level lev-1 runs combustion on covered cells too).
+    struct PendBox { amrex::Box bx; std::vector<double> v; };   // v: (bx grown by 1, nc) as fds_p_pend
+    std::vector<std::vector<PendBox>> pend;                      // pend[lev]
+    static amrex::Box pend_gbox(const amrex::Box& b) { return amrex::grow(b, 1); }
+    void pend_save(int lev)
+    {
+        if (static_cast<int>(pend.size()) <= lev) pend.resize(lev + 1);
+        std::vector<PendBox>& P = pend[lev];
+        P.clear();
+        const Level& Lv = L.m_reg->level(lev);
+        const int me = amrex::ParallelDescriptor::MyProc();
+        for (int i = 0; i < static_cast<int>(Lv.ba.size()); ++i) {
+            if (Lv.dm[i] != me) continue;
+            PendBox pb; pb.bx = Lv.ba[i];
+            const long np = static_cast<long>(pend_gbox(pb.bx).numPts());
+            pb.v.assign(np * (nt + 1), 0.0);
+            const int nc = fds_p_pend(lc[lev].fds0 + i + 1, 0, pb.v.data(), static_cast<long>(pb.v.size()));
+            if (nc <= 0) { P.clear(); return; }   // no reaction arrays (or a size mismatch: nothing to carry)
+            P.push_back(std::move(pb));
+        }
+    }
+    void pend_restore(int lev)
+    {
+        if (static_cast<int>(pend.size()) <= lev || pend[lev].empty()) return;
+        if (std::getenv("FDSTL_NO_PEND_RESTORE")) { pend[lev].clear(); return; }   // reproducer of the double-burn after a regrid (the pending source dropped as before)
+        std::vector<PendBox> old = std::move(pend[lev]);
+        pend[lev].clear();
+        const Level& Lv = L.m_reg->level(lev);
+        const Level& Lp = L.m_reg->level(lev - 1);
+        const amrex::IntVect rr(Lv.ref_ratio_from_parent);
+        const int me = amrex::ParallelDescriptor::MyProc();
+        const int ncomp = nt + 1;
+        for (int i = 0; i < static_cast<int>(Lv.ba.size()); ++i) {
+            if (Lv.dm[i] != me) continue;
+            const amrex::Box vb = Lv.ba[i], gb = pend_gbox(vb);
+            const long np = static_cast<long>(gb.numPts());
+            std::vector<double> buf(np * ncomp, 0.0);
+            const int nm = lc[lev].fds0 + i + 1;
+            if (fds_p_pend(nm, 0, buf.data(), static_cast<long>(buf.size())) <= 0) continue;   // new box starts as zeros (read just to learn the layout is valid)
+            // parent values: the level lev-1 boxes (own process) that hold the coarse cell
+            std::vector<PendBox> par;
+            const amrex::Box cb = amrex::coarsen(vb, rr);
+            for (int j = 0; j < static_cast<int>(Lp.ba.size()); ++j) {
+                if (Lp.dm[j] != me || !(Lp.ba[j] & cb).ok()) continue;
+                PendBox pb; pb.bx = Lp.ba[j];
+                pb.v.assign(static_cast<long>(pend_gbox(pb.bx).numPts()) * ncomp, 0.0);
+                if (fds_p_pend(lc[lev - 1].fds0 + j + 1, 0, pb.v.data(), static_cast<long>(pb.v.size())) <= 0) { pb.v.clear(); }
+                par.push_back(std::move(pb));
+            }
+            auto at = [&](const PendBox& pb, int ii, int jj, int kk, int c) {
+                const amrex::Box g = pend_gbox(pb.bx);
+                const long np2 = static_cast<long>(g.numPts());
+                const long o = (ii - g.smallEnd(0)) + static_cast<long>(g.length(0)) * ((jj - g.smallEnd(1)) + static_cast<long>(g.length(1)) * (kk - g.smallEnd(2)));
+                return pb.v[o + np2 * c];
+            };
+            for (int k = vb.smallEnd(2); k <= vb.bigEnd(2); ++k)
+                for (int j = vb.smallEnd(1); j <= vb.bigEnd(1); ++j)
+                    for (int ii = vb.smallEnd(0); ii <= vb.bigEnd(0); ++ii) {
+                        const amrex::IntVect iv(ii, j, k);
+                        const PendBox* src = nullptr; amrex::IntVect siv = iv;
+                        for (const PendBox& ob : old) if (ob.bx.contains(iv)) { src = &ob; break; }
+                        if (!src) {
+                            siv = amrex::coarsen(iv, rr);
+                            for (const PendBox& pb : par) if (!pb.v.empty() && pb.bx.contains(siv)) { src = &pb; break; }
+                        }
+                        if (!src) continue;
+                        const long o = (ii - gb.smallEnd(0)) + static_cast<long>(gb.length(0)) * ((j - gb.smallEnd(1)) + static_cast<long>(gb.length(1)) * (k - gb.smallEnd(2)));
+                        for (int c = 0; c < ncomp; ++c) buf[o + np * c] = at(*src, siv[0], siv[1], siv[2], c);
+                    }
+            fds_p_pend(nm, 1, buf.data(), static_cast<long>(buf.size()));
+        }
     }
     void unbind_level(int lev)
     {
 #ifdef FDS_HAVE_FINE_LEVEL
         if (lev < 1 || lev != static_cast<int>(lc.size()) - 1) die("unbind_level(" + std::to_string(lev) + "): only the top bound level (> 0) can be unbound");
+        pend_save(lev);
         if (fds_fine_level_destroy(lev) != 0) die("unbind_level: fds_fine_level_destroy failed");
         lc.pop_back();
         ++layout_gen;
