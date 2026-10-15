@@ -342,9 +342,9 @@ Poisson residual tolerance); the count of steps with fine div > max(2·L0, 1e-10
 
 | Case | Script | Steps / stop | Wall time | Mass ratio | Z1 / Z2 / Z3 ratios | Worst \|div\| (level, step) | FLUXMATCH | Gate |
 |---|---|---|---|---|---|---|---|---|
-| L0 only | `run_simple_test_l0.sh` | 451 steps, `T_END=5` | ~11 min | 0.222 | 0.390 / 0.598 / 1.05e-11 | 1.70e-13 (L0) | n/a (no C/F; stale 0) | PASS |
-| 2-level | `run_simple_test_l2.sh` | 869 steps, `T_END=5` | ~5 min | 0.226 | 0.397 / 0.609 / 3.4e-11 | 1.38e-10 (fine; step 352) | stale 0 (when 0005 present) | FAIL only on fine-div step count (29) |
-| 3-level | `run_simple_test_l3.sh` | 2000 steps (`t=4.709`) | ~80 min | 0.226 | 1.496 / 0.552 / 1.075 | 0.217 (L1, step 1980); L0 3.61e-11; L2 7.72e-10 | ADV worst Z1/Z2/Z3/rho 0.769/0.0125/0.126/0.646; DIF 0.0394/0.00180/0.0394/1.6e-16; stale 0 | FAIL (species Z1/Z3 and L1 div spikes; 1335 fine-div steps) |
+| L0 only | `run_simple_test_l0.sh` | 451 steps, `T_END=5` | 46 s | 7.65e-8 | 5.9e-8 / 3.3e-13 / 1.05e-11 | 1.70e-13 (L0) | n/a (no C/F; stale 0) | PASS |
+| 2-level | `run_simple_test_l2.sh` (`--tag-vort auto --tag-temp`) | 917 steps, `T_END=5` | 940 s | 1.10e-6 | 5.45e-7 / 1.03e-12 / 2.54e-12 | 1.61e-10 (fine; step 327) | ADV worst Z1/Z2/Z3/rho 0.364/0.0172/0.245/0.244; DIF 0.0200/4.3e-4/0.0197/1e-16; stale 0 | PASS |
+| 3-level | `run_simple_test_l3.sh` | pending: movie run in progress (`vv-runs/owner-show/movies/oct14/simple_test_l3_run`) | | | | | | to be filled from that run |
 
 Level-0 numbers are from a matching `fds_amr` binary with `--levels 1` (451 steps to `T_END=5`). 2-level and 3-level numbers are from the Role-3 species gate logs (`r5_wbc`, `r3lev`) on the binary with 0004+0005+0006.
 The 3-level run keeps mass at the same 0.226 ratio as 2-level and passes the flux-register stale gate (0), but
