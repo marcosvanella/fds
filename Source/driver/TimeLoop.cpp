@@ -894,6 +894,38 @@ struct TimeLoop::Impl {
         }
         // FDS's own order: the kernels accumulated DSUM/PSUM/USUM per rank in box order; then the MPI_SUM reduction of INITIALIZE_DIVERGENCE_INTEGRALS' partner (main.f90 ~2111)
         amrex::ParallelAllReduce::Sum(fds_loc.data(), 3 * nzone, amrex::ParallelContext::CommunicatorSub());
+        if (multi()) {
+            // composite zone integrals: the kernels' sums count every L0 cell (also those under a finer level) and the fine boxes' cells on top, so D_PBAR_DT (= (DSUM-USUM)/PSUM) would
+            // be calibrated on a cell set that is not the composite one and the composite integral of D would not vanish (blob offset). Sum each cell once: uncovered cells of every level.
+            std::vector<int> g; std::vector<double> v;
+            for_levels([&](int l) {
+                const amrex::iMultiFab* cov = L.m_reg ? L.m_reg->covered_mask(l) : nullptr;
+                const amrex::MultiFab& RZ = (*c->F)[pred ? "ZZS" : "ZZ"];
+                for (amrex::MFIter mfi(RZ); mfi.isValid(); ++mfi) {
+                    const int nm = c->fds0 + mfi.index() + 1;
+                    const amrex::Box b = mfi.validbox();
+                    const long nc = b.numPts();
+                    const int nw = (l == 0) ? mip[16 * (nm - 1) + 7] : 0;
+                    std::vector<int> cz(nc), wz(std::max(nw, 1)); std::vector<double> dt_(nc), pt(nc), wt(std::max(nw, 1));
+                    fds_p_zone_terms(nm, cz.data(), dt_.data(), pt.data(), wz.data(), wt.data());
+                    amrex::Array4<const int> cv; if (cov) cv = cov->const_array(mfi);
+                    const auto dp = (*c->F)[pred ? "DS" : "D"].const_array(mfi);   // fine boxes: the Field's D (the mesh object's DP is not what the composite divergence part 1 left)
+                    const double dvol = c->lev->dx[0] * c->lev->dx[1] * c->lev->dx[2];
+                    long q = 0;
+                    amrex::LoopOnCpu(b, [&](int i, int j, int k) {
+                        const long cc = q++;
+                        if (cz[cc] <= 0 || (cov && cv(i, j, k) != 0)) return;
+                        g.push_back(cz[cc] - 1); v.push_back(l == 0 ? dt_[cc] : dvol * dp(i, j, k));
+                        g.push_back(nzone + cz[cc] - 1); v.push_back(pt[cc]);
+                    });
+                    for (int w = 0; w < nw; ++w) if (wz[w] > 0) { g.push_back(2 * nzone + wz[w] - 1); v.push_back(wt[w]); }
+                }
+            });
+            const std::vector<double> s = exact_group_sums(3 * nzone, g, v);
+            if (std::getenv("FDSTL_ZONES")) for (int z = 0; z < nzone; ++z) amrex::Print() << "  [zone] icyc " << L.m_icyc << (pred ? " P " : " C ") << "composite DSUM " << std::setprecision(17) << s[z] << " PSUM " << s[nzone + z] << " USUM " << s[2 * nzone + z] << "\n";
+            fds_p_zone_set(nzone, s.data(), s.data() + nzone, s.data() + 2 * nzone);
+            return;
+        }
         if (!diag) {
             if (std::getenv("FDSTL_ZONES")) for (int z = 0; z < nzone; ++z) amrex::Print() << "  [zone] icyc " << L.m_icyc << (pred ? " P " : " C ") << "FDS order DSUM " << std::setprecision(17) << fds_loc[z] << " PSUM " << fds_loc[nzone + z] << " USUM " << fds_loc[2 * nzone + z] << "\n";
             fds_p_zone_set(nzone, fds_loc.data(), fds_loc.data() + nzone, fds_loc.data() + 2 * nzone);

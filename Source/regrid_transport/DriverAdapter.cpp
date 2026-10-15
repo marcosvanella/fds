@@ -5,6 +5,7 @@
 
 #include "LevelOps.H"
 #include "PressureBackendSolver.H"
+#include "PressureIface.H"
 
 namespace fdsrt {
 
@@ -152,6 +153,28 @@ void install_post_regrid_projection(RegridAmrCore& core, fdsamr::LevelRegistry& 
         std::vector<ProjectionLevel> lv = registry_projection_levels(*rp, *cp, sp->D);
         if (sp->before) sp->before(lv);
         if (const auto* pbs = dynamic_cast<const PressureBackendSolver*>(sp->solver)) zero_neumann_face_velocity(lv, pbs->face_neumann);
+        if (const auto* pbs = dynamic_cast<const PressureBackendSolver*>(sp->solver)) {
+            // Closed or periodic domain (no Dirichlet face): the pressure solve is singular and takes the mean out of its right-hand side, so a target D whose composite integral is not zero
+            // (the regrid moved cells between the coarse and the fine D) would leave div u - D = -mean(D) everywhere. Take the mean out of D itself: the same D that the projection targets.
+            bool dirichlet = false;
+            for (int f = 0; f < 6; ++f) dirichlet = dirichlet || pbs->face_bc[f] == static_cast<int>(pb::BC::Dirichlet);
+            if (!dirichlet && lv.size() > 1) {
+                double sum = 0.0, vol_all = 0.0;
+                for (const ProjectionLevel& pl : lv) {
+                    if (!pl.D) continue;
+                    const double vol = pl.geom.CellSize(0) * pl.geom.CellSize(1) * pl.geom.CellSize(2);
+                    for (amrex::MFIter mfi(*pl.D); mfi.isValid(); ++mfi) {
+                        auto d = pl.D->const_array(mfi);
+                        amrex::Array4<const int> cv; if (pl.covered) cv = pl.covered->const_array(mfi);
+                        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (pl.covered && cv(i, j, k) != 0) return; sum += vol * d(i, j, k); vol_all += vol; });
+                    }
+                }
+                amrex::ParallelDescriptor::ReduceRealSum(sum);
+                amrex::ParallelDescriptor::ReduceRealSum(vol_all);
+                const double mean = vol_all > 0.0 ? sum / vol_all : 0.0;
+                for (const ProjectionLevel& pl : lv) if (pl.D) const_cast<amrex::MultiFab*>(pl.D)->plus(-mean, 0, 1, 0);
+            }
+        }
         ProjectionOptions o = sp->options;
         o.enabled = true;
         sp->last = project_after_regrid(lv, sp->solver, o);
