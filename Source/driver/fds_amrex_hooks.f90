@@ -95,19 +95,20 @@ PROCEDURE(LEAF_BOX_IF), POINTER, PUBLIC, SAVE :: LEAF_BOX_PROC => NULL()
 PROCEDURE(LEAF_FINEST_IF), POINTER, PUBLIC, SAVE :: LEAF_FINEST_PROC => NULL()
 
 !> Leaf wall devices (UPDATE_DEVICES_1 SPATIAL_STATISTIC over walls; registered with the hidden fine walls, fds_fine_level.f90): for a quantity index QI whose hidden fine wall value
-!> differs from its parent's (the FINE_DEVC set) LEAF_WALL_COUNT(NM,QI) is the number of hidden fine walls on level-0 mesh NM, LEAF_WALL(NM,K,WC,BC,B1,V) the K-th (its WALL, BOUNDARY_COORD and
-!> BOUNDARY_PROP1 entries, value V, box number as result) and LEAF_WALL_COVERED(NM,IW) tells that level-0 wall IW has fine children (its share is then the fine walls').
+!> differs from its parent's (the FINE_DEVC set) LEAF_WALL_COUNT(NM,QI) is the number of hidden fine walls on level-0 mesh NM, LEAF_WALL(NM,K,QI,WC,BC,B1,V,IWP) the K-th (its WALL, BOUNDARY_COORD and
+!> BOUNDARY_PROP1 entries, value V, parent wall index IWP, box number as result) and LEAF_WALL_COVERED(NM,IW) tells that level-0 wall IW has fine children (its share is then the fine walls').
 ABSTRACT INTERFACE
    INTEGER FUNCTION LEAF_WALL_COUNT_IF(NM,QI)
       INTEGER, INTENT(IN) :: NM,QI
    END FUNCTION LEAF_WALL_COUNT_IF
-   INTEGER FUNCTION LEAF_WALL_IF(NM,K,QI,WC,BC,B1,V)
+   INTEGER FUNCTION LEAF_WALL_IF(NM,K,QI,WC,BC,B1,V,IWP)
       IMPORT :: EB,WALL_TYPE,BOUNDARY_COORD_TYPE,BOUNDARY_PROP1_TYPE
       INTEGER, INTENT(IN) :: NM,K,QI
       TYPE(WALL_TYPE), POINTER :: WC
       TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
       TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
       REAL(EB), INTENT(OUT) :: V
+      INTEGER, INTENT(OUT) :: IWP
    END FUNCTION LEAF_WALL_IF
    LOGICAL FUNCTION LEAF_WALL_COVERED_IF(NM,IW)
       INTEGER, INTENT(IN) :: NM,IW

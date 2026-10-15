@@ -23,7 +23,7 @@ USE PRES, ONLY: PRESSURE_SOLVER_COMPUTE_RHS,PRESSURE_SOLVER_CHECK_RESIDUALS,COMP
 USE VELO, ONLY: NO_FLUX,BAROCLINIC_CORRECTION
 USE MASS, ONLY: MASS_FINITE_DIFFERENCES,DENSITY
 USE FDS_DENSITY_SPLIT, ONLY: DENSITY_PRE_CLIP
-USE FDS_AMREX_HOOKS, ONLY: FDS_HOOK_FINE_GUARD,FDS_HOOK_L0_ONLY,FDS_HOOK_SHADOW
+USE FDS_AMREX_HOOKS, ONLY: FDS_HOOK_FINE_GUARD,FDS_HOOK_L0_ONLY,FDS_HOOK_SHADOW,LEAF_WALL_COUNT_PROC,LEAF_WALL_PROC,LEAF_WALL_COVERED_PROC
 USE FDS_BOX_OBJ, ONLY: BOX_OBJ
 
 IMPLICIT NONE (TYPE,EXTERNAL)
@@ -36,7 +36,8 @@ PUBLIC :: FDS_P_PARAMS,FDS_P_MESH_INFO,FDS_P_GET,FDS_P_MFD,FDS_P_DENS,FDS_P_DENS
 
 PUBLIC :: FDS_P_SET_LEGACY_SAVE_GUARD,FDS_P_BND_RATE,FDS_P_MSUMS,FDS_P_ADD_MASS,FDS_P_NMASS
 
-REAL(EB), ALLOCATABLE, SAVE :: BND_RATE(:,:,:)   !< (0:N_TRACKED_SPECIES+1,NMESHES,stage) level-0 wall inflow rate (N_TRACKED_SPECIES+1: through-flow) (kg/s), BND_STAGE_RATE
+REAL(EB), ALLOCATABLE, SAVE :: BND_RATE(:,:,:)   !< (0:N_TRACKED_SPECIES+1,box,stage) leaf wall inflow rate (N_TRACKED_SPECIES+1: through-flow) (kg/s), BND_STAGE_RATE: level-0 walls without hidden fine children, per fine box NM>NMESHES its hidden walls
+INTEGER, ALLOCATABLE, SAVE :: BND_STAMP(:,:)   !< (box,stage) ICYC of the last BND_STAGE_RATE call of a fine box (a box dropped by a regrid keeps an old stamp and is not summed)
 
 !> Test switch (tests/run_stage_boundary_fine_check.sh): restore the guard fds_p_save_uvw had before S14.1 (level-0 numbers only), so that the test can show that a fine box number aborted there.
 LOGICAL, SAVE :: SAVE_UVW_LEGACY_GUARD = .FALSE.
@@ -178,45 +179,89 @@ CALL BND_STAGE_RATE(NM)
 CALL FDS_HOOK_SHADOW(1,10,NM,0._EB,0._EB,0,0._EB,0)
 END SUBROUTINE FDS_P_MFD
 
-!> Mass rate (kg/s) that DENSITY moves through the wall faces of level-0 mesh NM in this stage, kept per mesh and stage (a repeated call overwrites):
-!> advective RHO_F*ZZ_F*u_in (the FX override of MASS_FINITE_DIFFERENCES, UU = U or US) and diffusive -RHO_D_DZDN_F, times the face area.
+!> Mass rate (kg/s) that DENSITY moves through the leaf wall faces in this stage, kept per box and stage (a repeated call overwrites): level-0 mesh NM (<=NMESHES) the walls without hidden fine
+!> children, fine box NM its hidden fine walls (the face velocity and area of the box, the state RHO_F, ZZ_F, RHO_D_DZDN_F of the parent wall). Per wall: advective RHO_F*ZZ_F*u_in (the FX
+!> override of MASS_FINITE_DIFFERENCES, UU = U or US) and diffusive -RHO_D_DZDN_F, times the face area.
 SUBROUTINE BND_STAGE_RATE(NM)
+USE MESH_POINTERS, ONLY: POINT_TO_BOX,PU=>U,PV=>V,PW=>W,PUS=>US,PVS=>VS,PWS=>WS,PDX=>DX,PDY=>DY,PDZ=>DZ
+USE TYPES, ONLY: WALL_TYPE,BOUNDARY_COORD_TYPE,BOUNDARY_PROP1_TYPE
 INTEGER, INTENT(IN) :: NM
-INTEGER :: IW,IC,ST
-REAL(EB) :: UIN,A
+INTEGER :: IW,ST,NMP,K,IWP,NBX
+REAL(EB) :: V
 REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW
+REAL(EB), POINTER, DIMENSION(:) :: DXP,DYP,DZP
 TYPE(MESH_TYPE), POINTER :: M
-IF (NM>NMESHES) RETURN   ! fine boxes have no wall cells
-IF (.NOT.ALLOCATED(BND_RATE)) THEN ; ALLOCATE(BND_RATE(0:N_TRACKED_SPECIES+1,NMESHES,2)) ; BND_RATE = 0._EB ; ENDIF
-M => MESHES(NM)
+TYPE(WALL_TYPE), POINTER :: WCF
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BCF
+TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1F
+IF (.NOT.ALLOCATED(BND_RATE)) THEN ; ALLOCATE(BND_RATE(0:N_TRACKED_SPECIES+1,NMESHES,2),BND_STAMP(NMESHES,2)) ; BND_RATE = 0._EB ; BND_STAMP = 0 ; ENDIF
+IF (NM>SIZE(BND_RATE,2)) THEN   ! a fine box: grow the table
+   BLOCK
+   REAL(EB), ALLOCATABLE :: R2(:,:,:)
+   INTEGER, ALLOCATABLE :: S2(:,:)
+   ALLOCATE(R2(0:N_TRACKED_SPECIES+1,NM,2),S2(NM,2)) ; R2 = 0._EB ; S2 = 0
+   R2(:,1:SIZE(BND_RATE,2),:) = BND_RATE ; S2(1:SIZE(BND_RATE,2),:) = BND_STAMP
+   CALL MOVE_ALLOC(R2,BND_RATE) ; CALL MOVE_ALLOC(S2,BND_STAMP)
+   END BLOCK
+ENDIF
 ST = MERGE(1,2,PREDICTOR)
-IF (PREDICTOR) THEN ; UU=>M%U ; VV=>M%V ; WW=>M%W ; ELSE ; UU=>M%US ; VV=>M%VS ; WW=>M%WS ; ENDIF
 BND_RATE(:,NM,ST) = 0._EB
+IF (NM>NMESHES) BND_STAMP(NM,ST) = ICYC
 IF (FDS_P_DENS_SKIP()/=0) RETURN   ! DENSITY moves no mass this stage (first step ICYC<=1 etc.): no wall inflow either
-DO IW=1,M%N_EXTERNAL_WALL_CELLS+M%N_INTERNAL_WALL_CELLS
-   ASSOCIATE(WC=>M%WALL(IW))
-   IF (WC%BOUNDARY_TYPE/=SOLID_BOUNDARY .AND. WC%BOUNDARY_TYPE/=OPEN_BOUNDARY) CYCLE
-   ASSOCIATE(BC=>M%BOUNDARY_COORD(WC%BC_INDEX),B1=>M%BOUNDARY_PROP1(WC%B1_INDEX))
-   IC = M%CELL_INDEX(BC%II,BC%JJ,BC%KK)
-   IF (WC%BOUNDARY_TYPE==SOLID_BOUNDARY .AND. .NOT.M%CELL(IC)%SOLID .AND. .NOT.M%CELL(IC)%EXTERIOR) CYCLE   ! thin obstruction: FX = 0
-   SELECT CASE(BC%IOR)
-      CASE( 1) ; UIN =  UU(BC%IIG-1,BC%JJG,BC%KKG) ; A = M%DY(BC%JJG)*M%DZ(BC%KKG)
-      CASE(-1) ; UIN = -UU(BC%IIG,BC%JJG,BC%KKG)   ; A = M%DY(BC%JJG)*M%DZ(BC%KKG)
-      CASE( 2) ; UIN =  VV(BC%IIG,BC%JJG-1,BC%KKG) ; A = M%DX(BC%IIG)*M%DZ(BC%KKG)
-      CASE(-2) ; UIN = -VV(BC%IIG,BC%JJG,BC%KKG)   ; A = M%DX(BC%IIG)*M%DZ(BC%KKG)
-      CASE( 3) ; UIN =  WW(BC%IIG,BC%JJG,BC%KKG-1) ; A = M%DX(BC%IIG)*M%DY(BC%JJG)
-      CASE(-3) ; UIN = -WW(BC%IIG,BC%JJG,BC%KKG)   ; A = M%DX(BC%IIG)*M%DY(BC%JJG)
+IF (NM<=NMESHES) THEN
+   M => MESHES(NM)
+   IF (PREDICTOR) THEN ; UU=>M%U ; VV=>M%V ; WW=>M%W ; ELSE ; UU=>M%US ; VV=>M%VS ; WW=>M%WS ; ENDIF
+   DO IW=1,M%N_EXTERNAL_WALL_CELLS+M%N_INTERNAL_WALL_CELLS
+      IF (ASSOCIATED(LEAF_WALL_COVERED_PROC)) THEN
+         IF (LEAF_WALL_COVERED_PROC(NM,IW)) CYCLE   ! its hidden fine walls carry this share
+      ENDIF
+      CALL ONE_WALL(M,IW,M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX),M%DX,M%DY,M%DZ)
+   ENDDO
+ELSE
+   IF (.NOT.ASSOCIATED(LEAF_WALL_COUNT_PROC)) RETURN
+   CALL POINT_TO_BOX(NM)
+   IF (PREDICTOR) THEN ; UU=>PU ; VV=>PV ; WW=>PW ; ELSE ; UU=>PUS ; VV=>PVS ; WW=>PWS ; ENDIF
+   DXP=>PDX ; DYP=>PDY ; DZP=>PDZ
+   DO NMP=1,NMESHES
+      DO K=1,LEAF_WALL_COUNT_PROC(NMP,-1)
+         NBX = LEAF_WALL_PROC(NMP,K,-1,WCF,BCF,B1F,V,IWP)
+         IF (NBX==NM) CALL ONE_WALL(MESHES(NMP),IWP,BCF,DXP,DYP,DZP)
+      ENDDO
+   ENDDO
+ENDIF
+
+CONTAINS
+
+   !> Rate through the face of wall IW of level-0 mesh MP (its state B1, type, thin-obstruction test) with the geometry BCG (BC%IOR, IIG.. in the box of UU/VV/WW and DXP.. cell sizes).
+   SUBROUTINE ONE_WALL(MP,IW,BCG,DXP,DYP,DZP)
+   TYPE(MESH_TYPE), INTENT(IN) :: MP
+   INTEGER, INTENT(IN) :: IW
+   TYPE(BOUNDARY_COORD_TYPE), INTENT(IN) :: BCG
+   REAL(EB), INTENT(IN) :: DXP(0:),DYP(0:),DZP(0:)
+   INTEGER :: IC
+   REAL(EB) :: UIN,A
+   ASSOCIATE(WC=>MP%WALL(IW),BCP=>MP%BOUNDARY_COORD(MP%WALL(IW)%BC_INDEX),B1=>MP%BOUNDARY_PROP1(MP%WALL(IW)%B1_INDEX))
+   IF (WC%BOUNDARY_TYPE/=SOLID_BOUNDARY .AND. WC%BOUNDARY_TYPE/=OPEN_BOUNDARY) RETURN
+   IC = MP%CELL_INDEX(BCP%II,BCP%JJ,BCP%KK)
+   IF (WC%BOUNDARY_TYPE==SOLID_BOUNDARY .AND. .NOT.MP%CELL(IC)%SOLID .AND. .NOT.MP%CELL(IC)%EXTERIOR) RETURN   ! thin obstruction: FX = 0
+   SELECT CASE(BCG%IOR)
+      CASE( 1) ; UIN =  UU(BCG%IIG-1,BCG%JJG,BCG%KKG) ; A = DYP(BCG%JJG)*DZP(BCG%KKG)
+      CASE(-1) ; UIN = -UU(BCG%IIG,BCG%JJG,BCG%KKG)   ; A = DYP(BCG%JJG)*DZP(BCG%KKG)
+      CASE( 2) ; UIN =  VV(BCG%IIG,BCG%JJG-1,BCG%KKG) ; A = DXP(BCG%IIG)*DZP(BCG%KKG)
+      CASE(-2) ; UIN = -VV(BCG%IIG,BCG%JJG,BCG%KKG)   ; A = DXP(BCG%IIG)*DZP(BCG%KKG)
+      CASE( 3) ; UIN =  WW(BCG%IIG,BCG%JJG,BCG%KKG-1) ; A = DXP(BCG%IIG)*DYP(BCG%JJG)
+      CASE(-3) ; UIN = -WW(BCG%IIG,BCG%JJG,BCG%KKG)   ; A = DXP(BCG%IIG)*DYP(BCG%JJG)
    END SELECT
    BND_RATE(0,NM,ST) = BND_RATE(0,NM,ST) + A*B1%RHO_F*UIN
    BND_RATE(1:N_TRACKED_SPECIES,NM,ST) = BND_RATE(1:N_TRACKED_SPECIES,NM,ST) + A*(B1%RHO_F*B1%ZZ_F*UIN - B1%RHO_D_DZDN_F)
    IF (WC%BOUNDARY_TYPE==OPEN_BOUNDARY .OR. SURFACE(B1%SURF_INDEX)%SPECIES_BC_INDEX==SPECIFIED_MASS_FLUX) &
       BND_RATE(N_TRACKED_SPECIES+1,NM,ST) = BND_RATE(N_TRACKED_SPECIES+1,NM,ST) + A*B1%RHO_F*ABS(UIN)   ! through-flow (in plus out) of OPEN and mass-flux walls: > 0 marks an open case
    END ASSOCIATE
-   END ASSOCIATE
-ENDDO
+   END SUBROUTINE ONE_WALL
+
 END SUBROUTINE BND_STAGE_RATE
 
-!> Level-0 wall inflow rate of the last step (kg/s, rank-local): the mean of the predictor and corrector rates (DENSITY averages the two stages);
+!> Leaf wall inflow rate of the last step (kg/s, rank-local): the mean of the predictor and corrector rates (DENSITY averages the two stages);
 !> R(0) total, R(N) tracked species N = 1..NS (0 beyond N_TRACKED_SPECIES), R(NS+1) through-flow (inflow plus outflow). The driver multiplies by DT.
 SUBROUTINE FDS_P_BND_RATE(NS,R) BIND(C,NAME='fds_p_bnd_rate')
 INTEGER(C_INT), VALUE :: NS
@@ -224,7 +269,9 @@ REAL(C_DOUBLE), INTENT(OUT) :: R(0:NS+1)
 INTEGER :: NM
 R = 0._EB
 IF (.NOT.ALLOCATED(BND_RATE)) RETURN
-DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+DO NM=LOWER_MESH_INDEX,SIZE(BND_RATE,2)   ! level-0 meshes of this rank, then the fine boxes called in this step (both stages)
+   IF (NM>UPPER_MESH_INDEX .AND. NM<=NMESHES) CYCLE
+   IF (NM>NMESHES .AND. ANY(BND_STAMP(NM,:)/=ICYC)) CYCLE
    R(NS+1) = R(NS+1) + 0.5_EB*(BND_RATE(N_TRACKED_SPECIES+1,NM,1)+BND_RATE(N_TRACKED_SPECIES+1,NM,2))
    R(0:MIN(NS,N_TRACKED_SPECIES)) = R(0:MIN(NS,N_TRACKED_SPECIES)) + 0.5_EB*(BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,1)+BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,2))
 ENDDO
