@@ -27,6 +27,7 @@
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
 extern "C" void fds_p_bnd_rate(int ns, double* r);
+extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
 extern "C" int fds_p_reac_coef(int ns, double* c);   // fds_step.f90: species production per unit heat release (one reaction), else 0
 extern "C" void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);   // T_END etc.   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
 extern "C" int fds_find_tracked_species(const char* name);  // fds_mesh_query.f90; 0-based ZZ index or -1
@@ -460,6 +461,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     std::vector<double> fm_worst[2];
     long stale_regs = 0;
     int nl_now = nl;
+    double deref_worst = 0.0, deref_div = 0.0; int deref_n = 0;   // ISO-DR gate: worst relative change of T/Z/p0 over derefining regrids, worst div u - D after them
     for (int s = 1; s <= o.steps; ++s) {
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         fds_p_bnd_rate(ns, r.data());
@@ -472,6 +474,15 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         {
             const int ri = core.amr_params().regrid_interval;
             if (ri > 0 && s % ri == 0) {
+                // ISO-DR gate: snapshot of the level-0 T, Z and the background pressure; compared after the regrid when it removed a level (derefinement keeps them: owner rule)
+                const int fb0 = core.finestLevel();
+                const amrex::MultiFab* ft0 = reg.fields(0).has("TMP") ? &reg.fields(0)["TMP"] : nullptr;
+                const amrex::MultiFab* fz0 = reg.fields(0).has("ZZ") ? &reg.fields(0)["ZZ"] : nullptr;
+                std::unique_ptr<amrex::MultiFab> snap_t, snap_z;
+                if (ft0) { snap_t.reset(new amrex::MultiFab(ft0->boxArray(), ft0->DistributionMap(), 1, 0)); amrex::MultiFab::Copy(*snap_t, *ft0, 0, 0, 1, 0); }
+                if (fz0) { snap_z.reset(new amrex::MultiFab(fz0->boxArray(), fz0->DistributionMap(), fz0->nComp(), 0)); amrex::MultiFab::Copy(*snap_z, *fz0, 0, 0, fz0->nComp(), 0); }
+                std::vector<std::vector<double>> snap_p(reg.level(0).ba.size());
+                for (int i = 0; i < static_cast<int>(snap_p.size()); ++i) if (reg.level(0).dm[i] == amrex::ParallelDescriptor::MyProc()) { snap_p[i].assign(4096, 0.0); int n = 0; fds_p_pbar(i + 1, 4096, snap_p[i].data(), &n); snap_p[i].resize(n); }
                 const int fb = loop.finest_bound();
                 for (int l = fb; l >= 1; --l) loop.unbind_level(l);
                 if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
@@ -486,6 +497,32 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     loop.set_flux_overwrite(o.overwrite);
                 }
                 if (changed || rebound) loop.prime_levels();
+                if (finest < fb0) {   // derefinement: relative change of T, each Z and the background pressure at level 0, and div u - D of the remaining levels
+                    auto relmax = [](const amrex::MultiFab& a, const amrex::MultiFab& b0, int nc) {
+                        std::vector<double> w(nc, 0.0);
+                        for (amrex::MFIter mfi(a); mfi.isValid(); ++mfi) {
+                            auto x = a.const_array(mfi); auto y = b0.const_array(mfi);
+                            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { for (int n = 0; n < nc; ++n) w[n] = std::max(w[n], std::abs(x(i, j, k, n) - y(i, j, k, n)) / std::max(std::abs(y(i, j, k, n)), 1e-300)); });
+                        }
+                        amrex::ParallelAllReduce::Max(w.data(), nc, amrex::ParallelContext::CommunicatorSub());
+                        return w;
+                    };
+                    const double dT = snap_t ? relmax(reg.fields(0)["TMP"], *snap_t, 1)[0] : 0.0;
+                    std::vector<double> dZ = snap_z ? relmax(reg.fields(0)["ZZ"], *snap_z, snap_z->nComp()) : std::vector<double>();
+                    double dP = 0.0;
+                    for (int i = 0; i < static_cast<int>(snap_p.size()); ++i) if (!snap_p[i].empty()) {
+                        std::vector<double> pn(4096, 0.0); int n = 0; fds_p_pbar(i + 1, 4096, pn.data(), &n);
+                        for (int q = 0; q < n && q < static_cast<int>(snap_p[i].size()); ++q) dP = std::max(dP, std::abs(pn[q] - snap_p[i][q]) / std::max(std::abs(snap_p[i][q]), 1e-300));
+                    }
+                    amrex::ParallelAllReduce::Max(dP, amrex::ParallelContext::CommunicatorSub());
+                    double dD = 0.0;
+                    { std::vector<fdsrt::ProjectionLevel> plv = projection_levels(reg, finest + 1); dD = fdsrt::composite_divergence_error(plv); }
+                    double dZmax = 0.0; for (double z : dZ) dZmax = std::max(dZmax, z);
+                    deref_worst = std::max({deref_worst, dT, dZmax, dP}); deref_div = std::max(deref_div, dD); ++deref_n;
+                    amrex::Print() << tag << " DEREFINE after step " << s << ": relative change T " << dT << ", Z";
+                    for (std::size_t n = 0; n < dZ.size(); ++n) amrex::Print() << " " << dZ[n];
+                    amrex::Print() << ", background pressure " << dP << " (each <= 1e-12), max|div u - D| " << dD << " (<= 1e-9)\n";
+                }
                 nl_now = finest + 1;
                 amrex::Print() << tag << " mid-regrid after step " << s << " t " << loop.time()
                                << " changed " << changed << " finest " << finest
@@ -595,7 +632,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         amrex::Print() << "; after override 0 by construction (hook writes the list values)\n";
     }
     amrex::Print() << tag << " RESULT flux registers: stale (old-hierarchy) read-out arrays " << stale_regs << " (gate: 0)\n";
-    const bool gate = worst_fine <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0;
+    const bool deref_ok = deref_n == 0 || (deref_worst <= 1e-12 && deref_div <= 1e-9);
+    if (deref_n > 0) amrex::Print() << tag << " RESULT derefinement invariance (" << deref_n << " derefining regrids): worst relative change of T, Z, background pressure " << deref_worst << " (<= 1e-12), worst max|div u - D| after " << deref_div << " (<= 1e-9): " << (deref_ok ? "PASS" : "FAIL") << "\n";
+    const bool gate = worst_fine <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok;
     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked << " (info only)"
                    << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x (initial mass + through-flow), open" : "1e-10 x initial mass, closed") << ")\n";
     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
