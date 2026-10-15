@@ -15,7 +15,7 @@
 namespace fdsamr {
 
 struct TwoLevelOptions {
-    int steps = 20;
+    int steps = 10000000;   // --steps is optional: step cap, T_END normally ends the run
     int max_level = 1;               // finest level index (1 = two levels; 2 = three levels). Levels are bound 1..max_level.
     int ratio = 2;                   // refinement ratio in the directions with more than one cell (same at every level)
     int patch[4] = {4, 11, 4, 11};   // level-0 cells tagged to create level 1: x lo, x hi, z lo, z hi (y: the whole domain)

@@ -257,7 +257,7 @@ A good run ends with `MULTI-LEVEL RUN PASS`. Per-step data is in `<chid>_multi_l
 |---|---|
 | `--two-level-run` | Run the multi-level (AMR) time loop. Must be the first flag after the input file. |
 | `--levels N` | Number of levels (`max_level = N-1`, default 2). `--levels 1` = level 0 only. |
-| `--steps N` | Number of time steps. The loop stops on steps, not on `T_END`. |
+| `--steps N` | Optional step cap (default 10000000 = 1e7), so `T_END` normally ends the run. If the cap is hit first the log says `STEP CAP N reached before T_END`. |
 | `--regrid-every N` | Re-tag and regrid every N steps (0 = keep the initial fine boxes fixed). |
 | `--tag-vort auto\|<thr>` | Tag cells by undivided vorticity |ω|·Δx. `auto` sets the threshold to 0.45 × the current maximum on level 0, so it follows the flow. A number gives a fixed threshold (the input headers print a hint). |
 | `--tag-obst` | **In progress (P1), not in the committed tip:** tag cells near obstacles. |

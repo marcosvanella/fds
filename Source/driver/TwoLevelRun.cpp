@@ -547,7 +547,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     int nl_now = nl;
     double deref_worst = 0.0, deref_div = 0.0; int deref_n = 0;   // ISO-DR gate: worst relative change of T/Z/p0 over derefining regrids, worst div u - D after them
     const int ldiag = std::getenv("FDSTL_LEAFDIAG") ? std::max(1, std::atoi(std::getenv("FDSTL_LEAFDIAG"))) : 0;
+    int s_done = 0; bool t_end_hit = false;
     for (int s = 1; s <= o.steps; ++s) {
+        s_done = s;
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         fds_p_bnd_rate(ns, r.data());
         amrex::ParallelAllReduce::Sum(r.data(), 1 + ns, amrex::ParallelContext::CommunicatorSub());
@@ -698,8 +700,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         hrr_prev = composite_hrr(reg, nl_now);
         hrr_sum += hrr_prev * loop.steps().back().dt; hrr_last = hrr_prev;
         if (o.log_every > 0 && (s % o.log_every == 0 || s == o.steps)) amrex::Print() << tag << " HRR at step " << s << " composite " << hrr_prev / 1000.0 << " kW\n";
-        if (loop.time() >= t_end) { amrex::Print() << tag << ": T_END " << t_end << " reached at step " << s << " t " << loop.time() << "\n"; break; }
+        if (loop.time() >= t_end) { amrex::Print() << tag << ": T_END " << t_end << " reached at step " << s << " t " << loop.time() << "\n"; t_end_hit = true; break; }
     }
+    if (!t_end_hit && fails == 0 && s_done == o.steps) amrex::Print() << tag << ": STEP CAP " << o.steps << " reached before T_END (t " << loop.time() << " < T_END " << t_end << ")\n";
     if (lf) std::fclose(lf);
     loop.write_perf();
     if (!o.plotfile.empty() && fails == 0) {

@@ -216,7 +216,7 @@ int main(int argc, char** argv)
             }
 #endif
             if (argc > 2 && std::strcmp(argv[2], "--two-level-run") == 0) {
-                // --two-level-run [--levels N] [--steps N] [--patch i0 i1 k0 k1] [--patch2 i0 i1 k0 k1] [--ratio R] [--maxsize M] [--blocking B]
+                // --two-level-run [--levels N] [--steps N (optional, default 1e7)] [--patch i0 i1 k0 k1] [--patch2 i0 i1 k0 k1] [--ratio R] [--maxsize M] [--blocking B]
                 //   [--projection ON|AUTO|OFF] [--no-overwrite] [--bind-only] [--regrid-every N] [--plotfile [DIR]] [--plot-every N]
                 //   [--tag-vort auto|<thr>] [--exact-zone-sums] [--outdir D] [--chid C]: S14 / D-053 (N levels = max_level+1, default 2)
                 //   [--pressure-backend auto|mlmg|hypre] [--krylov none|gmres|bicgstab|cg] [--pressure-tol T] [--pressure-csv FILE]: P2 solver study (RunOptions)
