@@ -222,6 +222,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "'";
     // Adaptive TAG_*: vortex-ring TAG_VORT path, else blob TAG_SPEC_*. Static (regrid_every==0) uses nested set_tag_function only.
     const bool use_tag_vort = o.tag_vort_auto || !std::isnan(o.tag_vort);
+    const bool use_tag_temp = !std::isnan(o.tag_temp), use_tag_obst = o.tag_obst >= 0;
+    const bool adaptive_free = use_tag_vort || (o.regrid_every > 0 && (use_tag_temp || use_tag_obst));   // criteria that move the fine region by themselves: the refinable region is the whole domain
     double tag_vort_thr = o.tag_vort;
     if (o.regrid_every > 0 && use_tag_vort) {
         fill_undivided_vorticity(reg, 1);   // L0 |ω| before AmrParams (auto thr needs max)
@@ -231,7 +233,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             amrex::Print() << tag << ": TAG_VORT auto thr = 0.45 * max|VORT|_L0 = " << tag_vort_thr << "\n";
         }
         amr << ", TAG_VORT=" << std::setprecision(17) << tag_vort_thr << ", TAG_KEEP=0.85";
-    } else if (o.regrid_every > 0) {
+    } else if (o.regrid_every > 0 && !use_tag_temp && !use_tag_obst) {   // default blob criterion only when no other adaptive criterion (--tag-temp, --tag-obst) is asked for
         amr << ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=0.05, TAG_KEEP=0.8";
     }
     if (o.regrid_every > 0 && !std::isnan(o.tag_temp)) amr << ", TAG_TMP_ABOVE=" << std::setprecision(17) << o.tag_temp - 293.15;   // --tag-temp (TMPA 293.15 = TagFields::tmp_ambient)
@@ -240,7 +242,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // --levels 1 (max_level 0): level 0 alone through the same loop and plotfiles, no &AMR_REGION (its LEVEL must be >= 1)
     if (o.max_level > 0) {
         amr << std::setprecision(17) << "&AMR_REGION XB=";
-        if (use_tag_vort) {
+        if (adaptive_free) {
             for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) << "," << l0.geom.ProbHi(d) << (d < 2 ? "," : "");
         } else {
             for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
@@ -351,7 +353,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     fdsrt::install_post_regrid_projection(core, reg, pst);   // D-063: the hook of RegridAmrCore::regrid_dynamic
     loop.zero_closed_wall_normal();   // IC: Neumann faces carry no net volume flux into the first projection
     // One AmrCore::regrid grows at most one new fine level; repeat until max_level (or stuck).
-    core.set_force_tag_function(o.init_patch && o.regrid_every > 0);   // --init-patch: patch/patch2 forced at step 0 only
+    core.set_force_tag_function((o.init_patch || o.patch_set) && o.regrid_every > 0);   // --init-patch or an explicit --patch/--patch2: patch/patch2 forced at step 0 only (adaptive runs would otherwise ignore them)
     for (int pass = 0; pass < o.max_level; ++pass) {
         if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
         core.regrid_dynamic(0.0);

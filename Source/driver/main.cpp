@@ -227,9 +227,9 @@ int main(int argc, char** argv)
                     if (pressure_flag(argc, argv, i, ro)) continue;
                     if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) to.steps = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--levels") == 0 && i + 1 < argc) to.max_level = std::atoi(argv[++i]) - 1;  // --levels 3 -> max_level 2
-                    else if (std::strcmp(argv[i], "--patch") == 0 && i + 4 < argc) { for (int q = 0; q < 4; ++q) to.patch[q] = std::atoi(argv[++i]); }
+                    else if (std::strcmp(argv[i], "--patch") == 0 && i + 4 < argc) { for (int q = 0; q < 4; ++q) to.patch[q] = std::atoi(argv[++i]); to.patch_set = true; }
                     else if (std::strcmp(argv[i], "--init-patch") == 0) to.init_patch = true;
-                    else if (std::strcmp(argv[i], "--patch2") == 0 && i + 4 < argc) { for (int q = 0; q < 4; ++q) to.patch2[q] = std::atoi(argv[++i]); }
+                    else if (std::strcmp(argv[i], "--patch2") == 0 && i + 4 < argc) { for (int q = 0; q < 4; ++q) to.patch2[q] = std::atoi(argv[++i]); to.patch_set = true; }
                     else if (std::strcmp(argv[i], "--ratio") == 0 && i + 1 < argc) to.ratio = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--maxsize") == 0 && i + 1 < argc) to.maxsize = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--blocking") == 0 && i + 1 < argc) to.blocking = std::atoi(argv[++i]);
