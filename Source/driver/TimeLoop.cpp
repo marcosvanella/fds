@@ -332,6 +332,7 @@ struct TimeLoop::Impl {
         ++layout_gen;
         dt_new.resize(total_boxes(), L.m_dt);
         chg.resize(total_boxes(), 0);
+        fine_burner_state(false);   // burner face lists of the new box layout: the first stage after a (re)bind applies them in its flux override, a list kept from the old layout has faces outside the new boxes
         select(0);
 #endif
     }
