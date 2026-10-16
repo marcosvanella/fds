@@ -2477,20 +2477,20 @@ struct TimeLoop::Impl {
         for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) es_old += fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
         if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
         e_old = e; have_e_old = true;
-        static bool warned3 = false;
-        if (lc.size() > 2 && !warned3 && amrex::ParallelDescriptor::IOProcessor()) { warned3 = true; std::fprintf(stderr, "WARNING: hrr.csv Q_CONV/Q_COND/Q_DIFF are level-0 wall sums (hidden fine walls exist for level 1 only); levels above 1 are not leaf in these three columns\n"); }
-        if (lc.size() == 2) {   // Q_CONV, Q_COND, Q_DIFF: replace the covered level-0 walls by the hidden fine walls (two levels only: the parent is level 0)
-            const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only
+        // Q_CONV, Q_COND, Q_DIFF (leaf-only, any number of levels): the level-0 walls under level 1 are removed (level 1 call, q[3..5]); every hidden wall whose gas cell is not covered by
+        // the next level is added at its own level, each location at the finest level covering it
+        const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only
+        for (int lev = 1; lev < static_cast<int>(lc.size()); ++lev) {
             double q[12];
-            fds_fine_walls_sums(1, L.m_t, prt ? 1 : 0, q);
+            fds_fine_walls_sums(lev, L.m_t, prt ? 1 : 0, q);
             for (int n = 0; n < 3; ++n) fds_p_add_qdot(4 + n, q[n] - q[3 + n]);   // Q_DOT is per rank (summed by FDS), in W
             if (prt) {
                 amrex::ParallelDescriptor::ReduceRealSum(q, 8);
                 amrex::ParallelDescriptor::ReduceRealMax(q[8]);
                 amrex::ParallelDescriptor::ReduceRealSum(&q[9], 3);
-                amrex::Print() << "FINE-WALLS t " << L.m_t << " nwall " << q[9] << " sum(Q_CON_F*A) fine " << q[6] << " W, parent share " << q[7]
-                               << " W, identity max|dQ_CON_F| " << q[8] << " W/m2; Q_CONV/COND/DIFF fine-parent " << q[0] - q[3] << " " << q[1] - q[4] << " " << q[2] - q[5]
-                               << " W; fine wall area " << q[10] << " of L0 solid " << q[11] << " m2\n";
+                amrex::Print() << "FINE-WALLS t " << L.m_t << " level " << lev << " nleaf " << q[9] << " sum(Q_CON_F*A) leaf " << q[6] << " W, covered level-0 " << q[7]
+                               << " W, identity max|dQ_CON_F| " << q[8] << " W/m2; Q_CONV/COND/DIFF leaf-covered " << q[0] - q[3] << " " << q[1] - q[4] << " " << q[2] - q[5]
+                               << " W; leaf wall area " << q[10] << " of L0 solid " << q[11] << " m2\n";
             }
         }
     }

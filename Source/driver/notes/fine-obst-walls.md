@@ -534,3 +534,11 @@ prints one `WALLDIAG level L box B g0 ... nwall N perD(...) withparent K` line p
 D1 rods/points dropped on L0: accepted. D2 L0 never re-snapped: yes. D3: implemented for solid OBSTs at every level; **thin (zero-thickness) OBSTs are not yet built** (M3).
 D4 default on for 2+ levels: implemented. D5 open (Solid Lead). D6 hidden walls only. D7/D8 zones and composite volume: not yet. D9 intensive state kept at derefinement: not yet (M4).
 Thick and ONE_D walls above L0: unsupported, refused with an error. Leaf-only sums over the finest level covering each location: M2.
+
+## R21. M2 status: leaf-only sums for N levels (Role 1)
+
+- Leaf rule by geometry: a hidden wall is leaf if its gas-cell centre is not inside a box of the next level; an L0 wall is covered if its gas cell is inside a level-1 box.
+- Composite wall sums = sum over l>=1 of leaf walls at l, minus the L0 walls covered by level 1 (no FR telescoping, so fine-only walls are counted).
+- State of a hidden wall comes from its parent (SNM/SIW) or, with no parent, from the nearest same-surface/IOR L0 wall on this rank (D5 default).
+- Covers Q_CONV/Q_COND/Q_DIFF (hrr.csv), fuel MLR (R(1) L0, R(2) covered share, R(3) leaf), wall devices (finest leaf wall at the point). The 3-level warning is removed.
+- Open: fine walls over L0 meshes of other ranks have no state source and are skipped; devices and sums are rank-local before the reduce; FINE-DEVC not exercised at 3 levels.
