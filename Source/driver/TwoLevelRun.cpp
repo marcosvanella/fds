@@ -566,8 +566,26 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 const amrex::MultiFab* ft0 = reg.fields(0).has("TMP") ? &reg.fields(0)["TMP"] : nullptr;
                 const amrex::MultiFab* fz0 = reg.fields(0).has("ZZ") ? &reg.fields(0)["ZZ"] : nullptr;
                 std::unique_ptr<amrex::MultiFab> snap_t, snap_z;
-                if (ft0) { snap_t.reset(new amrex::MultiFab(ft0->boxArray(), ft0->DistributionMap(), 1, 0)); amrex::MultiFab::Copy(*snap_t, *ft0, 0, 0, 1, 0); }
-                if (fz0) { snap_z.reset(new amrex::MultiFab(fz0->boxArray(), fz0->DistributionMap(), fz0->nComp(), 0)); amrex::MultiFab::Copy(*snap_z, *fz0, 0, 0, fz0->nComp(), 0); }
+                // Leaf field of T and Z at level-0 resolution: the level-0 cells under a finer box hold the average of the finest data (levels averaged down, finest first), not the coarse solution.
+                auto leaf_snap = [&](const char* name) {
+                    std::vector<std::unique_ptr<amrex::MultiFab>> S;
+                    for (int l = 0; l <= fb0; ++l) { const amrex::MultiFab& f = reg.fields(l)[name]; S.emplace_back(new amrex::MultiFab(f.boxArray(), f.DistributionMap(), f.nComp(), 0)); amrex::MultiFab::Copy(*S[l], f, 0, 0, f.nComp(), 0); }
+                    for (int l = fb0; l >= 1; --l) amrex::average_down(*S[l], *S[l - 1], 0, S[l]->nComp(), reg.level(l).ref_ratio_from_parent);
+                    return std::move(S[0]);
+                };
+                if (ft0) snap_t = leaf_snap("TMP");
+                if (fz0) {   // Z is restricted as the regrid does it: average of rho*Z over average of rho
+                    const int nz = fz0->nComp(); std::vector<std::unique_ptr<amrex::MultiFab>> R, Q;
+                    for (int l = 0; l <= fb0; ++l) {
+                        const amrex::MultiFab& z = reg.fields(l)["ZZ"]; const amrex::MultiFab& r = reg.fields(l)["RHO"];
+                        R.emplace_back(new amrex::MultiFab(z.boxArray(), z.DistributionMap(), 1, 0)); amrex::MultiFab::Copy(*R[l], r, 0, 0, 1, 0);
+                        Q.emplace_back(new amrex::MultiFab(z.boxArray(), z.DistributionMap(), nz, 0)); amrex::MultiFab::Copy(*Q[l], z, 0, 0, nz, 0);
+                        for (int n = 0; n < nz; ++n) amrex::MultiFab::Multiply(*Q[l], *R[l], 0, n, 1, 0);
+                    }
+                    for (int l = fb0; l >= 1; --l) { amrex::average_down(*Q[l], *Q[l - 1], 0, nz, reg.level(l).ref_ratio_from_parent); amrex::average_down(*R[l], *R[l - 1], 0, 1, reg.level(l).ref_ratio_from_parent); }
+                    for (int n = 0; n < nz; ++n) amrex::MultiFab::Divide(*Q[0], *R[0], 0, n, 1, 0);
+                    snap_z = std::move(Q[0]);
+                }
                 std::vector<std::vector<double>> snap_p(reg.level(0).ba.size());
                 for (int i = 0; i < static_cast<int>(snap_p.size()); ++i) if (reg.level(0).dm[i] == amrex::ParallelDescriptor::MyProc()) { snap_p[i].assign(4096, 0.0); int n = 0; fds_p_pbar(i + 1, 4096, snap_p[i].data(), &n); snap_p[i].resize(n); }
                 std::vector<amrex::BoxArray> old_ba;
@@ -588,11 +606,12 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 if (changed || rebound) loop.prime_levels();
                 if (ldiag) { leaf_diag(reg, "post-regrid", s, loop.time(), ns); leaf_boxes(reg, "post-regrid", s); old_ba.resize(std::max<std::size_t>(old_ba.size(), reg.num_levels())); leaf_diag(reg, "new-cells", s, loop.time(), ns, &old_ba); }
                 if (finest < fb0) {   // derefinement: relative change of T, each Z and the background pressure at level 0, and div u - D of the remaining levels
-                    auto relmax = [](const amrex::MultiFab& a, const amrex::MultiFab& b0, int nc) {
+                    amrex::BoxArray cov_new; if (finest >= 1) { cov_new = reg.level(1).ba; cov_new.coarsen(reg.level(1).ref_ratio_from_parent); }   // still covered: not a leaf cell at level 0
+                    auto relmax = [&](const amrex::MultiFab& a, const amrex::MultiFab& b0, int nc) {
                         std::vector<double> w(nc, 0.0);
                         for (amrex::MFIter mfi(a); mfi.isValid(); ++mfi) {
                             auto x = a.const_array(mfi); auto y = b0.const_array(mfi);
-                            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { for (int n = 0; n < nc; ++n) w[n] = std::max(w[n], std::abs(x(i, j, k, n) - y(i, j, k, n)) / std::max(std::abs(y(i, j, k, n)), 1e-300)); });
+                            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (cov_new.contains(amrex::IntVect(i, j, k))) return; for (int n = 0; n < nc; ++n) w[n] = std::max(w[n], std::abs(x(i, j, k, n) - y(i, j, k, n)) / std::max(std::abs(y(i, j, k, n)), 1e-300)); });
                         }
                         amrex::ParallelAllReduce::Max(w.data(), nc, amrex::ParallelContext::CommunicatorSub());
                         return w;
