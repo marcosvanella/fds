@@ -114,6 +114,9 @@ struct PressureLevel {
     // Known (OPEN) cells may not sit on a coarse/fine face (Q2: InvalidInput).
     amrex::iMultiFab const* cell_class = nullptr;
     amrex::MultiFab const* known_value = nullptr;
+    // Thin (zero-thickness) wall faces, levels >= 1 (ObstMask.H build_thin_faces): nodal flags per direction (BoxArray convert(ba, d), valid faces), nonzero = no flux
+    // through the face (beta = 0 in the masked composite MLMG, the face_neumann path). Null = none. Composite MLMG only (Auto picks it; HYPRE is NotBuilt).
+    std::array<amrex::iMultiFab const*, 3> thin_face = {nullptr, nullptr, nullptr};
 };
 
 class PressureWorkspace;                          // opaque, below
@@ -485,6 +488,7 @@ Status fold_boundary_data (PressureProblem const& p,
 // 1 when cell iv of composite level `lev` (>= 1) lies over a flagged cell of face f (PressureProblem::face_neumann), else 0.
 int face_neumann_at (PressureProblem const& p, int lev, int f, amrex::IntVect const& iv);
 bool has_face_neumann (PressureProblem const& p);
+bool has_thin_face (PressureProblem const& p);   // any PressureLevel::thin_face flag set (collective)
 
 const char* to_string (Status s);
 const char* to_string (BC b);

@@ -19,6 +19,7 @@ struct PressureBackendSolver::Impl {
     std::vector<amrex::MultiFab> rhs0;      // zero right-hand sides: layout carriers for rebuild
     std::array<pb::BC, 6> bc;
     std::array<std::vector<int>, 6> fn;   // face_neumann
+    std::vector<std::array<std::unique_ptr<amrex::iMultiFab>, 3>> thin;   // thin-wall face flags per level (ObstMask.H)
     std::vector<std::unique_ptr<amrex::iMultiFab>> cls;   // OBST cell_class per level (empty: no OBST loaded)
 
     pb::PressureProblem problem(const std::vector<const amrex::MultiFab*>* rhs)
@@ -32,6 +33,7 @@ struct PressureBackendSolver::Impl {
             L.rhs = rhs ? (*rhs)[l] : &rhs0[l];
             L.phi = &phi[l];
             if (l < cls.size()) L.cell_class = cls[l].get();
+            if (l < thin.size()) for (int d = 0; d < 3; ++d) L.thin_face[d] = thin[l][d].get();
             p.levels.push_back(L);
         }
         return p;
@@ -65,10 +67,12 @@ void PressureBackendSolver::rebuild(const std::vector<ProjectionLevel>& levels)
         }
     }
     m.fn = face_neumann;
-    m.cls.clear();
+    m.cls.clear(); m.thin.clear();
     if (!pb::obst_list().empty()) {
         pb::set_level_geoms(std::vector<amrex::Geometry>(m.geom.begin(), m.geom.end()));
         for (size_t l = 0; l < m.ba.size(); ++l) m.cls.push_back(l == 0 ? nullptr : pb::build_obst_class(m.geom[l], static_cast<int>(l), m.ba[l], m.dm[l]));   // L0: FDS's own OBST (TimeLoop.cpp)
+        m.thin.resize(m.ba.size());
+        for (size_t l = 1; l < m.ba.size(); ++l) if (!pb::build_thin_flags(static_cast<int>(l), m.ba[l], m.dm[l], m.thin[l])) m.thin[l] = {};
     }
     std::string msg;
     const pb::Status st = m.ws.rebuild(m.problem(nullptr), &msg);

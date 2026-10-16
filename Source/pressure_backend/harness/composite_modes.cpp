@@ -2612,6 +2612,45 @@ void run_comp_mixed (ParmParse& pp)
         ccheck(pb::solve_pressure(pm, oh2, nullptr).status == pb::Status::NotBuilt, "masked + mixed face: HYPRE NotBuilt");
         MultiFab::Copy(*h.rhs[1], rs, 0, 0, 1, 0);
     }
+    // (5) Thin (zero-thickness) wall faces on level 1 (PressureLevel::thin_face): a 4x4 x-face wall in the middle of the fine patch, no solid cell. Auto -> masked MLMG
+    // (beta = 0 on the wall faces): Ok, zero gradient through every wall face, div(grad) = rhs on all uncovered level-1 cells; HYPRE NotBuilt.
+    {
+        const Box fb = h.ba[1].minimalBox();
+        const IntVect m0 = fb.smallEnd() + (fb.bigEnd() - fb.smallEnd()) / 2;
+        const Box wall(IntVect(m0[0], m0[1] - 2, m0[2] - 2), IntVect(m0[0], m0[1] + 1, m0[2] + 1), IndexType(IntVect::TheDimensionVector(0)));   // nodal x faces
+        iMultiFab thin(amrex::convert(h.ba[1], IntVect::TheDimensionVector(0)), h.dm[1], 1, 0);
+        thin.setVal(0); for (MFIter mfi(thin); mfi.isValid(); ++mfi) { thin[mfi].setVal<RunOn::Host>(1, wall & mfi.validbox()); }
+        for (auto& q : h.phi) { q->setVal(Real(0)); }
+        pb::PressureProblem pm = make_problem(c, h);
+        pm.face_neumann[fz] = all;
+        pm.levels[1].thin_face[0] = &thin;
+        const pb::PressureResult rt = pb::solve_pressure(pm, o, nullptr);
+        Print() << "COMP_MIXED thin status=" << pb::to_string(rt.status) << " backend=" << rt.backend << " true_rel2=" << rt.residual_rel2 << " " << rt.message << "\n";
+        ccheck(rt.status == pb::Status::Ok && rt.backend == "MLMG" && std::isfinite(rt.residual_rel2) && rt.residual_rel2 < 1e-9, "thin faces: masked MLMG Ok");
+        std::vector<std::array<std::unique_ptr<MultiFab>,3>> g(c.nlev);
+        std::vector<std::array<MultiFab*,3>> gp(c.nlev);
+        for (int l = 0; l < c.nlev; ++l) for (int d = 0; d < 3; ++d) { g[l][d] = std::make_unique<MultiFab>(amrex::convert(h.ba[l], IntVect::TheDimensionVector(d)), h.dm[l], 1, 0); gp[l][d] = g[l][d].get(); }
+        ccheck(pb::face_gradient_composite(pm, gp).status == pb::Status::Ok, "thin faces: face gradient Ok");
+        const auto dx = h.geom[1].CellSizeArray();
+        double gw = 0.0, dvm = 0.0, gmax = 0.0;
+        for (MFIter mfi(*h.rhs[1]); mfi.isValid(); ++mfi) {
+            auto const& b = h.rhs[1]->const_array(mfi);
+            auto const& gx = g[1][0]->const_array(mfi); auto const& gy = g[1][1]->const_array(mfi); auto const& gzz = g[1][2]->const_array(mfi);
+            auto const& th = thin.const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                if (th(i,j,k)) { gw = std::max(gw, std::abs(double(gx(i,j,k)))); }
+                gmax = std::max(gmax, std::abs(double(gx(i,j,k))));
+                const double d = (gx(i+1,j,k) - gx(i,j,k)) / dx[0] + (gy(i,j+1,k) - gy(i,j,k)) / dx[1] + (gzz(i,j,k+1) - gzz(i,j,k)) / dx[2];
+                dvm = std::max(dvm, std::abs(d - double(b(i,j,k))));
+            });
+        }
+        ParallelDescriptor::ReduceRealMax(gw); ParallelDescriptor::ReduceRealMax(dvm); ParallelDescriptor::ReduceRealMax(gmax);
+        Print() << "COMP_MIXED thin max|grad on wall faces|=" << gw << " max|L1 grad x|=" << gmax << " max|L1 div grad - rhs|=" << dvm << "\n";
+        ccheck(gw == 0.0 && gmax > 0.0, "thin faces: no flux through the wall faces");
+        ccheck(dvm <= 1e-8 * bmax, "thin faces: level-1 div(grad) = rhs");
+        pb::PressureOptions oh3 = o; oh3.backend = pb::BackendKind::HYPRE;
+        ccheck(pb::solve_pressure(pm, oh3, nullptr).status == pb::Status::NotBuilt, "thin faces: HYPRE NotBuilt");
+    }
 }
 
 // mode=comp_seam: vortex_ring_re100_wall at blocking 8, where level 1 reaches the periodic x,y faces. Layout 1 puts the fine
