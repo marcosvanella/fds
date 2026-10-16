@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "../pressure_backend/ObstCoarseFaces.H"
+
 namespace fdsrt {
 
 std::vector<std::vector<FluxOverride>> FluxStageRunner::lists_for_level(const FluxAccess& fa, int l, FluxKind kind, OverrideStats* st) const
@@ -11,7 +13,9 @@ std::vector<std::vector<FluxOverride>> FluxStageRunner::lists_for_level(const Fl
     const StageLevel& c = lv_[l];
     const StageLevel& f = lv_[l + 1];
     const amrex::MultiFab* fl[3] = {&fa.stage_flux(l + 1, kind, 0), &fa.stage_flux(l + 1, kind, 1), &fa.stage_flux(l + 1, kind, 2)};
-    return build_flux_overrides(c.ba, c.dm, c.geom, f.ba, f.dm, f.ratio_from_parent, fl, st);
+    std::function<bool(const amrex::IntVect&)> solid;
+    if (!pb::obst_list().empty()) solid = [&c, l](const amrex::IntVect& iv) { return pb::obst_solid_cell(c.geom, l, iv); };   // level l is the coarse level of this pair
+    return build_flux_overrides(c.ba, c.dm, c.geom, f.ba, f.dm, f.ratio_from_parent, fl, st, solid);
 }
 
 void FluxStageRunner::match(const FluxAccess& fa, int l, FluxKind kind, const std::vector<std::vector<FluxOverride>>& lists)

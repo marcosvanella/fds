@@ -9,7 +9,7 @@ namespace fdsrt {
 
 std::vector<std::vector<FluxOverride>> build_flux_overrides(const amrex::BoxArray& crse_ba, const amrex::DistributionMapping& crse_dm, const amrex::Geometry& cg,
                                                            const amrex::BoxArray& fine_ba, const amrex::DistributionMapping& fine_dm, const amrex::IntVect& ratio,
-                                                           const amrex::MultiFab* const fine_flux[3], OverrideStats* stats)
+                                                           const amrex::MultiFab* const fine_flux[3], OverrideStats* stats, const std::function<bool(const amrex::IntVect&)>& coarse_solid)
 {
     std::vector<std::vector<FluxOverride>> out;
     for (amrex::MFIter mfi(crse_ba, crse_dm); mfi.isValid(); ++mfi) out.emplace_back();
@@ -72,6 +72,7 @@ std::vector<std::vector<FluxOverride>> build_flux_overrides(const amrex::BoxArra
                 lo_cell[d] -= 1;
                 const int cl = covered(lo_cell), ch = covered(hi_cell);
                 if (cl < 0 || ch < 0 || cl == ch) return;
+                if (coarse_solid && coarse_solid(cl == 0 ? lo_cell : hi_cell)) return;   // the uncovered side is solid: a wall, not an interface
                 ov.face.push_back({i, j, k});
                 for (int n = 0; n < nscal; ++n) ov.value.push_back(cv(i, j, k, n));
             });

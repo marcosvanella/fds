@@ -6,6 +6,7 @@
 //  (b) Only uniform Cartesian metrics are used (R(I)/RRN(I) dropped); CYLINDRICAL and TRN* meshes are rejected (IR-002), the pressure call-through assumes IPS=0.
 #include <set>
 #include "ObstList.H"
+#include "../pressure_backend/ObstCoarseFaces.H"
 #include "TimeLoop.H"
 #include "LevelRegistry.H"
 #include "PressureBcMap.H"
@@ -1632,6 +1633,11 @@ struct TimeLoop::Impl {
                             std::array<int, 4> a{d, i - lo[0] + (d == 0 ? 0 : 1), j - lo[1] + (d == 1 ? 0 : 1), k - lo[2] + (d == 2 ? 0 : 1)};
                             if (!bf.count(a)) b.sf.insert(b.sf.end(), a.begin(), a.end());
                         });
+                    }
+                    for (const pb::ThinFace& tf : pb::coarse_solid_faces(lc[l - 1].lev->geom, l - 1, lc[l].lev->ref_ratio_from_parent, lc[l].lev->ba, vb, lc[l].lev->geom)) {   // coarse neighbour solid: ADV = DIF = 0
+                        const int d = tf.dir;
+                        std::array<int, 4> a{d, tf.i - lo[0] + (d == 0 ? 0 : 1), tf.j - lo[1] + (d == 1 ? 0 : 1), tf.k - lo[2] + (d == 2 ? 0 : 1)};
+                        if (!bf.count(a)) b.sf.insert(b.sf.end(), a.begin(), a.end());
                     }
                     for (const pb::ThinFace& tf : pb::thin_faces(l)) {   // zero-thickness OBST faces (owner rule, ObstMask.H): a wall on the face, ADV = DIF = 0
                         const int d = tf.dir; const amrex::IntVect hi(tf.i, tf.j, tf.k);
