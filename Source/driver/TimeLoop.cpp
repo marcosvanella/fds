@@ -135,6 +135,7 @@ int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext,
 void fds_leaf_register();   // fds_leaf_devc.f90: leaf-cell hooks of the gas devices
 int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
+void fds_fine_walls_rad_xchg(int lev);                      // fds_fine_level.f90: pull the hidden-wall radiation state of level lev from level lev-1 (collective)
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
 void fds_fine_walls_sums(int lev, double t, int chk, double* q);
 int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90 (frozen/fine-wall-state.md)
@@ -2215,7 +2216,10 @@ struct TimeLoop::Impl {
         if (multi()) fine_burner_state(false);
 #endif
         if (IP[10]) rad_ghost_table();   // fine-box ghost intensity table for the current layout
-        if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int) {
+        if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int lev) {
+#ifdef FDS_HAVE_FINE_LEVEL
+            if (IP[10] && lev >= 1) fds_fine_walls_rad_xchg(lev);   // hidden fine walls: T_W, emissivity, outgoing flux of the level lev-1 wall (every rank, collective)
+#endif
             each_local([&](int nm) { fds_k_rad(L.m_t, nm); });
             if (IP[10] && lc.size() > 1) rad_ghost_exchange();   // ILS -> ILR (all ranks) after each level: level L+1 sees this update's level-L intensity of the same angle subset; same-level faces lag one update, as MESH_EXCHANGE(2)
         });   // main.f90 ~1121-1142: the one COMPUTE_RADIATION (QR) and COMBUSTION_BC per box, after WALL_BC, before DIVERGENCE_PART_1

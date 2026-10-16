@@ -20,7 +20,7 @@ USE FDS_KERNELS, ONLY: FDS_K_RESERVE_BOXES
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
-PUBLIC :: FDS_FINE_SET_LISTS,BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_SUMS,FDS_FINE_FUEL_MDOT
+PUBLIC :: FDS_FINE_SET_LISTS,BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_RAD_XCHG,FDS_FINE_WALLS_SUMS,FDS_FINE_FUEL_MDOT
 
 !> Hidden fine-level wall cells (patch 0026): per local box a separate mesh object W holding only WALL/BOUNDARY_COORD/BOUNDARY_PROP1/2 (the box itself keeps WALL(0:0), so the
 !> kernels never see them), and per wall the level-0 parent wall (mesh PNM, wall PIW) whose face contains it. Used for the composite HRR-file wall terms only.
@@ -28,6 +28,8 @@ TYPE FWALL_BOX_TYPE
    TYPE(MESH_TYPE), POINTER :: W=>NULL()
    INTEGER :: NW=0
    INTEGER, ALLOCATABLE :: PNM(:),PIW(:)
+   REAL(EB), ALLOCATABLE :: PV(:,:)   !< radiation state pulled from the level L-1 wall of the same face (TMP_F, EMISSIVITY, Q_RAD_OUT, T_IGN), FDS_FINE_WALLS_RAD_XCHG
+   LOGICAL, ALLOCATABLE :: HAVEP(:)
 END TYPE
 TYPE FWALL_LEVEL_TYPE
    TYPE(FWALL_BOX_TYPE), ALLOCATABLE :: B(:)
@@ -415,12 +417,11 @@ ALLOCATE(T(8,6*R%IBAR*R%JBAR*R%KBAR)) ; N = 0 ; N_SKIP = 0   ! I,J,K,D,NM0,IW0,S
 DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
    IF (R%CELL(R%CELL_INDEX(I,J,K))%SOLID) CYCLE
    NM0 = 0
-   DO L=1,SIZE(MESHES)
-      IF (.NOT.ALLOCATED(MESHES(L)%CELL_INDEX)) CYCLE
+   DO L=1,MIN(NMESHES,SIZE(MESHES))   ! level-0 meshes of every rank (extents are known everywhere; the WALL data are not)
       IF (R%XC(I)>MESHES(L)%XS .AND. R%XC(I)<MESHES(L)%XF .AND. R%YC(J)>MESHES(L)%YS .AND. R%YC(J)<MESHES(L)%YF .AND. &
           R%ZC(K)>MESHES(L)%ZS .AND. R%ZC(K)<MESHES(L)%ZF) THEN ; NM0 = L ; EXIT ; ENDIF
    ENDDO
-   IF (NM0==0) THEN ; WRITE(0,'(A)') 'fds_amr ERROR in FDS_FINE_WALLS_BUILD: no local level-0 mesh under a fine cell' ; ERROR STOP 1 ; ENDIF
+   IF (NM0==0) THEN ; WRITE(0,'(A)') 'fds_amr ERROR in FDS_FINE_WALLS_BUILD: no level-0 mesh under a fine cell' ; ERROR STOP 1 ; ENDIF
    M0 => MESHES(NM0)
    ! The parent mesh may belong to another rank (the fine-level boxes follow the AMReX distribution, not the level-0 owner): its WALL array is not stored here, so such a wall has no parent state here.
    LOCAL0 = PROCESS(NM0)==MY_RANK
@@ -469,6 +470,8 @@ ALLOCATE(FB%W) ; WM => FB%W
 FB%NW = N
 IF (ALLOCATED(FB%PNM)) DEALLOCATE(FB%PNM,FB%PIW)
 ALLOCATE(FB%PNM(N),FB%PIW(N)) ; FB%PNM = T(5,1:N) ; FB%PIW = T(6,1:N)
+IF (ALLOCATED(FB%PV)) DEALLOCATE(FB%PV,FB%HAVEP)
+ALLOCATE(FB%PV(4,N),FB%HAVEP(N)) ; FB%PV = 0._EB ; FB%HAVEP = .FALSE.   ! filled by FDS_FINE_WALLS_RAD_XCHG before each radiation update
 ALLOCATE(WM%WALL(0:N),WM%WALL_WORK1(N),WM%WALL_WORK2(N)) ; WM%WALL_WORK1 = 0._EB ; WM%WALL_WORK2 = 0._EB ; WM%N_WALL_CELLS_DIM = N ; WM%N_WALL_CELLS = N ; WM%N_EXTERNAL_WALL_CELLS = 0 ; WM%N_INTERNAL_WALL_CELLS = N
 MESH_OBJ => WM
 DO IW=1,N
@@ -563,13 +566,168 @@ DO O=NVT,1,-1
 ENDDO
 END SUBROUTINE FACE_SURFACE
 
+!> Radiation state of the hidden walls of level LEV (>= 1), pulled from the walls of level LEV-1 only (one-way, read-only toward the fine box; collective over all ranks, called by the driver
+!> before the radiation update of level LEV, so after every regrid and every step). Every rank packs the solid/open walls of its level LEV-1 data (level 0: the WALL array of its meshes; level >= 1:
+!> the hidden walls of its boxes) as records (global cell index at that level, IOR, TMP_F, EMISSIVITY, Q_RAD_OUT, T_IGN, SURF_INDEX, BOUNDARY_TYPE), all ranks gather them, and each local box
+!> wall finds its parent record by (parent cell, IOR) when its face lies on the parent cell face and the surface and boundary type agree; otherwise it has no parent (HAVEP false).
+SUBROUTINE FDS_FINE_WALLS_RAD_XCHG(LEV) BIND(C,NAME='fds_fine_walls_rad_xchg')
+USE MPI_F08
+USE GLOBAL_CONSTANTS, ONLY: MY_RANK,PROCESS,N_MPI_PROCESSES
+INTEGER(C_INT), VALUE :: LEV
+INTEGER, PARAMETER :: NF=10
+INTEGER :: LP,NM0,IB,IW,N,NT,IERR,I,J,K,A,RATIO,P,G(3),GP(3),D,NTOT
+INTEGER, ALLOCATABLE :: CNT(:),DSP(:),IX(:)
+INTEGER(8), ALLOCATABLE :: KEY(:)
+INTEGER(8) :: KQ
+REAL(EB), ALLOCATABLE :: SB(:,:),RB(:,:)
+REAL(EB) :: X0(3),DXP,DXF
+TYPE(MESH_TYPE), POINTER :: R,WM
+IF (.NOT.ALLOCATED(FINE_LEVEL)) RETURN   ! the same on every rank (the driver creates every level on every rank): no collective is skipped
+IF (.NOT.ALLOCATED(FWALL)) ALLOCATE(FWALL(0))
+LP = LEV-1
+X0 = (/MINVAL(MESHES(1:NMESHES)%XS),MINVAL(MESHES(1:NMESHES)%YS),MINVAL(MESHES(1:NMESHES)%ZS)/)
+! pack the walls of level LP owned by this rank
+N = 0
+ALLOCATE(SB(NF,0:0))
+DO P=1,2   ! 1: count, 2: fill
+   IF (P==2) THEN ; DEALLOCATE(SB) ; ALLOCATE(SB(NF,MAX(1,N))) ; ENDIF
+   N = 0
+   IF (LP==0) THEN
+      DO NM0=1,NMESHES
+         IF (PROCESS(NM0)/=MY_RANK .OR. .NOT.ALLOCATED(MESHES(NM0)%WALL)) CYCLE
+         DO IW=1,MESHES(NM0)%N_EXTERNAL_WALL_CELLS+MESHES(NM0)%N_INTERNAL_WALL_CELLS
+            ASSOCIATE(WC=>MESHES(NM0)%WALL(IW))
+            IF (WC%B1_INDEX<1) CYCLE
+            N = N+1
+            IF (P==2) CALL PACK(MESHES(NM0),WC,MESHES(NM0)%BOUNDARY_COORD(WC%BC_INDEX),MESHES(NM0)%BOUNDARY_PROP1(WC%B1_INDEX),SB(:,N))
+            END ASSOCIATE
+         ENDDO
+      ENDDO
+   ELSEIF (SIZE(FWALL)>=LP) THEN
+     IF (ALLOCATED(FWALL(LP)%B)) THEN
+      DO IB=1,SIZE(FWALL(LP)%B)
+         WM => FWALL(LP)%B(IB)%W
+         IF (.NOT.ASSOCIATED(WM)) CYCLE
+         DO IW=1,FWALL(LP)%B(IB)%NW
+            N = N+1
+            IF (P==2) CALL PACK(FINE_LEVEL(LP)%BOX(IB),WM%WALL(IW),WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX),SB(:,N))
+         ENDDO
+      ENDDO
+     ENDIF
+   ENDIF
+ENDDO
+! gather the records of all ranks
+ALLOCATE(CNT(0:N_MPI_PROCESSES-1),DSP(0:N_MPI_PROCESSES-1))
+CNT(MY_RANK) = N*NF
+IF (N_MPI_PROCESSES>1) CALL MPI_ALLGATHER(MPI_IN_PLACE,1,MPI_INTEGER,CNT,1,MPI_INTEGER,MPI_COMM_WORLD,IERR)
+DSP(0) = 0 ; DO I=1,N_MPI_PROCESSES-1 ; DSP(I) = DSP(I-1)+CNT(I-1) ; ENDDO
+NTOT = SUM(CNT)/NF
+ALLOCATE(RB(NF,MAX(1,NTOT)))
+IF (N_MPI_PROCESSES>1) THEN
+   CALL MPI_ALLGATHERV(SB,N*NF,MPI_DOUBLE_PRECISION,RB,CNT,DSP,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,IERR)
+ELSE
+   RB(:,1:N) = SB(:,1:N)
+ENDIF
+! sort the records by key
+ALLOCATE(KEY(NTOT),IX(NTOT))
+DO I=1,NTOT ; KEY(I) = KEYOF(NINT(RB(1:3,I)),NINT(RB(4,I))) ; IX(I) = I ; ENDDO
+CALL SORT_KEYS(NTOT,KEY,IX)
+! parent lookup of every wall of the local boxes of level LEV
+DXP = 0._EB   ! cell size of level LP: from a box of this rank (a box of another rank has no cells here), the largest over the ranks
+IF (LP==0) THEN
+   DXP = (MESHES(1)%XF-MESHES(1)%XS)/MESHES(1)%IBAR
+ELSE
+   DO IB=1,FINE_LEVEL(LP)%N_BOXES
+      IF (FINE_LEVEL(LP)%BOX(IB)%IBAR>0) DXP = MAX(DXP,(FINE_LEVEL(LP)%BOX(IB)%XF-FINE_LEVEL(LP)%BOX(IB)%XS)/FINE_LEVEL(LP)%BOX(IB)%IBAR)
+   ENDDO
+   IF (N_MPI_PROCESSES>1) CALL MPI_ALLREDUCE(MPI_IN_PLACE,DXP,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
+ENDIF
+IF (SIZE(FWALL)<LEV) RETURN
+IF (.NOT.ALLOCATED(FWALL(LEV)%B)) RETURN
+DO IB=1,SIZE(FWALL(LEV)%B)
+   WM => FWALL(LEV)%B(IB)%W
+   IF (.NOT.ASSOCIATED(WM)) CYCLE
+   R => FINE_LEVEL(LEV)%BOX(IB)
+   DXF = (R%XF-R%XS)/R%IBAR ; RATIO = NINT(DXP/DXF)
+   FWALL(LEV)%B(IB)%HAVEP = .FALSE.
+   DO IW=1,FWALL(LEV)%B(IB)%NW
+      ASSOCIATE(WC=>WM%WALL(IW),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
+      G = (/NINT((R%XC(BC%IIG)-X0(1))/DXF-0.5_EB),NINT((R%YC(BC%JJG)-X0(2))/DXF-0.5_EB),NINT((R%ZC(BC%KKG)-X0(3))/DXF-0.5_EB)/)
+      A = ABS(BC%IOR) ; D = -BC%IOR
+      IF (D<0 .AND. MOD(G(A),RATIO)/=0) CYCLE   ! the fine face is inside the parent cell, not on its face
+      IF (D>0 .AND. MOD(G(A),RATIO)/=RATIO-1) CYCLE
+      GP = G/RATIO
+      KQ = KEYOF(GP,BC%IOR)
+      I = FIND_KEY(NTOT,KEY,KQ)
+      IF (I==0) CYCLE
+      K = IX(I)
+      IF (NINT(RB(9,K))/=WC%SURF_INDEX .OR. NINT(RB(10,K))/=WC%BOUNDARY_TYPE) CYCLE
+      FWALL(LEV)%B(IB)%PV(:,IW) = RB(5:8,K) ; FWALL(LEV)%B(IB)%HAVEP(IW) = .TRUE.
+      END ASSOCIATE
+   ENDDO
+ENDDO
+
+CONTAINS
+
+INTEGER(8) FUNCTION KEYOF(GG,IOR)
+INTEGER, INTENT(IN) :: GG(3),IOR
+KEYOF = ((INT(GG(3),8)*100000_8+INT(GG(2),8))*100000_8+INT(GG(1),8))*8_8+INT(IOR+3,8)
+END FUNCTION KEYOF
+
+SUBROUTINE PACK(M,WC,BC,B1,REC)
+USE TYPES, ONLY: WALL_TYPE,BOUNDARY_COORD_TYPE,BOUNDARY_PROP1_TYPE
+TYPE(MESH_TYPE), INTENT(IN) :: M
+TYPE(WALL_TYPE), INTENT(IN) :: WC
+TYPE(BOUNDARY_COORD_TYPE), INTENT(IN) :: BC
+TYPE(BOUNDARY_PROP1_TYPE), INTENT(IN) :: B1
+REAL(EB), INTENT(OUT) :: REC(NF)
+REAL(EB) :: DXM
+DXM = (M%XF-M%XS)/M%IBAR
+REC(1) = NINT((M%XC(BC%IIG)-X0(1))/DXM-0.5_EB) ; REC(2) = NINT((M%YC(BC%JJG)-X0(2))/DXM-0.5_EB) ; REC(3) = NINT((M%ZC(BC%KKG)-X0(3))/DXM-0.5_EB)
+REC(4) = BC%IOR ; REC(5) = B1%TMP_F ; REC(6) = B1%EMISSIVITY ; REC(7) = B1%Q_RAD_OUT ; REC(8) = B1%T_IGN ; REC(9) = WC%SURF_INDEX ; REC(10) = WC%BOUNDARY_TYPE
+END SUBROUTINE PACK
+
+SUBROUTINE SORT_KEYS(NN,KY,ID)   ! shell sort of KY with the index list ID
+INTEGER, INTENT(IN) :: NN
+INTEGER(8), INTENT(INOUT) :: KY(NN)
+INTEGER, INTENT(INOUT) :: ID(NN)
+INTEGER :: GAP,II,JJ,IT
+INTEGER(8) :: KT
+GAP = NN/2
+DO WHILE (GAP>0)
+   DO II=GAP+1,NN
+      KT = KY(II) ; IT = ID(II) ; JJ = II
+      DO WHILE (JJ>GAP)
+         IF (KY(JJ-GAP)<=KT) EXIT
+         KY(JJ) = KY(JJ-GAP) ; ID(JJ) = ID(JJ-GAP) ; JJ = JJ-GAP
+      ENDDO
+      KY(JJ) = KT ; ID(JJ) = IT
+   ENDDO
+   GAP = GAP/2
+ENDDO
+END SUBROUTINE SORT_KEYS
+
+INTEGER FUNCTION FIND_KEY(NN,KY,KK)   ! index of KK in the sorted KY, 0 if absent
+INTEGER, INTENT(IN) :: NN
+INTEGER(8), INTENT(IN) :: KY(NN),KK
+INTEGER :: LO,HI,MD
+FIND_KEY = 0 ; LO = 1 ; HI = NN
+DO WHILE (LO<=HI)
+   MD = (LO+HI)/2
+   IF (KY(MD)==KK) THEN ; FIND_KEY = MD ; RETURN ; ENDIF
+   IF (KY(MD)<KK) THEN ; LO = MD+1 ; ELSE ; HI = MD-1 ; ENDIF
+ENDDO
+END FUNCTION FIND_KEY
+
+END SUBROUTINE FDS_FINE_WALLS_RAD_XCHG
+
 !> Radiation on fine box NM (radi.f90 COMPUTE_RADIATION, same code for every level): ON=1 points the wall variables of MESH_POINTERS to the hidden walls of the box and copies the surface
 !> state radiation reads (TMP_F, EMISSIVITY, Q_RAD_OUT, T_IGN of the level-0 parent wall; AREA of the fine face), so the face ghost intensity is the wall's, as at level 0; ON=0 points back to the box.
 SUBROUTINE FRAD_WALLS(NM,ON)
 USE MESH_POINTERS, ONLY: WALL,BOUNDARY_COORD,BOUNDARY_PROP1,BOUNDARY_RADIA,WALL_WORK1,WALL_WORK2,N_WALL_CELLS,N_INTERNAL_WALL_CELLS,N_EXTERNAL_WALL_CELLS,POINT_TO_BOX
 USE TYPES, ONLY: SURFACE
 INTEGER, INTENT(IN) :: NM,ON
-INTEGER :: LEV,IB,IW,NM0,IW0
+INTEGER :: LEV,IB,IW
 REAL(EB) :: RDN,AREA
 TYPE(MESH_TYPE), POINTER :: WM
 IF (ON==0) THEN ; CALL POINT_TO_BOX(NM) ; RETURN ; ENDIF
@@ -581,17 +739,14 @@ DO LEV=1,MIN(SIZE(FWALL),SIZE(FINE_LEVEL))
    WM => FWALL(LEV)%B(IB)%W
    IF (.NOT.ASSOCIATED(WM)) RETURN
    DO IW=1,FWALL(LEV)%B(IB)%NW
-      NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
-      IF (NM0==0) THEN   ! no level-0 parent wall (new fine face): surface values
-         ASSOCIATE(B1=>WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),SF=>SURFACE(WM%WALL(IW)%SURF_INDEX))
-         CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),BC,RDN,AREA)
-         B1%TMP_F = SF%TMP_FRONT ; B1%EMISSIVITY = SF%EMISSIVITY ; B1%Q_RAD_OUT = 0._EB ; B1%AREA = AREA
-         END ASSOCIATE
-         CYCLE
-      ENDIF
-      ASSOCIATE(B1=>WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX),P=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
+      ASSOCIATE(B1=>WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),SF=>SURFACE(WM%WALL(IW)%SURF_INDEX))
       CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),BC,RDN,AREA)
-      B1%TMP_F = P%TMP_F ; B1%EMISSIVITY = P%EMISSIVITY ; B1%Q_RAD_OUT = P%Q_RAD_OUT ; B1%T_IGN = P%T_IGN ; B1%AREA = AREA
+      B1%AREA = AREA
+      IF (FWALL(LEV)%B(IB)%HAVEP(IW)) THEN   ! the wall of level LEV-1 on the same face (one-way pull, FDS_FINE_WALLS_RAD_XCHG)
+         B1%TMP_F = FWALL(LEV)%B(IB)%PV(1,IW) ; B1%EMISSIVITY = FWALL(LEV)%B(IB)%PV(2,IW) ; B1%Q_RAD_OUT = FWALL(LEV)%B(IB)%PV(3,IW) ; B1%T_IGN = FWALL(LEV)%B(IB)%PV(4,IW)
+      ELSE   ! no parent wall (new fine face, OBST unresolved above): surface values
+         B1%TMP_F = SF%TMP_FRONT ; B1%EMISSIVITY = SF%EMISSIVITY ; B1%Q_RAD_OUT = 0._EB
+      ENDIF
       END ASSOCIATE
    ENDDO
    WALL=>WM%WALL ; BOUNDARY_COORD=>WM%BOUNDARY_COORD ; BOUNDARY_PROP1=>WM%BOUNDARY_PROP1 ; BOUNDARY_RADIA=>WM%BOUNDARY_RADIA
