@@ -3786,6 +3786,9 @@ ENDIF
 
 T_USED(9)=T_USED(9)+CURRENT_TIME()-TNOW
 
+#ifdef WITH_AMREX
+IF (RAD_LEAF_ON()) CALL RAD_LEAF_DIAG(T,NM)   ! FDS_RAD_LEAF=1: leaf-only radiation sums (diagnostic, off by default)
+#endif
 CONTAINS
 
 !> \brief Finite Volume Method of radiation transport
@@ -5386,6 +5389,78 @@ DO IB=1,FINE_LEVEL(L+1)%N_BOXES
    IF (RAD_COVERED) RETURN
 ENDDO
 END FUNCTION RAD_COVERED
+
+!> Diagnostic, FDS_RAD_LEAF=1 (default off): one line per box and call, "RADLEAF t NM level  QR*V  wall net  wall incident  incident flux over the wall cells inside FDS_RAD_BOX=x0,x1,y0,y1,z0,z1  UII*V and QR*V of the leaf cells inside FDS_RAD_REG (same form)  n_wall  QR*V in the region",
+!> over the leaf gas cells (not covered by the next level, RAD_COVERED) and all external solid wall cells (fine boxes have none, so walls are level 0). Sums over boxes (and ranks) are the
+!> composite leaf values; kW. A box of level L is L=0 for NM<=NMESHES.
+LOGICAL FUNCTION RAD_LEAF_ON()
+CHARACTER(16) :: EV
+LOGICAL, SAVE :: ON=.FALSE., SET=.FALSE.
+IF (.NOT.SET) THEN
+   CALL GET_ENVIRONMENT_VARIABLE('FDS_RAD_LEAF',EV) ; ON = (EV(1:1)=='1') ; SET = .TRUE.
+ENDIF
+RAD_LEAF_ON = ON
+END FUNCTION RAD_LEAF_ON
+
+SUBROUTINE RAD_LEAF_DIAG(T,NM)
+REAL(EB), INTENT(IN) :: T
+INTEGER, INTENT(IN) :: NM
+INTEGER :: I,J,K,IW,L,IB,NW,IOS
+REAL(EB) :: SQ,SN,SI,PV,PU,PQ
+CHARACTER(64) :: EV
+LOGICAL, SAVE :: PSET=.FALSE.,HAVEPT=.FALSE.,HAVERG=.FALSE.,HAVESL=.FALSE.,SLDONE(0:4095)=.FALSE.
+REAL(EB), SAVE :: PTX(6)=0._EB,RGX(6)=0._EB,SLY=0._EB,SLT=0._EB
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
+IF (.NOT.PSET) THEN
+   PSET = .TRUE. ; CALL GET_ENVIRONMENT_VARIABLE('FDS_RAD_BOX',EV)
+   IF (LEN_TRIM(EV)>0) THEN ; READ(EV,*,IOSTAT=IOS) PTX ; HAVEPT = (IOS==0) ; ENDIF
+   CALL GET_ENVIRONMENT_VARIABLE('FDS_RAD_REG',EV)   ! region x0,x1,y0,y1,z0,z1: leaf UII and QR integrals
+   IF (LEN_TRIM(EV)>0) THEN ; READ(EV,*,IOSTAT=IOS) RGX ; HAVERG = (IOS==0) ; ENDIF
+   CALL GET_ENVIRONMENT_VARIABLE('FDS_RAD_SLICE',EV)   ! y,t: once per box, UII of the cells cut by the plane y
+   IF (LEN_TRIM(EV)>0) THEN ; READ(EV,*,IOSTAT=IOS) SLY,SLT ; HAVESL = (IOS==0) ; ENDIF
+ENDIF
+L = 0
+IF (ALLOCATED(FINE_LEVEL)) THEN
+   DO IB=1,SIZE(FINE_LEVEL)
+      IF (NM>FINE_LEVEL(IB)%NM0 .AND. NM<=FINE_LEVEL(IB)%NM0+FINE_LEVEL(IB)%N_BOXES) L = IB
+   ENDDO
+ENDIF
+SQ = 0._EB ; SN = 0._EB ; SI = 0._EB ; NW = 0 ; PV = 0._EB ; PU = 0._EB ; PQ = 0._EB
+DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
+   IF (RAD_COVERED(NM,I,J,K)) CYCLE
+   SQ = SQ + QR(I,J,K)*DX(I)*DY(J)*DZ(K)*0.001_EB
+   IF (HAVERG) THEN
+      IF (XC(I)>=RGX(1) .AND. XC(I)<=RGX(2) .AND. YC(J)>=RGX(3) .AND. YC(J)<=RGX(4) .AND. ZC(K)>=RGX(5) .AND. ZC(K)<=RGX(6)) THEN
+         PU = PU + UII(I,J,K)*DX(I)*DY(J)*DZ(K)*0.001_EB ; PQ = PQ + QR(I,J,K)*DX(I)*DY(J)*DZ(K)*0.001_EB
+      ENDIF
+   ENDIF
+ENDDO ; ENDDO ; ENDDO
+DO IW=1,N_EXTERNAL_WALL_CELLS
+   BC => BOUNDARY_COORD(WALL(IW)%BC_INDEX) ; B1 => BOUNDARY_PROP1(WALL(IW)%B1_INDEX)
+   IF (WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+   NW = NW + 1
+   SN = SN + (B1%Q_RAD_IN-B1%Q_RAD_OUT)*B1%AREA*0.001_EB
+   IF (B1%EMISSIVITY>0._EB) SI = SI + B1%Q_RAD_IN/B1%EMISSIVITY*B1%AREA*0.001_EB
+   IF (HAVEPT .AND. B1%EMISSIVITY>0._EB) THEN
+      IF (BC%X>=PTX(1)-1.E-6_EB .AND. BC%X<=PTX(2)+1.E-6_EB .AND. BC%Y>=PTX(3)-1.E-6_EB .AND. BC%Y<=PTX(4)+1.E-6_EB .AND. &
+          BC%Z>=PTX(5)-1.E-6_EB .AND. BC%Z<=PTX(6)+1.E-6_EB) PV = PV + B1%Q_RAD_IN/B1%EMISSIVITY*B1%AREA*0.001_EB
+   ENDIF
+ENDDO
+IF (HAVESL .AND. T>=SLT .AND. NM<=4095) THEN
+   IF (.NOT.SLDONE(NM)) THEN
+      SLDONE(NM) = .TRUE.
+      DO J=1,JBAR
+         IF (ABS(YC(J)-SLY)>0.5_EB*DY(J)+1.E-9_EB) CYCLE
+         DO K=1,KBAR ; DO I=1,IBAR
+            WRITE(0,'(A,ES11.4,2I5,5ES13.5,I2)') 'RADSLC ',T,NM,L,XC(I),ZC(K),DX(I),DZ(K),UII(I,J,K), &
+               MERGE(1,0,RAD_COVERED(NM,I,J,K))
+         ENDDO ; ENDDO
+      ENDDO
+   ENDIF
+ENDIF
+WRITE(0,'(A,ES13.6,2I5,5ES15.7,I8,ES15.7)') 'RADLEAF ',T,NM,L,SQ,SN,SI,PV,PU,NW,PQ
+END SUBROUTINE RAD_LEAF_DIAG
 
 #endif
 
