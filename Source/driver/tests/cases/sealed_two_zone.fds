@@ -1,0 +1,14 @@
+&HEAD CHID='sealed_two_zone', TITLE='Sealed isothermal compartments, internal partition thinner than a coarse cell' /
+&MESH IJK=16,12,12, XB=0.0,1.6,0.0,1.2,0.0,1.2 /
+&TIME T_END=10.0 /
+&MISC SIMULATION_MODE='VLES' /
+&RADI RADIATION=.FALSE. /
+&SPEC ID='PROPANE' /
+&SURF ID='ADIAB', ADIABATIC=.TRUE. /
+&OBST XB=0.78,0.81,0.0,1.2,0.0,1.2, SURF_ID='ADIAB' /
+&ZONE XYZ=0.35,0.65,0.65 /
+&ZONE XYZ=1.25,0.65,0.65 /
+&INIT XB=0.82,1.6,0.0,1.2,0.0,1.2, SPEC_ID(1)='PROPANE', MASS_FRACTION(1)=0.3 /
+&DUMP MASS_FILE=.TRUE. /
+&AMR BLOCKING_FACTOR=4 /
+&TAIL /
