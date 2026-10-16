@@ -10,6 +10,7 @@
 
 #include "FaceTransfer.H"
 #include "../pressure_backend/ObstMask.H"
+#include "../pressure_backend/ObstCoarseFaces.H"
 
 namespace fdsamr {
 
@@ -25,6 +26,18 @@ void composite_zero_solid_faces(LevelRegistry& reg, int l0, int nl, const std::a
                 amrex::LoopOnCpu(amrex::surroundingNodes(m.box(mfi.index()), d), [&](int i, int j, int k) {
                     if (s(i, j, k) | s(i - e[0], j - e[1], k - e[2])) a(i + sh * e[0], j + sh * e[1], k + sh * e[2]) = 0.0;
                 });
+            }
+        }
+        if (l >= 1) {   // fine box faces next to a SOLID cell of the covering coarser level: wall, no normal velocity / flux
+            const amrex::IntVect rr = reg.level(l).ref_ratio_from_parent;
+            for (int d = 0; d < 3; ++d) {
+                amrex::MultiFab& f = reg.fields(l)[names[d]];
+                const amrex::IntVect e = amrex::IntVect::TheDimensionVector(d);
+                for (amrex::MFIter mfi(f); mfi.isValid(); ++mfi) {
+                    auto a = f.array(mfi);
+                    for (const pb::ThinFace& cf : pb::coarse_solid_faces(reg.level(l - 1).geom, l - 1, rr, reg.level(l).ba, mfi.validbox(), reg.level(l).geom))
+                        if (cf.dir == d) a(cf.i + sh * e[0], cf.j + sh * e[1], cf.k + sh * e[2]) = 0.0;
+                }
             }
         }
         if (l >= 1) {   // zero-thickness OBST faces (pb::thin_faces): no normal velocity / flux through them

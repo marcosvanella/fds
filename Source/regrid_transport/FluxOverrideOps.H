@@ -12,6 +12,7 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_MultiFab.H>
 
+#include <functional>
 #include <vector>
 
 #include "RegridInterface.H"
@@ -27,7 +28,8 @@ struct OverrideStats {
 // an interface face give an empty vector. An empty fine_ba gives all-empty vectors (the empty set: the kernels must then be bitwise unchanged).
 std::vector<std::vector<FluxOverride>> build_flux_overrides(const amrex::BoxArray& crse_ba, const amrex::DistributionMapping& crse_dm, const amrex::Geometry& crse_geom,
                                                            const amrex::BoxArray& fine_ba, const amrex::DistributionMapping& fine_dm, const amrex::IntVect& ratio,
-                                                           const amrex::MultiFab* const fine_flux[3], OverrideStats* stats = nullptr);
+                                                           const amrex::MultiFab* const fine_flux[3], OverrideStats* stats = nullptr,
+                                                           const std::function<bool(const amrex::IntVect&)>& coarse_solid = nullptr);   // coarse_solid(cell): a coarse SOLID cell; no entry for an outline face whose uncovered side is solid
 
 }  // namespace fdsrt
 
