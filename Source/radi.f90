@@ -2803,11 +2803,12 @@ END TYPE RAD_GHOST_TYPE
 TYPE(RAD_GHOST_TYPE), TARGET, SAVE :: RAD_GHOST
 PUBLIC RAD_GHOST,RAD_GHOST_TYPE
 #ifdef WITH_AMREX
-TYPE RAD_SRC_TYPE   !< kappa and kappa*4*sigma*T^4 averaged down from the finer levels (covered cells of a box), set by the driver before the radiation update
-   REAL(EB), ALLOCATABLE :: KAP(:,:,:),F4(:,:,:)
+TYPE RAD_SRC_TYPE   !< averaged down from the finer levels (covered cells of a box), set by the driver before the radiation update: D(:,:,:,1)=kappa*UII, 2=kappa*4 sigma T^4, 3:8=incident flux of the solid wall of the cell for IOR -1,1,-2,2,-3,3, 9:14 = 3:8 of the box itself (not averaged), RAD_SRC_DQ
+   REAL(EB), ALLOCATABLE :: D(:,:,:,:),WQ(:,:,:,:)   ! WQ(I,J,K,1:6): incident flux of the solid walls of the cell at the last radiation update (a fine wall is overwritten by its parent's state every step)
 END TYPE RAD_SRC_TYPE
+INTEGER, PARAMETER :: RAD_SRC_NC=14
 TYPE(RAD_SRC_TYPE), ALLOCATABLE, SAVE :: RAD_SRC(:)
-PUBLIC RAD_SRC_FILL,RAD_SRC_SET
+PUBLIC RAD_SRC_FILL,RAD_SRC_SET,RAD_SRC_WSCALE
 #endif
 #endif
 
@@ -4246,11 +4247,11 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
 
    IF (ALLOCATED(RAD_SRC) .AND. .NOT.(WIDE_BAND_MODEL .OR. WSGG_MODEL)) THEN
       IF (NM<=SIZE(RAD_SRC)) THEN
-         IF (ALLOCATED(RAD_SRC(NM)%KAP)) THEN
+         IF (ALLOCATED(RAD_SRC(NM)%D)) THEN
             DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
                IF (.NOT.RAD_COVERED(NM,I,J,K)) CYCLE
-               KAPPA_GAS(I,J,K) = RAD_SRC(NM)%KAP(I,J,K)
-               KFST4_GAS(I,J,K) = RAD_SRC(NM)%F4(I,J,K)
+               IF (UII(I,J,K)>0._EB) KAPPA_GAS(I,J,K) = RAD_SRC(NM)%D(I,J,K,1)/UII(I,J,K)   ! the cell absorbs what its leaf cells did: kappa*UII averaged down, over its own UII of the previous update
+               KFST4_GAS(I,J,K) = RAD_SRC(NM)%D(I,J,K,2)
             ENDDO ; ENDDO ; ENDDO
          ENDIF
       ENDIF
@@ -4420,7 +4421,8 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                         ENDDO
                         IL(II,JJ,KK) = IL(II,JJ,KK)/REAL(EXTERNAL_WALL(IW)%NIC_MAX-EXTERNAL_WALL(IW)%NIC_MIN+1,EB)
                      CASE DEFAULT ! solid wall
-                        BR%BAND(IBND)%ILW(N) = OUTRAD_W(IW) + RPI*(1._EB-B1%EMISSIVITY)*INRAD_W(IW)
+                        BR%BAND(IBND)%ILW(N) = OUTRAD_W(IW) + RPI*((1._EB-B1%EMISSIVITY)*INRAD_W(IW) &
+                                                   -B1%EMISSIVITY*RAD_SRC_DQ(NM,IW))
                         IC = CELL_INDEX(BC%IIG,BC%JJG,BC%KKG)
                         IF (IC>0) CELL_ILW(IC,ABS(IOR)) = BR%BAND(IBND)%ILW(N)
                   END SELECT
@@ -4999,6 +5001,9 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
             EFLUX = 0._EB
          ENDIF
          B1%Q_RAD_IN  = B1%Q_RAD_IN + B1%EMISSIVITY*(INRAD_W(IW)+BBFA*EFLUX)
+#ifdef WITH_AMREX
+         CALL RAD_SRC_WQ(NM,IW)
+#endif
       ENDDO
 
       DO ICF=INTERNAL_CFACE_CELLS_LB+1,INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS
@@ -5413,10 +5418,11 @@ END FUNCTION KAPPA_SOOT
 INTEGER FUNCTION RAD_SRC_FILL(NM,DAT)
 INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(OUT) :: DAT(*)
-INTEGER :: I,J,K,N
+INTEGER :: I,J,K,N,IC
 REAL(EB) :: KAP
 REAL(EB), ALLOCATABLE :: ZG(:)
 RAD_SRC_FILL = 0
+IF (.NOT.ALLOCATED(RAD_SRC)) ALLOCATE(RAD_SRC(0))
 IF (WIDE_BAND_MODEL .OR. WSGG_MODEL) RETURN
 CALL POINT_TO_MESH(NM)
 ALLOCATE(ZG(N_TRACKED_SPECIES))
@@ -5427,34 +5433,79 @@ DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
       IF (KAPPA0>=0._EB) THEN ; KAP = KAPPA0
       ELSE ; ZG = ZZ(I,J,K,1:N_TRACKED_SPECIES) ; KAP = GET_KAPPA(ZG,TMP(I,J,K),1) ; ENDIF
    ENDIF
-   DAT(I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = KAP
-   DAT(N+I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = KAP*FOUR_SIGMA*TMP(I,J,K)**4
+   IC = I+(J-1)*IBAR+(K-1)*IBAR*JBAR
+   DAT(IC) = KAP*UII(I,J,K) ; DAT(N+IC) = KAP*FOUR_SIGMA*TMP(I,J,K)**4
    IF (RTE_SOURCE_CORRECTION .AND. CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP) &   ! flame cells: the same source correction as the sweep applies to the fine cell
-      DAT(N+I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = DAT(N+I+(J-1)*IBAR+(K-1)*IBAR*JBAR)*RTE_SOURCE_CORRECTION_FACTOR
+      DAT(N+IC) = DAT(N+IC)*RTE_SOURCE_CORRECTION_FACTOR
 ENDDO ; ENDDO ; ENDDO
+DAT(2*N+1:RAD_SRC_NC*N) = 0._EB
+IF (NM<=SIZE(RAD_SRC)) THEN ; IF (ALLOCATED(RAD_SRC(NM)%WQ)) DAT(2*N+1:8*N) = RESHAPE(RAD_SRC(NM)%WQ,(/6*N/)) ; ENDIF
+DAT(8*N+1:14*N) = DAT(2*N+1:8*N)
 DEALLOCATE(ZG)
 RAD_SRC_FILL = 1
 END FUNCTION RAD_SRC_FILL
 
-!> Store the averaged-down values DAT(IBAR,JBAR,KBAR,2) of box NM (used in its covered cells by COMPUTE_RADIATION).
+!> Store the averaged-down values DAT(IB,JB,KB,RAD_SRC_NC) of box NM (used in its covered cells by COMPUTE_RADIATION).
 SUBROUTINE RAD_SRC_SET(NM,IB,JB,KB,DAT)
 INTEGER, INTENT(IN) :: NM,IB,JB,KB
-REAL(EB), INTENT(IN) :: DAT(IB*JB*KB,2)
+REAL(EB), INTENT(IN) :: DAT(IB*JB*KB*RAD_SRC_NC)
+CALL RAD_SRC_ENSURE(NM)
+IF (ALLOCATED(RAD_SRC(NM)%D)) DEALLOCATE(RAD_SRC(NM)%D)
+ALLOCATE(RAD_SRC(NM)%D(IB,JB,KB,RAD_SRC_NC))
+RAD_SRC(NM)%D = RESHAPE(DAT,(/IB,JB,KB,RAD_SRC_NC/))
+END SUBROUTINE RAD_SRC_SET
+
+!> RAD_SRC(1:NM) exists.
+SUBROUTINE RAD_SRC_ENSURE(NM)
+INTEGER, INTENT(IN) :: NM
 TYPE(RAD_SRC_TYPE), ALLOCATABLE :: TMPL(:)
 INTEGER :: L
-IF (.NOT.ALLOCATED(RAD_SRC)) ALLOCATE(RAD_SRC(NM))
-IF (SIZE(RAD_SRC)<NM) THEN
-   ALLOCATE(TMPL(NM))
-   DO L=1,SIZE(RAD_SRC)
-      IF (.NOT.ALLOCATED(RAD_SRC(L)%KAP)) CYCLE
-      CALL MOVE_ALLOC(RAD_SRC(L)%KAP,TMPL(L)%KAP) ; CALL MOVE_ALLOC(RAD_SRC(L)%F4,TMPL(L)%F4)
-   ENDDO
-   CALL MOVE_ALLOC(TMPL,RAD_SRC)
-ENDIF
-IF (ALLOCATED(RAD_SRC(NM)%KAP)) DEALLOCATE(RAD_SRC(NM)%KAP,RAD_SRC(NM)%F4)
-ALLOCATE(RAD_SRC(NM)%KAP(IB,JB,KB),RAD_SRC(NM)%F4(IB,JB,KB))
-RAD_SRC(NM)%KAP = RESHAPE(DAT(:,1),(/IB,JB,KB/)) ; RAD_SRC(NM)%F4 = RESHAPE(DAT(:,2),(/IB,JB,KB/))
-END SUBROUTINE RAD_SRC_SET
+IF (.NOT.ALLOCATED(RAD_SRC)) ALLOCATE(RAD_SRC(0))
+IF (SIZE(RAD_SRC)>=NM) RETURN
+ALLOCATE(TMPL(NM))
+DO L=1,SIZE(RAD_SRC)
+   IF (ALLOCATED(RAD_SRC(L)%D)) CALL MOVE_ALLOC(RAD_SRC(L)%D,TMPL(L)%D)
+   IF (ALLOCATED(RAD_SRC(L)%WQ)) CALL MOVE_ALLOC(RAD_SRC(L)%WQ,TMPL(L)%WQ)
+ENDDO
+CALL MOVE_ALLOC(TMPL,RAD_SRC)
+END SUBROUTINE RAD_SRC_ENSURE
+
+!> Incident flux of the solid wall IW (external, or a hidden fine wall) of box NM after the radiation update, kept in the cell next to it for the average-down of the next one.
+SUBROUTINE RAD_SRC_WQ(NM,IW)
+INTEGER, INTENT(IN) :: NM,IW
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
+CALL RAD_SRC_ENSURE(NM)
+IF (.NOT.ALLOCATED(RAD_SRC(NM)%WQ)) THEN ; ALLOCATE(RAD_SRC(NM)%WQ(IBAR,JBAR,KBAR,6)) ; RAD_SRC(NM)%WQ = 0._EB ; ENDIF
+BC => BOUNDARY_COORD(WALL(IW)%BC_INDEX) ; B1 => BOUNDARY_PROP1(WALL(IW)%B1_INDEX)
+IF (B1%EMISSIVITY>0._EB) RAD_SRC(NM)%WQ(BC%IIG,BC%JJG,BC%KKG,2*ABS(BC%IOR)-MERGE(0,1,BC%IOR>0)) = B1%Q_RAD_IN/B1%EMISSIVITY
+END SUBROUTINE RAD_SRC_WQ
+
+!> After the average-down of a level pair: the wall incident flux (comps 3:8) of the covered cells of box NM, summed over the RATIO**2 fine faces / RATIO**3 children, times RATIO is the face average.
+SUBROUTINE RAD_SRC_WSCALE(NM,IB,JB,KB,DAT,RATIO)
+INTEGER, INTENT(IN) :: NM,IB,JB,KB,RATIO
+REAL(EB), INTENT(INOUT) :: DAT(IB,JB,KB,RAD_SRC_NC)
+INTEGER :: I,J,K
+CALL POINT_TO_MESH(NM)
+DO K=1,KB ; DO J=1,JB ; DO I=1,IB
+   IF (RAD_COVERED(NM,I,J,K)) DAT(I,J,K,3:8) = RATIO*DAT(I,J,K,3:8)
+ENDDO ; ENDDO ; ENDDO
+END SUBROUTINE RAD_SRC_WSCALE
+
+!> Covered external solid wall IW of box NM: incident flux of the fine faces behind it (averaged down) minus its own (D(:,:,:,C+6)), both of the previous update, else 0. The coarse sweep then absorbs what the fine faces did.
+REAL(EB) FUNCTION RAD_SRC_DQ(NM,IW)
+INTEGER, INTENT(IN) :: NM,IW
+INTEGER :: I,J,K,C
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+RAD_SRC_DQ = 0._EB
+IF (.NOT.ALLOCATED(RAD_SRC) .OR. IW>N_EXTERNAL_WALL_CELLS) RETURN
+IF (NM>SIZE(RAD_SRC)) RETURN
+IF (.NOT.ALLOCATED(RAD_SRC(NM)%D)) RETURN
+BC => BOUNDARY_COORD(WALL(IW)%BC_INDEX) ; I = BC%IIG ; J = BC%JJG ; K = BC%KKG
+C = 2+2*ABS(BC%IOR)-MERGE(0,1,BC%IOR>0)
+IF (RAD_COVERED(NM,I,J,K) .AND. RAD_SRC(NM)%D(I,J,K,C)>0._EB .AND. RAD_SRC(NM)%D(I,J,K,C+6)>0._EB) &
+   RAD_SRC_DQ = RAD_SRC(NM)%D(I,J,K,C)-RAD_SRC(NM)%D(I,J,K,C+6)
+END FUNCTION RAD_SRC_DQ
 
 !> Cell (I,J,K) of box NM (the current mesh pointers; level L) lies inside a box of level L+1 (box extents are set on every rank).
 LOGICAL FUNCTION RAD_COVERED(NM,I,J,K)
