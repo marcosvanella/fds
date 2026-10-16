@@ -316,6 +316,9 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     }
     if (has_zero_mask(p.uncovered)) { s.message = "composite with a caller-supplied covered-cell mask is not built: covered cells are derived from the level BoxArrays"; return s; }
     const bool masked = composite_is_masked(p);
+    if (has_thin_face(p) && requested == BackendKind::HYPRE) {
+        s.message = "composite with thin (zero-thickness) wall faces is built on masked MLMG only (beta = 0 faces); HYPRE is not built"; return s;
+    }
     if (has_face_neumann(p) && requested == BackendKind::HYPRE) {
         s.message = "composite with a mixed domain face (face_neumann) is built on MLMG only (Robin BC unmasked, beta = 0 boundary faces masked); HYPRE is not built"; return s;
     }
@@ -360,7 +363,7 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
     }
     s.ok = true;
     if (requested == BackendKind::HYPRE) { s.kind = BackendKind::HYPRE; }
-    else if (requested == BackendKind::Auto && composite_is_masked(p) && !has_face_neumann(p)) { s.kind = BackendKind::HYPRE; }  // D-092 product: Auto → HYPRE
+    else if (requested == BackendKind::Auto && composite_is_masked(p) && !has_face_neumann(p) && !has_thin_face(p)) { s.kind = BackendKind::HYPRE; }  // D-092 product: Auto → HYPRE
     else { s.kind = BackendKind::MLMG; }
     return s;
 }
@@ -945,6 +948,24 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
     }
 
     int maxc = -1;
+    {   // a thin wall face survives MG coarsening only on planes that stay coarse-face planes: 2^maxc must divide the plane index
+        int tc = std::numeric_limits<int>::max();
+        for (int l = 0; l < n; ++l) {
+            for (int d = 0; d < 3; ++d) {
+                auto const* t = p.levels[l].thin_face[d];
+                if (!t) { continue; }
+                for (MFIter mfi(*t); mfi.isValid(); ++mfi) {
+                    auto const& a = t->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                        const int q = IntVect(i,j,k)[d];
+                        if (a(i,j,k) && q != 0) { int c = 0; for (int v = std::abs(q); (v & 1) == 0; v >>= 1) { ++c; } tc = std::min(tc, c); }
+                    });
+                }
+            }
+        }
+        ParallelDescriptor::ReduceIntMin(tc);
+        if (tc < std::numeric_limits<int>::max()) { tmin = std::min(tmin, std::ldexp(1.0, tc)); }
+    }
     if (nlong > 0) { tmin = std::min(tmin, double(kRunCap)); }
     if (tmin < std::numeric_limits<double>::max()) { maxc = std::max(0, int(std::floor(std::log2(tmin) + 1e-12))); }
 
@@ -986,6 +1007,7 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
                     if (!per && hi[d] == dom.smallEnd(d)) { g = open(c(hi[0],hi[1],hi[2])) && !face_neumann_at(p, l, face_index(d,0), hi); }
                     else if (!per && lo[d] == dom.bigEnd(d)) { g = open(c(lo[0],lo[1],lo[2])) && !face_neumann_at(p, l, face_index(d,1), lo); }
                     else { g = open(c(hi[0],hi[1],hi[2])) && open(c(lo[0],lo[1],lo[2])); }
+                    if (g && p.levels[l].thin_face[d] && p.levels[l].thin_face[d]->const_array(mfi)(i,j,k)) { g = false; }   // thin wall face: beta = 0
                     b(i,j,k) = g ? Real(1) : Real(0);
                 });
             }
@@ -1011,10 +1033,12 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
         M.op->setBCoeffs(l, Array<MultiFab const*,AMREX_SPACEDIM>{&b0[l][0], &b0[l][1], &b0[l][2]});
         M.op->set_masks(l, f0[l], k0[l]);
     }
+    bool bicg_bottom = false;
     M.op->prepareForSolve();
     {
         const std::string e = M.op->bottom_pin_check();
-        if (!e.empty()) { return "masked composite MLMG is not built: " + e + " (pressure/13 ruling 6 gauge for the BoomerAMG bottom): use HYPRE"; }
+        bicg_bottom = !e.empty() && has_thin_face(p);   // thin walls can seal compartments (several singular regions): BiCGStab bottom, no single pinned row
+        if (!e.empty() && !bicg_bottom) { return "masked composite MLMG is not built: " + e + " (pressure/13 ruling 6 gauge for the BoomerAMG bottom): use HYPRE"; }
     }
 
     // Diagnostics of rulings 1-4 on the built hierarchy.
@@ -1056,7 +1080,7 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
     }
     M.mlmg = std::make_unique<MLMG>(*M.op);
     {
-        std::string bot = "hypre";              // diagnostics only: pb_mlmg_bottom.solver = smoother | bicgstab
+        std::string bot = bicg_bottom ? "bicgstab" : "hypre";   // pb_mlmg_bottom.solver (diagnostics) = smoother | bicgstab: pb_mlmg_bottom.solver = smoother | bicgstab
         ParmParse("pb_mlmg_bottom").query("solver", bot);
         M.mlmg->setBottomSolver(bot == "smoother" ? BottomSolver::smoother : bot == "bicgstab" ? BottomSolver::bicgstab : BottomSolver::hypre);
     }
@@ -1933,7 +1957,7 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
     // never touch a Solid cell (NotBuilt in the solve), so they are unchanged. Known cells stay NotBuilt.
     for (auto const& L : p.levels) { if (L.known_value) { return fail(Status::NotBuilt, "face_gradient_composite with Known cells is not built"); } }
     PressureProblem pu = p;
-    for (auto& L : pu.levels) { L.cell_class = nullptr; }
+    for (auto& L : pu.levels) { L.cell_class = nullptr; L.thin_face = {nullptr, nullptr, nullptr}; }
     PressureWorkspace::Impl W;
     build_impl(W, pu);
     const bool ext = (W.hidden >= 0);
@@ -1990,6 +2014,16 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
                 auto const& g = grad_out[l][d]->array(mfi);
                 auto const& s = c.const_array(mfi);
                 amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (s(i,j,k) == 1 || s(i-e[0],j-e[1],k-e[2]) == 1) { g(i,j,k) = 0.0; } });
+            }
+        }
+    }
+    for (int l = 1; l < nlev; ++l) {   // thin wall faces: no flux
+        for (int d = 0; d < 3; ++d) {
+            auto const* t = p.levels[l].thin_face[d];
+            if (!t) { continue; }
+            for (MFIter mfi(*grad_out[l][d]); mfi.isValid(); ++mfi) {
+                auto const& g = grad_out[l][d]->array(mfi); auto const& w = t->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { if (w(i,j,k)) { g(i,j,k) = 0.0; } });
             }
         }
     }

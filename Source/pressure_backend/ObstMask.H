@@ -6,7 +6,9 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_Array4.H>
+#include <AMReX_ParallelDescriptor.H>
 #include <array>
+#include <memory>
 #include <cmath>
 #include <vector>
 
@@ -97,6 +99,22 @@ inline std::unique_ptr<amrex::iMultiFab> build_obst_class (amrex::Geometry const
     auto m = std::make_unique<amrex::iMultiFab>(ba, dm, 1, 0);
     for (amrex::MFIter mfi(*m); mfi.isValid(); ++mfi) { fill_obst_mask(geom, lev, mfi.validbox(), m->array(mfi)); }
     return m;
+}
+
+// Nodal wall-face flags of level `lev` >= 1 (PressureLevel::thin_face) from thin_faces(lev): out[d] on convert(ba, d), 1 = wall face. Only the faces of the level's own boxes are set.
+// Returns false when the level has none (collective).
+inline bool build_thin_flags (int lev, amrex::BoxArray const& ba, amrex::DistributionMapping const& dm, std::array<std::unique_ptr<amrex::iMultiFab>, 3>& out)
+{
+    for (int d = 0; d < 3; ++d) { out[d] = std::make_unique<amrex::iMultiFab>(amrex::convert(ba, amrex::IntVect::TheDimensionVector(d)), dm, 1, 0); out[d]->setVal(0); }
+    bool any = false;
+    for (ThinFace const& tf : thin_faces(lev)) {
+        const amrex::IntVect p(tf.i, tf.j, tf.k);
+        for (amrex::MFIter mfi(*out[tf.dir]); mfi.isValid(); ++mfi) {
+            if (mfi.validbox().contains(p)) { out[tf.dir]->array(mfi)(tf.i, tf.j, tf.k) = 1; any = true; }
+        }
+    }
+    amrex::ParallelDescriptor::ReduceBoolOr(any);
+    return any;
 }
 
 // Forced-tag box of one XB at the level of `geom`: rounded outward (floor/ceil; covers the NINT snap of this and every finer level), grown by `grow` cells.

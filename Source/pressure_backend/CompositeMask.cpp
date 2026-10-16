@@ -16,7 +16,7 @@ bool composite_is_masked (PressureProblem const& p)
     for (auto const& L : p.levels) {
         if (L.cell_class && (L.cell_class->max(0) != 0 || L.cell_class->min(0) != 0)) { return true; }
     }
-    return false;
+    return has_thin_face(p);
 }
 
 namespace {

@@ -508,6 +508,12 @@ bool has_face_neumann (PressureProblem const& p)
     return false;
 }
 
+bool has_thin_face (PressureProblem const& p)
+{
+    for (auto const& L : p.levels) { for (auto const* t : L.thin_face) { if (t && t->max(0) != 0) { return true; } } }
+    return false;
+}
+
 int face_neumann_at (PressureProblem const& p, int lev, int f, IntVect const& iv)
 {
     auto const& v = p.face_neumann[f];
