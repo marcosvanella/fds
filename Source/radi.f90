@@ -3841,6 +3841,7 @@ REAL(EB), POINTER, DIMENSION(:)     :: OUTRAD_W,INRAD_W,OUTRAD_F,INRAD_F,IL_F
 TYPE (OMESH_TYPE), POINTER :: M2
 TYPE(SURFACE_TYPE), POINTER :: SF
 TYPE(VENTS_TYPE), POINTER :: VT
+LOGICAL :: TMP_EXT_ON
 TYPE(RAD_FILE_TYPE), POINTER :: RF
 TYPE(LAGRANGIAN_PARTICLE_CLASS_TYPE), POINTER :: LPC
 TYPE(LAGRANGIAN_PARTICLE_TYPE), POINTER :: LP
@@ -4393,8 +4394,12 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                IF (.NOT.TWO_D .OR. ABS(IOR)/=2) THEN
                   SELECT CASE (WC%BOUNDARY_TYPE)
                      CASE (OPEN_BOUNDARY)
-                        VT => VENTS(WC%VENT_INDEX)
-                        IF (VT%TMP_EXTERIOR>0._EB) THEN
+                        IF (NM<=NMESHES .AND. WC%VENT_INDEX>0) THEN   ! a fine box has no VENTS array: its open walls see the ambient
+                           VT => VENTS(WC%VENT_INDEX) ; TMP_EXT_ON = (VT%TMP_EXTERIOR>0._EB)
+                        ELSE
+                           TMP_EXT_ON = .FALSE.
+                        ENDIF
+                        IF (TMP_EXT_ON) THEN
                            TSI = T - T_BEGIN
                            TMP_EXTERIOR = TMP_0(KK)+EVALUATE_RAMP(TSI,VT%TMP_EXTERIOR_RAMP_INDEX)*(VT%TMP_EXTERIOR-TMP_0(KK))
                            IL(II,JJ,KK) = BBFA*RPI_SIGMA*TMP_EXTERIOR**4
