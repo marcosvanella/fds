@@ -657,7 +657,10 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             if (fm && ri > 0 && s % ri == std::min(2, ri - 1)) {
                 for (int k = 0; k < 2; ++k) {
                     std::vector<double> p = fm->pre[k];
-                    for (double& x : p) amrex::ParallelAllReduce::Max(x, amrex::ParallelContext::CommunicatorSub());
+                    int np_ = static_cast<int>(p.size());   // a rank without fine boxes has an empty vector: agree on the length, pad with 0 (the values are >= 0), then one collective
+                    amrex::ParallelAllReduce::Max(np_, amrex::ParallelContext::CommunicatorSub());
+                    p.resize(np_, 0.0);
+                    if (np_ > 0) amrex::ParallelAllReduce::Max(p.data(), np_, amrex::ParallelContext::CommunicatorSub());
                     long st = fm->stale[k];
                     amrex::ParallelAllReduce::Sum(st, amrex::ParallelContext::CommunicatorSub());
                     stale_regs += st;
@@ -697,7 +700,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         const double dts = loop.steps().empty() ? 0.0 : loop.steps().back().dt;
         // CLIP_MASS / CLIP_CELLS (P3-C11/C12): every dump step when P3-C01 CSV path is active (emit zeros too).
         double fm[3] = {0.0, 0.0, 0.0};   // leaf fuel MLR (diagnostic): collective, so every rank takes part (lf is open on rank 0 only)
-        if (nl == 2) { fds_fine_fuel_mdot(1, fm); amrex::ParallelAllReduce::Sum(fm, 3, amrex::ParallelContext::CommunicatorSub()); }
+        if (nl >= 2) { fds_fine_fuel_mdot(1, fm); amrex::ParallelAllReduce::Sum(fm, 3, amrex::ParallelContext::CommunicatorSub()); }
         if (lf) {
             const int ntr = l0.dom.n_tracked;
             for (int l = 0; l < nl_now; ++l)
