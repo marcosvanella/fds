@@ -4416,7 +4416,7 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                      CASE DEFAULT ! solid wall
                         BR%BAND(IBND)%ILW(N) = OUTRAD_W(IW) + RPI*(1._EB-B1%EMISSIVITY)*INRAD_W(IW)
                         IC = CELL_INDEX(BC%IIG,BC%JJG,BC%KKG)
-                        CELL_ILW(IC,ABS(IOR)) = BR%BAND(IBND)%ILW(N)
+                        IF (IC>0) CELL_ILW(IC,ABS(IOR)) = BR%BAND(IBND)%ILW(N)
                   END SELECT
                ELSEIF (CYLINDRICAL) THEN
                   IF (WC%BOUNDARY_TYPE==OPEN_BOUNDARY) CYCLE WALL_LOOP1
