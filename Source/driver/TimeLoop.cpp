@@ -52,6 +52,7 @@ void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
 int fds_k_rad_src_fill(int nm, double* dat);                // radiation source average-down (radi.f90 RAD_SRC_FILL)
 void fds_k_rad_src_set(int nm, int ib, int jb, int kb, const double* dat);
+void fds_k_rad_src_wscale(int nm, int ib, int jb, int kb, double* dat, int ratio);
 void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), any level
 void fds_k_rte_factor();
 void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* w_ijk, const int* w_nic, const int* s_nm, const int* s_ijk, const int* s_loc, double** ils, double** ilr, int* nra, int* nsb);   // fds_kernels.f90
@@ -2235,11 +2236,18 @@ struct TimeLoop::Impl {
             std::vector<std::unique_ptr<amrex::MultiFab>> S(nl);
             bool gray = true;
             for (int l = 0; l < nl; ++l) {
-                S[l].reset(new amrex::MultiFab(lc[l].lev->ba, lc[l].lev->dm, 2, 0));
+                S[l].reset(new amrex::MultiFab(lc[l].lev->ba, lc[l].lev->dm, 14, 0));   // kappa*UII, kappa*4 sigma T^4, 6 wall incident fluxes (averaged down), the same 6 of the box itself (not averaged): radi.f90 RAD_SRC_NC
                 for (amrex::MFIter mfi(*S[l]); mfi.isValid(); ++mfi) gray = fds_k_rad_src_fill(lc[l].fds0 + mfi.index() + 1, (*S[l])[mfi].dataPtr()) != 0 && gray;
             }
             if (gray) {
-                for (int l = nl - 1; l >= 1; --l) amrex::average_down(*S[l], *S[l - 1], 0, 2, L.m_reg->level(l).ref_ratio_from_parent);
+                for (int l = nl - 1; l >= 1; --l) {
+                    const amrex::IntVect r = L.m_reg->level(l).ref_ratio_from_parent;
+                    amrex::average_down(*S[l], *S[l - 1], 0, 8, r);
+                    for (amrex::MFIter mfi(*S[l - 1]); mfi.isValid(); ++mfi) {   // face values: the children average has 1/ratio of the cells next to a wall
+                        const amrex::Box& b = mfi.validbox();
+                        fds_k_rad_src_wscale(lc[l - 1].fds0 + mfi.index() + 1, b.length(0), b.length(1), b.length(2), (*S[l - 1])[mfi].dataPtr(), r[0]);
+                    }
+                }
                 for (int l = 0; l < nl - 1; ++l)
                     for (amrex::MFIter mfi(*S[l]); mfi.isValid(); ++mfi) {
                         const amrex::Box& b = mfi.validbox();
