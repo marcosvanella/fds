@@ -16,7 +16,7 @@ def fds_series(d, chid='in'):
         r = list(csv.reader(open(f'{d}/{chid}_hrr.csv'))); h = [x.strip() for x in r[1]]
         a = np.array([[float(x) for x in row] for row in r[2:] if row])
         for c in ('HRR', 'Q_RADI'): out[c] = (a[:, 0], a[:, h.index(c)])
-    except (FileNotFoundError, ValueError): pass
+    except (FileNotFoundError, ValueError, IndexError): pass
     return out
 
 def amr_series(d, chid='in'):
@@ -33,7 +33,7 @@ def amr_series(d, chid='in'):
         r = list(csv.reader(open(f'{d}/{chid}_hrr.csv'))); h = [x.strip() for x in r[1]]
         a = np.array([[float(x) for x in row] for row in r[2:] if row])
         for c in ('HRR', 'Q_RADI'): out[c] = (a[:, 0], a[:, h.index(c)])
-    except (FileNotFoundError, ValueError): pass
+    except (FileNotFoundError, ValueError, IndexError): pass
     return out, g
 
 def value(s, mode, t0):
