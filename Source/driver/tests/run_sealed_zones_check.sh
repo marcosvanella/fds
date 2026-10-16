@@ -2,7 +2,7 @@
 # run_sealed_zones_check.sh <build-dir> [<run-dir>]: two sealed isothermal compartments (cases/sealed_two_zone.fds, 2 &ZONEs) split by a partition (x 0.78-0.81) thinner than a
 # level-0 cell, 3 levels forced at step 0 over the partition (--init-patch), derefined by the regrid after step 3 (pressure zones inherited by every level, D7/D8; derefinement
 # keeps T, Z, background pressure and divergence, D9). Passes when the DEREFINE line shows relative changes of T, Z, p0 <= 1e-12, max|div u - D| <= 1e-9 on every step, no
-# abort, and the run gate passes. Needs the per-cell zone inheritance of fds_fine_level.f90 (PATCH-D7); without it the run aborts (fds_fine_level_create code 3).
+# abort, and the run gate passes. Needs per-cell zone inheritance (4e4fb03a38), thin fine-level faces (81c4affdab) and the face-Neumann mask (d2c134e36d); PASS at d2c134e36d (div 7e-15 on L2, 1.9e-10 after derefine, mass change 2e-13).
 set -u
 BLD=$1; RUN=${2:-$BLD/run/sealedzones}
 HERE=$(cd "$(dirname "$0")" && pwd)
