@@ -164,6 +164,20 @@ void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time
         }
         if (!forced.empty()) tag_boxes(tags, forced);
     }
+    // --tag-obst-snap: OBSTs whose snap at level lev+1 is not the refinement of the snap at level lev
+    if (tag_obst_snap_ && lev < maxLevel() && !pb::obst_list().empty()) {
+        const amrex::IntVect r = amrex::AmrCore::refRatio(lev);
+        std::vector<amrex::Box> forced;
+        for (auto const& xb : pb::obst_list()) {
+            const amrex::Box bc = pb::obst_cells(Geom(lev), xb), bf = pb::obst_cells(Geom(lev + 1), xb);
+            const amrex::Box bcr = bc.ok() ? amrex::refine(bc, r) : amrex::Box();
+            if (bf.ok() != bcr.ok() || (bf.ok() && bf != bcr)) {
+                const amrex::Box b = pb::obst_tag_box(Geom(lev), xb, 1);
+                if (b.ok()) forced.push_back(b);
+            }
+        }
+        if (!forced.empty()) tag_boxes(tags, forced);
+    }
     // IR-008: tags outside the refinable region are discarded and counted; one message per level
     std::vector<amrex::Box> allowed;
     for (const RegionBox& rb : h_.levels[lev].taggable) allowed.push_back(to_amrex(rb.box));

@@ -412,6 +412,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     });
     load_obst_list();
     core.set_tag_obst(o.tag_obst);
+    core.set_tag_obst_snap(o.tag_obst_snap != 0 && o.max_level >= 1);
     core.set_nofine(o.nofine);
     if (o.nofine >= 0 && !pb::nofine_list().empty()) amrex::Print() << tag << ": D-010 " << pb::nofine_list().size() << " stateful VENT(s) stay on level 0 (no-refine buffer " << o.nofine << " level-0 cells)\n";
     core.init_static(reg, false, fdsrt::RegridAmrCore::DmFn(), &l0.dm);

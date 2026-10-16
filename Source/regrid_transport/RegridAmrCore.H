@@ -69,6 +69,9 @@ public:
     void set_force_tag_function(bool on) { force_tag_fn_ = on; }
     // --tag-obst NBUF: force-tag every OBST of pb::obst_list() (ObstMask.H) on each level below the top, rounded outward and grown by NBUF level-0 cells (<0: off)
     void set_tag_obst(int nbuf) { tag_obst_nbuf_ = nbuf; }
+    // --tag-obst-snap (default on for two or more levels): tag, on each level below the top, every OBST whose FDS snap at the next level is not the refinement of its snap at this level
+    // (including OBSTs that are thin at this level), rounded outward and grown by 1 cell, so a coarse-fine interface never cuts an OBST whose representation differs between the levels
+    void set_tag_obst_snap(bool on) { tag_obst_snap_ = on; }
     // D-010: no tags within NBUF level-0 cells of a stateful wall (pb::nofine_list; -1 off). Clustering then takes only tagged cells
     // (grid efficiency 1), else a box around a tagged region would cover the cleared hole.
     void set_nofine(int nbuf) { nofine_nbuf_ = nbuf; if (nbuf >= 0 && !pb::nofine_list().empty()) SetGridEff(1.0); }
@@ -129,6 +132,7 @@ private:
     TagFn tag_fn_;
     bool force_tag_fn_ = false;
     int tag_obst_nbuf_ = -1;
+    bool tag_obst_snap_ = false;
     int nofine_nbuf_ = -1;
     TagFieldsFn tag_fields_fn_;
     DmFn dm_fn_;

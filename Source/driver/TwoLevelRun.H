@@ -30,6 +30,7 @@ struct TwoLevelOptions {
     std::string chid = "two_level";
     int log_every = 1;
     int nofine = 2;                  // --nofine NBUF: D-010 no-refine buffer of NBUF level-0 cells around stateful VENTs (-1 off)
+    int tag_obst_snap = 1;           // --tag-obst-snap [0|1]: force-tag OBSTs whose snap differs between levels (default on; only with two or more levels)
     int tag_obst = -1;               // --tag-obst [NBUF]: force-tag OBST extents grown by NBUF level-0 cells (default 1); -1 off
     int boundary_test = 0;           // 1: call stage_boundary(1,3) and (1,6) on the bound fine level and check level 0 is untouched; 2: same with the pre-S14.1 level-0-only guard (must stop the run)
     bool bind_only = false;          // true: build hierarchy, bind all levels, report layout, skip advance (registry/bind gate when a full step is not wanted)

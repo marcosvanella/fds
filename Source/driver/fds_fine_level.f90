@@ -20,7 +20,7 @@ USE FDS_KERNELS, ONLY: FDS_K_RESERVE_BOXES
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
-PUBLIC :: BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_SUMS,FDS_FINE_FUEL_MDOT
+PUBLIC :: FDS_FINE_SET_LISTS,BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_SUMS,FDS_FINE_FUEL_MDOT
 
 !> Hidden fine-level wall cells (patch 0026): per local box a separate mesh object W holding only WALL/BOUNDARY_COORD/BOUNDARY_PROP1/2 (the box itself keeps WALL(0:0), so the
 !> kernels never see them), and per wall the level-0 parent wall (mesh PNM, wall PIW) whose face contains it. Used for the composite HRR-file wall terms only.
@@ -34,7 +34,25 @@ TYPE FWALL_LEVEL_TYPE
 END TYPE
 TYPE(FWALL_LEVEL_TYPE), ALLOCATABLE, SAVE :: FWALL(:)
 
+!> Global OBST and VENT lists (set once by the driver, fds_fine_set_lists): the per-level wall builder snaps them at the dx of each box (FDS rounding, as ObstMask.H).
+INTEGER, SAVE :: NOB=0,NVT=0
+REAL(EB), ALLOCATABLE, SAVE :: OBX(:,:),VTX(:,:)   ! XB(6,*)
+INTEGER, SAVE :: G0(3)=0,NG(3)=0   ! global cell index (0-based) of cell (1,1,1) of the current box, number of cells of the domain at its level
+INTEGER, ALLOCATABLE, SAVE :: OBI(:,:),VTS(:,:)   ! OBST and VENT XB snapped at the current box's dx (FDS NINT rounding)
+INTEGER, ALLOCATABLE, SAVE :: OBS(:,:),VTI(:,:)    ! OBST SURF_INDEX(-3:3) (7,*); VENT IOR,SURF_INDEX,BOUNDARY_TYPE (3,*)
+
 CONTAINS
+
+SUBROUTINE FDS_FINE_SET_LISTS(NO,OXB,OSF,NV,VXB,VI) BIND(C,NAME='fds_fine_set_lists')
+INTEGER(C_INT), VALUE :: NO,NV
+REAL(C_DOUBLE), INTENT(IN) :: OXB(6,*),VXB(6,*)
+INTEGER(C_INT), INTENT(IN) :: OSF(7,*),VI(3,*)
+IF (ALLOCATED(OBX)) DEALLOCATE(OBX,OBS,VTX,VTI)
+ALLOCATE(OBX(6,NO),OBS(7,NO),VTX(6,NV),VTI(3,NV))
+NOB = NO ; NVT = NV
+IF (NO>0) THEN ; OBX = OXB(:,1:NO) ; OBS = OSF(:,1:NO) ; ENDIF
+IF (NV>0) THEN ; VTX = VXB(:,1:NV) ; VTI = VI(:,1:NV) ; ENDIF
+END SUBROUTINE FDS_FINE_SET_LISTS
 
 !> Make FINE_LEVEL(LEV) with NBOX boxes (LEV = the next level above the existing ones, or the top level again after FDS_FINE_LEVEL_DESTROY). Box IB has IJK(:,IB) cells
 !> on [XB(1,IB),XB(2,IB)] x [XB(3,IB),XB(4,IB)] x [XB(5,IB),XB(6,IB)]; its mesh object is built only when LOCAL(IB)/=0 (the boxes of this rank). NM0 returns the offset of the
@@ -365,7 +383,8 @@ USE MEMORY_FUNCTIONS, ONLY: ALLOCATE_STORAGE
 USE TRAN, ONLY: GET_IJK
 USE GLOBAL_CONSTANTS, ONLY: MY_RANK,PROCESS
 INTEGER(C_INT), VALUE :: LEV,IB
-INTEGER :: I,J,K,D,NM0,I0,J0,K0,IW0,IW,N,NM,L,N_SKIP
+INTEGER :: I,J,K,D,NM0,I0,J0,K0,IW0,IW,N,NM,L,N_SKIP,SI,BT,NMP
+LOGICAL :: LOCAL0,WALLQ
 LOGICAL, SAVE :: SKIP_WARNED=.FALSE.
 INTEGER, ALLOCATABLE :: T(:,:)
 REAL(EB) :: XI,YJ,ZK,FF,F0,TOL
@@ -387,7 +406,12 @@ FINE_DEVC_PROC => FINE_DEVC   ! fine wall-flux devices (patch 0027 hook in FDS_S
 LEAF_WALL_COUNT_PROC => LEAF_WALL_COUNT ; LEAF_WALL_PROC => LEAF_WALL ; LEAF_WALL_COVERED_PROC => LEAF_WALL_COVERED ; RAD_WALLS_PROC => FRAD_WALLS   ! fine walls in the wall-device statistics
 R => FINE_LEVEL(LEV)%BOX(IB)
 NM = FINE_LEVEL(LEV)%NM0 + IB
-ALLOCATE(T(6,6*R%IBAR*R%JBAR*R%KBAR)) ; N = 0 ; N_SKIP = 0   ! I,J,K,D,NM0,IW0 of each wall
+! Per-level wall inventory (same code for every level >= 1): the OBST and VENT lists snapped at this box's own dx (FDS rounding NINT((X-X0)/DX), as ObstMask.H), no parent copy.
+! Gas cell (I,J,K) gets a wall on face D when the cell across it is an OBST cell or outside the domain; coarse-fine / box-box faces get none. Surface: the last VENT of the list that covers
+! the face (plane and extents snapped at this dx, IOR = -D), else the OBST face surface (last OBST containing the cell across), else SURF_DEFAULT. PNM/PIW = the level-0 wall with the same
+! surface whose face contains this one (0 if none: new fine faces and faces whose surface differs; they have no parent state).
+CALL SNAP_SETUP(R)
+ALLOCATE(T(8,6*R%IBAR*R%JBAR*R%KBAR)) ; N = 0 ; N_SKIP = 0   ! I,J,K,D,NM0,IW0,SURF_INDEX,BOUNDARY_TYPE of each wall
 DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
    IF (R%CELL(R%CELL_INDEX(I,J,K))%SOLID) CYCLE
    NM0 = 0
@@ -398,33 +422,40 @@ DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
    ENDDO
    IF (NM0==0) THEN ; WRITE(0,'(A)') 'fds_amr ERROR in FDS_FINE_WALLS_BUILD: no local level-0 mesh under a fine cell' ; ERROR STOP 1 ; ENDIF
    M0 => MESHES(NM0)
-   ! The parent mesh may belong to another rank (the fine-level boxes follow the AMReX distribution, not the level-0 owner; every level >= 1 when --levels >= 3): its WALL
-   ! array is not stored here (CELL is, WALL is empty), so its walls cannot be read. Such a fine cell gets no hidden wall (counted and reported once below).
-   IF (PROCESS(NM0)/=MY_RANK) THEN ; N_SKIP = N_SKIP+1 ; CYCLE ; ENDIF
-   CALL GET_IJK(R%XC(I),R%YC(J),R%ZC(K),NM0,XI,YJ,ZK,I0,J0,K0)
-   IF (M0%CELL(M0%CELL_INDEX(I0,J0,K0))%SOLID) CYCLE
+   ! The parent mesh may belong to another rank (the fine-level boxes follow the AMReX distribution, not the level-0 owner): its WALL array is not stored here, so such a wall has no parent state here.
+   LOCAL0 = PROCESS(NM0)==MY_RANK
+   IF (LOCAL0) CALL GET_IJK(R%XC(I),R%YC(J),R%ZC(K),NM0,XI,YJ,ZK,I0,J0,K0)
+   IF (.NOT.LOCAL0) N_SKIP = N_SKIP+1
    DO D=-3,3
       IF (D==0) CYCLE
-      SELECT CASE(D)
-         CASE(-1) ; FF=R%X(I-1) ; F0=M0%X(I0-1) ; TOL=R%DXI
-         CASE( 1) ; FF=R%X(I)   ; F0=M0%X(I0)   ; TOL=R%DXI
-         CASE(-2) ; FF=R%Y(J-1) ; F0=M0%Y(J0-1) ; TOL=R%DETA
-         CASE( 2) ; FF=R%Y(J)   ; F0=M0%Y(J0)   ; TOL=R%DETA
-         CASE(-3) ; FF=R%Z(K-1) ; F0=M0%Z(K0-1) ; TOL=R%DZETA
-         CASE( 3) ; FF=R%Z(K)   ; F0=M0%Z(K0)   ; TOL=R%DZETA
-      END SELECT
-      IF (ABS(FF-F0)>1.E-3_EB*TOL) CYCLE
-      IW0 = M0%CELL(M0%CELL_INDEX(I0,J0,K0))%WALL_INDEX(D)
-      IF (IW0==0) CYCLE
-      WC0 => M0%WALL(IW0)
-      IF (WC0%BOUNDARY_TYPE/=SOLID_BOUNDARY .AND. WC0%BOUNDARY_TYPE/=OPEN_BOUNDARY) CYCLE
-      IF (SURFACE(WC0%SURF_INDEX)%THERMAL_BC_INDEX==THERMALLY_THICK .OR. SURFACE(WC0%SURF_INDEX)%TMP_GAS_FRONT>0._EB .OR. &
-          ANY(SURFACE(WC0%SURF_INDEX)%VEL_T/=0._EB) .OR. SURFACE(WC0%SURF_INDEX)%HEAT_TRANSFER_MODEL==LOGLAW_HTC_MODEL) THEN
-         WRITE(0,'(3A)') 'fds_amr ERROR in FDS_FINE_WALLS_BUILD: unsupported surface ',TRIM(SURFACE(WC0%SURF_INDEX)%ID), &
-                         ' on a fine box (fine-level walls support inert / fixed-temperature surfaces without VEL_T, TMP_GAS_FRONT or the log-law HTC model (B2 U_TAU/Y_PLUS would be the parent''s) only)'
+      CALL FACE_SURFACE(R,I,J,K,D,SI,BT,WALLQ)
+      IF (.NOT.WALLQ) CYCLE
+      IF (BT/=SOLID_BOUNDARY .AND. BT/=OPEN_BOUNDARY) CYCLE
+      IF (SURFACE(SI)%THERMAL_BC_INDEX==THERMALLY_THICK .OR. SURFACE(SI)%TMP_GAS_FRONT>0._EB .OR. &
+          ANY(SURFACE(SI)%VEL_T/=0._EB) .OR. SURFACE(SI)%HEAT_TRANSFER_MODEL==LOGLAW_HTC_MODEL) THEN
+         WRITE(0,'(3A,I0,A)') 'fds_amr ERROR in FDS_FINE_WALLS_BUILD: unsupported surface ',TRIM(SURFACE(SI)%ID),' on level ',LEV, &
+                         ' (levels above 0 support inert / fixed-temperature surfaces without VEL_T, TMP_GAS_FRONT or the log-law HTC model only; thermally thick (ONE_D) walls stay on level 0)'
          ERROR STOP 1
       ENDIF
-      N = N+1 ; T(:,N) = (/I,J,K,D,NM0,IW0/)
+      IW0 = 0 ; NMP = 0
+      IF (LOCAL0) THEN
+         SELECT CASE(D)
+            CASE(-1) ; FF=R%X(I-1) ; F0=M0%X(I0-1) ; TOL=R%DXI
+            CASE( 1) ; FF=R%X(I)   ; F0=M0%X(I0)   ; TOL=R%DXI
+            CASE(-2) ; FF=R%Y(J-1) ; F0=M0%Y(J0-1) ; TOL=R%DETA
+            CASE( 2) ; FF=R%Y(J)   ; F0=M0%Y(J0)   ; TOL=R%DETA
+            CASE(-3) ; FF=R%Z(K-1) ; F0=M0%Z(K0-1) ; TOL=R%DZETA
+            CASE( 3) ; FF=R%Z(K)   ; F0=M0%Z(K0)   ; TOL=R%DZETA
+         END SELECT
+         IF (ABS(FF-F0)<=1.E-3_EB*TOL .AND. .NOT.M0%CELL(M0%CELL_INDEX(I0,J0,K0))%SOLID) THEN
+            IW0 = M0%CELL(M0%CELL_INDEX(I0,J0,K0))%WALL_INDEX(D)
+            IF (IW0>0) THEN
+               IF (M0%WALL(IW0)%SURF_INDEX==SI .AND. M0%WALL(IW0)%BOUNDARY_TYPE==BT) NMP = NM0
+            ENDIF
+            IF (NMP==0) IW0 = 0
+         ENDIF
+      ENDIF
+      N = N+1 ; T(:,N) = (/I,J,K,D,NMP,IW0,SI,BT/)
    ENDDO
 ENDDO ; ENDDO ; ENDDO
 
@@ -441,14 +472,14 @@ ALLOCATE(FB%PNM(N),FB%PIW(N)) ; FB%PNM = T(5,1:N) ; FB%PIW = T(6,1:N)
 ALLOCATE(WM%WALL(0:N),WM%WALL_WORK1(N),WM%WALL_WORK2(N)) ; WM%WALL_WORK1 = 0._EB ; WM%WALL_WORK2 = 0._EB ; WM%N_WALL_CELLS_DIM = N ; WM%N_WALL_CELLS = N ; WM%N_EXTERNAL_WALL_CELLS = 0 ; WM%N_INTERNAL_WALL_CELLS = N
 MESH_OBJ => WM
 DO IW=1,N
-   CALL ALLOCATE_STORAGE(NM,SURF_INDEX=MESHES(T(5,IW))%WALL(T(6,IW))%SURF_INDEX,WALL_INDEX=IW)
+   CALL ALLOCATE_STORAGE(NM,SURF_INDEX=T(7,IW),WALL_INDEX=IW)
 ENDDO
 MESH_OBJ => NULL()
 DO IW=1,N
    I=T(1,IW) ; J=T(2,IW) ; K=T(3,IW) ; D=T(4,IW)
-   WC0 => MESHES(T(5,IW))%WALL(T(6,IW))
    WC => WM%WALL(IW)
-   WC%SURF_INDEX = WC0%SURF_INDEX ; WC%BOUNDARY_TYPE = WC0%BOUNDARY_TYPE ; WC%VENT_INDEX = WC0%VENT_INDEX
+   WC%SURF_INDEX = T(7,IW) ; WC%BOUNDARY_TYPE = T(8,IW) ; WC%VENT_INDEX = 0
+   IF (T(5,IW)>0) WC%VENT_INDEX = MESHES(T(5,IW))%WALL(T(6,IW))%VENT_INDEX
    BC => WM%BOUNDARY_COORD(WC%BC_INDEX)
    BC%IOR = -D ; BC%IIG = I ; BC%JJG = J ; BC%KKG = K ; BC%II = I ; BC%JJ = J ; BC%KK = K
    SELECT CASE(ABS(D))
@@ -468,13 +499,75 @@ DO IW=1,N
    END SELECT
 ENDDO
 END ASSOCIATE
+IF (WALL_DIAG()) WRITE(0,'(A,I0,A,I0,A,3I6,A,3I5,A,I0,A,6I7,A,I0)') 'WALLDIAG level ',LEV,' box ',IB,' g0',G0,' n',R%IBAR,R%JBAR,R%KBAR,' nwall ',N,' perD(-1,1,-2,2,-3,3)', &
+   COUNT(T(4,1:N)==-1),COUNT(T(4,1:N)==1),COUNT(T(4,1:N)==-2),COUNT(T(4,1:N)==2),COUNT(T(4,1:N)==-3),COUNT(T(4,1:N)==3),' withparent ',COUNT(T(5,1:N)>0)
 DEALLOCATE(T)
 END SUBROUTINE FDS_FINE_WALLS_BUILD
+
+!> Env FDS_AMR_WALL_DIAG set: one WALLDIAG line per box at every wall build (wall counts per direction, for the tests).
+LOGICAL FUNCTION WALL_DIAG()
+INTEGER :: L
+LOGICAL, SAVE :: DONE=.FALSE.,ON=.FALSE.
+IF (.NOT.DONE) THEN ; CALL GET_ENVIRONMENT_VARIABLE('FDS_AMR_WALL_DIAG',LENGTH=L) ; ON = L>0 ; DONE = .TRUE. ; ENDIF
+WALL_DIAG = ON
+END FUNCTION WALL_DIAG
+
+!> Snap the OBST and VENT lists at the dx of box R (FDS: NINT((X-X0)/DX) from the domain corner), and the box offset G0 and domain size NG at this level.
+SUBROUTINE SNAP_SETUP(R)
+TYPE(MESH_TYPE), INTENT(IN) :: R
+REAL(EB) :: X0(3),X1(3),DX(3)
+INTEGER :: O,D
+X0 = (/MINVAL(MESHES%XS),MINVAL(MESHES%YS),MINVAL(MESHES%ZS)/) ; X1 = (/MAXVAL(MESHES%XF),MAXVAL(MESHES%YF),MAXVAL(MESHES%ZF)/)
+DX = (/R%DXI,R%DETA,R%DZETA/)
+G0 = NINT((/R%XS-X0(1),R%YS-X0(2),R%ZS-X0(3)/)/DX) ; NG = NINT((X1-X0)/DX)
+IF (ALLOCATED(OBI)) DEALLOCATE(OBI,VTS)
+ALLOCATE(OBI(6,NOB),VTS(6,NVT))
+DO O=1,NOB ; DO D=1,3 ; OBI(2*D-1:2*D,O) = NINT((OBX(2*D-1:2*D,O)-X0(D))/DX(D)) ; ENDDO ; ENDDO
+DO O=1,NVT ; DO D=1,3 ; VTS(2*D-1:2*D,O) = NINT((VTX(2*D-1:2*D,O)-X0(D))/DX(D)) ; ENDDO ; ENDDO
+END SUBROUTINE SNAP_SETUP
+
+!> Wall of gas cell (I,J,K) of box R on its face D (+-1..3): WALLQ true when the cell across is an OBST cell (snapped at this level) or outside the domain; then SI, BT = its surface
+!> and boundary type (last covering VENT, else the face surface of the last OBST containing the cell across, else SURF_DEFAULT).
+SUBROUTINE FACE_SURFACE(R,I,J,K,D,SI,BT,WALLQ)
+USE GLOBAL_CONSTANTS, ONLY: DEFAULT_SURF_INDEX,SOLID_BOUNDARY
+TYPE(MESH_TYPE), INTENT(IN) :: R
+INTEGER, INTENT(IN) :: I,J,K,D
+INTEGER, INTENT(OUT) :: SI,BT
+LOGICAL, INTENT(OUT) :: WALLQ
+INTEGER :: A,SG,G(3),GN(3),OWN,O,P,TT
+LOGICAL :: IN
+A = ABS(D) ; SG = SIGN(1,D)
+G = G0 + (/I-1,J-1,K-1/) ; GN = G ; GN(A) = G(A)+SG
+OWN = 0
+IF (GN(A)>=0 .AND. GN(A)<NG(A)) THEN
+   DO O=NOB,1,-1
+      IF (ALL(GN>=OBI(1:5:2,O)) .AND. ALL(GN<=OBI(2:6:2,O)-1)) THEN ; OWN = O ; EXIT ; ENDIF
+   ENDDO
+   WALLQ = OWN>0
+ELSE
+   WALLQ = .TRUE.
+ENDIF
+SI = DEFAULT_SURF_INDEX ; BT = SOLID_BOUNDARY
+IF (.NOT.WALLQ) RETURN
+IF (OWN>0) SI = OBS(-D+4,OWN)
+P = G(A) + MERGE(1,0,SG>0)
+DO O=NVT,1,-1
+   IF (VTI(1,O)/=-D) CYCLE
+   IF (VTS(2*A-1,O)/=P .OR. VTS(2*A,O)/=P) CYCLE
+   IN = .TRUE.
+   DO TT=1,3
+      IF (TT==A) CYCLE
+      IF (G(TT)<VTS(2*TT-1,O) .OR. G(TT)>VTS(2*TT,O)-1) IN = .FALSE.
+   ENDDO
+   IF (IN) THEN ; SI = VTI(2,O) ; BT = VTI(3,O) ; EXIT ; ENDIF
+ENDDO
+END SUBROUTINE FACE_SURFACE
 
 !> Radiation on fine box NM (radi.f90 COMPUTE_RADIATION, same code for every level): ON=1 points the wall variables of MESH_POINTERS to the hidden walls of the box and copies the surface
 !> state radiation reads (TMP_F, EMISSIVITY, Q_RAD_OUT, T_IGN of the level-0 parent wall; AREA of the fine face), so the face ghost intensity is the wall's, as at level 0; ON=0 points back to the box.
 SUBROUTINE FRAD_WALLS(NM,ON)
 USE MESH_POINTERS, ONLY: WALL,BOUNDARY_COORD,BOUNDARY_PROP1,BOUNDARY_RADIA,WALL_WORK1,WALL_WORK2,N_WALL_CELLS,N_INTERNAL_WALL_CELLS,N_EXTERNAL_WALL_CELLS,POINT_TO_BOX
+USE TYPES, ONLY: SURFACE
 INTEGER, INTENT(IN) :: NM,ON
 INTEGER :: LEV,IB,IW,NM0,IW0
 REAL(EB) :: RDN,AREA
@@ -489,6 +582,13 @@ DO LEV=1,MIN(SIZE(FWALL),SIZE(FINE_LEVEL))
    IF (.NOT.ASSOCIATED(WM)) RETURN
    DO IW=1,FWALL(LEV)%B(IB)%NW
       NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
+      IF (NM0==0) THEN   ! no level-0 parent wall (new fine face): surface values
+         ASSOCIATE(B1=>WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),SF=>SURFACE(WM%WALL(IW)%SURF_INDEX))
+         CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),BC,RDN,AREA)
+         B1%TMP_F = SF%TMP_FRONT ; B1%EMISSIVITY = SF%EMISSIVITY ; B1%Q_RAD_OUT = 0._EB ; B1%AREA = AREA
+         END ASSOCIATE
+         CYCLE
+      ENDIF
       ASSOCIATE(B1=>WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX),P=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
       CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),BC,RDN,AREA)
       B1%TMP_F = P%TMP_F ; B1%EMISSIVITY = P%EMISSIVITY ; B1%Q_RAD_OUT = P%Q_RAD_OUT ; B1%T_IGN = P%T_IGN ; B1%AREA = AREA
@@ -519,6 +619,7 @@ WM => FWALL(LEV)%B(IB)%W
 IF (.NOT.ASSOCIATED(WM)) RETURN
 DO IW=1,FWALL(LEV)%B(IB)%NW
    NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
+   IF (NM0==0) CYCLE   ! no level-0 parent state (D5, not yet)
    IF (IW0<=MESHES(NM0)%N_EXTERNAL_WALL_CELLS) CYCLE
    ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX), BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
    UN = MERGE(B1%U_NORMAL_S,B1%U_NORMAL,PRED==1)
@@ -551,6 +652,7 @@ WM => FWALL(LEV)%B(IB)%W
 IF (.NOT.ASSOCIATED(WM)) RETURN
 DO IW=1,FWALL(LEV)%B(IB)%NW
    NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
+   IF (NM0==0) CYCLE   ! no level-0 parent state (D5, not yet)
    IF (IW0<=MESHES(NM0)%N_EXTERNAL_WALL_CELLS .OR. MESHES(NM0)%WALL(IW0)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
    ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX), BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
    UN = MERGE(B1%U_NORMAL_S,B1%U_NORMAL,PRED==1)
@@ -611,6 +713,7 @@ DO IB=1,SIZE(FWALL(LEV)%B)
    IF (.NOT.ASSOCIATED(WM)) CYCLE
    DO IW=1,FWALL(LEV)%B(IB)%NW
       NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
+      IF (NM0==0) CYCLE
       IF (MESHES(NM0)%WALL(IW0)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
       ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX),BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
       MD = SUM(B1%M_DOT_G_PP_ADJUST(1:N_TRACKED_SPECIES))
@@ -668,7 +771,9 @@ DO IB=1,SIZE(FWALL(LEV)%B)
    MESH_OBJ => WM
    DO IW=1,FWALL(LEV)%B(IB)%NW
       WC => WM%WALL(IW) ; BC => WM%BOUNDARY_COORD(WC%BC_INDEX) ; B1 => WM%BOUNDARY_PROP1(WC%B1_INDEX)
-      NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; M0 => MESHES(NM0)
+      NM0 = FWALL(LEV)%B(IB)%PNM(IW)
+      IF (NM0==0) CYCLE   ! no level-0 parent wall: not in the composite sums yet (M2)
+      M0 => MESHES(NM0)
       WC0 => M0%WALL(FWALL(LEV)%B(IB)%PIW(IW))
       BC0 => M0%BOUNDARY_COORD(WC0%BC_INDEX) ; B10 => M0%BOUNDARY_PROP1(WC0%B1_INDEX)
       SF => SURFACE(WC%SURF_INDEX)

@@ -195,4 +195,42 @@ DO NM=1,NMESHES
 ENDDO
 END FUNCTION FDS_STATEFUL_VENTS
 
+!> \brief Face surfaces of the OBSTs of fds_obst_xb (same order): S(1:7,M) = OB%SURF_INDEX(-3:3). Input of the per-level wall builder (fds_fine_level.f90).
+SUBROUTINE FDS_OBST_SURF(N,S) BIND(C,NAME='fds_obst_surf')
+INTEGER(C_INT), VALUE :: N
+INTEGER(C_INT), INTENT(OUT) :: S(7,N)
+INTEGER :: NM,I,M
+M = 0
+DO NM=1,NMESHES
+   IF (PROCESS(NM)/=MY_RANK) CYCLE
+   DO I=1,MESHES(NM)%N_OBST
+      M = M + 1
+      IF (M>N) RETURN
+      S(:,M) = MESHES(NM)%OBSTRUCTION(I)%SURF_INDEX(-3:3)
+   ENDDO
+ENDDO
+END SUBROUTINE FDS_OBST_SURF
+
+!> \brief All VENTs of the local meshes (those of READ_VENT incl. the MIRROR/OPEN mesh-boundary ones): XB(6,M) = X1..Z2 and V(3,M) = IOR, SURF_INDEX, BOUNDARY_TYPE.
+!> With N = 0 only the count is returned. Input of the per-level wall builder (fds_fine_level.f90).
+FUNCTION FDS_VENT_LIST(N,XB,V) BIND(C,NAME='fds_vent_list') RESULT(M)
+INTEGER(C_INT), VALUE :: N
+REAL(C_DOUBLE), INTENT(OUT) :: XB(6,*)
+INTEGER(C_INT), INTENT(OUT) :: V(3,*)
+INTEGER(C_INT) :: M
+INTEGER :: NM,I
+M = 0
+DO NM=1,NMESHES
+   IF (PROCESS(NM)/=MY_RANK) CYCLE
+   DO I=1,MESHES(NM)%N_VENT
+      M = M + 1
+      IF (M>N) CYCLE
+      ASSOCIATE (VT=>MESHES(NM)%VENTS(I))
+      XB(:,M) = [VT%X1,VT%X2,VT%Y1,VT%Y2,VT%Z1,VT%Z2]
+      V(:,M) = [VT%IOR,VT%SURF_INDEX,VT%BOUNDARY_TYPE]
+      END ASSOCIATE
+   ENDDO
+ENDDO
+END FUNCTION FDS_VENT_LIST
+
 END MODULE FDS_MESH_QUERY

@@ -253,6 +253,7 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) { to.chid = argv[++i]; ro.chid = to.chid; }
                     else if (std::strcmp(argv[i], "--nofine") == 0 && i + 1 < argc) to.nofine = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--tag-temp") == 0) to.tag_temp = (i + 1 < argc && argv[i + 1][0] != '-') ? std::atof(argv[++i]) : 400.0;
+                    else if (std::strcmp(argv[i], "--tag-obst-snap") == 0) to.tag_obst_snap = (i + 1 < argc && argv[i + 1][0] != '-') ? std::atoi(argv[++i]) : 1;
                     else if (std::strcmp(argv[i], "--tag-obst") == 0) to.tag_obst = (i + 1 < argc && argv[i + 1][0] != '-') ? std::atoi(argv[++i]) : 1;
                     else if (std::strcmp(argv[i], "--log-every") == 0 && i + 1 < argc) to.log_every = std::atoi(argv[++i]);
                 }

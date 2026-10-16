@@ -4,12 +4,16 @@
 #include "../pressure_backend/ObstMask.H"
 #include <AMReX_ParallelDescriptor.H>
 
-extern "C" { int fds_obst_count (); void fds_obst_xb (int n, double* xb); int fds_stateful_vents (int n, double* xb); }
+extern "C" {
+int fds_obst_count (); void fds_obst_xb (int n, double* xb); int fds_stateful_vents (int n, double* xb);
+void fds_obst_surf (int n, int* s); int fds_vent_list (int n, double* xb, int* v);                                          // fds_mesh_query.f90
+void fds_fine_set_lists (int no, const double* oxb, const int* osf, int nv, const double* vxb, const int* vi);          // fds_fine_level.f90
+}
 
 namespace fdsamr {
 
-// local XB list (6 per entry) -> global list on every rank
-inline void gather_xb (std::vector<double> const& loc, std::vector<std::array<double, 6>>& L)
+// local flat list -> global flat list on every rank
+inline std::vector<double> gather_flat (std::vector<double> const& loc)
 {
     const int np = amrex::ParallelDescriptor::NProcs();
     std::vector<int> cnt(np, 0), off(np, 0);
@@ -27,6 +31,14 @@ inline void gather_xb (std::vector<double> const& loc, std::vector<std::array<do
 #else
     all = loc;
 #endif
+    return all;
+}
+
+// local XB list (6 per entry) -> global list on every rank
+inline void gather_xb (std::vector<double> const& loc, std::vector<std::array<double, 6>>& L)
+{
+    const std::vector<double> all = gather_flat(loc);
+    const int tot = static_cast<int>(all.size());
     L.clear();
     for (int i = 0; i + 5 < tot; i += 6) { L.push_back({all[i], all[i+1], all[i+2], all[i+3], all[i+4], all[i+5]}); }
 }
@@ -44,6 +56,18 @@ inline void load_obst_list ()
     loc.assign(6 * static_cast<size_t>(fds_stateful_vents(0, nullptr)), 0.0);
     if (!loc.empty()) { fds_stateful_vents(static_cast<int>(loc.size() / 6), loc.data()); }
     gather_xb(loc, pb::nofine_list());
+    // per-level fine walls (fds_fine_level.f90): OBST face surfaces and all VENTs, global lists, handed to Fortran once
+    std::vector<double> osf(7 * static_cast<size_t>(n));
+    if (n > 0) { std::vector<int> si(7 * static_cast<size_t>(n)); fds_obst_surf(n, si.data()); osf.assign(si.begin(), si.end()); }
+    const std::vector<double> gosf = gather_flat(osf);
+    const int nv = fds_vent_list(0, nullptr, nullptr);
+    std::vector<double> vxb(6 * static_cast<size_t>(nv)), vi_d(3 * static_cast<size_t>(nv));
+    if (nv > 0) { std::vector<int> vi(3 * static_cast<size_t>(nv)); fds_vent_list(nv, vxb.data(), vi.data()); vi_d.assign(vi.begin(), vi.end()); }
+    const std::vector<double> gvxb = gather_flat(vxb), gvi = gather_flat(vi_d);
+    const std::vector<int> iosf(gosf.begin(), gosf.end()), ivi(gvi.begin(), gvi.end());
+    std::vector<double> oxb;
+    for (auto const& b : pb::obst_list()) oxb.insert(oxb.end(), b.begin(), b.end());
+    fds_fine_set_lists(static_cast<int>(pb::obst_list().size()), oxb.data(), iosf.data(), static_cast<int>(gvi.size() / 3), gvxb.data(), ivi.data());
 }
 
 }  // namespace fdsamr
