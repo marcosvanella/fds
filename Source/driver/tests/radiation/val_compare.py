@@ -24,7 +24,7 @@ def amr_series(d, chid='in'):
     g, cur, prev = [], None, None
     for l in open(f'{d}/run.log', errors='replace'):
         if not l.startswith('RADLEAF'): continue
-        f = l.split(); t, nm, lev = float(f[1]), int(f[2]), int(f[3]); v = [float(x) for x in f[4:9]] + [float(f[10]), int(f[9])]
+        f = l.split(); t, nm, lev = float(f[1]), int(f[2]), int(f[3]); v = [float(x) for x in f[4:9]] + [float(f[10]), int(f[9])]; v[1] += float(f[15]) if len(f) > 15 else 0.   # SNO: open-boundary net flux, part of FDS W_net
         if cur is None or (lev, nm) <= prev: cur = [t, np.zeros(6), 0, []]; g.append(cur)
         prev = (lev, nm); cur[1] += np.array(v[:5] + [v[5]]); cur[3].append((nm, lev, v[0], v[4])); cur[2] += 1
     t = np.array([x[0] for x in g]); S = np.array([x[1] for x in g])
