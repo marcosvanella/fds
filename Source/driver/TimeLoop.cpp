@@ -1392,6 +1392,7 @@ struct TimeLoop::Impl {
     std::unique_ptr<pb::PressureWorkspace> pws;
     std::unique_ptr<fdsrt::FluxStageRunner> runner;
     std::vector<std::unique_ptr<amrex::MultiFab>> crhs, cphi;   // by level (index 0 unused: level 0 has rhs / phi)
+    std::vector<std::array<std::unique_ptr<amrex::iMultiFab>, 3>> cthin;   // thin-wall face flags by level (ObstMask.H build_thin_flags; null entries = none)
     std::vector<std::unique_ptr<amrex::iMultiFab>> ccls;        // OBST cell_class by level (ObstMask.H); empty without OBST
     TimeLoop::CompositeReport crep;
     void ensure_comp()
@@ -1418,7 +1419,10 @@ struct TimeLoop::Impl {
         ccls.clear();
         // Level 0 is an FDS mesh: FDS treats its OBSTs itself (solve through solids, wall normal velocity, e.g. a MASS_FLUX burner, via NO_FLUX FV),
         // as with --levels 1. Only levels >= 1, where FDS has no OBST, are masked; a Solid L0 cell is under L1 (--tag-obst) or FDS's own.
+        { std::vector<amrex::Geometry> gg; for (int l = 0; l < nl; ++l) gg.push_back(lc[l].lev->geom); pb::set_level_geoms(gg); }
         if (!pb::obst_list().empty()) for (int l = 0; l < nl; ++l) ccls.push_back(l == 0 ? nullptr : pb::build_obst_class(lc[l].lev->geom, l, lc[l].lev->ba, lc[l].lev->dm));
+        cthin.clear(); cthin.resize(nl);
+        if (!pb::obst_list().empty()) for (int l = 1; l < nl; ++l) if (!pb::build_thin_flags(l, lc[l].lev->ba, lc[l].lev->dm, cthin[l])) cthin[l] = {};
         comp_gen = layout_gen;
     }
     // Composite pressure solve of the stage: PRHS of every level, one solve, H (pred) / HS (corrector) of every level, the face gradient at the interface into the fine ghost cells.
@@ -1484,6 +1488,7 @@ struct TimeLoop::Impl {
             pl.phi = l == 0 ? phi.get() : cphi[l].get();
             if (!warm) pl.phi->setVal(0.0);
             if (l < static_cast<int>(ccls.size())) pl.cell_class = ccls[l].get();
+            if (l < static_cast<int>(cthin.size())) for (int d = 0; d < 3; ++d) pl.thin_face[d] = cthin[l][d].get();
         }
         pb::PressureOptions o;
         o.backend = pb::BackendKind::Auto;
@@ -1626,6 +1631,13 @@ struct TimeLoop::Impl {
                             std::array<int, 4> a{d, i - lo[0] + (d == 0 ? 0 : 1), j - lo[1] + (d == 1 ? 0 : 1), k - lo[2] + (d == 2 ? 0 : 1)};
                             if (!bf.count(a)) b.sf.insert(b.sf.end(), a.begin(), a.end());
                         });
+                    }
+                    for (const pb::ThinFace& tf : pb::thin_faces(l)) {   // zero-thickness OBST faces (owner rule, ObstMask.H): a wall on the face, ADV = DIF = 0
+                        const int d = tf.dir; const amrex::IntVect hi(tf.i, tf.j, tf.k);
+                        amrex::Box fb = vb; fb.surroundingNodes(d);
+                        if (!fb.contains(hi)) continue;
+                        std::array<int, 4> a{d, tf.i - lo[0] + (d == 0 ? 0 : 1), tf.j - lo[1] + (d == 1 ? 0 : 1), tf.k - lo[2] + (d == 2 ? 0 : 1)};
+                        if (!bf.count(a)) b.sf.insert(b.sf.end(), a.begin(), a.end());
                     }
                 }
                 for (int f = 0; f < b.n; ++f) {

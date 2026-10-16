@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "FaceTransfer.H"
+#include "../pressure_backend/ObstMask.H"
 
 namespace fdsamr {
 
@@ -24,6 +25,14 @@ void composite_zero_solid_faces(LevelRegistry& reg, int l0, int nl, const std::a
                 amrex::LoopOnCpu(amrex::surroundingNodes(m.box(mfi.index()), d), [&](int i, int j, int k) {
                     if (s(i, j, k) | s(i - e[0], j - e[1], k - e[2])) a(i + sh * e[0], j + sh * e[1], k + sh * e[2]) = 0.0;
                 });
+            }
+        }
+        if (l >= 1) {   // zero-thickness OBST faces (pb::thin_faces): no normal velocity / flux through them
+            for (const pb::ThinFace& tf : pb::thin_faces(l)) {
+                const int d = tf.dir; const amrex::IntVect e = amrex::IntVect::TheDimensionVector(d), p(tf.i, tf.j, tf.k);
+                amrex::MultiFab& f = reg.fields(l)[names[d]];
+                for (amrex::MFIter mfi(f); mfi.isValid(); ++mfi)
+                    if (amrex::surroundingNodes(mfi.validbox(), d).contains(p)) f.array(mfi)(p[0] + sh * e[0], p[1] + sh * e[1], p[2] + sh * e[2]) = 0.0;
             }
         }
     }
