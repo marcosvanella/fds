@@ -5426,6 +5426,8 @@ DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
    ENDIF
    DAT(I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = KAP
    DAT(N+I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = KAP*FOUR_SIGMA*TMP(I,J,K)**4
+   IF (RTE_SOURCE_CORRECTION .AND. CHI_R(I,J,K)*Q(I,J,K)>QR_CLIP) &   ! flame cells: the same source correction as the sweep applies to the fine cell
+      DAT(N+I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = DAT(N+I+(J-1)*IBAR+(K-1)*IBAR*JBAR)*RTE_SOURCE_CORRECTION_FACTOR
 ENDDO ; ENDDO ; ENDDO
 DEALLOCATE(ZG)
 RAD_SRC_FILL = 1
