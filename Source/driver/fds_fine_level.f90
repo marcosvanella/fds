@@ -102,7 +102,6 @@ DO NM=1,SIZE(MESHES)
    DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR   ! gas cells only: an OBST cell carries no zone of its own
       IF (R%CELL(R%CELL_INDEX(I,J,K))%SOLID) CYCLE
       IF (.NOT.Z0_SET) THEN ; Z0 = R%PRESSURE_ZONE(I,J,K) ; Z0_SET = .TRUE. ; ENDIF
-      IF (R%PRESSURE_ZONE(I,J,K)/=Z0) THEN ; IERR = 3 ; RETURN ; ENDIF
    ENDDO ; ENDDO ; ENDDO
    END ASSOCIATE
 ENDDO
@@ -117,6 +116,7 @@ DO IB=1,NBOX
    IF (LOCAL(IB)/=0) CALL BUILD_FINE_BOX(FINE_LEVEL(LEV)%BOX(IB),IJK(1,IB),IJK(2,IB),IJK(3,IB),XB(1,IB),XB(2,IB),XB(3,IB),XB(4,IB),XB(5,IB),XB(6,IB))
    IF (LOCAL(IB)/=0) THEN
       FINE_LEVEL(LEV)%BOX(IB)%PRESSURE_ZONE = Z0
+      CALL FINE_BOX_ZONES(FINE_LEVEL(LEV)%BOX(IB))   ! D7: every cell inherits the zone of its level-0 cell (zones are never renumbered, so the chain l-1,...,0 ends there)
       ! zone-wide background pressure state (PBAR, PBAR_S, D_PBAR_DT, D_PBAR_DT_S, U_LEAK, R_PBAR) of a new box = the one of the level-0 mesh (without STRATIFICATION PBAR is uniform in K;
       ! with STRATIFICATION the box keeps its own P_0 profile and takes only the zone rates)
       IF (NMREF>0) THEN
@@ -136,6 +136,30 @@ CALL FDS_HOOK_SET_FINE_READY(1_C_INT)
 NM0 = INT(N0,C_INT)
 
 END FUNCTION FDS_FINE_LEVEL_CREATE
+
+!> D7/D8: pressure zone of every cell of fine box M = the zone of the level-0 cell that contains its centre (a cell over an OBST of level 0 keeps the box's default zone).
+!> Ghost cells copy the nearest interior cell.
+SUBROUTINE FINE_BOX_ZONES(M)
+USE TRAN, ONLY: GET_IJK
+TYPE(MESH_TYPE), INTENT(INOUT) :: M
+INTEGER :: I,J,K,L,NM0,I0,J0,K0
+REAL(EB) :: XI,YJ,ZK
+DO K=1,M%KBAR ; DO J=1,M%JBAR ; DO I=1,M%IBAR
+   NM0 = 0
+   DO L=1,SIZE(MESHES)
+      IF (.NOT.ALLOCATED(MESHES(L)%PRESSURE_ZONE)) CYCLE
+      IF (M%XC(I)>MESHES(L)%XS .AND. M%XC(I)<MESHES(L)%XF .AND. M%YC(J)>MESHES(L)%YS .AND. M%YC(J)<MESHES(L)%YF .AND. &
+          M%ZC(K)>MESHES(L)%ZS .AND. M%ZC(K)<MESHES(L)%ZF) THEN ; NM0 = L ; EXIT ; ENDIF
+   ENDDO
+   IF (NM0==0) CYCLE
+   CALL GET_IJK(M%XC(I),M%YC(J),M%ZC(K),NM0,XI,YJ,ZK,I0,J0,K0)
+   IF (MESHES(NM0)%CELL(MESHES(NM0)%CELL_INDEX(I0,J0,K0))%SOLID) CYCLE
+   M%PRESSURE_ZONE(I,J,K) = MESHES(NM0)%PRESSURE_ZONE(I0,J0,K0)
+ENDDO ; ENDDO ; ENDDO
+M%PRESSURE_ZONE(0,1:M%JBAR,1:M%KBAR) = M%PRESSURE_ZONE(1,1:M%JBAR,1:M%KBAR) ; M%PRESSURE_ZONE(M%IBP1,1:M%JBAR,1:M%KBAR) = M%PRESSURE_ZONE(M%IBAR,1:M%JBAR,1:M%KBAR)
+M%PRESSURE_ZONE(:,0,:) = M%PRESSURE_ZONE(:,1,:) ; M%PRESSURE_ZONE(:,M%JBP1,:) = M%PRESSURE_ZONE(:,M%JBAR,:)
+M%PRESSURE_ZONE(:,:,0) = M%PRESSURE_ZONE(:,:,1) ; M%PRESSURE_ZONE(:,:,M%KBP1) = M%PRESSURE_ZONE(:,:,M%KBAR)
+END SUBROUTINE FINE_BOX_ZONES
 
 !> Drop the boxes and views of the top level LEV (before it is made again after a regrid, or when it is cleared). IERR 1 when LEV is not the top level.
 FUNCTION FDS_FINE_LEVEL_DESTROY(LEV) BIND(C,NAME='fds_fine_level_destroy') RESULT(IERR)
