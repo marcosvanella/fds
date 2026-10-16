@@ -39,6 +39,12 @@ PUBLIC :: FDS_P_SET_LEGACY_SAVE_GUARD,FDS_P_BND_RATE,FDS_P_MSUMS,FDS_P_ADD_MASS,
 REAL(EB), ALLOCATABLE, SAVE :: BND_RATE(:,:,:)   !< (0:N_TRACKED_SPECIES+1,box,stage) leaf wall inflow rate (N_TRACKED_SPECIES+1: through-flow) (kg/s), BND_STAGE_RATE: level-0 walls without hidden fine children, per fine box NM>NMESHES its hidden walls
 INTEGER, ALLOCATABLE, SAVE :: BND_STAMP(:,:)   !< (box,stage) ICYC of the last BND_STAGE_RATE call of a fine box (a box dropped by a regrid keeps an old stamp and is not summed)
 
+!> Fine walls whose level-0 parent mesh is on another MPI rank (BND_STAGE_RATE): the fine rank records A*UIN and A of the face per stage (PEND), the owner rank of the level-0 mesh publishes
+!> the stage state of its covered walls (PUB: key, RHO_F, open/mass-flux flag, ZZ_F, RHO_D_DZDN_F); FDS_P_BND_RATE (collective, once per step) gathers PUB and pairs the two by the key of
+!> (level-0 mesh, gas cell, IOR).
+REAL(EB), ALLOCATABLE, SAVE :: PEND(:,:,:),PUB(:,:,:)   !< (field,record,stage)
+INTEGER, SAVE :: NPEND(2)=0,NPUB(2)=0,PEND_ICYC(2)=-1,PUB_ICYC(2)=-1
+
 !> Test switch (tests/run_stage_boundary_fine_check.sh): restore the guard fds_p_save_uvw had before S14.1 (level-0 numbers only), so that the test can show that a fine box number aborted there.
 LOGICAL, SAVE :: SAVE_UVW_LEGACY_GUARD = .FALSE.
 
@@ -207,13 +213,18 @@ ENDIF
 ST = MERGE(1,2,PREDICTOR)
 BND_RATE(:,NM,ST) = 0._EB
 IF (NM>NMESHES) BND_STAMP(NM,ST) = ICYC
+IF (PEND_ICYC(ST)/=ICYC) THEN ; NPEND(ST) = 0 ; PEND_ICYC(ST) = ICYC ; ENDIF   ! the lists of this step and stage start empty at the first call
+IF (PUB_ICYC(ST)/=ICYC) THEN ; NPUB(ST) = 0 ; PUB_ICYC(ST) = ICYC ; ENDIF
 IF (FDS_P_DENS_SKIP()/=0) RETURN   ! DENSITY moves no mass this stage (first step ICYC<=1 etc.): no wall inflow either
 IF (NM<=NMESHES) THEN
    M => MESHES(NM)
    IF (PREDICTOR) THEN ; UU=>M%U ; VV=>M%V ; WW=>M%W ; ELSE ; UU=>M%US ; VV=>M%VS ; WW=>M%WS ; ENDIF
    DO IW=1,M%N_EXTERNAL_WALL_CELLS+M%N_INTERNAL_WALL_CELLS
       IF (ASSOCIATED(LEAF_WALL_COVERED_PROC)) THEN
-         IF (LEAF_WALL_COVERED_PROC(NM,IW)) CYCLE   ! its hidden fine walls carry this share
+         IF (LEAF_WALL_COVERED_PROC(NM,IW)) THEN   ! its hidden fine walls carry this share; a fine wall on another rank needs the state: publish it
+            IF (N_MPI_PROCESSES>1) CALL PUBLISH(M,IW)
+            CYCLE
+         ENDIF
       ENDIF
       CALL ONE_WALL(M,IW,M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX),M%DX,M%DY,M%DZ)
    ENDDO
@@ -225,7 +236,10 @@ ELSE
    DO NMP=1,NMESHES
       DO K=1,LEAF_WALL_COUNT_PROC(NMP,-1)
          NBX = LEAF_WALL_PROC(NMP,K,-1,WCF,BCF,B1F,V,IWP)
-         IF (NBX==NM) CALL ONE_WALL(MESHES(NMP),IWP,BCF,DXP,DYP,DZP)
+         IF (NBX/=NM) CYCLE
+         IF (IWP>0) THEN ; CALL ONE_WALL(MESHES(NMP),IWP,BCF,DXP,DYP,DZP)
+         ELSEIF (PROCESS(NMP)/=MY_RANK) THEN ; CALL PEND_WALL(NMP,BCF,DXP,DYP,DZP)   ! the parent wall is on another rank
+         ENDIF   ! else no parent wall
       ENDDO
    ENDDO
 ENDIF
@@ -259,6 +273,67 @@ CONTAINS
    END ASSOCIATE
    END SUBROUTINE ONE_WALL
 
+   !> Key of the level-0 wall face (mesh NM0, gas cell I,J,K, IOR) as an exactly representable number.
+   REAL(EB) FUNCTION WKEY(NM0,I,J,K,IOR)
+   INTEGER, INTENT(IN) :: NM0,I,J,K,IOR
+   WKEY = REAL((((INT(NM0,8)*1000_8+I)*1000_8+J)*1000_8+K)*8_8+IOR+3,EB)
+   END FUNCTION WKEY
+
+   !> Level-0 wall IW of local mesh MP, covered by a finer level: its stage state, for the fine rank (see PUB).
+   SUBROUTINE PUBLISH(MP,IW)
+   TYPE(MESH_TYPE), INTENT(IN) :: MP
+   INTEGER, INTENT(IN) :: IW
+   INTEGER :: IC,NF
+   NF = 3+2*N_TRACKED_SPECIES
+   ASSOCIATE(WC=>MP%WALL(IW),BCP=>MP%BOUNDARY_COORD(MP%WALL(IW)%BC_INDEX),B1=>MP%BOUNDARY_PROP1(MP%WALL(IW)%B1_INDEX))
+   IF (WC%BOUNDARY_TYPE/=SOLID_BOUNDARY .AND. WC%BOUNDARY_TYPE/=OPEN_BOUNDARY) RETURN
+   IC = MP%CELL_INDEX(BCP%II,BCP%JJ,BCP%KK)
+   IF (WC%BOUNDARY_TYPE==SOLID_BOUNDARY .AND. .NOT.MP%CELL(IC)%SOLID .AND. .NOT.MP%CELL(IC)%EXTERIOR) RETURN
+   CALL GROW(PUB,NPUB(ST),NF,ST)
+   NPUB(ST) = NPUB(ST)+1
+   PUB(1,NPUB(ST),ST) = WKEY(NM,BCP%IIG,BCP%JJG,BCP%KKG,BCP%IOR)
+   PUB(2,NPUB(ST),ST) = B1%RHO_F
+   PUB(3,NPUB(ST),ST) = MERGE(1._EB,0._EB,WC%BOUNDARY_TYPE==OPEN_BOUNDARY .OR. SURFACE(B1%SURF_INDEX)%SPECIES_BC_INDEX==SPECIFIED_MASS_FLUX)
+   PUB(4:3+N_TRACKED_SPECIES,NPUB(ST),ST) = B1%ZZ_F(1:N_TRACKED_SPECIES)
+   PUB(4+N_TRACKED_SPECIES:NF,NPUB(ST),ST) = B1%RHO_D_DZDN_F(1:N_TRACKED_SPECIES)
+   END ASSOCIATE
+   END SUBROUTINE PUBLISH
+
+   !> Fine wall BCG whose level-0 parent mesh NMP is on another rank: record A*UIN and A with the key of the parent face (gas cell of mesh NMP on the gas side of the face, IOR).
+   SUBROUTINE PEND_WALL(NMP,BCG,DXP,DYP,DZP)
+   INTEGER, INTENT(IN) :: NMP
+   TYPE(BOUNDARY_COORD_TYPE), INTENT(IN) :: BCG
+   REAL(EB), INTENT(IN) :: DXP(0:),DYP(0:),DZP(0:)
+   INTEGER :: I,J,K
+   REAL(EB) :: UIN,A,X,Y,Z,D0(3)
+   ASSOCIATE(MP=>MESHES(NMP))
+   D0 = (/(MP%XF-MP%XS)/MP%IBAR,(MP%YF-MP%YS)/MP%JBAR,(MP%ZF-MP%ZS)/MP%KBAR/)
+   X = BCG%X ; Y = BCG%Y ; Z = BCG%Z
+   SELECT CASE(BCG%IOR)   ! IOR points into the gas: the gas cell is on the +IOR side of the face
+      CASE( 1) ; UIN =  UU(BCG%IIG-1,BCG%JJG,BCG%KKG) ; A = DYP(BCG%JJG)*DZP(BCG%KKG) ; X = X+0.5_EB*D0(1)
+      CASE(-1) ; UIN = -UU(BCG%IIG,BCG%JJG,BCG%KKG)   ; A = DYP(BCG%JJG)*DZP(BCG%KKG) ; X = X-0.5_EB*D0(1)
+      CASE( 2) ; UIN =  VV(BCG%IIG,BCG%JJG-1,BCG%KKG) ; A = DXP(BCG%IIG)*DZP(BCG%KKG) ; Y = Y+0.5_EB*D0(2)
+      CASE(-2) ; UIN = -VV(BCG%IIG,BCG%JJG,BCG%KKG)   ; A = DXP(BCG%IIG)*DZP(BCG%KKG) ; Y = Y-0.5_EB*D0(2)
+      CASE( 3) ; UIN =  WW(BCG%IIG,BCG%JJG,BCG%KKG-1) ; A = DXP(BCG%IIG)*DYP(BCG%JJG) ; Z = Z+0.5_EB*D0(3)
+      CASE(-3) ; UIN = -WW(BCG%IIG,BCG%JJG,BCG%KKG)   ; A = DXP(BCG%IIG)*DYP(BCG%JJG) ; Z = Z-0.5_EB*D0(3)
+   END SELECT
+   I = FLOOR((X-MP%XS)/D0(1))+1 ; J = FLOOR((Y-MP%YS)/D0(2))+1 ; K = FLOOR((Z-MP%ZS)/D0(3))+1
+   END ASSOCIATE
+   CALL GROW(PEND,NPEND(ST),3,ST)
+   NPEND(ST) = NPEND(ST)+1
+   PEND(1,NPEND(ST),ST) = WKEY(NMP,I,J,K,BCG%IOR) ; PEND(2,NPEND(ST),ST) = A*UIN ; PEND(3,NPEND(ST),ST) = A
+   END SUBROUTINE PEND_WALL
+
+   SUBROUTINE GROW(AR,N,NF,ST)
+   REAL(EB), ALLOCATABLE, INTENT(INOUT) :: AR(:,:,:)
+   INTEGER, INTENT(IN) :: N,NF,ST
+   REAL(EB), ALLOCATABLE :: T(:,:,:)
+   IF (.NOT.ALLOCATED(AR)) THEN ; ALLOCATE(AR(NF,1024,2)) ; AR = 0._EB ; ENDIF
+   IF (N+1>SIZE(AR,2)) THEN
+      ALLOCATE(T(NF,2*SIZE(AR,2),2)) ; T = 0._EB ; T(:,1:SIZE(AR,2),:) = AR ; CALL MOVE_ALLOC(T,AR)
+   ENDIF
+   END SUBROUTINE GROW
+
 END SUBROUTINE BND_STAGE_RATE
 
 !> Leaf wall inflow rate of the last step (kg/s, rank-local): the mean of the predictor and corrector rates (DENSITY averages the two stages);
@@ -275,6 +350,48 @@ DO NM=LOWER_MESH_INDEX,SIZE(BND_RATE,2)   ! level-0 meshes of this rank, then th
    R(NS+1) = R(NS+1) + 0.5_EB*(BND_RATE(N_TRACKED_SPECIES+1,NM,1)+BND_RATE(N_TRACKED_SPECIES+1,NM,2))
    R(0:MIN(NS,N_TRACKED_SPECIES)) = R(0:MIN(NS,N_TRACKED_SPECIES)) + 0.5_EB*(BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,1)+BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,2))
 ENDDO
+IF (N_MPI_PROCESSES>1) CALL REMOTE_PARENT_RATE()   ! collective: every rank calls FDS_P_BND_RATE once per step
+
+CONTAINS
+
+!> Rate of the fine walls whose parent mesh is on another rank: both stages, state of the parent wall from the gathered PUB records.
+SUBROUTINE REMOTE_PARENT_RATE()
+USE MPI_F08
+INTEGER :: ST,I,J,N,NF,IERR,NTOT
+INTEGER, ALLOCATABLE :: CNT(:),DSP(:)
+REAL(EB), ALLOCATABLE :: SB(:,:),RB(:,:),RS(:)
+REAL(EB) :: KEY,UA,A
+INTEGER :: NQ
+NF = 3+2*N_TRACKED_SPECIES
+ALLOCATE(CNT(0:N_MPI_PROCESSES-1),DSP(0:N_MPI_PROCESSES-1),RS(0:NS+1))
+DO ST=1,2
+   N = 0 ; IF (ALLOCATED(PUB) .AND. PUB_ICYC(ST)==ICYC) N = NPUB(ST)
+   ALLOCATE(SB(NF,MAX(1,N)))
+   IF (N>0) SB(:,1:N) = PUB(:,1:N,ST)
+   CNT = 0 ; CNT(MY_RANK) = N*NF
+   CALL MPI_ALLGATHER(MPI_IN_PLACE,1,MPI_INTEGER,CNT,1,MPI_INTEGER,MPI_COMM_WORLD,IERR)
+   DSP(0) = 0 ; DO I=1,N_MPI_PROCESSES-1 ; DSP(I) = DSP(I-1)+CNT(I-1) ; ENDDO
+   NTOT = SUM(CNT)/NF
+   ALLOCATE(RB(NF,MAX(1,NTOT)))
+   CALL MPI_ALLGATHERV(SB,N*NF,MPI_DOUBLE_PRECISION,RB,CNT,DSP,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,IERR)
+   IF (ALLOCATED(PEND) .AND. PEND_ICYC(ST)==ICYC) THEN
+      DO I=1,NPEND(ST)
+         KEY = PEND(1,I,ST) ; UA = PEND(2,I,ST) ; A = PEND(3,I,ST)
+         DO J=1,NTOT   ! linear search: the number of covered walls with a fine child on another rank is small
+            IF (RB(1,J)/=KEY) CYCLE
+            RS = 0._EB
+            RS(0) = RB(2,J)*UA
+            DO NQ=1,MIN(NS,N_TRACKED_SPECIES) ; RS(NQ) = RB(2,J)*RB(3+NQ,J)*UA - A*RB(3+N_TRACKED_SPECIES+NQ,J) ; ENDDO
+            RS(NS+1) = RB(3,J)*RB(2,J)*ABS(UA)
+            R(NS+1) = R(NS+1) + 0.5_EB*RS(NS+1)
+            R(0:MIN(NS,N_TRACKED_SPECIES)) = R(0:MIN(NS,N_TRACKED_SPECIES)) + 0.5_EB*RS(0:MIN(NS,N_TRACKED_SPECIES))
+            EXIT
+         ENDDO
+      ENDDO
+   ENDIF
+   DEALLOCATE(SB,RB)
+ENDDO
+END SUBROUTINE REMOTE_PARENT_RATE
 END SUBROUTINE FDS_P_BND_RATE
 
 !> Species production per unit heat release (kg/J), for the two-level species balance: COMBUSTION_MODEL sets Q = -RHO*SUM(H_F*DZ)/DT with DZ = NU_MW_O_MW_F*DZ_F for one
