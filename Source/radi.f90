@@ -2802,6 +2802,13 @@ TYPE RAD_GHOST_TYPE
 END TYPE RAD_GHOST_TYPE
 TYPE(RAD_GHOST_TYPE), TARGET, SAVE :: RAD_GHOST
 PUBLIC RAD_GHOST,RAD_GHOST_TYPE
+#ifdef WITH_AMREX
+TYPE RAD_SRC_TYPE   !< kappa and kappa*4*sigma*T^4 averaged down from the finer levels (covered cells of a box), set by the driver before the radiation update
+   REAL(EB), ALLOCATABLE :: KAP(:,:,:),F4(:,:,:)
+END TYPE RAD_SRC_TYPE
+TYPE(RAD_SRC_TYPE), ALLOCATABLE, SAVE :: RAD_SRC(:)
+PUBLIC RAD_SRC_FILL,RAD_SRC_SET
+#endif
 #endif
 
 CONTAINS
@@ -4232,6 +4239,22 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
       ENDDO SLOOP
    ENDIF
 
+#ifdef WITH_AMREX
+   ! Cells under a finer box: the emission and absorption of the finer data averaged down (RAD_SRC_FILL/SET, driver, finest to coarsest), so the coarse sweep sees the emission of the leaf cells there
+
+   IF (ALLOCATED(RAD_SRC) .AND. .NOT.(WIDE_BAND_MODEL .OR. WSGG_MODEL)) THEN
+      IF (NM<=SIZE(RAD_SRC)) THEN
+         IF (ALLOCATED(RAD_SRC(NM)%KAP)) THEN
+            DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
+               IF (.NOT.RAD_COVERED(NM,I,J,K)) CYCLE
+               KAPPA_GAS(I,J,K) = RAD_SRC(NM)%KAP(I,J,K)
+               KFST4_GAS(I,J,K) = RAD_SRC(NM)%F4(I,J,K)
+            ENDDO ; ENDDO ; ENDDO
+         ENDIF
+      ENDIF
+   ENDIF
+#endif
+
    ! Calculate extinction coefficient
 
    EXTCOE = KAPPA_GAS + KAPPA_PART + (SCAEFF+SCAEFF_G)*RSA_RAT
@@ -5377,6 +5400,51 @@ KAPPA_SOOT = SOOT_MASS_CONCENTRATION*(1232.4_EB+0.591552_EB*(TTMP-2000._EB))
 END FUNCTION KAPPA_SOOT
 
 #ifdef WITH_AMREX
+
+!> Gray gas kappa and kappa*4*sigma*T^4 of every cell of box NM (any level), DAT(IBAR,JBAR,KBAR,2) (driver, before the radiation update). Not for the wide-band and WSGG models (returns 0, nothing to average).
+INTEGER FUNCTION RAD_SRC_FILL(NM,DAT)
+INTEGER, INTENT(IN) :: NM
+REAL(EB), INTENT(OUT) :: DAT(*)
+INTEGER :: I,J,K,N
+REAL(EB) :: KAP
+REAL(EB), ALLOCATABLE :: ZG(:)
+RAD_SRC_FILL = 0
+IF (WIDE_BAND_MODEL .OR. WSGG_MODEL) RETURN
+CALL POINT_TO_MESH(NM)
+ALLOCATE(ZG(N_TRACKED_SPECIES))
+N = IBAR*JBAR*KBAR
+DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
+   KAP = 0._EB
+   IF (.NOT.CELL(CELL_INDEX(I,J,K))%SOLID) THEN
+      IF (KAPPA0>=0._EB) THEN ; KAP = KAPPA0
+      ELSE ; ZG = ZZ(I,J,K,1:N_TRACKED_SPECIES) ; KAP = GET_KAPPA(ZG,TMP(I,J,K),1) ; ENDIF
+   ENDIF
+   DAT(I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = KAP
+   DAT(N+I+(J-1)*IBAR+(K-1)*IBAR*JBAR) = KAP*FOUR_SIGMA*TMP(I,J,K)**4
+ENDDO ; ENDDO ; ENDDO
+DEALLOCATE(ZG)
+RAD_SRC_FILL = 1
+END FUNCTION RAD_SRC_FILL
+
+!> Store the averaged-down values DAT(IBAR,JBAR,KBAR,2) of box NM (used in its covered cells by COMPUTE_RADIATION).
+SUBROUTINE RAD_SRC_SET(NM,IB,JB,KB,DAT)
+INTEGER, INTENT(IN) :: NM,IB,JB,KB
+REAL(EB), INTENT(IN) :: DAT(IB*JB*KB,2)
+TYPE(RAD_SRC_TYPE), ALLOCATABLE :: TMPL(:)
+INTEGER :: L
+IF (.NOT.ALLOCATED(RAD_SRC)) ALLOCATE(RAD_SRC(NM))
+IF (SIZE(RAD_SRC)<NM) THEN
+   ALLOCATE(TMPL(NM))
+   DO L=1,SIZE(RAD_SRC)
+      IF (.NOT.ALLOCATED(RAD_SRC(L)%KAP)) CYCLE
+      CALL MOVE_ALLOC(RAD_SRC(L)%KAP,TMPL(L)%KAP) ; CALL MOVE_ALLOC(RAD_SRC(L)%F4,TMPL(L)%F4)
+   ENDDO
+   CALL MOVE_ALLOC(TMPL,RAD_SRC)
+ENDIF
+IF (ALLOCATED(RAD_SRC(NM)%KAP)) DEALLOCATE(RAD_SRC(NM)%KAP,RAD_SRC(NM)%F4)
+ALLOCATE(RAD_SRC(NM)%KAP(IB,JB,KB),RAD_SRC(NM)%F4(IB,JB,KB))
+RAD_SRC(NM)%KAP = RESHAPE(DAT(:,1),(/IB,JB,KB/)) ; RAD_SRC(NM)%F4 = RESHAPE(DAT(:,2),(/IB,JB,KB/))
+END SUBROUTINE RAD_SRC_SET
 
 !> Cell (I,J,K) of box NM (the current mesh pointers; level L) lies inside a box of level L+1 (box extents are set on every rank).
 LOGICAL FUNCTION RAD_COVERED(NM,I,J,K)

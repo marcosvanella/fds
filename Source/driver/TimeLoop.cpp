@@ -50,6 +50,8 @@ void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* dat
 void fds_k_dens_post(double t, double dt, int nm);
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
+int fds_k_rad_src_fill(int nm, double* dat);                // radiation source average-down (radi.f90 RAD_SRC_FILL)
+void fds_k_rad_src_set(int nm, int ib, int jb, int kb, const double* dat);
 void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), any level
 void fds_k_rte_factor();
 void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* w_ijk, const int* w_nic, const int* s_nm, const int* s_ijk, const int* s_loc, double** ils, double** ilr, int* nra, int* nsb);   // fds_kernels.f90
@@ -2216,6 +2218,23 @@ struct TimeLoop::Impl {
         if (multi()) fine_burner_state(false);
 #endif
         if (IP[10]) rad_ghost_table();   // fine-box ghost intensity table for the current layout
+        if (IP[10] && lc.size() > 1) {   // kappa and kappa*4*sigma*T^4 of every level, averaged down finest to coarsest: the covered cells of the coarse sweep carry the emission of the leaf cells (same for every level pair)
+            const int nl = static_cast<int>(lc.size());
+            std::vector<std::unique_ptr<amrex::MultiFab>> S(nl);
+            bool gray = true;
+            for (int l = 0; l < nl; ++l) {
+                S[l].reset(new amrex::MultiFab(lc[l].lev->ba, lc[l].lev->dm, 2, 0));
+                for (amrex::MFIter mfi(*S[l]); mfi.isValid(); ++mfi) gray = fds_k_rad_src_fill(lc[l].fds0 + mfi.index() + 1, (*S[l])[mfi].dataPtr()) != 0 && gray;
+            }
+            if (gray) {
+                for (int l = nl - 1; l >= 1; --l) amrex::average_down(*S[l], *S[l - 1], 0, 2, L.m_reg->level(l).ref_ratio_from_parent);
+                for (int l = 0; l < nl - 1; ++l)
+                    for (amrex::MFIter mfi(*S[l]); mfi.isValid(); ++mfi) {
+                        const amrex::Box& b = mfi.validbox();
+                        fds_k_rad_src_set(lc[l].fds0 + mfi.index() + 1, b.length(0), b.length(1), b.length(2), (*S[l])[mfi].dataPtr());
+                    }
+            }
+        }
         if (IP[9] > 0 || IP[10] || IP[25]) for_levels([&](int lev) {
 #ifdef FDS_HAVE_FINE_LEVEL
             if (IP[10] && lev >= 1) fds_fine_walls_rad_xchg(lev);   // hidden fine walls: T_W, emissivity, outgoing flux of the level lev-1 wall (every rank, collective)
