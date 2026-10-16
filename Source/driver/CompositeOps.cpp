@@ -28,14 +28,14 @@ void composite_zero_solid_faces(LevelRegistry& reg, int l0, int nl, const std::a
                 });
             }
         }
-        if (l >= 1) {   // fine box faces next to a SOLID cell of the covering coarser level: wall, no normal velocity / flux
+        if (l >= 1) {   // fine box faces next to a SOLID cell of the covering coarser level: wall, no normal velocity / flux (the U/V/W MultiFabs are nodal in d: coarse_solid_faces needs the CELL box, else the high-side faces in d are taken one cell too far out and stay open)
             const amrex::IntVect rr = reg.level(l).ref_ratio_from_parent;
             for (int d = 0; d < 3; ++d) {
                 amrex::MultiFab& f = reg.fields(l)[names[d]];
                 const amrex::IntVect e = amrex::IntVect::TheDimensionVector(d);
                 for (amrex::MFIter mfi(f); mfi.isValid(); ++mfi) {
                     auto a = f.array(mfi);
-                    for (const pb::ThinFace& cf : pb::coarse_solid_faces(reg.level(l - 1).geom, l - 1, rr, reg.level(l).ba, mfi.validbox(), reg.level(l).geom))
+                    for (const pb::ThinFace& cf : pb::coarse_solid_faces(reg.level(l - 1).geom, l - 1, rr, reg.level(l).ba, amrex::enclosedCells(mfi.validbox()), reg.level(l).geom))
                         if (cf.dir == d) a(cf.i + sh * e[0], cf.j + sh * e[1], cf.k + sh * e[2]) = 0.0;
                 }
             }
