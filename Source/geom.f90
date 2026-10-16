@@ -20078,12 +20078,7 @@ DO X1AXIS=IAXIS,KAXIS
    ENDDO
 ENDDO
 IF (NADD<1) RETURN
-! No cut cells means no FACE table yet. Create it here, as the seam RC append does, with nothing to keep.
-IF (ALLOCATED(M%FV%FACE%FTYPE)) THEN
-   NOLD=M%FV%FACE%N
-ELSE
-   NOLD=0
-ENDIF
+NOLD=M%FV%FACE%N
 CALL CC_GRID_SIZE_FACE(M,NOLD+NADD,NOLD)
 M%FV%FACE%N=NOLD+NADD
 IFACE=NOLD
