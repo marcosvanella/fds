@@ -52,7 +52,7 @@ def main():
             for L_ in sorted({x[0] for x in c}):   # outline: one rectangle edge per leaf cell of level >= 1
                 if L_ == 0: continue
                 for (l2, xc, zc, dx, dz, u, cov, t) in c:
-                    if l2 == L_: a_.add_patch(Rectangle((xc-dx/2, zc-dz/2), dx, dz, fill=False, edgecolor='c' if L_ == 1 else 'lime', lw=0.2))
+                    if l2 == L_: a_.add_patch(Rectangle((xc-dx/2, zc-dz/2), dx, dz, fill=False, edgecolor='c' if L_ == 1 else 'lime', lw=0.15, alpha=0.6))
             a_.set_xlim(0, Lx); a_.set_ylim(0, Lz); a_.set_aspect('equal'); im = plt.cm.ScalarMappable(norm=plt.Normalize(vmin, vmax), cmap='inferno')
         a_.set_title(title, fontsize=8); a_.set_xlabel('x (m)', fontsize=7); a_.tick_params(labelsize=6)
     fig.colorbar(im, ax=ax[0].tolist(), shrink=0.8, label='UII (kW/m2)'); fig.suptitle('UII slice y=1.2 m', fontsize=9); fig.savefig(o.out, dpi=130, bbox_inches='tight')
