@@ -46,6 +46,9 @@ INTEGER, SAVE :: BUILD_VER=0,LEAF_VER=-1   !< bumped at every level create/destr
 INTEGER, SAVE :: NOB=0,NVT=0
 REAL(EB), ALLOCATABLE, SAVE :: OBX(:,:),VTX(:,:)   ! XB(6,*)
 INTEGER, SAVE :: G0(3)=0,NG(3)=0   ! global cell index (0-based) of cell (1,1,1) of the current box, number of cells of the domain at its level
+INTEGER, ALLOCATABLE, SAVE :: THD(:),THP(:),THT(:,:)   ! thin OBST (owner rule): direction (0 none), plane and transverse cell ranges at the current level
+INTEGER, SAVE :: NTHIN = 0   ! thin-face walls found by the last builder pass (WALLDIAG)
+REAL(EB), SAVE :: DXLEV(3,20) = 0._EB   ! cell size of fine level 1.. (set by FDS_FINE_LEVEL_CREATE)
 INTEGER, ALLOCATABLE, SAVE :: OBI(:,:),VTS(:,:)   ! OBST and VENT XB snapped at the current box's dx (FDS NINT rounding)
 INTEGER, ALLOCATABLE, SAVE :: OBS(:,:),VTI(:,:)    ! OBST SURF_INDEX(-3:3) (7,*); VENT IOR,SURF_INDEX,BOUNDARY_TYPE (3,*)
 
@@ -108,6 +111,7 @@ DO NM=1,SIZE(MESHES)
    END ASSOCIATE
 ENDDO
 FINE_LEVEL(LEV)%NM0 = N0 ; FINE_LEVEL(LEV)%N_BOXES = NBOX
+IF (NBOX>0 .AND. LEV<=20) DXLEV(:,LEV) = (/XB(2,1)-XB(1,1),XB(4,1)-XB(3,1),XB(6,1)-XB(5,1)/)/REAL(IJK(:,1),EB)
 IF (ALLOCATED(FINE_LEVEL(LEV)%BOX)) DEALLOCATE(FINE_LEVEL(LEV)%BOX)
 IF (ALLOCATED(FINE_LEVEL(LEV)%VIEW)) DEALLOCATE(FINE_LEVEL(LEV)%VIEW)
 ALLOCATE(FINE_LEVEL(LEV)%BOX(NBOX),FINE_LEVEL(LEV)%VIEW(NBOX))
@@ -445,7 +449,8 @@ NM = FINE_LEVEL(LEV)%NM0 + IB
 ! Gas cell (I,J,K) gets a wall on face D when the cell across it is an OBST cell or outside the domain; coarse-fine / box-box faces get none. Surface: the last VENT of the list that covers
 ! the face (plane and extents snapped at this dx, IOR = -D), else the OBST face surface (last OBST containing the cell across), else SURF_DEFAULT. PNM/PIW = the level-0 wall with the same
 ! surface whose face contains this one (0 if none: new fine faces and faces whose surface differs; they have no parent state).
-CALL SNAP_SETUP(R)
+CALL SNAP_SETUP(R,LEV)
+NTHIN = 0
 ALLOCATE(T(8,6*R%IBAR*R%JBAR*R%KBAR)) ; N = 0 ; N_SKIP = 0   ! I,J,K,D,NM0,IW0,SURF_INDEX,BOUNDARY_TYPE of each wall
 DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
    IF (R%CELL(R%CELL_INDEX(I,J,K))%SOLID) CYCLE
@@ -543,8 +548,8 @@ DO IW=1,N
    IF (FB%SNM(IW)==0) CALL NEAREST_L0_WALL(WC%SURF_INDEX,WC%BOUNDARY_TYPE,BC%IOR,BC%X,BC%Y,BC%Z,FB%SNM(IW),FB%SIW(IW))
 ENDDO
 END ASSOCIATE
-IF (WALL_DIAG()) WRITE(0,'(A,I0,A,I0,A,3I6,A,3I5,A,I0,A,6I7,A,I0)') 'WALLDIAG level ',LEV,' box ',IB,' g0',G0,' n',R%IBAR,R%JBAR,R%KBAR,' nwall ',N,' perD(-1,1,-2,2,-3,3)', &
-   COUNT(T(4,1:N)==-1),COUNT(T(4,1:N)==1),COUNT(T(4,1:N)==-2),COUNT(T(4,1:N)==2),COUNT(T(4,1:N)==-3),COUNT(T(4,1:N)==3),' withparent ',COUNT(T(5,1:N)>0)
+IF (WALL_DIAG()) WRITE(0,'(A,I0,A,I0,A,3I6,A,3I5,A,I0,A,6I7,A,I0,A,I0)') 'WALLDIAG level ',LEV,' box ',IB,' g0',G0,' n',R%IBAR,R%JBAR,R%KBAR,' nwall ',N,' perD(-1,1,-2,2,-3,3)', &
+   COUNT(T(4,1:N)==-1),COUNT(T(4,1:N)==1),COUNT(T(4,1:N)==-2),COUNT(T(4,1:N)==2),COUNT(T(4,1:N)==-3),COUNT(T(4,1:N)==3),' withparent ',COUNT(T(5,1:N)>0),' thin ',NTHIN
 DEALLOCATE(T)
 END SUBROUTINE FDS_FINE_WALLS_BUILD
 
@@ -651,10 +656,12 @@ WALL_DIAG = ON
 END FUNCTION WALL_DIAG
 
 !> Snap the OBST and VENT lists at the dx of box R (FDS: NINT((X-X0)/DX) from the domain corner), and the box offset G0 and domain size NG at this level.
-SUBROUTINE SNAP_SETUP(R)
+SUBROUTINE SNAP_SETUP(R,LEV)
 TYPE(MESH_TYPE), INTENT(IN) :: R
-REAL(EB) :: X0(3),X1(3),DX(3)
-INTEGER :: O,D
+INTEGER, INTENT(IN) :: LEV
+REAL(EB) :: X0(3),X1(3),DX(3),DXK(3)
+INTEGER :: O,D,KL,LS,NZ,DZ,LO(3),HI(3),RR(3),T1,T2
+LOGICAL :: OK
 X0 = (/MINVAL(MESHES%XS),MINVAL(MESHES%YS),MINVAL(MESHES%ZS)/) ; X1 = (/MAXVAL(MESHES%XF),MAXVAL(MESHES%YF),MAXVAL(MESHES%ZF)/)
 DX = (/R%DXI,R%DETA,R%DZETA/)
 G0 = NINT((/R%XS-X0(1),R%YS-X0(2),R%ZS-X0(3)/)/DX) ; NG = NINT((X1-X0)/DX)
@@ -662,6 +669,33 @@ IF (ALLOCATED(OBI)) DEALLOCATE(OBI,VTS)
 ALLOCATE(OBI(6,NOB),VTS(6,NVT))
 DO O=1,NOB ; DO D=1,3 ; OBI(2*D-1:2*D,O) = NINT((OBX(2*D-1:2*D,O)-X0(D))/DX(D)) ; ENDDO ; ENDDO
 DO O=1,NVT ; DO D=1,3 ; VTS(2*D-1:2*D,O) = NINT((VTX(2*D-1:2*D,O)-X0(D))/DX(D)) ; ENDDO ; ENDDO
+! Thin OBSTs (same rule as ObstMask.H thin_faces): coarsest level KL<=LEV at which the snap has zero thickness in exactly one direction and is thick in the other two. From there on the OBST has
+! no solid cells; it is the face set at plane lo*r over the transverse extent snapped at KL, refined by r (nested). Rods and points keep the per-level snap.
+IF (ALLOCATED(THD)) DEALLOCATE(THD,THP,THT)
+ALLOCATE(THD(NOB),THP(NOB),THT(4,NOB)) ; THD = 0 ; THP = 0 ; THT = 0
+DO O=1,NOB
+   DO KL=0,LEV
+      IF (KL==0) THEN ; DXK = (/MESHES(1)%DXI,MESHES(1)%DETA,MESHES(1)%DZETA/) ; ELSE ; DXK = DXLEV(:,KL) ; ENDIF
+      IF (ANY(DXK<=0._EB)) CYCLE
+      NZ = 0 ; DZ = 0 ; OK = .TRUE.
+      DO D=1,3
+         LO(D) = NINT((OBX(2*D-1,O)-X0(D))/DXK(D)) ; HI(D) = NINT((OBX(2*D,O)-X0(D))/DXK(D))
+         IF (HI(D)==LO(D)) THEN ; NZ = NZ+1 ; DZ = D ; ELSEIF (HI(D)<LO(D)) THEN ; OK = .FALSE. ; ENDIF
+      ENDDO
+      IF (OK .AND. NZ==1) THEN
+         LS = KL ; EXIT
+      ENDIF
+   ENDDO
+   IF (KL>LEV) CYCLE
+   RR = NINT(DXK/DX)   ! DXK is the level-LS cell size at the exit
+   IF (LEV>=1) THEN
+      T1 = MOD(DZ,3)+1 ; T2 = MOD(DZ+1,3)+1
+      THD(O) = DZ ; THP(O) = LO(DZ)*RR(DZ)
+      THT(1,O) = LO(T1)*RR(T1) ; THT(2,O) = HI(T1)*RR(T1) ; THT(3,O) = LO(T2)*RR(T2) ; THT(4,O) = HI(T2)*RR(T2)
+      OBI(2*DZ,O) = OBI(2*DZ-1,O)   ! no solid cells from here on
+      IF (THP(O)<=0 .OR. THP(O)>=NG(DZ)) THD(O) = 0   ! domain boundary plane: the domain wall exists anyway
+   ENDIF
+ENDDO
 END SUBROUTINE SNAP_SETUP
 
 !> Wall of gas cell (I,J,K) of box R on its face D (+-1..3): WALLQ true when the cell across is an OBST cell (snapped at this level) or outside the domain; then SI, BT = its surface
@@ -672,7 +706,7 @@ TYPE(MESH_TYPE), INTENT(IN) :: R
 INTEGER, INTENT(IN) :: I,J,K,D
 INTEGER, INTENT(OUT) :: SI,BT
 LOGICAL, INTENT(OUT) :: WALLQ
-INTEGER :: A,SG,G(3),GN(3),OWN,O,P,TT
+INTEGER :: A,SG,G(3),GN(3),OWN,O,P,TT,THIN,T1,T2
 LOGICAL :: IN
 A = ABS(D) ; SG = SIGN(1,D)
 G = G0 + (/I-1,J-1,K-1/) ; GN = G ; GN(A) = G(A)+SG
@@ -685,10 +719,19 @@ IF (GN(A)>=0 .AND. GN(A)<NG(A)) THEN
 ELSE
    WALLQ = .TRUE.
 ENDIF
+P = G(A) + MERGE(1,0,SG>0)
+THIN = 0   ! zero-thickness OBST face on this face (last OBST wins over the solid cell across)
+DO O=NOB,1,-1
+   IF (THD(O)/=A) CYCLE
+   IF (THP(O)/=P) CYCLE
+   T1 = MOD(A,3)+1 ; T2 = MOD(A+1,3)+1
+   IF (G(T1)<THT(1,O) .OR. G(T1)>THT(2,O)-1 .OR. G(T2)<THT(3,O) .OR. G(T2)>THT(4,O)-1) CYCLE
+   THIN = O ; EXIT
+ENDDO
+IF (THIN>0) THEN ; IF (THIN>OWN) THEN ; WALLQ = .TRUE. ; OWN = THIN ; NTHIN = NTHIN+1 ; ENDIF ; ENDIF
 SI = DEFAULT_SURF_INDEX ; BT = SOLID_BOUNDARY
 IF (.NOT.WALLQ) RETURN
 IF (OWN>0) SI = OBS(-D+4,OWN)
-P = G(A) + MERGE(1,0,SG>0)
 DO O=NVT,1,-1
    IF (VTI(1,O)/=-D) CYCLE
    IF (VTS(2*A-1,O)/=P .OR. VTS(2*A,O)/=P) CYCLE

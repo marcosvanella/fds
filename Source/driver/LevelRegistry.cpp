@@ -12,6 +12,7 @@ CellWallProvider layout_cell_walls(const Level& lev)
 {
     const amrex::Geometry geom = lev.geom;
     const int l = lev.level;
+    pb::note_level_geom(l, geom);
     return [geom, l](int /*nm*/, const amrex::Box& vb, amrex::Array4<int> const& a) {
         const amrex::Box dom = geom.Domain();
         amrex::BaseFab<int> sf(amrex::grow(vb, 1));
