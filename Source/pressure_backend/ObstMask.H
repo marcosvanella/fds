@@ -101,7 +101,8 @@ inline std::unique_ptr<amrex::iMultiFab> build_obst_class (amrex::Geometry const
     return m;
 }
 
-// Nodal wall-face flags of level `lev` >= 1 (PressureLevel::thin_face) from thin_faces(lev): out[d] on convert(ba, d), 1 = wall face. Only the faces of the level's own boxes are set.
+// Nodal wall-face flags of level `lev` >= 1 (PressureLevel::thin_face): out[d] on convert(ba, d), 1 = wall face (beta = 0). Two sources: thin_faces(lev) (zero-thickness walls), and
+// the coarse/fine interface faces of the level's own boxes whose coarse-side cell (level lev-1) is a Solid OBST cell: no flux through a solid cell, whatever the coarse level's own mask.
 // Returns false when the level has none (collective).
 inline bool build_thin_flags (int lev, amrex::BoxArray const& ba, amrex::DistributionMapping const& dm, std::array<std::unique_ptr<amrex::iMultiFab>, 3>& out)
 {
@@ -111,6 +112,34 @@ inline bool build_thin_flags (int lev, amrex::BoxArray const& ba, amrex::Distrib
         const amrex::IntVect p(tf.i, tf.j, tf.k);
         for (amrex::MFIter mfi(*out[tf.dir]); mfi.isValid(); ++mfi) {
             if (mfi.validbox().contains(p)) { out[tf.dir]->array(mfi)(tf.i, tf.j, tf.k) = 1; any = true; }
+        }
+    }
+    auto const& G = level_geoms();
+    if (lev >= 1 && lev < static_cast<int>(G.size())) {
+        amrex::IntVect r;
+        for (int q = 0; q < 3; ++q) { r[q] = static_cast<int>(std::lround(G[lev-1].CellSize(q) / G[lev].CellSize(q))); }
+        const amrex::Box dom = G[lev].Domain();
+        auto solid = [&] (amrex::IntVect const& n) {   // is the level-(lev-1) cell under the level-lev cell n a Solid OBST cell
+            const amrex::IntVect cc = amrex::coarsen(n, r);
+            int v = 0;
+            fill_obst_mask(G[lev-1], lev - 1, amrex::Box(cc, cc), amrex::Array4<int>(&v, cc, cc + 1, 1));
+            return v != 0;
+        };
+        for (int d = 0; d < 3; ++d) {
+            const amrex::IntVect e = amrex::IntVect::TheDimensionVector(d);
+            for (amrex::MFIter mfi(*out[d]); mfi.isValid(); ++mfi) {
+                const amrex::Box vb = amrex::enclosedCells(mfi.validbox());
+                auto const& a = out[d]->array(mfi);
+                for (int side = 0; side < 2; ++side) {
+                    amrex::Box slab = vb; if (side == 0) { slab.setBig(d, vb.smallEnd(d)); } else { slab.setSmall(d, vb.bigEnd(d)); }
+                    amrex::LoopOnCpu(slab, [&] (int i, int j, int k) {
+                        const amrex::IntVect c(i, j, k), n = side == 0 ? c - e : c + e;
+                        if (!dom.contains(n) || ba.contains(n) || !solid(n)) { return; }
+                        const amrex::IntVect f = side == 0 ? c : c + e;
+                        a(f[0], f[1], f[2]) = 1; any = true;
+                    });
+                }
+            }
         }
     }
     amrex::ParallelDescriptor::ReduceBoolOr(any);

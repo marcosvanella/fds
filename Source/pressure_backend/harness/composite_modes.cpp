@@ -2651,6 +2651,55 @@ void run_comp_mixed (ParmParse& pp)
         pb::PressureOptions oh3 = o; oh3.backend = pb::BackendKind::HYPRE;
         ccheck(pb::solve_pressure(pm, oh3, nullptr).status == pb::Status::NotBuilt, "thin faces: HYPRE NotBuilt");
     }
+    // (6) A level-0 OBST block abutting the fine patch: the fine faces on the C/F interface whose coarse side is Solid are beta = 0 (build_thin_flags; level 0 is not masked).
+    // Ok, exactly zero gradient on those faces, div(grad) = rhs on every uncovered level-1 cell, HYPRE NotBuilt.
+    {
+        const Box fb = h.ba[1].minimalBox();
+        const IntVect r = h.ratio[1];
+        const int i0 = fb.smallEnd(0) / r[0] - 1;                                   // the level-0 cell column just below the fine patch (in x)
+        const IntVect clo(i0, fb.smallEnd(1) / r[1] + 1, fb.smallEnd(2) / r[2] + 1), chi(i0, clo[1] + 1, clo[2] + 1);   // 2x2 level-0 cells
+        const auto plo = h.geom[0].ProbLoArray(); const auto d0 = h.geom[0].CellSizeArray();
+        std::vector<std::array<double, 6>> keep = pb::obst_list(); std::vector<amrex::Geometry> keepg = pb::level_geoms();
+        pb::obst_list() = {{plo[0] + clo[0]*d0[0], plo[0] + (chi[0]+1)*d0[0], plo[1] + clo[1]*d0[1], plo[1] + (chi[1]+1)*d0[1], plo[2] + clo[2]*d0[2], plo[2] + (chi[2]+1)*d0[2]}};
+        pb::set_level_geoms(std::vector<amrex::Geometry>(h.geom.begin(), h.geom.end()));
+        std::array<std::unique_ptr<iMultiFab>, 3> fl;
+        const bool any = i0 >= 0 && pb::build_thin_flags(1, h.ba[1], h.dm[1], fl);
+        long nf = 0; if (any) { for (MFIter mfi(*fl[0]); mfi.isValid(); ++mfi) { auto const& a = fl[0]->const_array(mfi); amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) { nf += a(i,j,k); }); } }
+        ParallelDescriptor::ReduceLongSum(nf);
+        ccheck(any && nf == long(r[1]) * r[2] * 4, "C/F solid: the fine faces under the 2x2 coarse Solid cells are flagged");
+        if (any) {
+            for (auto& q : h.phi) { q->setVal(Real(0)); }
+            pb::PressureProblem pm = make_problem(c, h);
+            pm.face_neumann[fz] = all;
+            for (int d = 0; d < 3; ++d) { pm.levels[1].thin_face[d] = fl[d].get(); }
+            const pb::PressureResult rt = pb::solve_pressure(pm, o, nullptr);
+            Print() << "COMP_MIXED cfsolid status=" << pb::to_string(rt.status) << " backend=" << rt.backend << " true_rel2=" << rt.residual_rel2 << " " << rt.message << "\n";
+            ccheck(rt.status == pb::Status::Ok && rt.backend == "MLMG" && std::isfinite(rt.residual_rel2) && rt.residual_rel2 < 1e-9, "C/F solid: masked MLMG Ok");
+            std::vector<std::array<std::unique_ptr<MultiFab>,3>> g(c.nlev);
+            std::vector<std::array<MultiFab*,3>> gp(c.nlev);
+            for (int l = 0; l < c.nlev; ++l) for (int d = 0; d < 3; ++d) { g[l][d] = std::make_unique<MultiFab>(amrex::convert(h.ba[l], IntVect::TheDimensionVector(d)), h.dm[l], 1, 0); gp[l][d] = g[l][d].get(); }
+            ccheck(pb::face_gradient_composite(pm, gp).status == pb::Status::Ok, "C/F solid: face gradient Ok");
+            const auto dx = h.geom[1].CellSizeArray();
+            double gw = 0.0, dvm = 0.0;
+            for (MFIter mfi(*h.rhs[1]); mfi.isValid(); ++mfi) {
+                auto const& b = h.rhs[1]->const_array(mfi);
+                auto const& gx = g[1][0]->const_array(mfi); auto const& gy = g[1][1]->const_array(mfi); auto const& gzz = g[1][2]->const_array(mfi);
+                auto const& th = fl[0]->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
+                    if (th(i,j,k)) { gw = std::max(gw, std::abs(double(gx(i,j,k)))); }
+                    const double d = (gx(i+1,j,k) - gx(i,j,k)) / dx[0] + (gy(i,j+1,k) - gy(i,j,k)) / dx[1] + (gzz(i,j,k+1) - gzz(i,j,k)) / dx[2];
+                    dvm = std::max(dvm, std::abs(d - double(b(i,j,k))));
+                });
+            }
+            ParallelDescriptor::ReduceRealMax(gw); ParallelDescriptor::ReduceRealMax(dvm);
+            Print() << "COMP_MIXED cfsolid max|grad on flagged faces|=" << gw << " max|L1 div grad - rhs|=" << dvm << "\n";
+            ccheck(gw == 0.0, "C/F solid: no flux through the faces over a coarse Solid cell");
+            ccheck(dvm <= 1e-8 * bmax, "C/F solid: level-1 div(grad) = rhs");
+            pb::PressureOptions oh4 = o; oh4.backend = pb::BackendKind::HYPRE;
+            ccheck(pb::solve_pressure(pm, oh4, nullptr).status == pb::Status::NotBuilt, "C/F solid: HYPRE NotBuilt");
+        }
+        pb::obst_list() = keep; pb::set_level_geoms(keepg);
+    }
 }
 
 // mode=comp_seam: vortex_ring_re100_wall at blocking 8, where level 1 reaches the periodic x,y faces. Layout 1 puts the fine
