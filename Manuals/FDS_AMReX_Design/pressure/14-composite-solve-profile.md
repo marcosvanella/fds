@@ -134,3 +134,80 @@ Per solve 0.1147 s: MLMG 0.084 (73%), label 0.010 (9%), `face_gradient_composite
 | - | V(1,1)/(3,3), bottom smoother, Krylov, lower coarsening, warm start in S | 0 or negative | measured | - | - |
 
 Predicted outcome: items 1-6 sum to about 19% of t_loop in B at best (estimate), taking pressure from 46% to roughly 34% share ((11.9 - 4.9)/(25.9 - 4.9)); 30% is not reached by solver tuning alone. A further 3 s would need about 25% fewer cycles at the same tolerance (a better C/F treatment or smoother; the 0.23 asymptotic factor, against 0.14 in cycle 1, is the target) or a cheaper residual/C/F fill path (items 3-6 of 7.3 are 52% of pressure). In S the post-regrid share is 41% and the same list gives about 33% (estimate).
+
+## 8. Deep dive: ranked optimization table
+
+Status: **MEASURED** unless marked *estimate*. Owner-provided NVIDIA test machine, CPU run, 1 rank, GCC 13, Open MPI 5, HYPRE 2.32, AMReX 26.09 with TinyProfiler. Tip `75308b9640` (persistent BoomerAMG setup, operator reuse, ground-layer corrector fix) plus throwaway environment switches in a private scratch copy of the source and of AMReX (nothing pushed, shared AMReX tree untouched, no product change). Case B (near-burner 3-level, 49 steps) is the main case; case S (`run_simple_test_l3.sh`, 30 steps) is used for tolerance and gate checks. Run-to-run spread 3-7%; repeats are listed where taken. Study flags (`--pressure-csv`) add a true-residual check; the study default tolerance is 1e-10, so every study run here passes `--pressure-tol 1e-12` to match the product default (an earlier set at 1e-10 was discarded).
+
+### 8.1 Baseline at this tip (B, 8 threads unpinned)
+t_loop 24.4-26.3 s, pressure 10.4-11.5 s (about 43%), MLMG solve 8.0-8.5 s, **20.2 cycles/solve** (S: 11.4). Divergence at the gate: B 3.6e-13, S 3.7e-11 (gate 1e-9). TinyProfiler (B, 27.6 s): MLMG 8.09 s; smooth 3.77 s inclusive (Fsmooth kernel 1.93), 91.7k `applyBC` calls 2.68 s (29 us each), 66.9k Fsmooth calls (29 us each), FillBoundary 0.99 s, ParallelCopy_nowait 1.07 s, setVal 0.73 s, `computeResWithCrseSolFineCor` 1.60 s, reflux 0.80 s, updateSolBC 0.49 s, updateCorBC 0.42 s, BoxList::complementIn 0.43 s (36k calls), BoomerAMG bottom only 0.22 s. Per-call costs of 10-30 us indicate the solve is overhead/latency bound, not bandwidth bound.
+
+### 8.2 Measured: threading (largest finding)
+Pressure and t_loop seconds, B, non-study runs:
+| Setting | t_loop | pressure | repeats |
+|---|---|---|---|
+| 8 threads unpinned (current) | 24.4 / 25.9 / 26.3 | 10.4 / 11.4 / 11.5 | 3 |
+| 8 threads pinned to the 8 performance cores | 22.7-23.1 | 9.9 | 3 |
+| 4 threads pinned | 18.3 / 19.0 | 7.9 / 8.4 | 2 |
+| 2 threads pinned | 19.1 | 8.6 | 2 |
+| 1 thread pinned | 18.55 | 8.87 | 3 (spread 0.2%) |
+| 1 thread unpinned | 18.6 / 18.7 | 8.9 / 9.0 | 2 |
+Fewer threads is faster for this small hierarchy (about 20k cells on level 0, 12-100 boxes of 8^3 on the fine levels): pressure -20 to -25%, t_loop -25 to -30%. The pressure *share* rises to 44-48% because the rest of the step gains more. This is a deployment setting (threads/ranks and pinning), bit-identical in the solve (same operations; reduction order untouched at 1 rank), and it is the largest single seconds-saving found. It does not reduce the share toward 30%.
+
+### 8.3 Measured: cycle count and factor (B unless noted, 1e-12)
+- Asymptotic factor is set by the fine AMR levels, which get only a single-level mini cycle (AMReX does not coarsen AMR levels above 0; 2 sweeps down-leg, 2 up-leg). Sweeps at fine levels only (down/up): 2/2 20.2 cycles, solve 8.5 s (baseline); 1/1 25.6, 9.2 s; 2/0 27.8; 0/2 28.0; 4/2 18.2, 8.8 s; 2/4 17.5, 8.5 s; 4/4 16.2, 8.8 s; 8/8 13.2, 10.3 s. Cycles fall (factor 0.23 to 0.15 to 0.10) but time per cycle rises in proportion: **flat optimum, no gain**. S 4/4: 10.4 vs 11.4 cycles, solve 18.7 vs 15.4 s (worse).
+- FMG initial guess: `setMaxFmgIter(1)` identical 20.2 cycles; 99: 20.5 cycles, +20% time. No gain. W/F-cycle: no runtime option exists in this AMReX (MLMG has V and FMG only); L0 smoothing is not the limiter (V(3,3) gave -10% cycles at +20% time), so a W-cycle would not help (*estimate*).
+- C/F boundary order: `setMaxOrder(3)` changes the discrete C/F stencil: cycles unchanged (17.1 vs 17.2) and the divergence gate fails (1.9) because the face gradient used for the velocity correction no longer matches the operator. Rejected.
+- Warm start (earlier measurement): 20.2 to 18.3 cycles, no detectable time gain.
+- Krylov: not repeated (section 7.7: 3 V-cycles per Krylov iteration, no gain).
+
+### 8.4 Measured: tolerance and gate (divergence is about residual in max norm, so it scales with the rhs max norm of the case)
+| tol_rel (requested; own residual is /10) | B cycles | B div | S cycles | S div | gate 1e-9 |
+|---|---|---|---|---|---|
+| 1e-12 (default) | 20.2 | 3.6e-13 | 11.4 | 3.7e-11 | pass |
+| 3e-12 | - | - | 10.9 | 3.7e-11 | pass |
+| 1e-11 | 18.7 | 5.5e-12 | 10.6 | 5.9e-11 | pass |
+| 1e-10 | 17.2 | 3.0e-11 | 9.5 | **1.5e-9** | S FAIL |
+| 1e-9 | 15.5 | 5.0e-10 | - | - | B pass (margin 2) |
+A fixed relative tolerance is too tight for B (margin 2800) and just right for S (margin 27). A stopping rule tied to the gate (absolute max-norm residual of about 1e-10 with margin 10) would give B about -15% cycles and S about -7% (1e-11 row). Outputs for 1e-11 (S) differ from 1e-12 by 1e-15 in the multi-level diagnostics: justified-tolerance material, not bit-identical.
+**Predictor-only looser tolerance** (corrector stays 1e-12; gate div unchanged at 3.6e-13 B, 3.7e-11 S, because the corrector decides the final divergence): predictor cycles B 20.2 to 14.2 (1e-8), 11.2 (1e-6), 8.1 (1e-4); MLMG solve 8.5 to 7.2, 6.6, 5.9 s; t_loop -4%, -5%, -8%. S: 1e-8 predictor 7.0 cycles, solve 15.4 to 13.0 s, t_loop -3%; 1e-6: 5.4 cycles, 11.7 s, t_loop -5%. Not bit-identical: S output vs baseline differs by 1.6e-9 (1e-8) and 3.3e-7 (1e-6) in the multi-level diagnostics, with the HRR column showing 0.3% (1e-8) and larger (1e-6) relative differences at small values. 1e-8 is the defensible setting; it needs a justified-tolerance argument for the predicted state (it feeds the corrector fluxes).
+
+### 8.5 Algorithmic alternatives (estimates, with risk)
+- Composite L0+L1 then level solve of L2 (Dirichlet from L1), or FAC with sync correction: removes the L2 coupling error only if a sync solve follows; without it the C/F flux mismatch leaves coarse-cell divergence at the interface and breaks the divergence gate and the leaf-only integral gate (D-067/D-091). With a sync solve the cost is about the same as the composite solve. Not recommended; no measurement taken.
+- Krylov preconditioning: each iteration costs about 3 V-cycles for a gain below 3x (section 7.7).
+- Coarsened fine AMR levels (agglomerated 2-level multigrid on each fine level, upstream feature work): the real lever on the 0.23 factor, since fine-level smoothing cannot reduce patch-wide smooth error. *Estimate* 30-40% fewer cycles at about equal cost per cycle; high effort, unmeasured.
+
+### 8.6 Cost per cycle: avoidable work in AMReX (read from the shared tree, read-only; gains are estimates from the TinyProfiler counts above)
+1. `MLCellLinOp.H` `smooth` (about line 1551): the first `applyBC` of a zero-guess smooth is redundant (`MLMG.H` 1806, 1850, 2019 pass `skip_fillboundary=true` only after `setVal(cor,0)`, ghosts are zero and homogeneous BC of zero is zero). 6 of 44 `applyBC` per cycle: **about 1.3% t_loop**, bit-identical. Patch drafted, not measured.
+2. `MLLinOp.H` `makeCoarseAmr` (about line 1903): builds a new coarsened BoxArray on every call (2 per cycle), so the ParallelCopy metadata cache misses (CPC::define 3,582 calls) and BoxList::complementIn runs (0.43 s): **up to 1.5% t_loop**, bit-identical. Cache the BoxArray per level in the operator. Patch drafted, not measured.
+3. Fuse `setVal(cor,0)` (`MLMG.H` 1804, 1848) into the first sweep: about 1.3% (Role 2: 0.50 s), bit-identical in principle; larger kernel change.
+4. updateCorBC/updateSolBC, per-cycle residual test, reflux ghost fill: each follows changed data; no safe skip found.
+Sum of upstream-patch items 1-3: about 3-4% t_loop.
+
+### 8.7 GPU path
+Measured with the existing single-level study harness (mms, Dirichlet, MLMG with BoomerAMG bottom, managed memory, 1 rank, 100 re-solves, 3 repeats; GPU is the 8 GB RTX 4070 laptop part, CPU is 1 thread on one performance core):
+| Cells | Boxes | CPU resolve | GPU resolve | Speedup |
+|---|---|---|---|---|
+| 32^3 (33k) | 1 | 22.1 ms (24 cycles) | 22.5 ms | 1.0x |
+| 32^3 | 8 | 26.7 ms | 25.8 ms | 1.0x |
+| 64^3 (262k) | 1 | 205 ms (30 cycles) | 50 ms | 4.1x |
+The CSIRO-style crude hierarchy (level 0 about 20k cells, 3 levels, tens of thousands of cells in total, under 10 MB of fields) sits at or below the 32^3 point: **about 1x, no gain** (launch/latency bound, about 0.9 ms per cycle either way). A production-size level 0 (about 2.3M cells, 3 levels, 50-100 MB of fields, fits in 8 GB) is *estimated* at 3-4x on the MLMG solve (doc 05: 2x vs the best 8-rank CPU at 1M cells, 4x vs one thread at 262k). Blockers: the HYPRE bottom (device BoomerAMG latency on 324 unknowns; alternatively smoother or BiCGStab bottom, which was neutral on CPU), `LoopOnCpu` host loops in the masked operator (`prepareForSolve`, region labelling) and in the per-solve rhs/phi preparation and component labelling (managed-memory page migration each solve), and all FDS Fortran host loops (the rest of the step stays on the CPU). A 3-level GPU composite measurement was not possible with the existing harness (single-level only); the table above is a calibration, not a composite result. Amdahl: MLMG is about 30% of t_loop, so even an infinite GPU speedup caps the t_loop gain at about 30% and leaves the share near 15-20% only if the rest of the step is not also moved.
+
+### 8.8 Ranked table (gain in % of t_loop; B is the main case, S in brackets where measured)
+| # | Item | Expected gain | Risk | Effort | Bit-identical / tolerance / gates |
+|---|---|---|---|---|---|
+| 1 | 1-4 pinned OpenMP threads (or ranks) instead of 8 unpinned | **25-30% of t_loop** (seconds; share rises to 44-48%) | low | trivial (run setting) | identical solve; all gates unchanged |
+| 2 | Predictor-only tolerance 1e-8 | 4% B (3% S); 1e-6: 5% | medium (state feeds corrector) | simple | not identical; justified tolerance needed; gate unchanged (corrector decides) |
+| 3 | Gate-tied absolute stopping rule (about 1e-10 abs residual, margin 10) | 2.5% B, 1% S (cycles -15% / -7%) | medium | simple | not identical; gate margin kept at 10; needs argument |
+| 4 | Skip rebuild on a regrid that leaves the layout unchanged (7.2) | 2.5% B, 0 S | low | simple | identical |
+| 5 | AMReX patch: skip first applyBC of zero-guess smooth | 1.3% (estimate) | low | small upstream patch | identical |
+| 6 | AMReX patch: cache coarsened BoxArray in makeCoarseAmr | up to 1.5% (estimate) | low | small upstream patch | identical |
+| 7 | AMReX patch: fuse cor zeroing into first sweep | about 1.3% (estimate) | medium | medium | identical in principle |
+| 8 | Larger fine boxes (maxsize 16-32) | pressure 5-13% (section 7.6) | layout change | trivial | reduction order only; share rises |
+| 9 | Coarsened fine AMR levels (agglomerated MG on fine levels) | 5-8% (estimate, 30-40% fewer cycles) | medium | high | not identical; gates unchanged if same operator |
+| 10 | `face_gradient_composite`, pre-solve, H copies (7.8) | 3-4% (estimate) | low | medium | identical |
+| 11 | GPU MLMG | about 0% on this size; 3-4x MLMG at 2M+ cells (estimate) | high | high | tolerance-level |
+| - | Fine-level sweeps, FMG, W-cycle, C/F order 3, bottom variants, Krylov, warm start | 0 or negative (measured) | - | - | order 3 fails the gate |
+
+### 8.9 Does the combination reach 30%?
+Share target: B needs pressure at about 6.4 s against 14.9 s of other work (currently 10.4-11.5 s). Items 2+3+4+5-7+10 sum to about 12-14% of t_loop in B (pressure to about 7.5-8 s; share about 33-35% at 8 threads); in S about 6-8% (share about 30-31% only with the 1e-6 predictor, 32-33% with 1e-8). **The 30% share is reachable only marginally (S with the aggressive predictor) and not robustly; B stops near 33-35% without the coarsened-fine-level work (item 9, -5 to -8%, giving about 30-32%).** Item 1 changes the picture differently: it cuts t_loop by a quarter but raises the share, so share is the wrong target if wall time is the goal. Cheapest to start now: item 1 (setting), item 4, items 5-6 (small upstream patches, bit-identical), then the predictor tolerance study.
