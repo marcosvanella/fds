@@ -1141,6 +1141,28 @@ struct TimeLoop::Impl {
         }
     }
 
+    // An OPEN face of a fine level that carries outflow: FDS's H there is the kinetic energy KRES of the boundary cell (pres.f90, BXF = P_EXTERNAL/RHO_F + KRES). The level-0 value injected over the
+    // fine faces is the one of a 10 m cell, a single number over fine cells whose velocities differ strongly near the ground; the fine cell's own KRES keeps the boundary cell consistent.
+    void fine_outflow_dirichlet(const Level& lv, int f, amrex::MultiFab& v)
+    {
+        const int d = f % 3, side = f / 3;
+        int l = 1; for (; l < static_cast<int>(lc.size()); ++l) if (lc[l].lev == &lv) break;
+        if (l >= static_cast<int>(lc.size())) return;
+        Fields& F = *lc[l].F;
+        const char* un[3] = {"U", "V", "W"};
+        const amrex::Box dom = lv.geom.Domain(); const int e = side ? dom.bigEnd(d) : dom.smallEnd(d);
+        const amrex::IntVect sh = amrex::IntVect::TheDimensionVector(d);
+        for (amrex::MFIter mfi(v); mfi.isValid(); ++mfi) {
+            amrex::Box slab = mfi.validbox();
+            if (slab.smallEnd(d) > e || slab.bigEnd(d) < e) continue;
+            slab.setSmall(d, e); slab.setBig(d, e);
+            auto a = v.array(mfi); const auto u = F[un[d]].const_array(mfi); const auto kr = F["KRES"].const_array(mfi);
+            amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
+                const double vn = side ? u(i + sh[0], j + sh[1], k + sh[2]) : u(i, j, k);
+                if (side ? vn > 0.0 : vn < 0.0) a(i, j, k) = kr(i, j, k);
+            });
+        }
+    }
     // Build BoundaryData (+ owned MultiFabs) for one level from L0-packed face MFs; skip Periodic faces.
     pb::BoundaryData make_bd_for_level(const Level& lv, const std::array<std::unique_ptr<amrex::MultiFab>, 6>& l0bd,
                                        std::array<std::unique_ptr<amrex::MultiFab>, 6>& owned)
@@ -1165,6 +1187,7 @@ struct TimeLoop::Impl {
             owned[f].reset(new amrex::MultiFab(lv.ba, lv.dm, 1, 0));
             inject_bd_to_level(*l0bd[f], *owned[f], rL0);
             if (&lv != &l0 && static_cast<pb::BC>(bc_type[f]) == pb::BC::Neumann) owned[f]->setVal(0.0);   // a fine box carries the wall flux of a Neumann domain face (a burning ground vent) in its own FV (fine_wall_fv, zero_wall_flux); the level-0 datum BZS = HZ*(-FV+DUNDT) is the level-0 wall flux and would not cancel the fine FV (it differs per fine face and stage)
+            if (&lv != &l0 && static_cast<pb::BC>(bc_type[f]) == pb::BC::Dirichlet) fine_outflow_dirichlet(lv, f, *owned[f]);
             bd.value[f] = owned[f].get();
             bd.constant[f] = 0.0;
         }
