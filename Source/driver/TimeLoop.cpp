@@ -1163,6 +1163,7 @@ struct TimeLoop::Impl {
             }
             owned[f].reset(new amrex::MultiFab(lv.ba, lv.dm, 1, 0));
             inject_bd_to_level(*l0bd[f], *owned[f], rL0);
+            if (&lv != &l0 && static_cast<pb::BC>(bc_type[f]) == pb::BC::Neumann) owned[f]->setVal(0.0);   // a fine box carries the wall flux of a Neumann domain face (a burning ground vent) in its own FV (fine_wall_fv, zero_wall_flux); the level-0 datum BZS = HZ*(-FV+DUNDT) is the level-0 wall flux and would not cancel the fine FV (it differs per fine face and stage)
             bd.value[f] = owned[f].get();
             bd.constant[f] = 0.0;
         }
