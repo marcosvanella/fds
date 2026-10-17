@@ -1083,6 +1083,7 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
         pp.queryAdd("bamg_down_relax_type", rd); pp.queryAdd("bamg_up_relax_type", ru); pp.queryAdd("bamg_coarse_relax_type", rc);
         pp.queryAdd("bamg_max_levels", ml);
         int adj = 1; pp.queryAdd("adjust_singular_matrix", adj);
+        int rp = 0; pp.queryAdd("recompute_preconditioner", rp);   // AMReX default 1: BoomerAMG set up again at every bottom solve (every V-cycle); the matrix is fixed for this MLMG (rebuilt with the stamp), so set it up once
     }
     M.mlmg = std::make_unique<MLMG>(*M.op);
     {
