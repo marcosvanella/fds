@@ -115,10 +115,11 @@ std::string label_components_composite_masked (PressureProblem const& p,
             // ccls shares the fine DM: same MFIter index covers the coarsened+grown box.
             auto const& ca = ccls.const_array(mfi);
             Box const cbox = ccls[mfi].box();
+            Box const vbx = mfi.validbox();
             amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
                 for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) {
                     IntVect n(i,j,k); n[d] += s ? 1 : -1;
-                    if (fba.contains(n)) { continue; }
+                    if (vbx.contains(n) || fba.contains(n)) { continue; }   // vbx: most neighbours lie in this box, skip the BoxArray search
                     IntVect w = n;
                     if (!wrap_iv(geom[L], w)) { continue; }
                     if (fba.contains(w)) { continue; }
@@ -206,11 +207,12 @@ std::string label_components_composite_masked (PressureProblem const& p,
                 auto const& ua = cunc.const_array(mfi);
                 auto const& ca = ccls.const_array(mfi);
                 Box const cbox = clab[mfi].box();
+                Box const vbx = mfi.validbox();
                 amrex::LoopOnCpu(mfi.validbox(), [&] (int i, int j, int k) {
                     if (u(i,j,k) == 0 || cl(i,j,k) != CellGas || o(i,j,k) < 0) { return; }
                     for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) {
                         IntVect n(i,j,k); n[d] += s ? 1 : -1;
-                        if (fba.contains(n)) { continue; }
+                        if (vbx.contains(n) || fba.contains(n)) { continue; }
                         IntVect w = n;
                         if (!wrap_iv(geom[L], w) || fba.contains(w)) { continue; }
                         IntVect cc;
