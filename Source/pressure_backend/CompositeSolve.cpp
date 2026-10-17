@@ -179,6 +179,7 @@ void build_impl (PressureWorkspace::Impl& W, PressureProblem const& p)
         ebc[face_index(d,0)] = BC::Periodic; ebc[face_index(d,1)] = BC::Periodic;     // the hidden direction's term is 0 whatever its BC (D-057)
     }
     // Masked composite: no MLPoisson hierarchy (HYPRE assembles its own matrix; masked MLMG builds MaskedMlmg on its first solve).
+    W.face_neumann = p.face_neumann;   // impl_matches compares it: stored for the masked early return too
     if (composite_is_masked(p)) {
         W.mlmg.reset();
         W.mlp.reset();
@@ -789,13 +790,18 @@ private:
     }
 };
 
+// Stamp of everything the cached masked-composite objects depend on besides the layout (ba, dm, geom, ratio, bc, face_neumann: impl_matches): the cell class of
+// every level, the thin-wall flags, cf_solid_l0_ok. Equal stamp = reuse of the component labels and of the masked MLMG; any change rebuilds both (collective).
 std::uint64_t composite_class_hash (PressureProblem const& p)
 {
     std::uint64_t g = 1469598103934665603ULL;
+    auto mix = [&] (std::uint64_t v) { g ^= v; g *= 1099511628211ULL; g ^= g >> 29; };
     for (auto const& L : p.levels) {
         PressureProblem q; q.cell_class = L.cell_class;
-        g ^= class_content_hash(q); g *= 1099511628211ULL; g ^= g >> 29;
+        mix(class_content_hash(q));
+        for (int d = 0; d < 3; ++d) { PressureProblem t; t.cell_class = L.thin_face[d]; mix(t.cell_class ? class_content_hash(t) + 1 : 0); }
     }
+    mix(p.cf_solid_l0_ok ? 1 : 0);
     return g;
 }
 } // namespace
@@ -1163,13 +1169,22 @@ PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions
     R.nlevels = nlev;
 
     // Label (D4); Q2 Known-on-C/F → InvalidInput.
-    CompositeComponentMap cm;
-    std::string lab_err = label_components_composite_masked(p, W.unc, W.geom, W.ratio, cm);
-    if (!lab_err.empty()) {
-        R.status = Status::InvalidInput; R.message = lab_err; R.backend = ""; return R;
+    // The labels are cached on the workspace (one struct, dropped with the Impl at a layout change) under the mask stamp; a different stamp relabels everything.
+    const std::uint64_t mstamp = composite_class_hash(p);
+    const bool lab_hit = W.lab_valid && W.lab_stamp == mstamp;
+    if (!lab_hit) {
+        W.lab_valid = false;
+        std::string lab_err = label_components_composite_masked(p, W.unc, W.geom, W.ratio, W.lab);
+        if (!lab_err.empty()) {
+            R.status = Status::InvalidInput; R.message = lab_err; R.backend = ""; return R;
+        }
+        W.lab_stamp = mstamp; W.lab_valid = true;
     }
-    R.mask_label_rounds = cm.rounds;
-    R.mask_label_seconds = cm.seconds;
+    ws->note_mask(lab_hit);
+    CompositeComponentMap& cm = W.lab;
+    for (auto& c : cm.comps) { c.removed_mean = c.removed_rel = c.gauge_shift = 0.0; }   // per-solve fields of the cached (pristine) map
+    R.mask_label_rounds = lab_hit ? 0 : cm.rounds;
+    R.mask_label_seconds = lab_hit ? 0.0 : cm.seconds;
     if (cm.comps.empty()) {
         R.status = Status::InvalidInput; R.message = "masked composite without an uncovered gas cell"; R.backend = ""; return R;
     }
@@ -1260,7 +1275,7 @@ PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions
     std::vector<std::unique_ptr<MultiFab>> mrhs;          // masked MLMG: its right-hand side s (residual check)
     if (use_mlmg) {
 #ifdef AMREX_USE_HYPRE
-        const std::uint64_t h = composite_class_hash(p);
+        const std::uint64_t h = mstamp;
         const bool reused = W.mmg && W.mmg->hash == h;
         if (!reused) {
             const double t0 = amrex::second();

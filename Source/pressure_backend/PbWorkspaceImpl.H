@@ -61,6 +61,10 @@ struct PressureWorkspace::Impl {
     // (rebuild() / discard()). Single level: the backend object (it owns the HypreSystem); composite: the system itself.
     // Masked composite MLMG operator and solver (P3; CompositeSolve.cpp), keyed on the mask content; dropped with the Impl at a regrid.
     std::shared_ptr<MaskedMlmg> mmg;
+    // Masked composite component labels (CompositeMask.cpp), valid for the layout of this Impl and the mask stamp lab_stamp (composite_class_hash).
+    CompositeComponentMap lab;
+    std::uint64_t lab_stamp = 0;
+    bool lab_valid = false;
 #ifdef PB_WITH_HYPRE
     std::unique_ptr<PressureBackend> hypre;
     std::unique_ptr<HypreSystem> hsys;
