@@ -251,6 +251,7 @@ int main(int argc, char** argv)
                         to.tag_phi = (i + 1 < argc && argv[i + 1][0] != '-') ? std::atof(argv[++i]) : 0.5;
                         if (i + 1 < argc && argv[i + 1][0] != '-') to.tag_phi_buf = std::atoi(argv[++i]);
                     }
+                    else if (std::strcmp(argv[i], "--fine-zmax") == 0 && i + 1 < argc) to.fine_zmax = std::atof(argv[++i]);
                     else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
                     else if (std::strcmp(argv[i], "--stage-boundary-test") == 0) to.boundary_test = (i + 1 < argc && std::strcmp(argv[i + 1], "legacy") == 0) ? (++i, 2) : 1;
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) { to.outdir = argv[++i]; ro.outdir = to.outdir; }

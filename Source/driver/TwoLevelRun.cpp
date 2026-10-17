@@ -360,7 +360,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (o.max_level > 0) {
         amr << std::setprecision(17) << "&AMR_REGION XB=";
         if (adaptive_free) {
-            for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) << "," << l0.geom.ProbHi(d) << (d < 2 ? "," : "");
+            for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) << "," << (d == 2 && !std::isnan(o.fine_zmax) ? std::min(l0.geom.ProbHi(d), o.fine_zmax) : l0.geom.ProbHi(d)) << (d < 2 ? "," : "");   // --fine-zmax caps the refinable region in z
         } else {
             for (int d = 0; d < 3; ++d) amr << l0.geom.ProbLo(d) + plo[d] * l0.dx[d] << "," << l0.geom.ProbLo(d) + (phi_[d] + 1) * l0.dx[d] << (d < 2 ? "," : "");
         }
@@ -678,7 +678,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 nl_now = finest + 1;
                 amrex::Print() << tag << " mid-regrid after step " << s << " t " << loop.time()
                                << " changed " << changed << " finest " << finest
-                               << " boxes L1 " << (finest >= 1 ? reg.level(1).ba.size() : 0) << "\n";
+                               << " boxes L1 " << (finest >= 1 ? reg.level(1).ba.size() : 0) << " cells L1 " << (finest >= 1 ? reg.level(1).ba.numPts() : 0) << "\n";
                 // Mid-run dump shares the same write helper (Architect: regrid dump path); only without a --plot-every cadence (else it dumped every regrid).
                 if (!o.plotfile.empty() && o.plot_every <= 0) {
                     const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
