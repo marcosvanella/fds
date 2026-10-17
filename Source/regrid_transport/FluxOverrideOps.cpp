@@ -17,6 +17,8 @@ std::vector<std::vector<FluxOverride>> build_flux_overrides(const amrex::BoxArra
     const int nscal = fine_flux[0]->nComp();
     amrex::BoxArray cfba = fine_ba;
     cfba.coarsen(ratio);
+    std::vector<std::pair<int, amrex::Box>> near_cov;   // covered pieces of the coarse box grown by 1: one BoxArray search per box, not per face
+    amrex::Box near_box;
     const amrex::Box dom = cg.Domain();
 
     for (int d = 0; d < 3; ++d) {
@@ -56,12 +58,14 @@ std::vector<std::vector<FluxOverride>> build_flux_overrides(const amrex::BoxArra
                 if (p[e] < dom.smallEnd(e)) { if (!cg.isPeriodic(e)) return -1; p[e] += dom.length(e); }
                 else if (p[e] > dom.bigEnd(e)) { if (!cg.isPeriodic(e)) return -1; p[e] -= dom.length(e); }
             }
+            if (near_box.contains(p)) { for (const auto& c : near_cov) if (c.second.contains(p)) return 1; return 0; }
             return cfba.contains(p) ? 1 : 0;
         };
         int ib = 0;
         for (amrex::MFIter mfi(crse_ba, crse_dm); mfi.isValid(); ++mfi, ++ib) {
             // the nodal box of this coarse box
             const amrex::Box nb = amrex::convert(mfi.validbox(), nodal);
+            near_box = amrex::grow(mfi.validbox(), 1); near_cov = cfba.intersections(near_box, false, amrex::IntVect(0));
             auto cv = cface.const_array(mfi);
             FluxOverride ov;
             ov.dir = d;
