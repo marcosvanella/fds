@@ -1,0 +1,10 @@
+&HEAD CHID='quiescent_open_2level', TITLE='Quiescent uniform air, no gravity, all sides open: no net flow through the open faces with fine boxes' /
+&MESH IJK=40,40,16, XB=0,1000,0,1000,0,400 /
+&TIME T_END=400, DT=20. /
+&MISC GVEC=0.,0.,0. /
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='YMIN', SURF_ID='OPEN' /
+&VENT MB='YMAX', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+&TAIL /
