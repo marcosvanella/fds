@@ -52,6 +52,7 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/FdsSetup.cpp
     ${CMAKE_CURRENT_LIST_DIR}/Fields.cpp
     ${CMAKE_CURRENT_LIST_DIR}/GhostExchange.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/LsFine.cpp
     ${CMAKE_CURRENT_LIST_DIR}/SideData.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ExactSum.cpp
     ${CMAKE_CURRENT_LIST_DIR}/OutputPlan.cpp

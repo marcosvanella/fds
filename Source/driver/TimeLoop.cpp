@@ -15,6 +15,7 @@
 #include "DriverAdapter.H"
 #include "PostRegridProjection.H"
 #include "IlGhost.H"
+#include "LsFine.H"
 
 #include <AMReX_BLassert.H>
 #include <AMReX_MultiFabUtil.H>
@@ -966,6 +967,9 @@ struct TimeLoop::Impl {
             for (int f : flags) std::fprintf(stderr, " %d", f);
             std::fprintf(stderr, "  DELTA_RHO nonzero %ld max|.| %.6g\n", nz, dmax);
             dumpfab(pred ? "preclip_p_DELTA_RHO" : "preclip_c_DELTA_RHO", *c->drho);
+        }
+        if (ls_fine_config().mode == 2 && c == lc.data()) {   // --ls-fine-shadow-gather: the wind at the reference height of the global LS grid from the leaf cells of every level, before the level-0 LS stage
+            if (ls_fine_gather_wind(*L.m_reg) != 0) die("ls_fine_gather_wind: a spreading LS column has no leaf sample");
         }
         each_local([&](int nm) { fds_k_set_flags(nm, flags[bi(nm)]); fds_k_dens_post(t, dt, nm); });
         if (fx) { flux_set_override(0, {}); flux_set_mode(0, 0); }
