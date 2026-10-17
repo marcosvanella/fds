@@ -1578,7 +1578,7 @@ struct TimeLoop::Impl {
                 gown.back()->setVal(0.0);
                 grad[l][d] = gown.back().get();
             }
-        const pb::PressureResult rg = pb::face_gradient_composite(p, grad);
+        const pb::PressureResult rg = pb::face_gradient_composite(p, grad, pws.get());
         if (rg.status != pb::Status::Ok) die(std::string("composite face gradient: ") + pb::to_string(rg.status) + ": " + rg.message);
         const char* hn = pred ? "H" : "HS";
         for (int l = 0; l < nl; ++l) {

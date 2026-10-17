@@ -65,6 +65,8 @@ struct PressureWorkspace::Impl {
     CompositeComponentMap lab;
     std::uint64_t lab_stamp = 0;
     bool lab_valid = false;
+    // Unmasked operator of face_gradient_composite (built once per layout; the gradient is of the unmasked operator, then masked afterwards).
+    std::shared_ptr<Impl> grad;
 #ifdef PB_WITH_HYPRE
     std::unique_ptr<PressureBackend> hypre;
     std::unique_ptr<HypreSystem> hsys;

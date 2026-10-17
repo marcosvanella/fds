@@ -1947,7 +1947,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
 // ---------------------------------------------------------------------------------------------------------------
 // Face-centred gradient
 // ---------------------------------------------------------------------------------------------------------------
-PressureResult face_gradient_composite (PressureProblem const& p, std::vector<std::array<MultiFab*,3>>& grad_out)
+PressureResult face_gradient_composite (PressureProblem const& p, std::vector<std::array<MultiFab*,3>>& grad_out, PressureWorkspace* ws)
 {
     PressureResult R;
     R.backend = "MLMG";
@@ -1974,8 +1974,17 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
     for (auto const& L : p.levels) { if (L.known_value) { return fail(Status::NotBuilt, "face_gradient_composite with Known cells is not built"); } }
     PressureProblem pu = p;
     for (auto& L : pu.levels) { L.cell_class = nullptr; L.thin_face = {nullptr, nullptr, nullptr}; }
-    PressureWorkspace::Impl W;
-    build_impl(W, pu);
+    PressureWorkspace::Impl Wl;
+    PressureWorkspace::Impl* Wp = &Wl;
+    if (ws && ws->impl()) {
+        std::shared_ptr<PressureWorkspace::Impl>& g = ws->impl()->grad;
+        if (!g || !impl_matches(*g, pu)) { g = std::make_shared<PressureWorkspace::Impl>(); build_impl(*g, pu); }
+        Wp = g.get();
+    } else {
+        build_impl(Wl, pu);
+    }
+    PressureWorkspace::Impl& W = *Wp;
+    refresh_robin(W);
     const bool ext = (W.hidden >= 0);
     LevelMFs phi;
     Vector<MultiFab*> pphi;
