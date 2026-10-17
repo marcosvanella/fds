@@ -91,6 +91,7 @@ public:
     // level > 0: FVX/FVY/FVZ = 0 on the INERT/MIRROR wall faces of vel_bc (what NO_FLUX does on level 0 for W = WS = 0 and the mirrored H ghost; a fine box has no wall cell).
     // FV(n) is the flux at the upper face of cell n: the wall faces are FV(dom lo - 1) and FV(dom hi). Call after NO_FLUX, before the pressure RHS and the flux average_down.
     void zero_wall_flux();
+    void inflow_ambient_ghosts(const std::string& n, bool predictor);
     void after_exchange(int code, double t, double dt);
     void wall_bc(int predictor, double t, double dt);   // WALL_BC of the stage (all local boxes)
     // Kernel-check replay: the box data is ALREADY matched (a frozen dump state), so MATCH_VELOCITY is not run again; the ghost-producing routines only:
