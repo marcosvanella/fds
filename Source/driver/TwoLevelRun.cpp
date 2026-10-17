@@ -675,9 +675,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         const std::vector<double> m = composite_mass(reg, nl_now, ns);
         const double dm = (m[0] - m0[0] - inflow[0]) / m0[0];   // mass balance residual: change minus boundary inflow
         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl_now);
-        // Solid fine cells are left out of the check (as FDS on level 0): a burner face gives its solid cell div u = U_wall/dz, not a gas cell's D.
+        // Solid cells are left out of the check: a burner face gives its solid cell div u = U_wall/dz, not a gas cell's D (and a level-0 OBST cell that no fine level covers is not solved: masked).
         std::vector<std::unique_ptr<amrex::iMultiFab>> skip(nl_now);
-        for (int l = 1; l < nl_now; ++l) {
+        for (int l = 0; l < nl_now; ++l) {
             const amrex::iMultiFab& sm = reg.side_data(l).mask();
             skip[l].reset(new amrex::iMultiFab(sm.boxArray(), sm.DistributionMap(), 1, 0));
             for (amrex::MFIter mfi(*skip[l]); mfi.isValid(); ++mfi) {

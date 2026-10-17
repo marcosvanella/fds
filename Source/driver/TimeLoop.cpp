@@ -1395,6 +1395,8 @@ struct TimeLoop::Impl {
     std::unique_ptr<fdsrt::FluxStageRunner> runner;
     std::vector<std::unique_ptr<amrex::MultiFab>> crhs, cphi;   // by level (index 0 unused: level 0 has rhs / phi)
     std::vector<std::array<std::unique_ptr<amrex::iMultiFab>, 3>> cthin;   // thin-wall face flags by level (ObstMask.H build_thin_flags; null entries = none)
+    std::array<std::unique_ptr<amrex::MultiFab>, 3> l0wall;      // wall normal velocity (UN) of the masked level-0 OBST faces (nodal, AMReX face index), set by solve_composite, restored by avg_down_vel
+    std::unique_ptr<amrex::iMultiFab> cls0g;                     // ccls[0] with one ghost layer (valid-cell values of the neighbours, OBST geometry outside the domain)
     std::vector<std::unique_ptr<amrex::iMultiFab>> ccls;        // OBST cell_class by level (ObstMask.H); empty without OBST
     TimeLoop::CompositeReport crep;
     void ensure_comp()
@@ -1420,12 +1422,61 @@ struct TimeLoop::Impl {
         load_obst_list();
         ccls.clear();
         // Level 0 is an FDS mesh: FDS treats its OBSTs itself (solve through solids, wall normal velocity, e.g. a MASS_FLUX burner, via NO_FLUX FV),
-        // as with --levels 1. Only levels >= 1, where FDS has no OBST, are masked; a Solid L0 cell is under L1 (--tag-obst) or FDS's own.
+        // as with --levels 1. Levels >= 1, where FDS has no OBST, are masked; level 0 only where an OBST cell is not under a fine level (below).
         { std::vector<amrex::Geometry> gg; for (int l = 0; l < nl; ++l) gg.push_back(lc[l].lev->geom); pb::set_level_geoms(gg); }
-        if (!pb::obst_list().empty()) for (int l = 0; l < nl; ++l) ccls.push_back(l == 0 ? nullptr : pb::build_obst_class(lc[l].lev->geom, l, lc[l].lev->ba, lc[l].lev->dm));
+        if (!pb::obst_list().empty()) for (int l = 0; l < nl; ++l) ccls.push_back(pb::build_obst_class(lc[l].lev->geom, l, lc[l].lev->ba, lc[l].lev->dm));
+        if (!ccls.empty()) {   // level 0: only an OBST cell that no fine level covers is masked (it is not under L1, so nothing else treats it); none: level 0 stays FDS's own (unmasked)
+            const amrex::iMultiFab* cov = L.m_reg->covered_mask(0); long nsol = 0;
+            for (amrex::MFIter mfi(*ccls[0]); mfi.isValid(); ++mfi) {
+                auto m = ccls[0]->array(mfi); amrex::Array4<const int> ca; if (cov) ca = cov->const_array(mfi);
+                amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { if (m(i, j, k) != 0 && cov && ca(i, j, k) != 0) m(i, j, k) = 0; else if (m(i, j, k) != 0) ++nsol; });
+            }
+            amrex::ParallelDescriptor::ReduceLongSum(nsol);
+            if (nsol == 0) ccls[0].reset();
+            cls0g.reset();
+            if (ccls[0]) {
+                const amrex::Geometry& g0 = lc[0].lev->geom;
+                cls0g.reset(new amrex::iMultiFab(ccls[0]->boxArray(), ccls[0]->DistributionMap(), 1, 1));
+                for (amrex::MFIter mfi(*cls0g); mfi.isValid(); ++mfi) {
+                    pb::fill_obst_mask(g0, 0, mfi.growntilebox(), cls0g->array(mfi));
+                    auto o = cls0g->array(mfi); auto m = ccls[0]->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { o(i, j, k) = m(i, j, k); });
+                }
+                cls0g->FillBoundary(g0.periodicity());
+            }
+        }
         cthin.clear(); cthin.resize(nl);
         if (!pb::obst_list().empty()) for (int l = 1; l < nl; ++l) if (!pb::build_thin_flags(l, lc[l].lev->ba, lc[l].lev->dm, cthin[l])) cthin[l] = {};
         comp_gen = layout_gen;
+    }
+    // Masked uncovered level-0 OBST cells (ccls[0]), called before PRHS (after the C/F flux overwrite). Their solid faces carry no pressure gradient (beta = 0), so
+    // FDS's NO_FLUX FV loses its H term: FV' = FV + rdn (Hhi - Hlo) = -(UN - U)/dt (wall velocity, e.g. a MASS_FLUX burner, exact); both-solid faces 0. UN is kept in l0wall.
+    void l0_wall_fv(bool pred, double dt)
+    {
+        ensure_comp();
+        if (cls0g) {   // masked uncovered level-0 OBST cells: the solid faces carry no pressure gradient (beta = 0), so FDS's NO_FLUX FV loses its H term: FV' = FV + rdn (Hhi - Hlo) = -(UN - U)/dt (the wall velocity, e.g. MASS_FLUX burner, is then exact); both-solid faces 0
+            Fields& F0 = *lc[0].F; const char* fvn[3] = {"FVX", "FVY", "FVZ"};
+            const amrex::MultiFab& Hh = F0[pred ? "H" : "HS"]; const char* un_[3] = {"U", "V", "W"}; const char* us_[3] = {"US", "VS", "WS"};
+            for (int d = 0; d < 3; ++d) {
+                const amrex::IntVect e = amrex::IntVect::TheDimensionVector(d); const double rdn = 1.0 / lc[0].lev->dx[d];
+                amrex::BoxArray nba = lc[0].lev->ba; nba.surroundingNodes(d);
+                l0wall[d].reset(new amrex::MultiFab(nba, lc[0].lev->dm, 1, 0)); l0wall[d]->setVal(0.0);
+                for (amrex::MFIter mfi(*ccls[0]); mfi.isValid(); ++mfi) {
+                    auto m = cls0g->const_array(mfi); auto fv = F0[fvn[d]].array(mfi); auto h = Hh.const_array(mfi);
+                    const amrex::Box dom = lc[0].lev->geom.Domain(); const bool per = lc[0].lev->geom.isPeriodic(d);
+                    auto u = F0[un_[d]].const_array(mfi); auto us = F0[us_[d]].const_array(mfi); auto un = l0wall[d]->array(mfi);
+                    amrex::LoopOnCpu(amrex::surroundingNodes(mfi.validbox(), d), [&](int i, int j, int k) {
+                        const int sh_ = m(i, j, k) | m(i - e[0], j - e[1], k - e[2]);
+                        if (!sh_) return;
+                        if (!per && (amrex::IntVect(i, j, k)[d] == dom.smallEnd(d) || amrex::IntVect(i, j, k)[d] == dom.bigEnd(d) + 1)) return;   // domain face: FDS's wall BC
+                        const bool both = m(i, j, k) && m(i - e[0], j - e[1], k - e[2]);
+                        double& f = fv(i - e[0], j - e[1], k - e[2]);
+                        f = both ? 0.0 : f + rdn * (h(i, j, k) - h(i - e[0], j - e[1], k - e[2]));
+                        un(i, j, k) = both ? 0.0 : (pred ? u(i, j, k) - dt * f : 0.5 * (u(i, j, k) + us(i, j, k)) - 0.5 * dt * f);   // UN: FV' = -(UN - U)/dt (predictor), -2 (UN - (U + US)/2)/dt (corrector)
+                    });
+                }
+            }
+        }
     }
     // Composite pressure solve of the stage: PRHS of every level, one solve, H (pred) / HS (corrector) of every level, the face gradient at the interface into the fine ghost cells.
     void solve_composite(bool pred, double dt)
@@ -1478,6 +1529,7 @@ struct TimeLoop::Impl {
             }
         }
         pb::PressureProblem p;
+        p.cf_solid_l0_ok = !ccls.empty() && ccls[0];
         for (int f = 0; f < 6; ++f) p.bc[f] = static_cast<pb::BC>(bc_type[f]);
         set_face_neumann(p);
         p.levels.resize(nl);
@@ -1536,6 +1588,18 @@ struct TimeLoop::Impl {
                 auto h = H.array(mfi); auto a = q.const_array(mfi);
                 amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { h(i, j, k) = a(i, j, k); });
             }
+            if (l == 0 && !ccls.empty() && ccls[0]) {   // the identity row leaves the solid cells at their rhs: take the H of a neighbouring gas cell (up first), so that the NO_FLUX velocity update of a solid face sees no H difference
+                for (amrex::MFIter mfi(*ccls[0]); mfi.isValid(); ++mfi) {
+                    auto h = H.array(mfi); auto m = ccls[0]->const_array(mfi); const amrex::Box vb = mfi.validbox();
+                    for (int sweep = 0; sweep < 8; ++sweep)
+                        amrex::LoopOnCpu(vb, [&](int i, int j, int k) {
+                            if (!m(i, j, k)) return;
+                            const int o[6][3] = {{0,0,1},{0,0,-1},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
+                            for (auto& q : o) { const int a_ = i + q[0], b_ = j + q[1], c_ = k + q[2]; if (!vb.contains(a_, b_, c_)) continue; if (!m(a_, b_, c_)) { h(i, j, k) = h(a_, b_, c_); return; } }
+                            for (auto& q : o) { const int a_ = i + q[0], b_ = j + q[1], c_ = k + q[2]; if (!vb.contains(a_, b_, c_)) continue; if (m(a_, b_, c_) && sweep > 0) { h(i, j, k) = h(a_, b_, c_); return; } }
+                        });
+                }
+            }
             H.FillBoundary(0, 1, H.nGrowVect(), lc[l].lev->geom.periodicity());
             if (l == 0) {
                 select(0);
@@ -1567,6 +1631,7 @@ struct TimeLoop::Impl {
         wrap_check("composite after noflux");
         { ProfScope prof_ad(4); composite_average_down_flux(reg, nl); }
         wrap_check("composite after avg-down");
+        l0_wall_fv(pred, dt);   // after the flux overwrite, before PRHS
         select(0);
         each_local([&](int nm) { fds_p_rhs(t, dt, nm); });
         const double ts0 = amrex::second();
@@ -1736,6 +1801,21 @@ struct TimeLoop::Impl {
         if (!multi()) return;
         ProfScope prof_ad(4);
         composite_zero_solid_faces(*L.m_reg, 1, static_cast<int>(lc.size()), pred ? std::array<const char*, 3>{"US", "VS", "WS"} : std::array<const char*, 3>{"U", "V", "W"}, 0);
+        if (cls0g && l0wall[0]) {   // masked level-0 OBST faces: wall normal velocity UN (the NO_FLUX velocity update saw no H difference only on some faces)
+            const char* nm_[3] = {"U", "V", "W"}, *nms_[3] = {"US", "VS", "WS"};
+            for (int d = 0; d < 3; ++d) {
+                const amrex::IntVect e = amrex::IntVect::TheDimensionVector(d);
+                amrex::MultiFab& v = (*lc[0].F)[pred ? nms_[d] : nm_[d]];
+                for (amrex::MFIter mfi(*ccls[0]); mfi.isValid(); ++mfi) {
+                    auto m = cls0g->const_array(mfi); auto a = v.array(mfi); auto un = l0wall[d]->const_array(mfi);
+                    const amrex::Box dom = lc[0].lev->geom.Domain(); const bool per = lc[0].lev->geom.isPeriodic(d);
+                    amrex::LoopOnCpu(amrex::surroundingNodes(mfi.validbox(), d), [&](int i, int j, int k) {
+                        if (!per && (amrex::IntVect(i, j, k)[d] == dom.smallEnd(d) || amrex::IntVect(i, j, k)[d] == dom.bigEnd(d) + 1)) return;
+                        if (m(i, j, k) | m(i - e[0], j - e[1], k - e[2])) a(i, j, k) = un(i, j, k);
+                    });
+                }
+            }
+        }
         composite_zero_solid_cells(*L.m_reg, 1, static_cast<int>(lc.size()), {"D", "DS", "DDDT"});   // solid fine cells: D/DS/DDDT stay 0 (div u = 0 there)
 #ifdef FDS_HAVE_FINE_LEVEL
         fine_wall_velocity(pred);

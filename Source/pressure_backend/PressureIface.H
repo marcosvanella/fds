@@ -143,6 +143,10 @@ struct PressureProblem {
     // level-0 cell under it; level 0 keeps `bc` (FDS folds its own values there). Composite MLMG only (Robin BC); HYPRE, masked composite
     // and a one-cell direction with a flag set are NotBuilt.
     std::array<std::vector<int>,6> face_neumann;
+    // Composite masked MLMG: accept a Solid level-0 cell in the coarse/fine interpolation stencil of an open C/F face of level 1 (its MLMG value 0 enters the
+    // interpolation: an O(h) error confined to that face). false: NotBuilt (the obstacle crosses the C/F interface; use HYPRE). The driver sets it for the uncovered
+    // level-0 OBST columns it masks (a burner block next to a fine patch).
+    bool cf_solid_l0_ok = false;
 
     // Coefficients: M1 supports the unit operator only (nullptr). Non-null is NotBuilt.
     amrex::MultiFab const* cell_coef_a = nullptr;
