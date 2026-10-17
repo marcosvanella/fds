@@ -949,8 +949,9 @@ END SUBROUTINE FRAD_WALLS
 
 !> Face velocity of the hidden OBST walls of local box IB of level LEV (e.g. a MASS_FLUX burner on the fine level): for each wall with a nonzero parent U_NORMAL_S (PRED=1)
 !> or U_NORMAL, the fine cell and wall direction IJKD(:,N) = I,J,K,D and UF(N) = -SIGN(IOR)*U_NORMAL of the level-0 parent wall (the normal velocity in +axis direction, as FDS sets
-!> it on a wall face). Domain-boundary walls are skipped (the driver's vel_bc mirror handles them). N <= NMAX.
+!> it on a wall face). A domain-boundary SOLID wall (a vent) counts like an OBST wall; the driver re-applies its velocity after the vel_bc mirror. N <= NMAX.
 SUBROUTINE FDS_FINE_WALLS_UN(LEV,IB,PRED,NMAX,N,IJKD,UF) BIND(C,NAME='fds_fine_walls_un')
+USE GLOBAL_CONSTANTS, ONLY: SOLID_BOUNDARY
 INTEGER(C_INT), VALUE :: LEV,IB,PRED,NMAX
 INTEGER(C_INT), INTENT(OUT) :: N,IJKD(4,NMAX)
 REAL(C_DOUBLE), INTENT(OUT) :: UF(NMAX)
@@ -966,9 +967,10 @@ IF (.NOT.ASSOCIATED(WM)) RETURN
 DO IW=1,FWALL(LEV)%B(IB)%NW
    NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
    IF (NM0==0) CYCLE   ! no level-0 parent state (D5, not yet)
-   IF (IW0<=MESHES(NM0)%N_EXTERNAL_WALL_CELLS) CYCLE
+   IF (MESHES(NM0)%WALL(IW0)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+   IF (PRED>=2 .AND. IW0>MESHES(NM0)%N_EXTERNAL_WALL_CELLS) CYCLE   ! PRED>=2: only the domain-boundary vents (the driver's re-apply after the vel_bc mirror)
    ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX), BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
-   UN = MERGE(B1%U_NORMAL_S,B1%U_NORMAL,PRED==1)
+   UN = MERGE(B1%U_NORMAL_S,B1%U_NORMAL,MOD(PRED,2)==1)
    IF (UN==0._EB .OR. N>=NMAX) CYCLE
    N = N+1
    IJKD(:,N) = (/BC%IIG,BC%JJG,BC%KKG,-BC%IOR/)
@@ -999,7 +1001,7 @@ IF (.NOT.ASSOCIATED(WM)) RETURN
 DO IW=1,FWALL(LEV)%B(IB)%NW
    NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; IW0 = FWALL(LEV)%B(IB)%PIW(IW)
    IF (NM0==0) CYCLE   ! no level-0 parent state (D5, not yet)
-   IF (IW0<=MESHES(NM0)%N_EXTERNAL_WALL_CELLS .OR. MESHES(NM0)%WALL(IW0)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+   IF (MESHES(NM0)%WALL(IW0)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
    ASSOCIATE(B1=>MESHES(NM0)%BOUNDARY_PROP1(MESHES(NM0)%WALL(IW0)%B1_INDEX), BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
    UN = MERGE(B1%U_NORMAL_S,B1%U_NORMAL,PRED==1)
    IF (UN==0._EB .AND. ALL(B1%M_DOT_G_PP_ADJUST(1:NZ)==0._EB)) CYCLE

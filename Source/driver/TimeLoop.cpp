@@ -1774,17 +1774,18 @@ struct TimeLoop::Impl {
     }
     // A fine OBST face with a nonzero wall velocity (MASS_FLUX burner) gets the parent wall's normal velocity back after the solid-face
     // zeroing, as FDS VELOCITY_BC sets the wall face to -SIGN(IOR)*U_NORMAL(_S). Box-local I,J,K (1-based) and direction D of the gas cell.
-    void fine_wall_velocity(bool pred)
+    void fine_wall_velocity(bool pred, int only = -1, bool ext_only = false)
     {
         const char* nm[3] = {pred ? "US" : "U", pred ? "VS" : "V", pred ? "WS" : "W"};
         std::vector<int> ijkd; std::vector<double> uf;
         for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+            if (only >= 0 && l != only) continue;
             const amrex::iMultiFab& sm = L.m_reg->side_data(l).mask();
             for (amrex::MFIter mfi(sm); mfi.isValid(); ++mfi) {
                 const int nmax = static_cast<int>(2 * mfi.validbox().numPts() * 3 / 2 + 64);
                 ijkd.resize(4 * nmax); uf.resize(nmax);
                 int n = 0;
-                fds_fine_walls_un(l, mfi.index() + 1, pred ? 1 : 0, nmax, &n, ijkd.data(), uf.data());
+                fds_fine_walls_un(l, mfi.index() + 1, (pred ? 1 : 0) + (ext_only ? 2 : 0), nmax, &n, ijkd.data(), uf.data());
                 const amrex::Box vb = mfi.validbox(); const amrex::IntVect lo = vb.smallEnd();
                 for (int w = 0; w < n; ++w) {
                     const int D = ijkd[4 * w + 3], d = std::abs(D) - 1;
@@ -2133,6 +2134,9 @@ struct TimeLoop::Impl {
             ProfScope prof_cf(5);
             if (code == 3) composite_fill_fine_face_ghosts(*L.m_reg, l, {"US", "VS", "WS"});
             else composite_fill_fine_face_ghosts(*L.m_reg, l, {"U", "V", "W"});
+#ifdef FDS_HAVE_FINE_LEVEL
+            fine_wall_velocity(code == 3, l, true);   // the domain-edge mirror zeroed the normal velocity of a ground-vent face; the vent wall velocity is the parent's
+#endif
         }
     }
     void s_after(int code) { c->bc->after_exchange(code, L.m_t, L.m_dt); }
