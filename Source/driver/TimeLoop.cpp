@@ -1764,6 +1764,21 @@ struct TimeLoop::Impl {
             ++n;
         }
         for (std::size_t f = 0; f < b.sf.size(); f += 4) { dir.push_back(b.sf[f]); idx.insert(idx.end(), b.sf.begin() + f + 1, b.sf.begin() + f + 4); val.insert(val.end(), ns, 0.0); ++n; }
+        if (kind == 1) {   // no diffusion through an open domain face of a fine box (its ghost layer holds the ambient state at an inflow; FDS walls carry the parent's wall value: not modelled here)
+            const amrex::Box bx = L.m_reg->level(l).ba[k], dom = L.m_reg->level(l).geom.Domain();
+            for (int d = 0; d < 3; ++d) {
+                if (L.m_reg->level(l).geom.isPeriodic(d)) continue;
+                for (int side = 0; side < 2; ++side) {
+                    if (vel_bc[2 * d + side] == kFaceInert || vel_bc[2 * d + side] == kFaceMirror || (side == 0 ? bx.smallEnd(d) != dom.smallEnd(d) : bx.bigEnd(d) != dom.bigEnd(d))) continue;
+                    const int t1 = d == 0 ? 1 : 0, t2 = d == 2 ? 1 : 2;
+                    for (int b = 1; b <= bx.length(t2); ++b)
+                        for (int a = 1; a <= bx.length(t1); ++a) {
+                            int c[3]; c[d] = side == 0 ? 0 : bx.length(d); c[t1] = a; c[t2] = b;
+                            dir.push_back(d); idx.insert(idx.end(), c, c + 3); val.insert(val.end(), ns, 0.0); ++n;
+                        }
+                }
+            }
+        }
         (void)lo;
     }
 #endif
