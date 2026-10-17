@@ -1744,10 +1744,29 @@ struct TimeLoop::Impl {
     }
 #endif
 #ifdef FDS_HAVE_FINE_LEVEL
+    // Domain-boundary vent faces of the last fine_wall_fv (the stage's pressure solve), per pred(1)/corr(0) and level: the velocity the projection was built on. The domain-edge mirror
+    // of the following exchange zeroes them; they get this value back (the parent's U_NORMAL may already have moved on to the next step's state).
+    struct VentFace { amrex::IntVect c; int box; int d; double v; };
+    std::vector<std::vector<VentFace>> vent_keep[2];
+    void restore_vent_faces(bool pred, int l)
+    {
+        const auto& vk = vent_keep[pred ? 1 : 0];
+        if (l >= static_cast<int>(vk.size())) return;
+        const char* nm[3] = {pred ? "US" : "U", pred ? "VS" : "V", pred ? "WS" : "W"};
+        for (const VentFace& f : vk[l])
+            for (amrex::MFIter mfi(L.m_reg->side_data(l).mask()); mfi.isValid(); ++mfi)
+                if (mfi.index() == f.box) L.m_reg->fields(l)[nm[f.d]][mfi](f.c) = f.v;
+    }
     // Wall inflow of a fine burner face into the fine RHS (-div FV), as FDS NO_FLUX with the H term dropped (beta = 0 on the face):
     // FV = -(UN - U)/dt (predictor), -2(UN - (U+US)/2)/dt (corrector); UN from fds_fine_walls_state (frozen/fine-wall-state.md), FV index = face - 1.
     void fine_wall_fv(bool pred, double dt)
     {
+        std::vector<std::vector<VentFace>> prev(lc.size());   // domain-wall vent faces of the last stages with a nonzero velocity: one that went off (UN = 0, no M_DOT) is no longer in the parent's list, but its face still carries the old velocity; it is driven to 0 like any vent face
+        for (int k = 0; k < 2; ++k)
+            for (std::size_t l = 0; l < vent_keep[k].size() && l < prev.size(); ++l)
+                for (const VentFace& f : vent_keep[k][l]) if (f.v != 0.0) prev[l].push_back(f);
+        auto& vk = vent_keep[pred ? 1 : 0];
+        vk.assign(lc.size(), {});
         const char* fv[3] = {"FVX", "FVY", "FVZ"}; const char* u[3] = {"U", "V", "W"}; const char* us[3] = {"US", "VS", "WS"};
         const int nz = fds_n_tracked_species(), ns = 5 + 2 * nz;
         std::vector<int> ijkd; std::vector<double> st;
@@ -1769,6 +1788,18 @@ struct TimeLoop::Impl {
                     const double dudt = pred ? (un - u0) / dt : 2.0 * (un - 0.5 * (u0 + F[us[d]][mfi](c))) / dt;
                     amrex::IntVect cf = c; cf[d] -= 1;
                     F[fv[d]][mfi](cf) = -dudt;
+                    if (c[d] == L.m_reg->level(l).geom.Domain().smallEnd(d) || c[d] == L.m_reg->level(l).geom.Domain().bigEnd(d) + 1) vk[l].push_back({c, mfi.index(), d, un});   // a vent face on a domain wall: the velocity the projection is built on
+                }
+                for (const VentFace& f : prev[l]) {   // went off: not in this stage's list
+                    if (f.box != mfi.index()) continue;
+                    bool in = false;
+                    for (const VentFace& g : vk[l]) if (g.box == f.box && g.d == f.d && g.c == f.c) { in = true; break; }
+                    if (in) continue;
+                    const double u0 = F[u[f.d]][mfi](f.c);
+                    const double dudt = pred ? (0.0 - u0) / dt : 2.0 * (0.0 - 0.5 * (u0 + F[us[f.d]][mfi](f.c))) / dt;
+                    amrex::IntVect cf = f.c; cf[f.d] -= 1;
+                    F[fv[f.d]][mfi](cf) = -dudt;
+                    vk[l].push_back({f.c, f.box, f.d, 0.0});
                 }
             }
         }
@@ -1821,6 +1852,7 @@ struct TimeLoop::Impl {
         composite_zero_solid_cells(*L.m_reg, 1, static_cast<int>(lc.size()), {"D", "DS", "DDDT"});   // solid fine cells: D/DS/DDDT stay 0 (div u = 0 there)
 #ifdef FDS_HAVE_FINE_LEVEL
         fine_wall_velocity(pred);
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) restore_vent_faces(pred, l);   // a vent face on a domain wall keeps the projection's velocity (the parent's UN may have moved on)
 #endif
         if (pred) composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"US", "VS", "WS"});
         else composite_average_down_faces(*L.m_reg, static_cast<int>(lc.size()), {"U", "V", "W"});
@@ -2136,7 +2168,7 @@ struct TimeLoop::Impl {
             if (code == 3) composite_fill_fine_face_ghosts(*L.m_reg, l, {"US", "VS", "WS"});
             else composite_fill_fine_face_ghosts(*L.m_reg, l, {"U", "V", "W"});
 #ifdef FDS_HAVE_FINE_LEVEL
-            fine_wall_velocity(code == 3, l, true);   // the domain-edge mirror zeroed the normal velocity of a ground-vent face; the vent wall velocity is the parent's
+            restore_vent_faces(code == 3, l);   // the domain-edge mirror zeroed the normal velocity of a ground-vent face; the vent wall velocity is the parent's
 #endif
         }
     }
