@@ -528,7 +528,13 @@ DO IW=1,N
    I=T(1,IW) ; J=T(2,IW) ; K=T(3,IW) ; D=T(4,IW)
    WC => WM%WALL(IW)
    WC%SURF_INDEX = T(7,IW) ; WC%BOUNDARY_TYPE = T(8,IW) ; WC%VENT_INDEX = 0
-   IF (WC%BR_INDEX>0) THEN ; DO NN=1,SIZE(WM%BOUNDARY_RADIA(WC%BR_INDEX)%BAND) ; WM%BOUNDARY_RADIA(WC%BR_INDEX)%BAND(NN)%ILW = SIGMA*TMPA4/PI ; ENDDO ; ENDIF   ! wall intensity at the ambient equilibrium, as level 0 after its initialization sweeps (ALLOCATE_STORAGE starts it at 0: the wall would reflect nothing and the gas next to it would see a deficit)
+   IF (WC%BR_INDEX>0) THEN   ! wall intensities: the level-0 parent wall's (it has converged its initialization sweeps; ALLOCATE_STORAGE starts at 0, so the wall would reflect nothing and the gas next to it would see a deficit), else ambient equilibrium
+      DO NN=1,SIZE(WM%BOUNDARY_RADIA(WC%BR_INDEX)%BAND)
+         WM%BOUNDARY_RADIA(WC%BR_INDEX)%BAND(NN)%ILW = SIGMA*TMPA4/PI
+         IF (T(5,IW)>0) THEN ; IF (MESHES(T(5,IW))%WALL(T(6,IW))%BR_INDEX>0) WM%BOUNDARY_RADIA(WC%BR_INDEX)%BAND(NN)%ILW = &
+            MESHES(T(5,IW))%BOUNDARY_RADIA(MESHES(T(5,IW))%WALL(T(6,IW))%BR_INDEX)%BAND(NN)%ILW ; ENDIF
+      ENDDO
+   ENDIF
    IF (T(5,IW)>0) WC%VENT_INDEX = MESHES(T(5,IW))%WALL(T(6,IW))%VENT_INDEX
    BC => WM%BOUNDARY_COORD(WC%BC_INDEX)
    BC%IOR = -D ; BC%IIG = I ; BC%JJG = J ; BC%KKG = K ; BC%II = I ; BC%JJ = J ; BC%KK = K
