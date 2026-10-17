@@ -39,6 +39,8 @@ struct TwoLevelOptions {
     int plot_every = 0;              // CLI --plot-every N: when N>0 and plotfile set, after step s with s%N==0 write plt_<chid>_s<s> (keeps the final dump; mid-regrid dump only when N<=0)
     // TAG_VORT path (vortex-ring owner-show). NaN = keep blob TAG_SPEC_* emit when regrid_every>0.
     // tag_vort_auto: thr = 0.45 * max|VORT| on level 0, recomputed at every regrid (VORT rescaled; AmrParams thr is the t=0 value); TAG_KEEP=0.85 (tight core).
+    double tag_phi = std::numeric_limits<double>::quiet_NaN();   // --tag-phi D [NBUF]: TAG_PHI_DIFF=D (level-set front band), N_ERROR_BUF=NBUF
+    int tag_phi_buf = 1;
     double tag_vort = std::numeric_limits<double>::quiet_NaN();
     bool tag_vort_auto = false;
     double tag_temp = std::numeric_limits<double>::quiet_NaN();   // --tag-temp [T]: also tag TMP > T K (default 400), OR with the other TAG_*; NaN off

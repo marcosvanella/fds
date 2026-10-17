@@ -69,6 +69,7 @@ struct TagFields {
     const amrex::MultiFab* zz_den = nullptr;
     int zz_comp = 0;
     const amrex::MultiFab* hrrpuv = nullptr;
+    const amrex::MultiFab* phi = nullptr;    // level-set PHI (k-constant) for TAG_PHI_DIFF
     const amrex::MultiFab* vort = nullptr;   // cell-centred |ω| for TAG_VORT
     double tmp_ambient = 293.15;             // base for TAG_TMP_ABOVE (TMPA)
     std::array<int, 3> dirs{1, 1, 1};       // 0 in a single-cell direction
