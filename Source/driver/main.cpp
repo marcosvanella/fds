@@ -37,6 +37,7 @@ namespace fdsamr { int level_bind_check(TimeLoop& loop, const Level0& l0, double
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
 extern "C" void fds_hook_set_out_meshes(int n);  // patch 0012: output-mesh count for the output tables (default NMESHES)
 extern "C" void fds_p_params(int* ip, double* rp);
+extern "C" void fds_ls_set_mode(int mode);   // fds_ls_grid.f90
 extern "C" void fds_p_mesh_info(int nm, int* mi, double* r);
 extern "C" void fds_k_visc(int nm, int est);
 #ifdef FDS_FINE_B_DRAFT
@@ -282,6 +283,7 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--chid") == 0 && i + 1 < argc) ro.chid = argv[++i];
                     else if (std::strcmp(argv[i], "--quiet") == 0) ro.quiet = true;
                     else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
+                    else if (std::strcmp(argv[i], "--ls-fine-shadow") == 0) fds_ls_set_mode(1);   // level set on a global grid equal to the level-0 mesh, run beside the original and compared (<CHID>_ls_shadow.txt)
                     else if (std::strcmp(argv[i], "--fine-b-shadow") == 0) fine_shadow = true;
                     else if (std::strcmp(argv[i], "--fine-b-build") == 0) { fine_shadow = true; fine_build = 1; }
                 }
