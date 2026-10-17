@@ -31,6 +31,7 @@ extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90:
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
 extern "C" int fds_p_reac_coef(int ns, double* c);   // fds_step.f90: species production per unit heat release (one reaction), else 0
 extern "C" void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);   // T_END etc.   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
+extern "C" void fds_k_phi(int nm, double* buf);   // fds_kernels.f90: PHI_LS of a level-0 mesh
 extern "C" int fds_find_tracked_species(const char* name);  // fds_mesh_query.f90; 0-based ZZ index or -1
 
 namespace fdsamr {
@@ -233,6 +234,33 @@ void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, TimeLoo
 namespace {
 
 // Cell-centred undivided |ω| from face U,V,W (FDS dump.f90 vorticity without /dx).
+// Level-set PHI (k-constant): level 0 from the FDS PHI_LS of its mesh, finer levels by injection from the level below (ghosts included).
+void fill_phi(LevelRegistry& reg, int nl)
+{
+    reg.fields(0).ensure("PHI");
+    amrex::MultiFab& P0 = reg.fields(0)["PHI"];
+    for (amrex::MFIter mfi(P0); mfi.isValid(); ++mfi) {
+        auto p = P0.array(mfi);
+        const amrex::Box vb = mfi.validbox();
+        std::vector<double> buf(static_cast<size_t>(vb.length(0) + 2) * (vb.length(1) + 2));
+        fds_k_phi(mfi.index() + 1, buf.data());
+        amrex::LoopOnCpu(amrex::grow(mfi.fabbox(), 0), [&](int i, int j, int k) { p(i, j, k) = buf[(i + 1) + static_cast<size_t>(j + 1) * (vb.length(0) + 2)]; });
+    }
+    for (int l = 1; l < nl; ++l) {
+        reg.fields(l).ensure("PHI");
+        const amrex::IntVect r = reg.level(l).ref_ratio_from_parent;
+        amrex::MultiFab& Pf = reg.fields(l)["PHI"];
+        amrex::BoxArray cba = reg.level(l).ba; cba.coarsen(r);
+        amrex::MultiFab Pc(cba, reg.level(l).dm, 1, 1);
+        Pc.setVal(0.0);
+        Pc.ParallelCopy(reg.fields(l - 1)["PHI"], 0, 0, 1, 0, 1, reg.level(l - 1).geom.periodicity());
+        for (amrex::MFIter mfi(Pf); mfi.isValid(); ++mfi) {
+            auto pf = Pf.array(mfi); auto pc = Pc.const_array(mfi);
+            amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) { pf(i, j, k) = pc(amrex::coarsen(i, r[0]), amrex::coarsen(j, r[1]), amrex::coarsen(k, r[2])); });
+        }
+    }
+}
+
 // ωx = (W_{j+1}-W_j) - (V_{k+1}-V_k), cyclic. Thin directions contribute 0.
 void fill_undivided_vorticity(LevelRegistry& reg, int nl)
 {
@@ -299,11 +327,12 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     std::ostringstream amr;
     amr << "&AMR MAX_LEVEL=" << o.max_level << ", REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize
-        << ", N_PROPER=1, N_ERROR_BUF=1, REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "'";
+        << ", N_PROPER=1, N_ERROR_BUF=" << (std::isnan(o.tag_phi) ? 1 : o.tag_phi_buf) << ", REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "'";
     // Adaptive TAG_*: vortex-ring TAG_VORT path, else blob TAG_SPEC_*. Static (regrid_every==0) uses nested set_tag_function only.
+    const bool use_tag_phi = !std::isnan(o.tag_phi);
     const bool use_tag_vort = o.tag_vort_auto || !std::isnan(o.tag_vort);
     const bool use_tag_temp = !std::isnan(o.tag_temp), use_tag_obst = o.tag_obst >= 0;
-    const bool adaptive_free = use_tag_vort || (o.regrid_every > 0 && (use_tag_temp || use_tag_obst));   // criteria that move the fine region by themselves: the refinable region is the whole domain
+    const bool adaptive_free = use_tag_vort || use_tag_phi || (o.regrid_every > 0 && (use_tag_temp || use_tag_obst));   // criteria that move the fine region by themselves: the refinable region is the whole domain
     double tag_vort_thr = o.tag_vort;
     if (o.regrid_every > 0 && use_tag_vort) {
         fill_undivided_vorticity(reg, 1);   // L0 |ω| before AmrParams (auto thr needs max)
@@ -313,9 +342,10 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             amrex::Print() << tag << ": TAG_VORT auto thr = 0.45 * max|VORT|_L0 = " << tag_vort_thr << "\n";
         }
         amr << ", TAG_VORT=" << std::setprecision(17) << tag_vort_thr << ", TAG_KEEP=0.85";
-    } else if (o.regrid_every > 0 && !use_tag_temp && !use_tag_obst) {   // default blob criterion only when no other adaptive criterion (--tag-temp, --tag-obst) is asked for
+    } else if (o.regrid_every > 0 && !use_tag_temp && !use_tag_obst && !use_tag_phi) {   // default blob criterion only when no other adaptive criterion (--tag-temp, --tag-obst) is asked for
         amr << ", TAG_SPEC_ID='TRACER', TAG_SPEC_DIFF=0.05, TAG_KEEP=0.8";
     }
+    if (o.regrid_every > 0 && use_tag_phi) amr << ", TAG_PHI_DIFF=" << std::setprecision(17) << o.tag_phi << ", TAG_KEEP=0.85";
     if (o.regrid_every > 0 && !std::isnan(o.tag_temp)) amr << ", TAG_TMP_ABOVE=" << std::setprecision(17) << o.tag_temp - 293.15;   // --tag-temp (TMPA 293.15 = TagFields::tmp_ambient)
     amr << " /\n";
     // Vortex adaptive: whole-domain refinable region so the ring can leave the static patch.
@@ -393,6 +423,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         if (F.has("HRRPUV")) f.hrrpuv = &F["HRRPUV"];
         else if (F.has("Q")) f.hrrpuv = &F["Q"];
         if (F.has("VORT")) { F["VORT"].FillBoundary(per); f.vort = &F["VORT"]; }
+        if (F.has("PHI")) { F["PHI"].FillBoundary(per); f.phi = &F["PHI"]; }
         for (int d = 0; d < 3; ++d) f.dirs[d] = (dom.length(d) == 1) ? 0 : 1;
         return f;
     });
@@ -437,6 +468,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     core.set_force_tag_function((o.init_patch || o.patch_set) && o.regrid_every > 0);   // --init-patch or an explicit --patch/--patch2: patch/patch2 forced at step 0 only (adaptive runs would otherwise ignore them)
     for (int pass = 0; pass < o.max_level; ++pass) {
         if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
+        if (use_tag_phi) fill_phi(reg, reg.num_levels());
         core.regrid_dynamic(0.0);
         if (core.finestLevel() >= o.max_level) break;
         if (pass > 0 && !core.last_outcome().changed) break;
@@ -594,6 +626,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 const int fb = loop.finest_bound();
                 for (int l = fb; l >= 1; --l) loop.unbind_level(l);
                 if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
+                if (use_tag_phi) fill_phi(reg, reg.num_levels());
                 // auto: thr stays 0.45*max|VORT|_L0 of now (AmrParams thr fixed, so rescale VORT by thr/(0.45*max))
                 if (o.tag_vort_auto) { const double sc = tag_vort_thr / (0.45 * reg.fields(0)["VORT"].max(0, 0)); for (int l = 0; l < reg.num_levels(); ++l) reg.fields(l)["VORT"].mult(sc); }
                 const bool changed = core.regrid_dynamic(loop.time());

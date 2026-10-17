@@ -201,6 +201,10 @@ void apply_tag_criteria(amrex::TagBoxArray& tags, const AmrParams& p, const TagF
         c.mode = TagMode::Above; c.thr = p.tag_hrrpuv * 1000.0; c.base = 0.0; c.comp = 0;
         tag_cells(tags, *f.hrrpuv, nullptr, 0, covered, c);
     }
+    if (p.has_tag_phi_diff() && f.phi) {
+        c.mode = TagMode::Diff; c.thr = p.tag_phi_diff; c.relative = false; c.comp = 0;
+        tag_cells(tags, *f.phi, nullptr, 0, covered, c);
+    }
     if (p.has_tag_vort() && f.vort) {
         c.mode = TagMode::Above; c.thr = p.tag_vort; c.base = 0.0; c.comp = 0;
         tag_cells(tags, *f.vort, nullptr, 0, covered, c);

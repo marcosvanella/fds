@@ -60,6 +60,7 @@ struct AmrParams {
     std::string tag_spec_id;                                         // TAG_SPEC_ID (character); needs TAG_SPEC_DIFF
     double tag_spec_diff = std::numeric_limits<double>::quiet_NaN();  // TAG_SPEC_DIFF (undivided on Y)
     double tag_hrrpuv = std::numeric_limits<double>::quiet_NaN();     // TAG_HRRPUV (kW/m3)
+    double tag_phi_diff = std::numeric_limits<double>::quiet_NaN();   // TAG_PHI_DIFF (undivided PHI jump: the level-set front)
     double tag_vort = std::numeric_limits<double>::quiet_NaN();       // TAG_VORT (|ω| undivided threshold)
     double tag_keep = 0.8;                                           // TAG_KEEP hysteresis factor in (0,1]
 
@@ -69,11 +70,12 @@ struct AmrParams {
     bool has_tag_rho_diff() const { return tag_set(tag_rho_diff); }
     bool has_tag_spec_diff() const { return tag_set(tag_spec_diff); }
     bool has_tag_hrrpuv() const { return tag_set(tag_hrrpuv); }
+    bool has_tag_phi_diff() const { return tag_set(tag_phi_diff); }
     bool has_tag_vort() const { return tag_set(tag_vort); }
     bool has_any_tag_criterion() const
     {
         return has_tag_tmp_diff() || has_tag_tmp_above() || has_tag_rho_diff() || has_tag_hrrpuv() ||
-               has_tag_vort() || (has_tag_spec_diff() && !tag_spec_id.empty());
+               has_tag_vort() || has_tag_phi_diff() || (has_tag_spec_diff() && !tag_spec_id.empty());
     }
 
     // Value for level `lev` of a per-level vector (a single entry applies to every level).
