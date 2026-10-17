@@ -8751,7 +8751,13 @@ ENDIF
 IF (PRESENT(DEVC_INDEX)) THEN
    DV => DEVICE(DEVC_INDEX)
    IF (DV%N_SUBDEVICES>0) THEN
+#ifdef WITH_AMREX
+      IF (NM<=SIZE(DV%SUBDEVICE_INDEX)) THEN   ! a point device read in a fine box (UPDATE_DEVICES_1 leaf cell): NM is a fine box number, no subdevice
+#endif
       IF (DV%SUBDEVICE_INDEX(NM)>0) SDV => DV%SUBDEVICE(DV%SUBDEVICE_INDEX(NM))
+#ifdef WITH_AMREX
+      ENDIF
+#endif
    ENDIF
 ENDIF
 
