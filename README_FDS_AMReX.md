@@ -91,6 +91,18 @@ cmake --build build-gnu -j8          # executable: build-gnu/fds_amr
 This matches the reference builds (Release `-O3`, `USE_OPENMP=ON`, `USE_HYPRE=ON`, `USE_SUNDIALS=ON`). Use `-DBUILD_TESTING=ON` for the ctest unit tests.
 Run with one OpenMP thread: `export OMP_NUM_THREADS=1`.
 
+#### Default run configuration (3-level cases)
+Run the 3-level cases (`Verification/Adaptive_Mesh_Refinement/run_simple_test_l3*.sh`, near-burner cases) with 1-4 pinned OpenMP threads, not 8 unpinned threads:
+```bash
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}   # supported range 1-4
+export OMP_PROC_BIND=${OMP_PROC_BIND:-close}
+export OMP_PLACES=${OMP_PLACES:-cores}
+```
+`Verification/Adaptive_Mesh_Refinement/_common.sh` sets exactly these defaults; any value you export yourself wins.
+- Why: on the near-burner 3-level case (49 steps) the pressure solve took about 11 s and `t_loop` about 25 s with 8 unpinned threads, against 8-9 s and 18.5 s with 1-4 pinned threads (1 thread: 3 repeats, spread 0.2%). The hierarchy is small (about 20k cells on level 0, 8^3 fine boxes), so the solve is latency bound and more threads only add overhead. Outputs are bit-identical and the gates are unchanged.
+- Caveat: the pressure share of `t_loop` rises to 44-48% (from about 43%) because the rest of the step gains more. Wall time falls; the share does not.
+- Measured on one machine (the owner-provided NVIDIA test machine, 24 cores). Re-check thread count and pinning on other hardware. The measurement pinned to the performance cores; 1 thread unpinned was equal, so pinning matters mainly above 1 thread. Details: `docs/pressure/14-composite-solve-profile.md` section 8.2.
+
 **MKL is off by default** (`FDS_USE_MKL=OFF`). Static MKL exports FFTW symbols that override the real
 `libfftw3` and break the AMReX FFT pressure solve. Add `-DFDS_USE_MKL=ON` only if you need MKL
 (e.g. the PARDISO/cluster-sparse solver) and do not use the AMReX FFT solver.
