@@ -3,8 +3,10 @@
 #define POINT_TO_MESH POINT_TO_BOX
 ! A level-0 cell under a level-1 box is left out of the RTE source correction sums (the fine box counts that region).
 #define RTE_SUM_CELL(I,J,K) .NOT.RAD_COVERED(NM,I,J,K)
+#define RAD_WALL_DQ(NM,IW) RAD_SRC_DQ(NM,IW)
 #else
 #define RTE_SUM_CELL(I,J,K) .TRUE.
+#define RAD_WALL_DQ(NM,IW) 0._EB
 #endif
 MODULE SPECDATA
 
@@ -4423,7 +4425,7 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                         IL(II,JJ,KK) = IL(II,JJ,KK)/REAL(EXTERNAL_WALL(IW)%NIC_MAX-EXTERNAL_WALL(IW)%NIC_MIN+1,EB)
                      CASE DEFAULT ! solid wall
                         BR%BAND(IBND)%ILW(N) = OUTRAD_W(IW) + RPI*((1._EB-B1%EMISSIVITY)*INRAD_W(IW) &
-                                                   -B1%EMISSIVITY*RAD_SRC_DQ(NM,IW))
+                                                   -B1%EMISSIVITY*RAD_WALL_DQ(NM,IW))
                         IC = CELL_INDEX(BC%IIG,BC%JJG,BC%KKG)
                         IF (IC>0) CELL_ILW(IC,ABS(IOR)) = BR%BAND(IBND)%ILW(N)
                   END SELECT
