@@ -38,6 +38,7 @@ const std::vector<FieldSpec> kTable = {
     {"FVX",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :543 (cell-shaped momentum flux terms)
     {"FVY",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :544
     {"FVZ",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // :545
+    {"PHI",    Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // driver aux: level-set PHI_LS (k-constant) for TAG_PHI_DIFF
     {"VORT",   Stag::Cell,  1, 1, false, "(0:IBP1,0:JBP1,0:KBP1)"},            // driver aux: undivided |ω| for TAG_VORT (not an FDS mesh array)
 };
 
