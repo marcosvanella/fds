@@ -1,0 +1,9 @@
+&HEAD CHID='gravity_tall_2level', TITLE='Quiescent tall open domain under gravity: composite air balance must close' /
+&MESH IJK=40,40,16, XB=0,1000,0,1000,0,400 /
+&TIME T_END=400, DT=20. /
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='YMIN', SURF_ID='OPEN' /
+&VENT MB='YMAX', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+&TAIL /
