@@ -77,7 +77,7 @@ REAL(C_DOUBLE), INTENT(IN) :: XB(6,NBOX)
 INTEGER(C_INT), INTENT(OUT) :: NM0
 INTEGER(C_INT) :: IERR
 TYPE(FINE_LEVEL_TYPE), ALLOCATABLE :: TMP(:)
-INTEGER :: L,IB,N0,NM,Z0,NMREF,I,J,K
+INTEGER :: L,IB,N0,NM,Z0,NMREF,I,J,K,KP
 LOGICAL :: Z0_SET
 
 IERR = 0 ; NM0 = 0
@@ -131,6 +131,12 @@ DO IB=1,NBOX
             IF (.NOT.STRATIFICATION) THEN
                DO K=0,M%KBP1
                   M%PBAR(K,:) = R%PBAR(1,:) ; M%PBAR_S(K,:) = R%PBAR_S(1,:) ; M%R_PBAR(K,:) = R%R_PBAR(1,:)
+               ENDDO
+            ELSE   ! injected children carry the parent's rho and T: the background profile must be the parent's, piecewise constant per parent cell
+               DO K=0,M%KBP1
+                  KP = 1 ; DO WHILE (KP<R%KBAR .AND. M%ZC(K)>R%Z(KP)) ; KP = KP+1 ; ENDDO
+                  M%P_0(K) = R%P_0(KP) ; M%TMP_0(K) = R%TMP_0(KP) ; M%RHO_0(K) = R%RHO_0(KP)
+                  M%PBAR(K,:) = R%PBAR(KP,:) ; M%PBAR_S(K,:) = R%PBAR_S(KP,:) ; M%R_PBAR(K,:) = R%R_PBAR(KP,:)
                ENDDO
             ENDIF
          END ASSOCIATE
