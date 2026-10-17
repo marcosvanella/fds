@@ -1755,8 +1755,10 @@ struct TimeLoop::Impl {
         if (l >= static_cast<int>(vk.size())) return;
         const char* nm[3] = {pred ? "US" : "U", pred ? "VS" : "V", pred ? "WS" : "W"};
         for (const VentFace& f : vk[l])
-            for (amrex::MFIter mfi(L.m_reg->side_data(l).mask()); mfi.isValid(); ++mfi)
-                if (mfi.index() == f.box) L.m_reg->fields(l)[nm[f.d]][mfi](f.c) = f.v;
+            for (amrex::MFIter mfi(L.m_reg->side_data(l).mask()); mfi.isValid(); ++mfi) {   // the face of its box and its copy in the ghost layer of a neighbouring box
+                amrex::FArrayBox& fab = L.m_reg->fields(l)[nm[f.d]][mfi];
+                if (fab.box().contains(f.c)) fab(f.c) = f.v;
+            }
     }
     // vent_keep of both stages from the parent's current vent state (a new box layout: the first exchange after the bind restores them)
     void record_vent_faces()
