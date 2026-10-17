@@ -451,8 +451,10 @@ void query_options (PressureOptions& o);
 // face that is covered by fine faces (the C/F faces and the coarse faces under the fine level) is overwritten by
 // amrex::average_down_faces of the fine gradients (D-032 (3)). For a one-cell direction the gradient in that
 // direction is 0. Collective. Returns the same status values as the solve (grad_out untouched when not Ok).
+// ws (optional): the solve's workspace; the unmasked gradient operator is then built once per layout and kept on it.
 PressureResult face_gradient_composite (PressureProblem const& p,
-                                        std::vector<std::array<amrex::MultiFab*,3>>& grad_out);
+                                        std::vector<std::array<amrex::MultiFab*,3>>& grad_out,
+                                        PressureWorkspace* ws = nullptr);
 
 // ---- Inhomogeneous boundary data: fold into the right-hand side (M2 item d) ------------------------------------------------
 // The solve is for the HOMOGENEOUS boundary problem (zero-gradient / zero-value / periodic). Non-zero boundary data enter by moving
