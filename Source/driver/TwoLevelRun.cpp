@@ -186,10 +186,14 @@ std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl
 
 namespace {
 
+void fill_phi(LevelRegistry& reg, int nl);
+
 // Cell-centred plot Multifab: RHO, U, V, W + OMEGA_Y = ∂u/∂z − ∂w/∂x (FDS edge form, 1/s), the mean of the cell's four y-edges.
-// Owner viz: ω_y on mid-y xz + dark-grey mesh/AMR boxes. VORT (|ω|) stays TAG_VORT-only via ensure().
+// + TMP (K) and, with --tag-phi, the level-set PHI (k-constant, refreshed here). Owner viz: ω_y on mid-y xz + dark-grey mesh/AMR boxes. VORT (|ω|) stays TAG_VORT-only via ensure().
 void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, TimeLoop& loop, int nl)
 {
+    const bool phi = reg.fields(0).has("PHI");
+    if (phi) fill_phi(reg, nl);
     amrex::Vector<amrex::MultiFab> mf(nl);
     amrex::Vector<const amrex::MultiFab*> pmf(nl);
     amrex::Vector<amrex::Geometry> geom(nl);
@@ -202,10 +206,12 @@ void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, TimeLoo
         std::vector<amrex::MultiFab> keep;
         for (const char* n : {"U", "V", "W", "H"}) { keep.emplace_back(F[n].boxArray(), F[n].DistributionMap(), 1, F[n].nGrow()); amrex::MultiFab::Copy(keep.back(), F[n], 0, 0, 1, F[n].nGrow()); }
         loop.stage_exchange(l, 6, false);
-        mf[l].define(Lv.ba, Lv.dm, 5, 0);
+        mf[l].define(Lv.ba, Lv.dm, phi ? 7 : 6, 0);
         amrex::MultiFab::Copy(mf[l], F["RHO"], 0, 0, 1, 0);
         amrex::Array<const amrex::MultiFab*, 3> faces{&F["U"], &F["V"], &F["W"]};
         amrex::average_face_to_cellcenter(mf[l], 1, faces);
+        amrex::MultiFab::Copy(mf[l], F["TMP"], 0, 5, 1, 0);
+        if (phi) amrex::MultiFab::Copy(mf[l], F["PHI"], 0, 6, 1, 0);
         const double fz = 0.25 / Lv.dx[2], fx = 0.25 / Lv.dx[0];
         for (amrex::MFIter mfi(mf[l]); mfi.isValid(); ++mfi) {
             auto a = mf[l].array(mfi);
@@ -222,9 +228,10 @@ void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, TimeLoo
         geom[l] = Lv.geom;
         if (l + 1 < nl) ref_ratio[l] = reg.level(l + 1).ref_ratio_from_parent;
     }
-    amrex::Vector<std::string> names{"RHO", "U", "V", "W", "OMEGA_Y"};
+    amrex::Vector<std::string> names{"RHO", "U", "V", "W", "OMEGA_Y", "TMP"};
+    if (phi) names.push_back("PHI");
     amrex::WriteMultiLevelPlotfile(path, nl, pmf, names, geom, loop.time(), level_steps, ref_ratio);
-    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W,OMEGA_Y cell-centred; OMEGA_Y = du/dz - dw/dx [1/s] from the 4 cell edges, " << nl << " level(s))\n";
+    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W,OMEGA_Y,TMP[,PHI] cell-centred; OMEGA_Y = du/dz - dw/dx [1/s] from the 4 cell edges, " << nl << " level(s))\n";
 }
 
 }  // namespace
