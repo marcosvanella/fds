@@ -2804,11 +2804,12 @@ TYPE(RAD_GHOST_TYPE), TARGET, SAVE :: RAD_GHOST
 PUBLIC RAD_GHOST,RAD_GHOST_TYPE
 #ifdef WITH_AMREX
 TYPE RAD_SRC_TYPE   !< averaged down from the finer levels (covered cells of a box), set by the driver before the radiation update: D(:,:,:,1)=kappa*UII, 2=kappa*4 sigma T^4, 3:8=incident flux of the solid wall of the cell for IOR -1,1,-2,2,-3,3, 9:14 = 3:8 of the box itself (not averaged), RAD_SRC_DQ
+   LOGICAL, ALLOCATABLE :: COV(:,:,:)   ! cells covered by the next level (RAD_SRC_COV, rebuilt by every RAD_SRC_FILL)
    REAL(EB), ALLOCATABLE :: D(:,:,:,:),WQ(:,:,:,:)   ! WQ(I,J,K,1:6): incident flux of the solid walls of the cell at the last radiation update (a fine wall is overwritten by its parent's state every step)
 END TYPE RAD_SRC_TYPE
 INTEGER, PARAMETER :: RAD_SRC_NC=14
 TYPE(RAD_SRC_TYPE), ALLOCATABLE, SAVE :: RAD_SRC(:)
-PUBLIC RAD_SRC_FILL,RAD_SRC_SET,RAD_SRC_WSCALE
+PUBLIC RAD_SRC_FILL,RAD_SRC_SET,RAD_SRC_WSCALE,RAD_SRC_COV
 #endif
 #endif
 
@@ -5423,6 +5424,7 @@ REAL(EB) :: KAP
 REAL(EB), ALLOCATABLE :: ZG(:)
 RAD_SRC_FILL = 0
 IF (.NOT.ALLOCATED(RAD_SRC)) ALLOCATE(RAD_SRC(0))
+CALL RAD_SRC_COV(NM)
 IF (WIDE_BAND_MODEL .OR. WSGG_MODEL) RETURN
 CALL POINT_TO_MESH(NM)
 ALLOCATE(ZG(N_TRACKED_SPECIES))
@@ -5439,7 +5441,12 @@ DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
       DAT(N+IC) = DAT(N+IC)*RTE_SOURCE_CORRECTION_FACTOR
 ENDDO ; ENDDO ; ENDDO
 DAT(2*N+1:RAD_SRC_NC*N) = 0._EB
-IF (NM<=SIZE(RAD_SRC)) THEN ; IF (ALLOCATED(RAD_SRC(NM)%WQ)) DAT(2*N+1:8*N) = RESHAPE(RAD_SRC(NM)%WQ,(/6*N/)) ; ENDIF
+IF (NM<=SIZE(RAD_SRC)) THEN   ! WQ of a box NM of the previous hierarchy has another shape after a regrid: not used
+   IF (ALLOCATED(RAD_SRC(NM)%WQ)) THEN
+      IF (SIZE(RAD_SRC(NM)%WQ,1)==IBAR .AND. SIZE(RAD_SRC(NM)%WQ,2)==JBAR .AND. SIZE(RAD_SRC(NM)%WQ,3)==KBAR) &
+         DAT(2*N+1:8*N) = RESHAPE(RAD_SRC(NM)%WQ,(/6*N/))
+   ENDIF
+ENDIF
 DAT(8*N+1:14*N) = DAT(2*N+1:8*N)
 DEALLOCATE(ZG)
 RAD_SRC_FILL = 1
@@ -5466,6 +5473,7 @@ ALLOCATE(TMPL(NM))
 DO L=1,SIZE(RAD_SRC)
    IF (ALLOCATED(RAD_SRC(L)%D)) CALL MOVE_ALLOC(RAD_SRC(L)%D,TMPL(L)%D)
    IF (ALLOCATED(RAD_SRC(L)%WQ)) CALL MOVE_ALLOC(RAD_SRC(L)%WQ,TMPL(L)%WQ)
+   IF (ALLOCATED(RAD_SRC(L)%COV)) CALL MOVE_ALLOC(RAD_SRC(L)%COV,TMPL(L)%COV)
 ENDDO
 CALL MOVE_ALLOC(TMPL,RAD_SRC)
 END SUBROUTINE RAD_SRC_ENSURE
@@ -5476,6 +5484,9 @@ INTEGER, INTENT(IN) :: NM,IW
 TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
 TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
 CALL RAD_SRC_ENSURE(NM)
+IF (ALLOCATED(RAD_SRC(NM)%WQ)) THEN   ! the box NM was recreated by a regrid with another shape
+   IF (SIZE(RAD_SRC(NM)%WQ,1)/=IBAR .OR. SIZE(RAD_SRC(NM)%WQ,2)/=JBAR .OR. SIZE(RAD_SRC(NM)%WQ,3)/=KBAR) DEALLOCATE(RAD_SRC(NM)%WQ)
+ENDIF
 IF (.NOT.ALLOCATED(RAD_SRC(NM)%WQ)) THEN ; ALLOCATE(RAD_SRC(NM)%WQ(IBAR,JBAR,KBAR,6)) ; RAD_SRC(NM)%WQ = 0._EB ; ENDIF
 BC => BOUNDARY_COORD(WALL(IW)%BC_INDEX) ; B1 => BOUNDARY_PROP1(WALL(IW)%B1_INDEX)
 IF (B1%EMISSIVITY>0._EB .AND. BC%IOR/=0) &
@@ -5509,10 +5520,10 @@ IF (RAD_COVERED(NM,I,J,K) .AND. RAD_SRC(NM)%D(I,J,K,C)>0._EB .AND. RAD_SRC(NM)%D
 END FUNCTION RAD_SRC_DQ
 
 !> Cell (I,J,K) of box NM (the current mesh pointers; level L) lies inside a box of level L+1 (box extents are set on every rank).
-LOGICAL FUNCTION RAD_COVERED(NM,I,J,K)
+LOGICAL FUNCTION RAD_COVERED_SLOW(NM,I,J,K)
 INTEGER, INTENT(IN) :: NM,I,J,K
 INTEGER :: IB,L
-RAD_COVERED = .FALSE.
+RAD_COVERED_SLOW = .FALSE.
 IF (.NOT.ALLOCATED(FINE_LEVEL)) RETURN
 L = 0   ! level of NM
 DO IB=1,SIZE(FINE_LEVEL)
@@ -5522,11 +5533,53 @@ IF (NM>NMESHES .AND. L==0) RETURN
 IF (SIZE(FINE_LEVEL)<L+1) RETURN
 DO IB=1,FINE_LEVEL(L+1)%N_BOXES
    ASSOCIATE(B=>FINE_LEVEL(L+1)%BOX(IB))
-   RAD_COVERED = XC(I)>B%XS .AND. XC(I)<B%XF .AND. YC(J)>B%YS .AND. YC(J)<B%YF .AND. ZC(K)>B%ZS .AND. ZC(K)<B%ZF
+   RAD_COVERED_SLOW = XC(I)>B%XS .AND. XC(I)<B%XF .AND. YC(J)>B%YS .AND. YC(J)<B%YF .AND. ZC(K)>B%ZS .AND. ZC(K)<B%ZF
    END ASSOCIATE
-   IF (RAD_COVERED) RETURN
+   IF (RAD_COVERED_SLOW) RETURN
 ENDDO
+END FUNCTION RAD_COVERED_SLOW
+
+LOGICAL FUNCTION RAD_COVERED(NM,I,J,K)   ! cell I,J,K of box NM lies under a box of the next level
+INTEGER, INTENT(IN) :: NM,I,J,K
+RAD_COVERED = .FALSE.
+IF (.NOT.ALLOCATED(FINE_LEVEL)) RETURN
+IF (ALLOCATED(RAD_SRC)) THEN
+   IF (NM<=SIZE(RAD_SRC)) THEN
+      IF (ALLOCATED(RAD_SRC(NM)%COV)) THEN
+         IF (I>=1 .AND. I<=SIZE(RAD_SRC(NM)%COV,1) .AND. J>=1 .AND. J<=SIZE(RAD_SRC(NM)%COV,2) .AND. &
+             K>=1 .AND. K<=SIZE(RAD_SRC(NM)%COV,3)) THEN
+            RAD_COVERED = RAD_SRC(NM)%COV(I,J,K) ; RETURN
+         ENDIF
+      ENDIF
+   ENDIF
+ENDIF
+RAD_COVERED = RAD_COVERED_SLOW(NM,I,J,K)
 END FUNCTION RAD_COVERED
+
+!> Mask of the cells of box NM under the boxes of the next level, by the index range of each box (instead of a search over all boxes per cell and angle).
+SUBROUTINE RAD_SRC_COV(NM)
+INTEGER, INTENT(IN) :: NM
+INTEGER :: IB,L,I,J,K,I1,I2,J1,J2,K1,K2
+CALL POINT_TO_MESH(NM)
+CALL RAD_SRC_ENSURE(NM)
+IF (ALLOCATED(RAD_SRC(NM)%COV)) DEALLOCATE(RAD_SRC(NM)%COV)
+ALLOCATE(RAD_SRC(NM)%COV(IBAR,JBAR,KBAR)) ; RAD_SRC(NM)%COV = .FALSE.
+IF (.NOT.ALLOCATED(FINE_LEVEL)) RETURN
+L = 0   ! level of NM
+DO IB=1,SIZE(FINE_LEVEL)
+   IF (NM>FINE_LEVEL(IB)%NM0 .AND. NM<=FINE_LEVEL(IB)%NM0+FINE_LEVEL(IB)%N_BOXES) L = IB
+ENDDO
+IF ((NM>NMESHES .AND. L==0) .OR. SIZE(FINE_LEVEL)<L+1) RETURN
+DO IB=1,FINE_LEVEL(L+1)%N_BOXES
+   ASSOCIATE(B=>FINE_LEVEL(L+1)%BOX(IB))
+   I1 = IBAR+1 ; I2 = 0 ; J1 = JBAR+1 ; J2 = 0 ; K1 = KBAR+1 ; K2 = 0
+   DO I=1,IBAR ; IF (XC(I)>B%XS .AND. XC(I)<B%XF) THEN ; I1 = MIN(I1,I) ; I2 = I ; ENDIF ; ENDDO
+   DO J=1,JBAR ; IF (YC(J)>B%YS .AND. YC(J)<B%YF) THEN ; J1 = MIN(J1,J) ; J2 = J ; ENDIF ; ENDDO
+   DO K=1,KBAR ; IF (ZC(K)>B%ZS .AND. ZC(K)<B%ZF) THEN ; K1 = MIN(K1,K) ; K2 = K ; ENDIF ; ENDDO
+   IF (I2>0 .AND. J2>0 .AND. K2>0) RAD_SRC(NM)%COV(I1:I2,J1:J2,K1:K2) = .TRUE.
+   END ASSOCIATE
+ENDDO
+END SUBROUTINE RAD_SRC_COV
 
 !> Diagnostic, FDS_RAD_LEAF=1 (default off): one line per box and call, "RADLEAF t NM level  QR*V  wall net  wall incident  incident flux over the wall cells inside FDS_RAD_BOX=x0,x1,y0,y1,z0,z1  UII*V and QR*V of the leaf cells inside FDS_RAD_REG (same form)  n_wall  QR*V in the region",
 !> over the leaf gas cells (not covered by the next level, RAD_COVERED) and all external solid wall cells (fine boxes have none, so walls are level 0). Sums over boxes (and ranks) are the
