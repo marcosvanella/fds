@@ -91,6 +91,8 @@ public:
     // level > 0: FVX/FVY/FVZ = 0 on the INERT/MIRROR wall faces of vel_bc (what NO_FLUX does on level 0 for W = WS = 0 and the mirrored H ghost; a fine box has no wall cell).
     // FV(n) is the flux at the upper face of cell n: the wall faces are FV(dom lo - 1) and FV(dom hi). Call after NO_FLUX, before the pressure RHS and the flux average_down.
     void zero_wall_flux();
+    // level > 0: an OPEN domain face with inflow gets the ambient RHO/ZZ/TMP in the scalar ghost layers (not the mirror of the cell inside). The ambient state is fds_ambient_state of the
+    // level-0 layer k (TMP_0, PBAR, ZZ0 of FDS mesh 1): a case with several level-0 meshes stacked in z would need the mesh of the face (limit; one mesh in z is exact).
     void inflow_ambient_ghosts(const std::string& n, bool predictor);
     void after_exchange(int code, double t, double dt);
     void wall_bc(int predictor, double t, double dt);   // WALL_BC of the stage (all local boxes)
