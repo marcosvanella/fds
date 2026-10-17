@@ -930,7 +930,7 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
                             for (int st = -1; st <= 1; st += 2) {
                                 IntVect T = Q; T[t] += st;
                                 const int v = k0(T[0],T[1],T[2]);
-                                if (v == CellSolid || v == CellKnown) {
+                                if ((v == CellSolid && l == 1 && p.cf_solid_l0_ok) ? false : (v == CellSolid || v == CellKnown)) {
                                     if (cfbad++ == 0) { std::ostringstream m2; m2 << "level " << l << " cell (" << i << "," << j << "," << k << ") face " << d << (side ? "+" : "-"); cf_at = m2.str(); }
                                 }
                             }

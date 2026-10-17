@@ -2697,6 +2697,36 @@ void run_comp_mixed (ParmParse& pp)
             ccheck(dvm <= 1e-8 * bmax, "C/F solid: level-1 div(grad) = rhs");
             pb::PressureOptions oh4 = o; oh4.backend = pb::BackendKind::HYPRE;
             ccheck(pb::solve_pressure(pm, oh4, nullptr).status == pb::Status::NotBuilt, "C/F solid: HYPRE NotBuilt");
+            {   // (7) the same block masked on level 0 (the driver's uncovered level-0 OBST column): NotBuilt unless cf_solid_l0_ok, then Ok with zero flux through the block
+                auto cls0 = pb::build_obst_class(h.geom[0], 0, h.ba[0], h.dm[0]);
+                pm.levels[0].cell_class = cls0.get();
+                for (auto& q : h.phi) { q->setVal(Real(0)); }
+                ccheck(pb::solve_pressure(pm, o, nullptr).status == pb::Status::NotBuilt, "L0 solid block masked: NotBuilt without cf_solid_l0_ok");
+                pm.cf_solid_l0_ok = true;
+                for (auto& q : h.phi) { q->setVal(Real(0)); }
+                const pb::PressureResult r7 = pb::solve_pressure(pm, o, nullptr);
+                Print() << "COMP_MIXED l0solid status=" << pb::to_string(r7.status) << " backend=" << r7.backend << " true_rel2=" << r7.residual_rel2 << " " << r7.message << "\n";
+                ccheck(r7.status == pb::Status::Ok && r7.backend == "MLMG" && std::isfinite(r7.residual_rel2) && r7.residual_rel2 < 1e-9, "L0 solid block masked: Ok with cf_solid_l0_ok");
+                std::vector<std::array<std::unique_ptr<MultiFab>,3>> g7(c.nlev);
+                std::vector<std::array<MultiFab*,3>> gp7(c.nlev);
+                for (int l = 0; l < c.nlev; ++l) for (int d = 0; d < 3; ++d) { g7[l][d] = std::make_unique<MultiFab>(amrex::convert(h.ba[l], IntVect::TheDimensionVector(d)), h.dm[l], 1, 0); gp7[l][d] = g7[l][d].get(); }
+                ccheck(pb::face_gradient_composite(pm, gp7).status == pb::Status::Ok, "L0 solid block masked: face gradient Ok");
+                double gs = 0.0;   // level-0 faces of the solid block between uncovered cells: no gradient
+                for (MFIter mfi(*cls0); mfi.isValid(); ++mfi) {
+                    auto const& m = cls0->const_array(mfi); auto const& un0 = h.unc[0]->const_array(mfi);
+                    for (int d = 0; d < 3; ++d) {
+                        auto const& gg = g7[0][d]->const_array(mfi); const IntVect e = IntVect::TheDimensionVector(d);
+                        amrex::LoopOnCpu(amrex::surroundingNodes(mfi.validbox(), d), [&] (int i, int j, int k) {
+                            const IntVect lo(i - e[0], j - e[1], k - e[2]);
+                            if (mfi.validbox().contains(lo) && mfi.validbox().contains(IntVect(i,j,k)) && un0(i,j,k) && un0(lo[0],lo[1],lo[2]) && (m(i,j,k) | m(lo[0],lo[1],lo[2]))) { gs = std::max(gs, std::abs(double(gg(i,j,k)))); }
+                        });
+                    }
+                }
+                ParallelDescriptor::ReduceRealMax(gs);
+                Print() << "COMP_MIXED l0solid max|L0 gradient on faces of the block|=" << gs << "\n";
+                ccheck(gs == 0.0, "L0 solid block masked: no flux through the block's level-0 faces");
+                pm.levels[0].cell_class = nullptr;
+            }
         }
         pb::obst_list() = keep; pb::set_level_geoms(keepg);
     }
