@@ -339,6 +339,7 @@ struct TimeLoop::Impl {
         dt_new.resize(total_boxes(), L.m_dt);
         chg.resize(total_boxes(), 0);
         pend_restore(lev);
+        record_vent_faces();   // the vent faces of the old box layout (box index, cell) mean nothing on the new one
         fine_burner_state(false);   // burner face lists of the new box layout: the first stage after a (re)bind applies them in its flux override, a list kept from the old layout has faces outside the new boxes
         select(0);
 #endif
@@ -1757,6 +1758,29 @@ struct TimeLoop::Impl {
             for (amrex::MFIter mfi(L.m_reg->side_data(l).mask()); mfi.isValid(); ++mfi)
                 if (mfi.index() == f.box) L.m_reg->fields(l)[nm[f.d]][mfi](f.c) = f.v;
     }
+    // vent_keep of both stages from the parent's current vent state (a new box layout: the first exchange after the bind restores them)
+    void record_vent_faces()
+    {
+        const int nz = fds_n_tracked_species(), ns = 5 + 2 * nz;
+        std::vector<int> ijkd; std::vector<double> st;
+        for (int k = 0; k < 2; ++k) {
+            vent_keep[k].assign(lc.size(), {});
+            for (int l = 1; l < static_cast<int>(lc.size()); ++l)
+                for (amrex::MFIter mfi(L.m_reg->side_data(l).mask()); mfi.isValid(); ++mfi) {
+                    const amrex::Box vb = mfi.validbox();
+                    const int nmax = static_cast<int>(3 * vb.numPts() + 64);
+                    ijkd.resize(4 * nmax); st.resize(static_cast<std::size_t>(ns) * nmax);
+                    int n = 0;
+                    if (fds_fine_walls_state(l, mfi.index() + 1, k, nz, nmax, &n, ijkd.data(), st.data()) != 0) die("record_vent_faces: fds_fine_walls_state failed");
+                    for (int w = 0; w < n; ++w) {
+                        const int D = ijkd[4 * w + 3], d = std::abs(D) - 1;
+                        amrex::IntVect c(vb.smallEnd(0) + ijkd[4 * w] - 1, vb.smallEnd(1) + ijkd[4 * w + 1] - 1, vb.smallEnd(2) + ijkd[4 * w + 2] - 1);
+                        if (D > 0) c[d] += 1;
+                        if (c[d] == L.m_reg->level(l).geom.Domain().smallEnd(d) || c[d] == L.m_reg->level(l).geom.Domain().bigEnd(d) + 1) vent_keep[k][l].push_back({c, mfi.index(), d, st[static_cast<std::size_t>(ns) * w]});
+                    }
+                }
+        }
+    }
     // Wall inflow of a fine burner face into the fine RHS (-div FV), as FDS NO_FLUX with the H term dropped (beta = 0 on the face):
     // FV = -(UN - U)/dt (predictor), -2(UN - (U+US)/2)/dt (corrector); UN from fds_fine_walls_state (frozen/fine-wall-state.md), FV index = face - 1.
     void fine_wall_fv(bool pred, double dt)
@@ -1806,7 +1830,7 @@ struct TimeLoop::Impl {
     }
     // A fine OBST face with a nonzero wall velocity (MASS_FLUX burner) gets the parent wall's normal velocity back after the solid-face
     // zeroing, as FDS VELOCITY_BC sets the wall face to -SIGN(IOR)*U_NORMAL(_S). Box-local I,J,K (1-based) and direction D of the gas cell.
-    void fine_wall_velocity(bool pred, int only = -1, bool ext_only = false)
+    void fine_wall_velocity(bool pred, int only = -1)
     {
         const char* nm[3] = {pred ? "US" : "U", pred ? "VS" : "V", pred ? "WS" : "W"};
         std::vector<int> ijkd; std::vector<double> uf;
@@ -1817,7 +1841,7 @@ struct TimeLoop::Impl {
                 const int nmax = static_cast<int>(2 * mfi.validbox().numPts() * 3 / 2 + 64);
                 ijkd.resize(4 * nmax); uf.resize(nmax);
                 int n = 0;
-                fds_fine_walls_un(l, mfi.index() + 1, (pred ? 1 : 0) + (ext_only ? 2 : 0), nmax, &n, ijkd.data(), uf.data());
+                fds_fine_walls_un(l, mfi.index() + 1, pred ? 1 : 0, nmax, &n, ijkd.data(), uf.data());
                 const amrex::Box vb = mfi.validbox(); const amrex::IntVect lo = vb.smallEnd();
                 for (int w = 0; w < n; ++w) {
                     const int D = ijkd[4 * w + 3], d = std::abs(D) - 1;
@@ -2249,8 +2273,14 @@ struct TimeLoop::Impl {
         first_pass = true;
         passes = 0;
         int stop = 0;
+#ifdef FDS_HAVE_FINE_LEVEL
+        const auto burner_start = burner;   // the wall state of the step start: a repeated pass (dt change) applies and counts this state again, as the level-0 DENSITY repeat reuses the first MASS_FINITE_DIFFERENCES
+#endif
         for (;;) {
             ++passes;
+#ifdef FDS_HAVE_FINE_LEVEL
+            burner = burner_start;
+#endif
             state(true, first_pass);
             if (passes == 1) {
                 stage_scratch("p1_mfd", {{"FX", 4}, {"FY", 4}, {"FZ", 4}});
