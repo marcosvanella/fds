@@ -20,6 +20,7 @@ void fds_g_velocity_bc(double t, int nm, int est);
 void fds_g_viscosity_bc(int nm, int est);
 void fds_g_mu_edges(int nm);
 void fds_g_mu_edges_dom(int nm, int mask, int which);
+void fds_wall_ghost(double u, double rho, double tmp, double muc, double dz, int ic, int jc, double* g);
 void fds_ambient_state(int k, int nz, double* rho, double* tmp, double* zz);
 int fds_n_tracked_species();
 }
@@ -130,6 +131,7 @@ void BcStep::exchange(int code, bool predictor)
             const bool vel = n == "U" || n == "V" || n == "W" || n == "US" || n == "VS" || n == "WS";
             mirror_domain_edges(m_l0, m_F[n], nd, vel ? vel_bc : FaceBc{});
             if (!vel) inflow_ambient_ghosts(n, predictor);
+            if (vel && (n == "U" || n == "V" || n == "US" || n == "VS")) ground_wall_ghosts(n);
             if (vel && nd >= 0) zero_mixed_wall(m_F[n], nd, false);
         }
     }
@@ -174,6 +176,41 @@ void BcStep::inflow_ambient_ghosts(const std::string& n, bool predictor)
                 }
             }
         }
+    }
+}
+
+// A fine box on the ground (INERT floor): the tangential velocity ghost layer below the first cell is the wall-model stress of FDS written as a ghost value (fds_wall_ghost) instead of
+// the odd (no-slip) copy, which with the eddy viscosity of the cell is a far larger drag than the log-law stress the level-0 ground has.
+void BcStep::ground_wall_ghosts(const std::string& n)
+{
+    if (vel_bc[4] != kFaceInert || std::getenv("FDSTL_NOWALLMODEL")) return;
+    const amrex::Box dom = m_l0.geom.Domain();
+    const bool s = n.back() == 'S';
+    const double dz = m_l0.geom.CellSize(2);
+    const int rx = dom.length(0) / l0_len[0], ry = dom.length(1) / l0_len[1];
+    amrex::MultiFab& mf = m_F[n];
+    // The face between two fine boxes belongs to both (nodal): both must compute the same ghost for it, so the cell states they read are first made the same in the ghost cells of both
+    // (a stale copy gave the two boxes different shear at that face: composite mass off by ~1e-4 once a regrid had made fine-fine box faces next to a fire).
+    for (const char* nm : {"MU", "TMP", s ? "RHOS" : "RHO"}) m_F[nm].FillBoundary(m_l0.geom.periodicity());
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        if (mfi.validbox().smallEnd(2) != dom.smallEnd(2)) continue;
+        auto a = mf.array(mfi);
+        const auto rho = m_F[s ? "RHOS" : "RHO"].const_array(mfi);
+        const auto tmp = m_F["TMP"].const_array(mfi);
+        const auto mu = m_F["MU"].const_array(mfi);
+        amrex::Box slab = mf[mfi].box();
+        slab.setRange(2, dom.smallEnd(2) - 1);
+        const amrex::Box cells = mfi.validbox();
+        amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
+            const int fu = n.front() == 'U' ? 1 : 0, fv = n.front() == 'V' ? 1 : 0;   // the face index of the nodal direction: the low face of the first cell is smallEnd - 1
+            if (i < cells.smallEnd(0) - fu || i > cells.bigEnd(0) || j < cells.smallEnd(1) - fv || j > cells.bigEnd(1)) return;
+            const double u = a(i, j, k + 1);
+            if (u == 0.0) return;
+            const int ic = std::max(i, cells.smallEnd(0)), jc = std::max(j, cells.smallEnd(1));
+            double g;
+            fds_wall_ghost(u, rho(ic, jc, k + 1), tmp(ic, jc, k + 1), mu(ic, jc, k + 1), dz, amrex::coarsen(ic, rx) + 1, amrex::coarsen(jc, ry) + 1, &g);
+            a(i, j, k) = g;
+        });
     }
 }
 
