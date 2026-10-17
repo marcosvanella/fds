@@ -441,13 +441,13 @@ struct TimeLoop::Impl {
     {
         std::vector<std::string> bad;
         auto chk = [&](bool cond, const char* what) { if (cond) bad.push_back(what); };
-        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[11] != 0, "LEVEL_SET_MODE");
+        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[11] != 0 && l0.mesh.size() > 1, "LEVEL_SET_MODE with several meshes (PHI_LS exchange, FDS code 14, is not routed)");
         chk(IP[12], "TUNNEL_PRECONDITIONER"); chk(IP[13] != 1, "pressure solver other than FFT"); chk(IP[14], "CYLINDRICAL"); chk(IP[15], "particle drag");
         // D-089: FREEZE_VELOCITY (IP[18]) allowed in AMR TimeLoop for cold-flow / passive-scalar adaptive demos; reacting-flow production must not depend on freeze.
         chk(IP[16], "SOLID_HEAT_TRANSFER_3D"); chk(IP[17] > 0, "Lagrangian particles"); chk(IP[19], "SOLID_PHASE_ONLY");
         chk(IP[22], "MPI particle exchange"); chk(IP[23], "obstruction mass exchange"); chk(IP[24] > 0, "agglomeration");
         // D-090: INIT_HRRPUV (IP[25]) allowed for manufactured-HRR / TAG_HRRPUV gates (R4-T2); reactions (IP[9]) allowed on level 0 (COMBUSTION in the corrector).
-        chk(IP[26], "TERRAIN_CASE"); chk(IP[27], "READ_EXTERNAL"); chk(IP[28], "SYNTHETIC_EDDY_METHOD");
+        chk(IP[26] && !IP[11], "TERRAIN_CASE"); chk(IP[27], "READ_EXTERNAL"); chk(IP[28], "SYNTHETIC_EDDY_METHOD");
         if (!bad.empty()) {
             std::string s;
             for (auto& b : bad) s += " " + b;
