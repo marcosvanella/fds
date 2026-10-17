@@ -614,6 +614,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     return std::move(S[0]);
                 };
                 if (ft0) snap_t = leaf_snap("TMP");
+                std::unique_ptr<amrex::MultiFab> snap_r; if (reg.fields(0).has("RHO")) snap_r = leaf_snap("RHO");
                 if (fz0) {   // Z is restricted as the regrid does it: average of rho*Z over average of rho
                     const int nz = fz0->nComp(); std::vector<std::unique_ptr<amrex::MultiFab>> R, Q;
                     for (int l = 0; l <= fb0; ++l) {
@@ -658,6 +659,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                         return w;
                     };
                     const double dT = snap_t ? relmax(reg.fields(0)["TMP"], *snap_t, 1)[0] : 0.0;
+                    const double dR = snap_r ? relmax(reg.fields(0)["RHO"], *snap_r, 1)[0] : 0.0;
                     std::vector<double> dZ = snap_z ? relmax(reg.fields(0)["ZZ"], *snap_z, snap_z->nComp()) : std::vector<double>();
                     double dP = 0.0;
                     for (int i = 0; i < static_cast<int>(snap_p.size()); ++i) if (!snap_p[i].empty()) {
@@ -668,8 +670,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     double dD = 0.0;
                     { std::vector<fdsrt::ProjectionLevel> plv = projection_levels(reg, finest + 1); dD = fdsrt::composite_divergence_error(plv); }
                     double dZmax = 0.0; for (double z : dZ) dZmax = std::max(dZmax, z);
-                    deref_worst = std::max({deref_worst, dT, dZmax, dP}); deref_div = std::max(deref_div, dD); ++deref_n;
-                    amrex::Print() << tag << " DEREFINE after step " << s << ": relative change T " << dT << ", Z";
+                    deref_worst = std::max({deref_worst, dT, dR, dZmax, dP}); deref_div = std::max(deref_div, dD); ++deref_n;
+                    amrex::Print() << tag << " DEREFINE after step " << s << ": relative change T " << dT << ", RHO " << dR << ", Z";
                     for (std::size_t n = 0; n < dZ.size(); ++n) amrex::Print() << " " << dZ[n];
                     amrex::Print() << ", background pressure " << dP << " (each <= 1e-12), max|div u - D| " << dD << " (<= 1e-9)\n";
                 }
