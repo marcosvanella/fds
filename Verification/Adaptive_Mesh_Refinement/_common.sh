@@ -6,6 +6,8 @@
 #   MPIRUN    MPI launcher (default "mpirun --bind-to none --oversubscribe" for Open MPI;
 #             with Intel MPI use MPIRUN=mpiexec, without --oversubscribe)
 #   RUN_DIR   where outputs go (default ./out_<chid> next to this script)
+#   OMP_NUM_THREADS  OpenMP threads per rank (default 1; supported range 1-4, see README_FDS_AMReX.md "Default run configuration")
+#   OMP_PROC_BIND, OMP_PLACES  thread pinning (defaults close / cores); an explicit setting by the caller wins
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -14,7 +16,10 @@ CASES=$REPO/Source/driver/tests/cases
 NP=${NP:-4}
 STEPS=${STEPS:-10}
 MPIRUN=${MPIRUN:-mpirun --bind-to none --oversubscribe}
+# Default run configuration: 1-4 pinned OpenMP threads, not 8 unpinned (measured faster, bit-identical output).
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+export OMP_PROC_BIND=${OMP_PROC_BIND:-close}
+export OMP_PLACES=${OMP_PLACES:-cores}
 
 # run_case INPUT.fds CHID [driver flags ...]
 run_case() {
