@@ -8,7 +8,7 @@ MODULE FDS_LS_GRID
 
 USE ISO_C_BINDING
 USE PRECISION_PARAMETERS, ONLY: EB,TWENTY_EPSILON_EB,PI,PIO2
-USE GLOBAL_CONSTANTS, ONLY: PREDICTOR,LEVEL_SET_MODE,LEVEL_SET_COUPLED_WIND,LEVEL_SET_COUPLED_FIRE,I_FLUX_LIMITER,CHID,NMESHES
+USE GLOBAL_CONSTANTS, ONLY: PREDICTOR,LEVEL_SET_MODE,LEVEL_SET_COUPLED_WIND,LEVEL_SET_COUPLED_FIRE,I_FLUX_LIMITER,CHID,NMESHES,SOLID_BOUNDARY,STORE_FIRE_ARRIVAL,STORE_FIRE_RESIDENCE,N_TRACKED_SPECIES
 USE TYPES, ONLY: SURFACE,SURFACE_TYPE
 USE MATH_FUNCTIONS, ONLY: EVALUATE_RAMP
 USE PHYSICAL_FUNCTIONS, ONLY: GET_WIND_AT_HEIGHT
@@ -16,7 +16,7 @@ USE MESH_VARIABLES, ONLY: MESHES,MESH_TYPE
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
-PUBLIC :: LS_ACTIVE,LS_INIT,LS_STEP,LS_REF_WIND,LS_REF_HEIGHT,LS_NX,LS_NY,LS_PHI,LS_PHI1,LS_T_IGN,LS_TAU,LS_BURN_DUR,LS_AREA_ADJ,LS_SURF,LS_DX,LS_DY, &
+PUBLIC :: LS_DRIVE,LS_APPLY_L0,LS_FLUX_ACTIVE,LS_BLOCK_FLUX,LS_ACTIVE,LS_INIT,LS_STEP,LS_REF_WIND,LS_REF_HEIGHT,LS_NX,LS_NY,LS_PHI,LS_PHI1,LS_T_IGN,LS_TAU,LS_BURN_DUR,LS_AREA_ADJ,LS_SURF,LS_DX,LS_DY, &
    LS_UREF,LS_VREF,LS_U,LS_V,LS_SHADOW_MODE,FDS_LS_SET_MODE,FDS_LS_SHADOW_RUN,FDS_LS_SHADOW_CMP,FDS_LS_PREPARE,FDS_LS_WIND_FROM_SLOTS
 
 REAL(EB), PARAMETER :: PHI_LS_MIN=-1._EB, PHI_LS_MAX=1._EB
@@ -24,6 +24,9 @@ REAL(EB), PARAMETER :: PHI_LS_MIN=-1._EB, PHI_LS_MAX=1._EB
 LOGICAL :: LS_ACTIVE=.FALSE.          !< the LS grid exists
 LOGICAL :: LS_WIND_SET=.FALSE.        !< LS_UREF/LS_VREF were set by FDS_LS_WIND_FROM_SLOTS for the coming stage
 INTEGER :: LS_RATIO=1                 !< LS cell = level-0 cell / LS_RATIO
+LOGICAL :: LS_DRIVE=.FALSE.           !< --ls-fine: the LS grid drives the fire (the original LEVEL_SET_FIRESPREAD is not called; level-0 walls get the LS cell means)
+REAL(EB) :: LS_X0=0._EB,LS_Y0=0._EB      !< lower corner of the LS grid
+REAL(EB), ALLOCATABLE :: LS_FLUX(:,:)    !< fuel mass flux of every LS cell at the current stage, kg/m2/s (LS_APPLY_L0)
 INTEGER :: LS_SHADOW_MODE=0           !< --ls-fine-shadow: run beside the original LEVEL_SET_FIRESPREAD and compare (level-0 equal grid)
 INTEGER :: LS_NX=0,LS_NY=0,LIMITER_LS=1
 REAL(EB), ALLOCATABLE :: LS_DX(:),LS_DY(:),RDXL(:),RDYL(:)
@@ -495,8 +498,151 @@ DO J=1,NY
 ENDDO
 CALL LS_INIT(NX,NY,DXF,DYF,SF0,T0,B0,A0,TA0)
 LS_RATIO = R
+LS_X0 = M%XS ; LS_Y0 = M%YS
+ALLOCATE(LS_FLUX(NX,NY)) ; LS_FLUX = 0._EB
+IF (LS_DRIVE .AND. (STORE_FIRE_ARRIVAL .OR. STORE_FIRE_RESIDENCE)) THEN
+   WRITE(0,'(A)') 'ERROR: --ls-fine does not support fire arrival / residence outputs (the level-0 walls carry LS cell means)'
+   STOP 1
+ENDIF
 
 END SUBROUTINE LS_INIT_FROM_MESH
+
+
+
+!> \brief Level-0 PHI_LS (cell means of the LS cells under it) for the PHI plotfile / tagging and the "LEVEL SET VALUE" output
+SUBROUTINE LS_RESTRICT_PHI(M)
+
+TYPE(MESH_TYPE), POINTER :: M
+INTEGER :: I,J,II,JJ,R
+REAL(EB) :: S
+
+R = LS_RATIO
+DO J=1,M%JBAR
+   DO I=1,M%IBAR
+      S = 0._EB
+      DO JJ=(J-1)*R+1,J*R
+         DO II=(I-1)*R+1,I*R
+            S = S + LS_PHI(II,JJ)
+         ENDDO
+      ENDDO
+      M%PHI_LS(I,J) = S/REAL(R*R,EB)
+   ENDDO
+ENDDO
+
+END SUBROUTINE LS_RESTRICT_PHI
+
+
+!> \brief Fraction of the plateau fuel flux of an LS cell at this stage: the trapezoid of WALL_BC (wall.f90) from the LS cell's T_IGN, TAU_LS and BURN_DURATION
+REAL(EB) FUNCTION LS_FRAC(I,J,T,DT)
+
+INTEGER, INTENT(IN) :: I,J
+REAL(EB), INTENT(IN) :: T,DT
+REAL(EB) :: TSI
+
+LS_FRAC = 0._EB
+IF (T<LS_T_IGN(I,J) .OR. LS_T_IGN(I,J)+LS_BURN_DUR(I,J)<T) RETURN
+IF (PREDICTOR) THEN
+   TSI = T+DT-LS_T_IGN(I,J)
+ELSE
+   TSI = T-LS_T_IGN(I,J)
+ENDIF
+IF (TSI<=LS_TAU(I,J)) THEN
+   LS_FRAC = TSI/LS_TAU(I,J)
+ELSEIF (TSI<=LS_BURN_DUR(I,J)-LS_TAU(I,J)) THEN
+   LS_FRAC = 1._EB
+ELSE
+   LS_FRAC = 1._EB-(TSI-(LS_BURN_DUR(I,J)-LS_TAU(I,J)))/LS_TAU(I,J)
+ENDIF
+
+END FUNCTION LS_FRAC
+
+
+!> \brief Before WALL_BC of level-0 mesh NM (FDS_G_WALL_BC): the fuel flux of every LS cell at this stage (LS_FLUX), and on every level-0 spreading wall the LS cell means:
+!> B2%PHI_LS = mean PHI; the wall trapezoid of WALL_BC is made to return mean(flux)/(MASS_FLUX*ADJUST_FAC) of the wall: T_IGN = T_stage - F*LAM, TAU_LS = LAM, BURN_DURATION huge
+!> (so TSI/TAU = F, any value of F in 0..1) and AREA_ADJUST = max(1,total) with F = total/AREA_ADJUST. M_DOT_G_PP_ADJUST (and the burning rate output) is then the mean LS flux.
+!> No flux is touched when LEVEL_SET_COUPLED_FIRE is off (only PHI_LS).
+SUBROUTINE LS_APPLY_L0(T,DT,NM)
+
+REAL(EB), INTENT(IN) :: T,DT
+INTEGER, INTENT(IN) :: NM
+REAL(EB), PARAMETER :: LAM=1.E6_EB
+TYPE(MESH_TYPE), POINTER :: M
+TYPE(SURFACE_TYPE), POINTER :: SF
+INTEGER :: I,J,II,JJ,IW,R
+REAL(EB) :: SM,SP,MF0,TOT,AA,FR,TEFF,RR
+
+IF (.NOT.LS_DRIVE .OR. .NOT.LS_ACTIVE .OR. NM/=1) RETURN
+M => MESHES(1) ; R = LS_RATIO ; RR = REAL(R*R,EB)
+TEFF = MERGE(T+DT,T,PREDICTOR)
+IF (LEVEL_SET_COUPLED_FIRE) THEN
+   DO J=1,LS_NY
+      DO I=1,LS_NX
+         SF => SURFACE(LS_SURF(I,J))
+         LS_FLUX(I,J) = 0._EB
+         IF (SF%VEG_LSET_SPREAD .AND. ABS(SUM(SF%MASS_FLUX(1:N_TRACKED_SPECIES)))>TWENTY_EPSILON_EB) &
+            LS_FLUX(I,J) = LS_FRAC(I,J,T,DT)*SUM(SF%MASS_FLUX(1:N_TRACKED_SPECIES))*SF%M_DOT_G_PP_ADJUST_FAC*LS_AREA_ADJ(I,J)
+      ENDDO
+   ENDDO
+ENDIF
+DO J=1,M%JBAR
+   DO I=1,M%IBAR
+      IW = M%CELL(M%CELL_INDEX(I,J,1))%WALL_INDEX(-3)
+      IF (IW<1) CYCLE
+      IF (M%WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+      SF => SURFACE(M%WALL(IW)%SURF_INDEX)
+      IF (.NOT.SF%VEG_LSET_SPREAD) CYCLE
+      SM = 0._EB ; SP = 0._EB
+      DO JJ=(J-1)*R+1,J*R
+         DO II=(I-1)*R+1,I*R
+            SP = SP + LS_PHI(II,JJ)
+            IF (LEVEL_SET_COUPLED_FIRE) SM = SM + LS_FLUX(II,JJ)
+         ENDDO
+      ENDDO
+      ASSOCIATE(B1=>M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX),B2=>M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX))
+      B2%PHI_LS = SP/RR
+      IF (LEVEL_SET_COUPLED_FIRE) THEN
+         MF0 = SUM(SF%MASS_FLUX(1:N_TRACKED_SPECIES))*SF%M_DOT_G_PP_ADJUST_FAC
+         IF (ABS(MF0)>TWENTY_EPSILON_EB) THEN
+            TOT = SM/RR/MF0
+            B2%TAU_LS = LAM
+            IF (TOT>0._EB) THEN
+               AA = MAX(1._EB,TOT) ; FR = TOT/AA
+               B1%T_IGN = TEFF-FR*LAM ; B1%BURN_DURATION = 1.E30_EB ; B1%AREA_ADJUST = AA
+            ELSE
+               B1%T_IGN = -1._EB ; B1%BURN_DURATION = -1._EB ; B1%AREA_ADJUST = 1._EB
+            ENDIF
+         ENDIF
+      ENDIF
+      END ASSOCIATE
+   ENDDO
+ENDDO
+
+END SUBROUTINE LS_APPLY_L0
+
+
+LOGICAL FUNCTION LS_FLUX_ACTIVE()
+LS_FLUX_ACTIVE = LS_DRIVE .AND. LS_ACTIVE .AND. LEVEL_SET_COUPLED_FIRE
+END FUNCTION LS_FLUX_ACTIVE
+
+
+!> \brief Mean LS flux of the LS cells under a fine wall centred at (X,Y) with sides DXL, DYL (the wall of a cell of a finer level)
+REAL(EB) FUNCTION LS_BLOCK_FLUX(X,Y,DXL,DYL)
+
+REAL(EB), INTENT(IN) :: X,Y,DXL,DYL
+INTEGER :: ILO,IHI,JLO,JHI,I,J
+REAL(EB) :: S
+
+ILO = MAX(1,NINT((X-0.5_EB*DXL-LS_X0)/LS_DX(1))+1) ; IHI = MIN(LS_NX,NINT((X+0.5_EB*DXL-LS_X0)/LS_DX(1)))
+JLO = MAX(1,NINT((Y-0.5_EB*DYL-LS_Y0)/LS_DY(1))+1) ; JHI = MIN(LS_NY,NINT((Y+0.5_EB*DYL-LS_Y0)/LS_DY(1)))
+S = 0._EB
+DO J=JLO,JHI
+   DO I=ILO,IHI
+      S = S + LS_FLUX(I,J)
+   ENDDO
+ENDDO
+LS_BLOCK_FLUX = S/REAL(MAX(1,(IHI-ILO+1)*(JHI-JLO+1)),EB)
+
+END FUNCTION LS_BLOCK_FLUX
 
 
 !> \brief C entry: make sure the LS grid exists (ratio R to the level-0 mesh); returns its size and the largest wind reference height of the spreading cells
@@ -555,6 +701,9 @@ END SUBROUTINE FDS_LS_WIND_FROM_SLOTS
 SUBROUTINE FDS_LS_SET_MODE(MODE) BIND(C,NAME='fds_ls_set_mode')
 INTEGER(C_INT), VALUE :: MODE
 LS_SHADOW_MODE = MODE
+IF (MODE==2) THEN   ! --ls-fine: drive
+   LS_DRIVE = .TRUE. ; LS_SHADOW_MODE = 0
+ENDIF
 END SUBROUTINE FDS_LS_SET_MODE
 
 
@@ -571,8 +720,9 @@ REAL(EB), ALLOCATABLE :: ZS(:),US(:),VS(:)
 IF (NM/=1 .OR. NMESHES/=1) RETURN
 M => MESHES(NM)
 IF (.NOT.LS_ACTIVE) CALL LS_INIT_FROM_MESH(1)
-IF (LS_RATIO/=1) CALL ABORT_LS('ls-fine-shadow: the LS grid must equal the level-0 mesh (ratio 1)')
+IF (LS_RATIO/=1 .AND. .NOT.LS_DRIVE) CALL ABORT_LS('ls-fine-shadow: the LS grid must equal the level-0 mesh (ratio 1)')
 IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) CALL ABORT_LS('ls-fine-shadow: LEVEL_SET_MODE 2 and 5 are not supported')
+IF (.NOT.LS_WIND_SET .AND. LS_RATIO/=1) CALL ABORT_LS('ls-fine: the wind of the LS grid was not gathered')
 IF (.NOT.LS_WIND_SET) THEN    ! no gathered wind for this stage: sample the level-0 mesh the way the original does
    ALLOCATE(ZS(M%KBAR),US(M%KBAR),VS(M%KBAR))
    DO J=1,M%JBAR
@@ -591,6 +741,7 @@ IF (.NOT.LS_WIND_SET) THEN    ! no gathered wind for this stage: sample the leve
 ENDIF
 LS_WIND_SET = .FALSE.
 CALL LS_STEP(T,DT)
+IF (LS_DRIVE) CALL LS_RESTRICT_PHI(M)
 
 CONTAINS
 SUBROUTINE ABORT_LS(MSG)
