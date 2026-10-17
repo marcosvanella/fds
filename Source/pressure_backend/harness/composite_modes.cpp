@@ -2725,6 +2725,67 @@ void run_comp_mixed (ParmParse& pp)
                 ParallelDescriptor::ReduceRealMax(gs);
                 Print() << "COMP_MIXED l0solid max|L0 gradient on faces of the block|=" << gs << "\n";
                 ccheck(gs == 0.0, "L0 solid block masked: no flux through the block's level-0 faces");
+                // (8) Workspace and label cache: a second solve of the same problem reuses both (no rebuild, no relabel, bitwise equal phi); a changed mask, thin flag or
+                // layout relabels (never stale labels): the result equals a fresh solve (no workspace) of the changed problem. Back to the first problem = the first phi.
+                {
+                    auto snap = [&] (pb::PressureProblem const& q) {
+                        std::vector<std::unique_ptr<MultiFab>> v;
+                        for (int l = 0; l < c.nlev; ++l) { v.push_back(std::make_unique<MultiFab>(q.levels[l].ba, q.levels[l].dm, 1, 0)); MultiFab::Copy(*v[l], *q.levels[l].phi, 0, 0, 1, 0); }
+                        return v;
+                    };
+                    auto diff = [&] (std::vector<std::unique_ptr<MultiFab>> const& a, std::vector<std::unique_ptr<MultiFab>> const& b) {
+                        double m = 0.0;
+                        for (std::size_t l = 0; l < a.size(); ++l) { MultiFab d(a[l]->boxArray(), a[l]->DistributionMap(), 1, 0); MultiFab::Copy(d, *a[l], 0, 0, 1, 0); MultiFab::Subtract(d, *b[l], 0, 0, 1, 0); m = std::max(m, double(d.norminf())); }
+                        return m;
+                    };
+                    auto zero = [&] (pb::PressureProblem const& q) { for (auto& lv : q.levels) { lv.phi->setVal(Real(0)); } };
+                    pb::PressureWorkspace ws;
+                    zero(pm); const pb::PressureResult a1 = pb::solve_pressure(pm, o, &ws); const auto s1 = snap(pm);
+                    zero(pm); const pb::PressureResult a2 = pb::solve_pressure(pm, o, &ws); const auto s2 = snap(pm);
+                    Print() << "COMP_MIXED labelcache solve1 rounds=" << a1.mask_label_rounds << " solve2 rounds=" << a2.mask_label_rounds << " builds=" << ws.mask_label_builds() << " hits=" << ws.mask_label_hits() << "\n";
+                    ccheck(a1.status == pb::Status::Ok && a2.status == pb::Status::Ok && a1.mask_label_rounds > 0, "label cache: first solve labels");
+                    ccheck(a2.mask_label_rounds == 0 && ws.mask_label_builds() == 1 && ws.mask_label_hits() == 1, "label cache: same problem reuses the workspace (it matches: face_neumann stored) and the labels");
+                    ccheck(diff(s1, s2) == 0.0, "label cache: reuse gives bitwise the same phi");
+                    // (a) mask change: one more level-0 Solid cell away from the patch
+                    iMultiFab* c0 = const_cast<iMultiFab*>(pm.levels[0].cell_class);
+                    const IntVect far(h.geom[0].Domain().bigEnd(0), h.geom[0].Domain().bigEnd(1), h.geom[0].Domain().bigEnd(2));
+                    int old_v = 0;
+                    for (MFIter mfi(*c0); mfi.isValid(); ++mfi) { if (mfi.validbox().contains(far)) { old_v = c0->array(mfi)(far); c0->array(mfi)(far) = pb::CellSolid; } }
+                    zero(pm); const pb::PressureResult b1 = pb::solve_pressure(pm, o, &ws); const auto t1 = snap(pm);
+                    zero(pm); const pb::PressureResult b0 = pb::solve_pressure(pm, o, nullptr); const auto t0 = snap(pm);
+                    Print() << "COMP_MIXED labelcache mask change rounds=" << b1.mask_label_rounds << " status=" << pb::to_string(b1.status) << " diff vs fresh=" << diff(t1, t0) << "\n";
+                    ccheck(b1.status == pb::Status::Ok && b1.mask_label_rounds > 0 && diff(t1, t0) == 0.0 && diff(t1, s1) > 0.0, "label cache: a changed mask relabels (result = fresh solve)");
+                    ccheck(b1.ncells_uncovered == a1.ncells_uncovered - 1, "label cache: the new Solid cell is out of the labelled gas cells");
+                    for (MFIter mfi(*c0); mfi.isValid(); ++mfi) { if (mfi.validbox().contains(far)) { c0->array(mfi)(far) = old_v; } }
+                    zero(pm); const pb::PressureResult b2 = pb::solve_pressure(pm, o, &ws); const auto t2 = snap(pm);
+                    ccheck(b2.mask_label_rounds > 0 && diff(t2, s1) == 0.0, "label cache: restoring the mask relabels, phi = the first solve");
+                    // (b) thin-flag change: one extra wall face inside the fine level
+                    iMultiFab* tf = fl[2].get(); IntVect tp; bool have = false;
+                    for (MFIter mfi(*tf); mfi.isValid(); ++mfi) { Box vb = mfi.validbox(); IntVect q = (vb.smallEnd() + vb.bigEnd()) / 2; if (!have && tf->array(mfi)(q) == 0) { tf->array(mfi)(q) = 1; tp = q; have = true; } }
+                    int hv = have ? 1 : 0; ParallelDescriptor::ReduceIntMax(hv);
+                    if (hv) {
+                        zero(pm); const pb::PressureResult c1 = pb::solve_pressure(pm, o, &ws); const auto u1 = snap(pm);
+                        zero(pm); (void)pb::solve_pressure(pm, o, nullptr); const auto u0 = snap(pm);
+                        Print() << "COMP_MIXED labelcache thin change rounds=" << c1.mask_label_rounds << " status=" << pb::to_string(c1.status) << " diff vs fresh=" << diff(u1, u0) << "\n";
+                        ccheck(c1.status == pb::Status::Ok && c1.mask_label_rounds > 0 && diff(u1, u0) == 0.0 && diff(u1, s1) > 0.0, "label cache: a changed thin flag rebuilds (result = fresh solve)");
+                        for (MFIter mfi(*tf); mfi.isValid(); ++mfi) { if (mfi.validbox().contains(tp) && have) { tf->array(mfi)(tp) = 0; } }
+                        zero(pm); const pb::PressureResult c2 = pb::solve_pressure(pm, o, &ws); const auto u2 = snap(pm);
+                        ccheck(c2.mask_label_rounds > 0 && diff(u2, s1) == 0.0, "label cache: restoring the thin flag rebuilds, phi = the first solve");
+                    }
+                    // (c) layout change: the same obstacle on another fine-patch layout, same workspace
+                    {
+                        Cfg c2 = c; c2.layout = 0;
+                        Hier h2 = build_hier(c2, 0);
+                        pb::PressureProblem pm2 = make_problem(c2, h2);
+                        pm2.face_neumann[fz] = all;
+                        auto cls2 = pb::build_obst_class(h2.geom[0], 0, h2.ba[0], h2.dm[0]);
+                        pm2.levels[0].cell_class = cls2.get(); pm2.cf_solid_l0_ok = true;
+                        zero(pm2); const pb::PressureResult d1 = pb::solve_pressure(pm2, o, &ws); const auto v1 = snap(pm2);
+                        zero(pm2); const pb::PressureResult d0 = pb::solve_pressure(pm2, o, nullptr); const auto v0 = snap(pm2);
+                        Print() << "COMP_MIXED labelcache layout change status=" << pb::to_string(d1.status) << " builds=" << ws.mask_label_builds() << " rounds=" << d1.mask_label_rounds << " diff vs fresh=" << diff(v1, v0) << " " << d1.message << "\n";
+                        ccheck(d1.status == pb::Status::Ok && ws.mask_label_builds() == 6 && d1.mask_label_rounds > 0 && diff(v1, v0) == 0.0, "label cache: a changed layout rebuilds and relabels (result = fresh solve)");
+                    }
+                }
                 pm.levels[0].cell_class = nullptr;
             }
         }
