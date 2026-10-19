@@ -16,6 +16,7 @@ grep -Eq 's_exchange\(6|exchange\(6' "$D/TimeLoop.cpp" || { echo "FAIL TimeLoop.
 # 3. after_exchange only handles 1, 3, 4, 6 (so 66/67 return immediately).
 grep -q 'code != 1 && code != 3 && code != 4 && code != 6' "$D/GhostExchange.cpp" || { echo "FAIL GhostExchange.cpp after_exchange gate"; rc=1; }
 # 4. FDS still owns 66/67 call sites (MAIN_LOOP / INITIALIZE_BACK_WALL_EXCHANGE).
-grep -q 'MESH_EXCHANGE(66)' "$D/../main.f90" && grep -q 'MESH_EXCHANGE(67)' "$D/../main.f90" && echo "PASS FDS main.f90 still calls MESH_EXCHANGE(66) and (67)" || { echo "FAIL FDS lost 66/67 call sites"; rc=1; }
+# FireX c2581655bb reverted the lightweight WALL exchange: MAIN_LOOP calls 66 again and 67 has no call site (code 67 remains a valid CODE value).
+grep -q 'MESH_EXCHANGE(66)' "$D/../main.f90" && echo "PASS FDS main.f90 still calls MESH_EXCHANGE(66)" || { echo "FAIL FDS lost 66 call sites"; rc=1; }
 [ $rc = 0 ] && echo "PASS exchange-code mapping (6 = U/V/W/H; 66/67 host-only)"
 exit $rc
