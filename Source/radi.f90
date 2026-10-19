@@ -2807,6 +2807,7 @@ PUBLIC RAD_GHOST,RAD_GHOST_TYPE
 #ifdef WITH_AMREX
 TYPE RAD_SRC_TYPE   !< averaged down from the finer levels (covered cells of a box), set by the driver before the radiation update: D(:,:,:,1)=kappa*UII, 2=kappa*4 sigma T^4, 3:8=incident flux of the solid wall of the cell for IOR -1,1,-2,2,-3,3, 9:14 = 3:8 of the box itself (not averaged), RAD_SRC_DQ
    LOGICAL, ALLOCATABLE :: COV(:,:,:)   ! cells covered by the next level (RAD_SRC_COV, rebuilt by every RAD_SRC_FILL)
+   REAL(EB) :: WK=0._EB   ! layout key (RAD_WQ_KEY) of the box hierarchy when WQ was written
    REAL(EB), ALLOCATABLE :: D(:,:,:,:),WQ(:,:,:,:)   ! WQ(I,J,K,1:6): incident flux of the solid walls of the cell at the last radiation update (a fine wall is overwritten by its parent's state every step)
 END TYPE RAD_SRC_TYPE
 INTEGER, PARAMETER :: RAD_SRC_NC=14
@@ -5445,8 +5446,8 @@ ENDDO ; ENDDO ; ENDDO
 DAT(2*N+1:RAD_SRC_NC*N) = 0._EB
 IF (NM<=SIZE(RAD_SRC)) THEN   ! WQ of a box NM of the previous hierarchy has another shape after a regrid: not used
    IF (ALLOCATED(RAD_SRC(NM)%WQ)) THEN
-      IF (SIZE(RAD_SRC(NM)%WQ,1)==IBAR .AND. SIZE(RAD_SRC(NM)%WQ,2)==JBAR .AND. SIZE(RAD_SRC(NM)%WQ,3)==KBAR) &
-         DAT(2*N+1:8*N) = RESHAPE(RAD_SRC(NM)%WQ,(/6*N/))
+      IF (SIZE(RAD_SRC(NM)%WQ,1)==IBAR .AND. SIZE(RAD_SRC(NM)%WQ,2)==JBAR .AND. SIZE(RAD_SRC(NM)%WQ,3)==KBAR .AND. &
+          RAD_SRC(NM)%WK==RAD_WQ_KEY(NM)) DAT(2*N+1:8*N) = RESHAPE(RAD_SRC(NM)%WQ,(/6*N/))
    ENDIF
 ENDIF
 DAT(8*N+1:14*N) = DAT(2*N+1:8*N)
@@ -5487,13 +5488,34 @@ TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
 TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
 CALL RAD_SRC_ENSURE(NM)
 IF (ALLOCATED(RAD_SRC(NM)%WQ)) THEN   ! the box NM was recreated by a regrid with another shape
-   IF (SIZE(RAD_SRC(NM)%WQ,1)/=IBAR .OR. SIZE(RAD_SRC(NM)%WQ,2)/=JBAR .OR. SIZE(RAD_SRC(NM)%WQ,3)/=KBAR) DEALLOCATE(RAD_SRC(NM)%WQ)
+   IF (SIZE(RAD_SRC(NM)%WQ,1)/=IBAR .OR. SIZE(RAD_SRC(NM)%WQ,2)/=JBAR .OR. SIZE(RAD_SRC(NM)%WQ,3)/=KBAR .OR. &
+       RAD_SRC(NM)%WK/=RAD_WQ_KEY(NM)) DEALLOCATE(RAD_SRC(NM)%WQ)
 ENDIF
-IF (.NOT.ALLOCATED(RAD_SRC(NM)%WQ)) THEN ; ALLOCATE(RAD_SRC(NM)%WQ(IBAR,JBAR,KBAR,6)) ; RAD_SRC(NM)%WQ = 0._EB ; ENDIF
+IF (.NOT.ALLOCATED(RAD_SRC(NM)%WQ)) THEN
+   ALLOCATE(RAD_SRC(NM)%WQ(IBAR,JBAR,KBAR,6)) ; RAD_SRC(NM)%WQ = 0._EB ; RAD_SRC(NM)%WK = RAD_WQ_KEY(NM)
+ENDIF
 BC => BOUNDARY_COORD(WALL(IW)%BC_INDEX) ; B1 => BOUNDARY_PROP1(WALL(IW)%B1_INDEX)
 IF (B1%EMISSIVITY>0._EB .AND. BC%IOR/=0) &
    RAD_SRC(NM)%WQ(BC%IIG,BC%JJG,BC%KKG,2*ABS(BC%IOR)-MERGE(0,1,BC%IOR>0)) = B1%Q_RAD_IN/B1%EMISSIVITY
 END SUBROUTINE RAD_SRC_WQ
+
+!> Key of the box layout of the level of box NM (the same on every rank; 0 for level 0). The saved wall flux WQ of box NM is used only under the
+!> layout it was written in: after a regrid, box number NM is another box (possibly of another rank), and a stale WQ made the result rank dependent.
+REAL(EB) FUNCTION RAD_WQ_KEY(NM)
+INTEGER, INTENT(IN) :: NM
+INTEGER :: L,IB
+RAD_WQ_KEY = 0._EB
+IF (NM<=NMESHES .OR. .NOT.ALLOCATED(FINE_LEVEL)) RETURN
+DO L=1,SIZE(FINE_LEVEL)
+   IF (NM<=FINE_LEVEL(L)%NM0 .OR. NM>FINE_LEVEL(L)%NM0+FINE_LEVEL(L)%N_BOXES) CYCLE
+   RAD_WQ_KEY = REAL(FINE_LEVEL(L)%N_BOXES,EB)
+   DO IB=1,FINE_LEVEL(L)%N_BOXES
+      ASSOCIATE(B=>FINE_LEVEL(L)%BOX(IB))
+      RAD_WQ_KEY = RAD_WQ_KEY + REAL(IB,EB)*(B%XS+2._EB*B%YS+3._EB*B%ZS+5._EB*B%XF+7._EB*B%YF+11._EB*B%ZF)
+      END ASSOCIATE
+   ENDDO
+ENDDO
+END FUNCTION RAD_WQ_KEY
 
 !> After the average-down of a level pair: the wall incident flux (comps 3:8) of the covered cells of box NM, summed over the RATIO**2 fine faces / RATIO**3 children, times RATIO is the face average.
 SUBROUTINE RAD_SRC_WSCALE(NM,IB,JB,KB,DAT,RATIO)
