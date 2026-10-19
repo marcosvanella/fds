@@ -645,6 +645,18 @@ LS_BLOCK_FLUX = S/REAL(MAX(1,(IHI-ILO+1)*(JHI-JLO+1)),EB)
 END FUNCTION LS_BLOCK_FLUX
 
 
+!> \brief C entry: the LS PHI of the global grid (x fastest, NX*NY values; 0 and returns 1 if the grid does not exist yet)
+INTEGER(C_INT) FUNCTION FDS_LS_GET_PHI(NX,NY,BUF) BIND(C,NAME='fds_ls_get_phi')
+INTEGER(C_INT), VALUE :: NX,NY
+REAL(C_DOUBLE), INTENT(OUT) :: BUF(NX*NY)
+FDS_LS_GET_PHI = 1
+IF (.NOT.LS_ACTIVE) RETURN
+IF (NX/=LS_NX .OR. NY/=LS_NY) RETURN
+BUF = RESHAPE(LS_PHI(1:NX,1:NY),(/NX*NY/))
+FDS_LS_GET_PHI = 0
+END FUNCTION FDS_LS_GET_PHI
+
+
 !> \brief C entry: make sure the LS grid exists (ratio R to the level-0 mesh); returns its size and the largest wind reference height of the spreading cells
 SUBROUTINE FDS_LS_PREPARE(R,NX,NY,HMAX) BIND(C,NAME='fds_ls_prepare')
 

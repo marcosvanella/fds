@@ -32,7 +32,8 @@ extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90:
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
 extern "C" int fds_p_reac_coef(int ns, double* c);   // fds_step.f90: species production per unit heat release (one reaction), else 0
 extern "C" void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);   // T_END etc.   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
-extern "C" void fds_k_phi(int nm, double* buf);   // fds_kernels.f90: PHI_LS of a level-0 mesh
+extern "C" void fds_k_phi(int nm, double* buf);
+extern "C" int fds_ls_get_phi(int nx, int ny, double* buf);   // fds_ls_grid.f90: PHI of the global LS grid   // fds_kernels.f90: PHI_LS of a level-0 mesh
 extern "C" int fds_find_tracked_species(const char* name);  // fds_mesh_query.f90; 0-based ZZ index or -1
 
 namespace fdsamr {
@@ -254,9 +255,32 @@ void fill_phi(LevelRegistry& reg, int nl)
         fds_k_phi(mfi.index() + 1, buf.data());
         amrex::LoopOnCpu(amrex::grow(mfi.fabbox(), 0), [&](int i, int j, int k) { p(i, j, k) = buf[(i + 1) + static_cast<size_t>(j + 1) * (vb.length(0) + 2)]; });
     }
+    std::vector<double> lsphi;   // --ls-fine: the finer levels take PHI from the global LS grid (mean of the LS cells of the level cell), so tagging follows the fine front
+    int lsnx = 0, lsny = 0, lsR = 1;
+    if (ls_fine_config().mode >= 3 && nl > 1) {
+        lsR = ls_fine_config().ratio; lsnx = reg.level(0).geom.Domain().length(0) * lsR; lsny = reg.level(0).geom.Domain().length(1) * lsR;
+        lsphi.resize(static_cast<size_t>(lsnx) * lsny);
+        if (fds_ls_get_phi(lsnx, lsny, lsphi.data()) != 0) lsphi.clear();
+    }
+    int cum = 1;
     for (int l = 1; l < nl; ++l) {
         reg.fields(l).ensure("PHI");
         const amrex::IntVect r = reg.level(l).ref_ratio_from_parent;
+        cum *= r[0];
+        if (!lsphi.empty()) {
+            const int q = lsR / cum;
+            amrex::MultiFab& Pl = reg.fields(l)["PHI"];
+            for (amrex::MFIter mfi(Pl); mfi.isValid(); ++mfi) {
+                auto pf = Pl.array(mfi);
+                amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
+                    const int ic = std::min(std::max(i, 0), lsnx / q - 1), jc = std::min(std::max(j, 0), lsny / q - 1);
+                    double s = 0.0;
+                    for (int jj = 0; jj < q; ++jj) for (int ii = 0; ii < q; ++ii) s += lsphi[static_cast<size_t>(ic * q + ii) + static_cast<size_t>(jc * q + jj) * lsnx];
+                    pf(i, j, k) = s / (q * q);
+                });
+            }
+            continue;
+        }
         amrex::MultiFab& Pf = reg.fields(l)["PHI"];
         amrex::BoxArray cba = reg.level(l).ba; cba.coarsen(r);
         amrex::MultiFab Pc(cba, reg.level(l).dm, 1, 1);
