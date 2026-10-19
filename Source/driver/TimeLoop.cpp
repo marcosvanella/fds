@@ -144,6 +144,8 @@ void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f
 void fds_fine_walls_sums(int lev, double t, int chk, double* q);
 int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90 (frozen/fine-wall-state.md)
 int fds_n_tracked_species();
+int fds_open_wind();
+void fds_wind_at_height(double t, double z, double* u, double* v, double* w);
 int fds_fine_walls_un(int lev, int ib, int pred, int nmax, int* n, int* ijkd, double* uf);   // fds_fine_level.f90: OBST wall face velocity (burner)
 int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90: parent wall state of fine burner faces
 int fds_fine_level_destroy(int lev);
@@ -1152,14 +1154,21 @@ struct TimeLoop::Impl {
         const char* un[3] = {"U", "V", "W"};
         const amrex::Box dom = lv.geom.Domain(); const int e = side ? dom.bigEnd(d) : dom.smallEnd(d);
         const amrex::IntVect sh = amrex::IntVect::TheDimensionVector(d);
+        const bool wind = fds_open_wind() != 0 && !std::getenv("FDSTL_NOFINEWIND");
         for (amrex::MFIter mfi(v); mfi.isValid(); ++mfi) {
             amrex::Box slab = mfi.validbox();
             if (slab.smallEnd(d) > e || slab.bigEnd(d) < e) continue;
             slab.setSmall(d, e); slab.setBig(d, e);
-            auto a = v.array(mfi); const auto u = F[un[d]].const_array(mfi); const auto kr = F["KRES"].const_array(mfi);
+            auto a = v.array(mfi); const auto u = F[un[d]].const_array(mfi); const auto kr = F["KRES"].const_array(mfi); const auto h = F["H"].const_array(mfi);
             amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
                 const double vn = side ? u(i + sh[0], j + sh[1], k + sh[2]) : u(i, j, k);
                 if (side ? vn > 0.0 : vn < 0.0) a(i, j, k) = kr(i, j, k);
+                else if (wind && d < 2) {   // inflow with a prevailing wind: pres.f90 H0 = H(inside) -+ 0.5/(dt RDXN) (U_WIND(z) - u) with the profile at the height of the fine cell (P_EXTERNAL = 0)
+                    const amrex::IntVect in = side ? amrex::IntVect(-sh[0], -sh[1], -sh[2]) : amrex::IntVect(0);
+                    double uw, vw, ww; fds_wind_at_height(L.m_t, (k + 0.5) * lv.geom.CellSize(2) + lv.geom.ProbLo(2), &uw, &vw, &ww);
+                    const double sg = side ? -1.0 : 1.0;
+                    a(i, j, k) = h(i + in[0], j + in[1], k + in[2]) + sg * 0.5 / (L.m_dt * (1.0 / lv.geom.CellSize(d))) * ((d == 0 ? uw : vw) - vn);
+                }
             });
         }
     }
