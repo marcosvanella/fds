@@ -2,8 +2,8 @@
 """Radiation validation tables: fds_amr (FDS_RAD_LEAF=1 RADLEAF lines in run.log, leaf-only sums over all boxes) against plain FDS devc.csv
 (devices QR_int, W_net, W_inc, W_q, U_reg, Q_reg from Source/driver/tests/radiation/*.fds-like inputs: RADIATION LOSS / RADIATIVE HEAT FLUX /
 INCIDENT HEAT FLUX surface and volume integrals) on the coarse and the fine uniform grid.
-The leaf rule (finest level covering each location) is applied in the driver diagnostic (RAD_COVERED skips cells under the next level; fine boxes have no wall cells,
-walls are level 0), so the AMR numbers here are plain sums.
+The leaf rule (finest level covering each location) is applied in the driver diagnostic (RAD_COVERED skips cells and wall faces under the next level; the
+solid and OPEN hidden walls of fine boxes are summed at their level), so the AMR numbers here are plain sums. --mode mean is a trapezoid time mean.
 usage: val_compare.py --mode last|mean [--t0 T] --fds c=DIR f1=DIR [f2=DIR] --amr 1=DIR 2=DIR 3=DIR [--hrr]"""
 import argparse, csv, re
 import numpy as np
