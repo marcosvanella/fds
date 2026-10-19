@@ -50,6 +50,7 @@ void fds_k_state(int pred, int first, int icyc, double rmin, double rmax);
 void fds_k_visc(int nm, int est);
 void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* data, int mode, long* ncnt, long* nbad, int* ierr);
 void fds_k_dens_post(double t, double dt, int nm);
+void fds_ls_drive_step(double t, double dt);   // fds_ls_grid.f90
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
 int fds_k_rad_src_fill(int nm, double* dat);                // radiation source average-down (radi.f90 RAD_SRC_FILL)
@@ -445,7 +446,7 @@ struct TimeLoop::Impl {
     {
         std::vector<std::string> bad;
         auto chk = [&](bool cond, const char* what) { if (cond) bad.push_back(what); };
-        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[11] != 0 && l0.mesh.size() > 1, "LEVEL_SET_MODE with several meshes (PHI_LS exchange, FDS code 14, is not routed)");
+        chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[11] != 0 && l0.mesh.size() > 1 && ls_fine_config().mode < 3, "LEVEL_SET_MODE with several meshes (PHI_LS exchange, FDS code 14, is not routed; --ls-fine supports it)");
         chk(IP[12], "TUNNEL_PRECONDITIONER"); chk(IP[13] != 1, "pressure solver other than FFT"); chk(IP[14], "CYLINDRICAL"); chk(IP[15], "particle drag");
         // D-089: FREEZE_VELOCITY (IP[18]) allowed in AMR TimeLoop for cold-flow / passive-scalar adaptive demos; reacting-flow production must not depend on freeze.
         chk(IP[16], "SOLID_HEAT_TRANSFER_3D"); chk(IP[17] > 0, "Lagrangian particles"); chk(IP[19], "SOLID_PHASE_ONLY");
@@ -970,6 +971,7 @@ struct TimeLoop::Impl {
         }
         if (ls_fine_config().mode >= 2 && c == lc.data()) {   // --ls-fine-shadow-gather: the wind at the reference height of the global LS grid from the leaf cells of every level, before the level-0 LS stage
             if (ls_fine_gather_wind(*L.m_reg) != 0) die("ls_fine_gather_wind: a spreading LS column has no leaf sample");
+            if (ls_fine_config().mode >= 3) fds_ls_drive_step(t, dt);   // --ls-fine: one LS stage per rank (replicated grid)
         }
         each_local([&](int nm) { fds_k_set_flags(nm, flags[bi(nm)]); fds_k_dens_post(t, dt, nm); });
         if (fx) { flux_set_override(0, {}); flux_set_mode(0, 0); }

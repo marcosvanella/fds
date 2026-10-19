@@ -27,6 +27,7 @@ int ls_fine_gather_wind(const LevelRegistry& reg)
     int nx = 0, ny = 0;
     double hmax = 0.0;
     fds_ls_prepare(R, &nx, &ny, &hmax);
+    if (nx != reg.level(0).geom.Domain().length(0) * R || ny != reg.level(0).geom.Domain().length(1) * R) amrex::Abort("ls_fine_gather_wind: the LS grid does not cover the level-0 domain footprint");
     const double dz0 = reg.level(0).geom.CellSize(2);
     const double dzf = dz0 / R;
     const int nzf = reg.level(0).geom.Domain().length(2) * R;
