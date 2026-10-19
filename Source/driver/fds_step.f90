@@ -324,8 +324,8 @@ CONTAINS
    INTEGER, INTENT(IN) :: NMP
    TYPE(BOUNDARY_COORD_TYPE), INTENT(IN) :: BCG
    REAL(EB), INTENT(IN) :: DXP(0:),DYP(0:),DZP(0:)
-   INTEGER :: I,J,K
-   REAL(EB) :: UIN,A,X,Y,Z,D0(3)
+   INTEGER :: I,J,K,NZ
+   REAL(EB) :: UIN,A,X,Y,Z,D0(3),FXN(N_TRACKED_SPECIES)
    ASSOCIATE(MP=>MESHES(NMP))
    D0 = (/(MP%XF-MP%XS)/MP%IBAR,(MP%YF-MP%YS)/MP%JBAR,(MP%ZF-MP%ZS)/MP%KBAR/)
    X = BCG%X ; Y = BCG%Y ; Z = BCG%Z
@@ -339,9 +339,19 @@ CONTAINS
    END SELECT
    I = FLOOR((X-MP%XS)/D0(1))+1 ; J = FLOOR((Y-MP%YS)/D0(2))+1 ; K = FLOOR((Z-MP%ZS)/D0(3))+1
    END ASSOCIATE
-   CALL GROW(PEND,NPEND(ST),3,ST)
+   SELECT CASE(BCG%IOR)   ! the box's own face flux, used if the parent is an OPEN wall (ONE_WALL: DENSITY applies FX, not the parent's RHO_F)
+      CASE( 1) ; FXN = PFX(BCG%IIG-1,BCG%JJG,BCG%KKG,1:N_TRACKED_SPECIES)
+      CASE(-1) ; FXN = PFX(BCG%IIG,BCG%JJG,BCG%KKG,1:N_TRACKED_SPECIES)
+      CASE( 2) ; FXN = PFY(BCG%IIG,BCG%JJG-1,BCG%KKG,1:N_TRACKED_SPECIES)
+      CASE(-2) ; FXN = PFY(BCG%IIG,BCG%JJG,BCG%KKG,1:N_TRACKED_SPECIES)
+      CASE( 3) ; FXN = PFZ(BCG%IIG,BCG%JJG,BCG%KKG-1,1:N_TRACKED_SPECIES)
+      CASE(-3) ; FXN = PFZ(BCG%IIG,BCG%JJG,BCG%KKG,1:N_TRACKED_SPECIES)
+   END SELECT
+   NZ = N_TRACKED_SPECIES
+   CALL GROW(PEND,NPEND(ST),4+NZ,ST)
    NPEND(ST) = NPEND(ST)+1
    PEND(1,NPEND(ST),ST) = WKEY(NMP,I,J,K,BCG%IOR) ; PEND(2,NPEND(ST),ST) = A*UIN ; PEND(3,NPEND(ST),ST) = A
+   PEND(4:3+NZ,NPEND(ST),ST) = A*(FXN*UIN) ; PEND(4+NZ,NPEND(ST),ST) = A*SUM(FXN)*ABS(UIN)
    END SUBROUTINE PEND_WALL
 
    SUBROUTINE GROW(AR,N,NF,ST)
@@ -400,7 +410,11 @@ DO ST=1,2
          DO J=1,NTOT   ! linear search: the number of covered walls with a fine child on another rank is small
             IF (RB(1,J)/=KEY) CYCLE
             RS = 0._EB
-            IF (RB(NF,J)>0._EB .AND. ANY(RB(4+2*N_TRACKED_SPECIES:3+3*N_TRACKED_SPECIES,J)/=0._EB)) THEN   ! hidden fine burner face (ONE_WALL): A*M_DOT_G_PP_ADJUST
+            IF (RB(NF,J)==0._EB) THEN   ! OPEN parent: the fine box's own face flux (as ONE_WALL)
+               RS(0) = SUM(PEND(4:3+N_TRACKED_SPECIES,I,ST))
+               DO NQ=1,MIN(NS,N_TRACKED_SPECIES) ; RS(NQ) = PEND(3+NQ,I,ST) ; ENDDO
+               RS(NS+1) = PEND(4+N_TRACKED_SPECIES,I,ST)
+            ELSEIF (RB(NF,J)>0._EB .AND. ANY(RB(4+2*N_TRACKED_SPECIES:3+3*N_TRACKED_SPECIES,J)/=0._EB)) THEN   ! hidden fine burner face (ONE_WALL): A*M_DOT_G_PP_ADJUST
                RS(0) = A*SUM(RB(4+2*N_TRACKED_SPECIES:3+3*N_TRACKED_SPECIES,J))
                DO NQ=1,MIN(NS,N_TRACKED_SPECIES) ; RS(NQ) = A*RB(3+2*N_TRACKED_SPECIES+NQ,J) ; ENDDO
                RS(NS+1) = RS(0)
