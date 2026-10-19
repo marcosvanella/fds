@@ -207,8 +207,9 @@ void BcStep::ground_wall_ghosts(const std::string& n)
             const double u = a(i, j, k + 1);
             if (u == 0.0) return;
             const int ic = std::max(i, cells.smallEnd(0)), jc = std::max(j, cells.smallEnd(1));
+            const int cx = std::min(amrex::coarsen(ic, rx), l0_len[0] - 1), cy = std::min(amrex::coarsen(jc, ry), l0_len[1] - 1);   // the face on the high domain wall (ic = dom.bigEnd + 1): its column is the last one, not one past it (an out-of-bounds read: rank-dependent heap data)
             double g;
-            fds_wall_ghost(u, rho(ic, jc, k + 1), tmp(ic, jc, k + 1), mu(ic, jc, k + 1), dz, ground_rough[amrex::coarsen(ic, rx) + l0_len[0] * amrex::coarsen(jc, ry)], &g);
+            fds_wall_ghost(u, rho(ic, jc, k + 1), tmp(ic, jc, k + 1), mu(ic, jc, k + 1), dz, ground_rough[cx + l0_len[0] * cy], &g);
             a(i, j, k) = g;
         });
     }
