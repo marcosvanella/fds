@@ -17,11 +17,13 @@ USE MESH_VARIABLES, ONLY: MESHES,MESH_TYPE
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
 PUBLIC :: LS_ACTIVE,LS_INIT,LS_STEP,LS_REF_WIND,LS_REF_HEIGHT,LS_NX,LS_NY,LS_PHI,LS_PHI1,LS_T_IGN,LS_TAU,LS_BURN_DUR,LS_AREA_ADJ,LS_SURF,LS_DX,LS_DY, &
-   LS_UREF,LS_VREF,LS_U,LS_V,LS_SHADOW_MODE,FDS_LS_SET_MODE,FDS_LS_SHADOW_RUN,FDS_LS_SHADOW_CMP
+   LS_UREF,LS_VREF,LS_U,LS_V,LS_SHADOW_MODE,FDS_LS_SET_MODE,FDS_LS_SHADOW_RUN,FDS_LS_SHADOW_CMP,FDS_LS_PREPARE,FDS_LS_WIND_FROM_SLOTS
 
 REAL(EB), PARAMETER :: PHI_LS_MIN=-1._EB, PHI_LS_MAX=1._EB
 
 LOGICAL :: LS_ACTIVE=.FALSE.          !< the LS grid exists
+LOGICAL :: LS_WIND_SET=.FALSE.        !< LS_UREF/LS_VREF were set by FDS_LS_WIND_FROM_SLOTS for the coming stage
+INTEGER :: LS_RATIO=1                 !< LS cell = level-0 cell / LS_RATIO
 INTEGER :: LS_SHADOW_MODE=0           !< --ls-fine-shadow: run beside the original LEVEL_SET_FIRESPREAD and compare (level-0 equal grid)
 INTEGER :: LS_NX=0,LS_NY=0,LIMITER_LS=1
 REAL(EB), ALLOCATABLE :: LS_DX(:),LS_DY(:),RDXL(:),RDYL(:)
@@ -446,6 +448,109 @@ SCALAR_FACE_VALUE_LS = ZUP + 0.5_EB * B * ( ZDWN - ZUP )
 END FUNCTION SCALAR_FACE_VALUE_LS
 
 
+!> \brief Build the LS grid from level-0 mesh 1 (one mesh, flat terrain): LS cell = level-0 cell / R, surface index and wall state injected from the level-0 ground wall of the cell.
+SUBROUTINE LS_INIT_FROM_MESH(R)
+
+INTEGER, INTENT(IN) :: R
+TYPE(MESH_TYPE), POINTER :: M
+INTEGER :: I,J,IC,JC,IW,NX,NY
+REAL(EB), ALLOCATABLE :: DXF(:),DYF(:),T0(:,:),B0(:,:),A0(:,:),TA0(:,:)
+INTEGER, ALLOCATABLE :: SF0(:,:)
+
+IF (LS_ACTIVE) RETURN
+IF (NMESHES/=1) THEN
+   WRITE(0,'(A)') 'ERROR: the LS grid supports one level-0 mesh only (multi-mesh: global surface/wall injection not done yet)'
+   STOP 1
+ENDIF
+IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) THEN
+   WRITE(0,'(A)') 'ERROR: the LS grid supports LEVEL_SET_MODE 1, 3 and 4 only'
+   STOP 1
+ENDIF
+M => MESHES(1)
+NX = M%IBAR*R ; NY = M%JBAR*R
+ALLOCATE(DXF(NX),DYF(NY),T0(NX,NY),B0(NX,NY),A0(NX,NY),TA0(NX,NY),SF0(NX,NY))
+DO I=1,NX
+   DXF(I) = M%DX((I-1)/R+1)/REAL(R,EB)
+ENDDO
+DO J=1,NY
+   DYF(J) = M%DY((J-1)/R+1)/REAL(R,EB)
+ENDDO
+IF (R==1) THEN
+   DXF = M%DX(1:NX) ; DYF = M%DY(1:NY)
+ENDIF
+DO J=1,NY
+   DO I=1,NX
+      IC = (I-1)/R+1 ; JC = (J-1)/R+1
+      IF (ABS(M%Z_LS(IC,JC))>0._EB .OR. M%K_LS(IC,JC)/=1) THEN
+         WRITE(0,'(A)') 'ERROR: the LS grid supports flat terrain only'
+         STOP 1
+      ENDIF
+      SF0(I,J) = M%LS_SURF_INDEX(IC,JC)
+      IW = M%CELL(M%CELL_INDEX(IC,JC,M%K_LS(IC,JC)))%WALL_INDEX(-3)
+      T0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%T_IGN
+      B0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%BURN_DURATION
+      A0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%AREA_ADJUST
+      TA0(I,J) = M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX)%TAU_LS
+   ENDDO
+ENDDO
+CALL LS_INIT(NX,NY,DXF,DYF,SF0,T0,B0,A0,TA0)
+LS_RATIO = R
+
+END SUBROUTINE LS_INIT_FROM_MESH
+
+
+!> \brief C entry: make sure the LS grid exists (ratio R to the level-0 mesh); returns its size and the largest wind reference height of the spreading cells
+SUBROUTINE FDS_LS_PREPARE(R,NX,NY,HMAX) BIND(C,NAME='fds_ls_prepare')
+
+INTEGER(C_INT), VALUE :: R
+INTEGER(C_INT), INTENT(OUT) :: NX,NY
+REAL(C_DOUBLE), INTENT(OUT) :: HMAX
+INTEGER :: I,J
+
+CALL LS_INIT_FROM_MESH(R)
+NX = LS_NX ; NY = LS_NY ; HMAX = 0._EB
+DO J=1,LS_NY
+   DO I=1,LS_NX
+      IF (SURFACE(LS_SURF(I,J))%VEG_LSET_SPREAD) HMAX = MAX(HMAX,LS_REF_HEIGHT(I,J))
+   ENDDO
+ENDDO
+
+END SUBROUTINE FDS_LS_PREPARE
+
+
+!> \brief C entry: wind at the reference height of every spreading LS cell from the column samples gathered from the leaf cells (ZS: height of the cell centre above the ground,
+!> US, VS: cell-centre wind, CNT: 1 where the slot holds a sample; slot index fastest, then LS i, then LS j). NBAD counts spreading columns without any sample.
+SUBROUTINE FDS_LS_WIND_FROM_SLOTS(NKS,ZS,US,VS,CNT,NBAD) BIND(C,NAME='fds_ls_wind_from_slots')
+
+INTEGER(C_INT), VALUE :: NKS
+REAL(C_DOUBLE), INTENT(IN) :: ZS(NKS,LS_NX,LS_NY),US(NKS,LS_NX,LS_NY),VS(NKS,LS_NX,LS_NY),CNT(NKS,LS_NX,LS_NY)
+INTEGER(C_INT), INTENT(OUT) :: NBAD
+INTEGER :: I,J,K,NS
+REAL(EB), ALLOCATABLE :: ZC(:),UC(:),VC(:)
+
+ALLOCATE(ZC(NKS),UC(NKS),VC(NKS))
+NBAD = 0
+DO J=1,LS_NY
+   DO I=1,LS_NX
+      IF (.NOT.SURFACE(LS_SURF(I,J))%VEG_LSET_SPREAD) CYCLE
+      NS = 0
+      DO K=1,NKS
+         IF (CNT(K,I,J)>0.5_EB) THEN
+            NS = NS+1 ; ZC(NS) = ZS(K,I,J) ; UC(NS) = US(K,I,J) ; VC(NS) = VS(K,I,J)
+         ENDIF
+      ENDDO
+      IF (NS==0) THEN
+         NBAD = NBAD+1 ; LS_UREF(I,J) = 0._EB ; LS_VREF(I,J) = 0._EB
+      ELSE
+         CALL LS_REF_WIND(NS,ZC,UC,VC,LS_REF_HEIGHT(I,J),LS_UREF(I,J),LS_VREF(I,J))
+      ENDIF
+   ENDDO
+ENDDO
+LS_WIND_SET = .TRUE.
+
+END SUBROUTINE FDS_LS_WIND_FROM_SLOTS
+
+
 !> \brief --ls-fine-shadow: C entry that switches the shadow mode on
 SUBROUTINE FDS_LS_SET_MODE(MODE) BIND(C,NAME='fds_ls_set_mode')
 INTEGER(C_INT), VALUE :: MODE
@@ -460,43 +565,31 @@ SUBROUTINE FDS_LS_SHADOW_RUN(T,DT,NM)
 REAL(EB), INTENT(IN) :: T,DT
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
-INTEGER :: I,J,K,IW,NS
-REAL(EB), ALLOCATABLE :: ZS(:),US(:),VS(:),T0(:,:),B0(:,:),A0(:,:),TA0(:,:)
-INTEGER, ALLOCATABLE :: SF0(:,:)
+INTEGER :: I,J,K,NS
+REAL(EB), ALLOCATABLE :: ZS(:),US(:),VS(:)
 
 IF (NM/=1 .OR. NMESHES/=1) RETURN
 M => MESHES(NM)
-IF (.NOT.LS_ACTIVE) THEN
-   ALLOCATE(T0(M%IBAR,M%JBAR),B0(M%IBAR,M%JBAR),A0(M%IBAR,M%JBAR),TA0(M%IBAR,M%JBAR),SF0(M%IBAR,M%JBAR))
+IF (.NOT.LS_ACTIVE) CALL LS_INIT_FROM_MESH(1)
+IF (LS_RATIO/=1) CALL ABORT_LS('ls-fine-shadow: the LS grid must equal the level-0 mesh (ratio 1)')
+IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) CALL ABORT_LS('ls-fine-shadow: LEVEL_SET_MODE 2 and 5 are not supported')
+IF (.NOT.LS_WIND_SET) THEN    ! no gathered wind for this stage: sample the level-0 mesh the way the original does
+   ALLOCATE(ZS(M%KBAR),US(M%KBAR),VS(M%KBAR))
    DO J=1,M%JBAR
       DO I=1,M%IBAR
-         SF0(I,J) = M%LS_SURF_INDEX(I,J)
-         IW = M%CELL(M%CELL_INDEX(I,J,M%K_LS(I,J)))%WALL_INDEX(-3)
-         T0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%T_IGN
-         B0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%BURN_DURATION
-         A0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%AREA_ADJUST
-         TA0(I,J) = M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX)%TAU_LS
-         IF (ABS(M%Z_LS(I,J))>0._EB) CALL ABORT_LS('ls-fine-shadow: terrain is not flat')
+         IF (.NOT.SURFACE(LS_SURF(I,J))%VEG_LSET_SPREAD) CYCLE
+         NS = 0
+         DO K=M%K_LS(I,J),M%KBAR
+            NS = NS+1
+            ZS(NS) = M%ZC(K)-M%Z_LS(I,J)
+            US(NS) = 0.5_EB*(M%U(I-1,J,K)+M%U(I,J,K))
+            VS(NS) = 0.5_EB*(M%V(I,J-1,K)+M%V(I,J,K))
+         ENDDO
+         CALL LS_REF_WIND(NS,ZS,US,VS,LS_REF_HEIGHT(I,J),LS_UREF(I,J),LS_VREF(I,J))
       ENDDO
    ENDDO
-   CALL LS_INIT(M%IBAR,M%JBAR,M%DX(1:M%IBAR),M%DY(1:M%JBAR),SF0,T0,B0,A0,TA0)
 ENDIF
-
-IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) CALL ABORT_LS('ls-fine-shadow: LEVEL_SET_MODE 2 and 5 are not supported')
-ALLOCATE(ZS(M%KBAR),US(M%KBAR),VS(M%KBAR))
-DO J=1,M%JBAR
-   DO I=1,M%IBAR
-      IF (.NOT.SURFACE(LS_SURF(I,J))%VEG_LSET_SPREAD) CYCLE
-      NS = 0
-      DO K=M%K_LS(I,J),M%KBAR
-         NS = NS+1
-         ZS(NS) = M%ZC(K)-M%Z_LS(I,J)
-         US(NS) = 0.5_EB*(M%U(I-1,J,K)+M%U(I,J,K))
-         VS(NS) = 0.5_EB*(M%V(I,J-1,K)+M%V(I,J,K))
-      ENDDO
-      CALL LS_REF_WIND(NS,ZS,US,VS,LS_REF_HEIGHT(I,J),LS_UREF(I,J),LS_VREF(I,J))
-   ENDDO
-ENDDO
+LS_WIND_SET = .FALSE.
 CALL LS_STEP(T,DT)
 
 CONTAINS

@@ -28,6 +28,7 @@
 #include "FdsSetup.H"
 #include "PressureBcMap.H"
 #include "TimeLoop.H"
+#include "LsFine.H"
 #include "TwoLevelRun.H"
 #ifdef FDSRT_DRIVER_MODES
 #include "DriverModes.H"
@@ -284,6 +285,7 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--quiet") == 0) ro.quiet = true;
                     else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
                     else if (std::strcmp(argv[i], "--ls-fine-shadow") == 0) fds_ls_set_mode(1);   // level set on a global grid equal to the level-0 mesh, run beside the original and compared (<CHID>_ls_shadow.txt)
+                    else if (std::strcmp(argv[i], "--ls-fine-shadow-gather") == 0) { fds_ls_set_mode(1); fdsamr::ls_fine_config().mode = 2; }   // the same with the wind gathered from the leaf cells (LsFine.cpp)
                     else if (std::strcmp(argv[i], "--fine-b-shadow") == 0) fine_shadow = true;
                     else if (std::strcmp(argv[i], "--fine-b-build") == 0) { fine_shadow = true; fine_build = 1; }
                 }
