@@ -483,7 +483,20 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     core.set_tag_obst_snap(o.tag_obst_snap != 0 && o.max_level >= 1);
     core.set_nofine(o.nofine);
     if (o.nofine >= 0 && !pb::nofine_list().empty()) amrex::Print() << tag << ": D-010 " << pb::nofine_list().size() << " stateful VENT(s) stay on level 0 (no-refine buffer " << o.nofine << " level-0 cells)\n";
-    core.init_static(reg, false, fdsrt::RegridAmrCore::DmFn(), &l0.dm);
+    // fine boxes are cut at the level-0 mesh boundaries (RegridAmrCore::chop_at_level0); each goes to the rank of the mesh under it (FDS PROCESS), so its parent walls,
+    // ambient state and devices are local
+    const fdsrt::RegridAmrCore::DmFn owner_dm = [&](int lev, const amrex::BoxArray& ba) {
+        amrex::IntVect r(1);
+        for (int l = 0; l < lev; ++l) r *= core.refRatio(l);
+        amrex::Vector<int> pmap(ba.size(), 0);
+        for (int i = 0; i < static_cast<int>(ba.size()); ++i) {
+            const amrex::Box b = amrex::coarsen(ba[i], r);
+            for (int m = 0; m < static_cast<int>(l0.ba.size()); ++m)
+                if (l0.ba[m].contains(b.smallEnd())) { pmap[i] = l0.dm[m]; break; }
+        }
+        return amrex::DistributionMapping(pmap);
+    };
+    core.init_static(reg, false, owner_dm, &l0.dm);
     probe("after init_static");
 
     // ---- level 0 alone: one corrector-form pass for the D of the initial state (projection target and parent value of new levels' D)
