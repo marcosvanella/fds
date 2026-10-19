@@ -2,7 +2,7 @@
 
 Owner: V&V Lead (matrix and gate). Implementation: Role 1. Written 2026-10-19 under the owner's top-priority directive. No solver code changes.
 Gate script: `/workspace/fds-amr/scratch/mr-ls/vv/lsfine_multirank_gate.sh` with comparator `lsfine_compare.py` in the same dir. Role 1 will move both into `Source/driver/tests`.
-Base code: `e821a0884c`. The dry runs used `scratch/b611/fds_amr` (built 09:26 from `src` with Role 1's multi-mesh init `9e812bb5d5`; sha256 `4c4488ce…`, see `dry_gate2.binary.sha256`).
+Base code: `e821a0884c`. Current dry run: `scratch/b611/fds_amr` built 09:49 from `src` `b549eeb2c6` (sha256 `39792e76…`, `dry_gate3.binary.sha256`).
 
 ## Case and flags
 
@@ -17,44 +17,44 @@ Base code: `e821a0884c`. The dry runs used `scratch/b611/fds_amr` (built 09:26 f
   - The csv integrals are the driver's leaf sums (HRR, mass, species, div over uncovered cells).
   - PHI is compared on leaf cells: each cell of the finest-resolution grid takes the value of the leaf cell covering it, and covered coarse cells never enter.
 
-## Metrics and tolerances (PROVISIONAL, Role 1 proposal adopted)
+## Metrics and tolerances: AGREED (Role 1, 2026-10-19)
 
-| metric | how | class A: same mesh count, more ranks (vs the 1-rank run of that mesh count) | class B: vs the 1/1 reference |
-|---|---|---|---|
-| every output csv (`_hrr`, `_devc`, `_driver_mass`, `_driver_steps`, `_multi_level`; timing files `_cpu`, `_driver_perf`, `_steps` excluded) | per-column max abs diff / column max | **bit-identical** (expected; provisional, since the multi-rank Allreduce path is coded but untested) | <= **1e-8** relative (provisional) |
-| front x (DEVC `x` = MAXLOC X of burning rate) at 10, 20, 30 s; 40, 80, 120 s on the long row | value at the last output time <= t | identical | **identical** (5 m device resolution) |
-| PHI, final plotfile, leaf cells | max abs dPHI / max abs PHI_ref | 0 | <= 1e-8 (provisional) |
-| gates | driver `RESULT gate` line | same limits | fine div <= 1e-9; mass and species residual/limit << 1 (driver: 1e-6·(M0+through-flow), open case). FR-020/021 1e-12 / 1e-10 apply to closed cases only; C064 is open |
+| comparison | required | not gated (printed as INFO) |
+|---|---|---|
+| **Same mesh count on more ranks**, vs the 1-rank run of that mesh count (`--mode bitid`); also the 1/1 determinism repeat | **strict bit-identity**: every output csv byte-identical (`_hrr`, `_devc`, `_driver_mass`, `_driver_steps`, `_multi_level`; timing files `_cpu`, `_driver_perf`, `_steps` excluded), front x identical, final-plotfile PHI on leaf cells identical, gate PASS | — |
+| **Any mesh count vs 1 mesh / 1 rank** (`--mode crossmesh`) | front x identical at 10/20/30 s (40/80/120 s long option; 5 m device resolution); gate verdict identical to the reference (fine div <= 1e-9, mass/species residual/limit << 1); **mean HRR for t >= 10 s within 2%** (`HRR_MEAN_TOL=0.02`, `HRR_MEAN_T0=10`, configurable) | csv and PHI differences (the PHI line flags non-finite or garbage values > 1e3) |
 
-**Rationale for the class A bit-identity.** For the same mesh count, the per-mesh arithmetic is unchanged. Only the global reductions change: LS-grid assembly ("one exact Allreduce"), the wind-gather MAX/MIN/SUM, the MLMG dot products and the composite sums. If those are exact or order-fixed, the result is bit-identical. If a reduction turns out to be order-dependent, fall back to the class B 1e-8 bound and file it against the reduction.
+- The earlier 1e-8 cross-mesh-count requirement is **removed**: a different mesh count changes the FDS mesh-interface arithmetic, and the turbulent flow amplifies that difference above round-off after 2-5 s.
+- **Calibration** (`PERTURB=1`): reruns each 1-mesh / 1-rank reference with TMPA + 0.01 C (`PERTURB_DT`) and reports the mean-HRR spread.
+  - Measured spread: 1.9e-5 (1 level), 3.5e-6 (`--nofine 0`), 1.5e-5 (`--nofine 1`).
+  - That is far below both the 2% tolerance and the measured cross-mesh differences (up to 1e-2). So at 30 s a +0.01 C TMPA shift does **not** reach the decomposition scatter; it only bounds the run-to-run noise from below.
+  - A stronger perturbation (e.g. `PERTURB_DT=1`, or the 120 s row) is needed for a real calibration. The 2% stays as agreed.
+- The multi-rank Allreduce path (LS-grid assembly, wind gather) is coded but untested. The 2- and 4-rank bit-identity rows are the first test of it.
+- **Leaf cells only** (owner ruling): the integrals are the driver's leaf sums; PHI is compared with each finest-grid cell holding its leaf cell value.
 
-**Warning on class B.** The dry run shows 2- and 4-mesh runs depart from 1 mesh above 1e-8 after the first 2-5 s, by up to 19% in single HRR samples and 0.1-2% in mean HRR. Front x is identical. This looks like the normal amplification of a decomposition change in turbulent LES: different meshes mean different FDS mesh-interface arithmetic. If so, **1e-8 against a different mesh count is not achievable even with a correct implementation.** Proposed fallback, to be decided by the owner and Role 1:
-- keep 1e-8 / bit-identity for class A;
-- for class B use identical front x, identical gate verdicts, and a statistical HRR bound (mean HRR 10-30 s within about 2%, provisional);
-- calibrate with a perturbed 1-mesh run to measure the scatter.
+## Matrix (T_END 30 s; dry run 2026-10-19 ~09:55 on `scratch/b611/fds_amr` built 09:49, src `b549eeb2c6`, sha256 `39792e76…`; 1 rank, 1 thread)
 
-## Matrix (2 levels unless noted; T_END 30 s)
+Status key: PASS = dry run on the box; NOT RUN = needs more cores (pop-os); DEFERRED = later.
 
-Status key: PASS = dry run on the box; XFAIL = expected fail or blocked; NOT RUN = needs more cores (pop-os); DEFERRED = later.
-
-| id | meshes / ranks | levels / nofine | compared against | class | status 2026-10-19 (b611 09:26) |
+| id | meshes / ranks | levels / nofine | compared against | mode | status |
 |---|---|---|---|---|---|
-| R-L1 / R-N0 / R-N1 | 1 / 1 | 1 lvl; 2 lvl nf0; 2 lvl nf1 | n/a (references) | — | runs OK. Determinism (1/1 rerun) **bit-identical** for all three (`REPEAT=1`) |
-| M2R1-L1 | 2 / 1 | 1 lvl | ref R-L1 | B | runs, **FAIL at 1e-8**: HRR samples 0.19 rel, mean HRR 0.74%, departs at t=5.2 s; front x identical (-10/5/5 m) |
-| M2R1-N0 | 2 / 1 | nf0 | R-N0 | B | runs, gate PASS (div 1.9e-12), **FAIL at 1e-8**: HRR 2.9e-2 rel, mean 0.20%, departs at t=2.34 s; PHI leaf rel 1.7e-2; front x identical (5/5/15 m) |
-| M2R1-N1 | 2 / 1 | nf1 | R-N1 | B | runs, gate PASS (div 4.6e-13), **FAIL at 1e-8**: HRR 1.3e-2, mean 0.27%; PHI 7.5e-3; front x identical |
-| M4R1-L1 | 4 / 1 | 1 lvl | R-L1 | B | runs, **FAIL at 1e-8**: HRR 8.3e-3, mean 0.10%; front x identical |
-| M4R1-N0 | 4 / 1 | nf0 | R-N0 | B | runs, gate PASS (div 6.5e-13), **FAIL**: HRR 4.7e-2, mean 0.86%; PHI 0.20; `_multi_level.csv` 81 vs 75 steps; front x identical |
-| M4R1-N1 | 4 / 1 | nf1 | R-N1 | B | gate PASS (div 1.7e-13), **FAIL, DEFECT**: final-plotfile **L0 PHI = garbage (up to 7e271)** in the top two j rows of meshes 3 and 4 (cells i=1..5,j=11 and i=8..11,j=10..11, all k). Looks like uninitialised PHI from `fds_ls_get_phi` on multi-mesh L0. HRR 0.12, mean 2.0% |
-| M2R2-* | 2 / 2 | 1 lvl, nf0, nf1 | R-* (B) and M2R1-* (A, bit-identity) | A+B | NOT RUN (pop-os) |
-| M4R2-* | 4 / 2 | same | R-* and M4R1-* | A+B | NOT RUN (pop-os) |
-| M4R4-* | 4 / 4 | same | R-* and M4R1-* | A+B | NOT RUN (pop-os) |
+| R-L1 / R-N0 / R-N1 repeat | 1 / 1 | 1 lvl; 2 lvl nf0; 2 lvl nf1 | 1/1 reference | bitid | **PASS** (bit-identical) |
+| R-*-perturb | 1 / 1, TMPA + 0.01 | all three | 1/1 reference | calibration | INFO: mean-HRR spread 1.9e-5 / 3.5e-6 / 1.5e-5 |
+| M2R1-L1 | 2 / 1 | 1 lvl | R-L1 | crossmesh | **PASS**: front x identical (-10/5/5 m), verdict PASS = PASS, mean HRR rel 9.8e-3 |
+| M4R1-L1 | 4 / 1 | 1 lvl | R-L1 | crossmesh | **PASS**: front x identical, mean HRR 1.3e-3 |
+| M2R1-N0 | 2 / 1 | nf0 | R-N0 | crossmesh | **PASS**: front x identical (5/5/15 m), gate PASS (div 9.2e-13), mean HRR 3.1e-3; PHI leaf rel 1.2e-2 (INFO) |
+| M4R1-N0 | 4 / 1 | nf0 | R-N0 | crossmesh | **PASS**: gate PASS (div 8.9e-13), mean HRR 9.0e-4; PHI 1.4e-2 (INFO) |
+| M2R1-N1 | 2 / 1 | nf1 | R-N1 | crossmesh | **PASS**: gate PASS (div 7.3e-13), mean HRR 4.8e-4; PHI 8.2e-3 (INFO) |
+| M4R1-N1 | 4 / 1 | nf1 | R-N1 | crossmesh | **PASS**: gate PASS (div 7.3e-13), mean HRR 8.3e-4; PHI 2.9e-3 (INFO), no garbage in this build. The L0 PHI garbage (up to 7e271, top two j rows of meshes 3 and 4) seen on the 09:26 build is **confirmed as Role 1's; fix pending in the multi-mesh commit**. It was not reproduced on the 09:49 build; keep the row watched |
+| M2R2-* | 2 / 2 | 1 lvl, nf0, nf1 | M2R1-* (bitid) and R-* (crossmesh) | both | NOT RUN (pop-os) |
+| M4R2-*, M4R4-* | 4 / 2, 4 / 4 | same | M4R1-* (bitid) and R-* (crossmesh) | both | NOT RUN (pop-os) |
 | M1R2, M1R4 | 1 / 2, 1 / 4 | — | — | — | N/A: FDS refuses ranks > meshes |
-| LONG | 1 / 1, 120 s | nf0 | gate only; multi-config at 120 s via `T_END=120 TIMES=40,80,120` | — | **PASS**: gate PASS, 17 s wall (1 rank, 1 thread); front x 15 / 35 / 55 m at 40 / 80 / 120 s |
-| L3-* | 1/1, 2/1, 2/2, 4/1, 4/2, 4/4 | 3 levels, nf0 / nf1 | 1/1 3-level | A+B | DEFERRED (3 levels later) |
+| LONG | 1 / 1, 120 s | nf0 | gate only; multi-config at 120 s via `T_END=120 TIMES=40,80,120` | — | **PASS** (gate PASS) |
+| L3-* | all of the above | 3 levels | 1/1 3-level | both | DEFERRED |
 
-**Multi-mesh status.** At `e821a0884c`, `LS_INIT_FROM_MESH` stops on NMESHES /= 1: "the LS grid supports one level-0 mesh only". So with the e821 binary the 2- and 4-mesh rows are blocked (expected fail, not failures), and the gate's default `MULTIMESH_EXPECT=blocked` reports them as XFAIL. b611 (09:26) already contains Role 1's multi-mesh init (`9e812bb5d5`): those rows run and the gates pass, but they fail the class B 1e-8 bound, and 4-mesh nf1 has the PHI defect. Use `MULTIMESH_EXPECT=pass` to count them.
-Plain (non-ls-fine) LEVEL_SET_MODE with more than one mesh aborts by design ("PHI_LS exchange, FDS code 14, is not routed; --ls-fine supports it"). So no plain-FDS multi-mesh baseline exists for the scatter calibration.
+Gate result: **GATE PASS** (`MULTIMESH_EXPECT=pass PERTURB=1 LONG=1 MESHES="1 2 4" RANKS=1`), 68 s total. Log: `scratch/mr-ls/vv/dry_gate3.log`.
+**History.** At `e821a0884c`, `LS_INIT_FROM_MESH` stopped on NMESHES /= 1, so multi-mesh rows were blocked; the gate's default `MULTIMESH_EXPECT=blocked` reports them as XFAIL. Role 1's multi-mesh init (`9e812bb5d5`) and later commits make them run.
+Plain (non-ls-fine) LEVEL_SET_MODE with more than one mesh aborts by design ("PHI_LS exchange, FDS code 14, is not routed").
 
 ## Existing gates (must stay green; `RUN_EXISTING=1` runs them)
 
@@ -68,7 +68,7 @@ Plain (non-ls-fine) LEVEL_SET_MODE with more than one mesh aborts by design ("PH
 ## Execution
 
 - **Box, 1 core:** `OMP_NUM_THREADS=1 MPIRUN="mpirun --allow-run-as-root" RANKS=1 ./lsfine_multirank_gate.sh`
-- **pop-os:** `FDS_AMR=<bin> MPIRUN=mpirun OMP_NUM_THREADS=1 RANKS="1 2 4" MESHES="1 2 4" MULTIMESH_EXPECT=pass RUN_EXISTING=1 ./lsfine_multirank_gate.sh`
+- **pop-os:** `FDS_AMR=<bin> MPIRUN=mpirun OMP_NUM_THREADS=1 RANKS="1 2 4" MESHES="1 2 4" MULTIMESH_EXPECT=pass PERTURB=1 RUN_EXISTING=1 ./lsfine_multirank_gate.sh`
 - **Long option:** `T_END=120 TIMES=40,80,120`.
 - Exit code 0 only if every non-XFAIL row passes.
-- Dry run logs: `scratch/mr-ls/vv/dry_gate.log` (default blocked mode: GATE PASS, 46 s total) and `dry_gate2.log` (multi-mesh counted: GATE FAIL 6, 41 s).
+- Dry run logs: `scratch/mr-ls/vv/dry_gate3.log` (agreed tolerance, current). Superseded: `dry_gate.log` and `dry_gate2.log` (provisional 1e-8 tolerance, 09:26 build).
