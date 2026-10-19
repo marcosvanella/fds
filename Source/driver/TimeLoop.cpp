@@ -141,6 +141,7 @@ int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext,
 void fds_leaf_register();   // fds_leaf_devc.f90: leaf-cell hooks of the gas devices
 int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
+void fds_fine_walls_parent_xchg();                          // fds_fine_level.f90: level-0 parent state of the hidden walls whose parent mesh is on another rank (collective)
 void fds_fine_walls_rad_xchg(int lev);                      // fds_fine_level.f90: pull the hidden-wall radiation state of level lev from level lev-1 (collective)
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
 void fds_fine_walls_sums(int lev, double t, int chk, double* q);
@@ -343,6 +344,7 @@ struct TimeLoop::Impl {
         dt_new.resize(total_boxes(), L.m_dt);
         chg.resize(total_boxes(), 0);
         pend_restore(lev);
+        fds_fine_walls_parent_xchg();   // collective: remote parent state of the new hidden walls
         record_vent_faces();   // the vent faces of the old box layout (box index, cell) mean nothing on the new one
         fine_burner_state(false);   // burner face lists of the new box layout: the first stage after a (re)bind applies them in its flux override, a list kept from the old layout has faces outside the new boxes
         select(0);
@@ -743,7 +745,7 @@ struct TimeLoop::Impl {
                     }
                 }
 #ifdef FDS_HAVE_FINE_LEVEL
-            burner_overrides(kind, dir, idx, val, n, k, lo);
+            burner_overrides(kind, dir, idx, val, n, k, vbx);
 #endif
             const int r = fds_flux_set_override(nm, kind, n, dir.data(), idx.data(), ns, val.data());
             if (r != 0) die(std::string("flux override rejected (") + (r == 2 ? "a face outside the valid range of the box" : "bad argument") + ") on box " + std::to_string(mfi.index()));
@@ -1714,6 +1716,7 @@ struct TimeLoop::Impl {
     std::vector<std::vector<BurnerFaces>> burner;   // [level][local box, MFIter order]
     void fine_burner_state(bool pred)
     {
+        fds_fine_walls_parent_xchg();   // collective, after the level-0 WALL_BC of the stage: remote parent state for this and the later fine-wall calls of the stage
         burner.assign(lc.size(), {});
         const int w = 5 + 2 * nt;
         for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
@@ -1766,7 +1769,7 @@ struct TimeLoop::Impl {
             }
         }
     }
-    void burner_overrides(int kind, std::vector<int>& dir, std::vector<int>& idx, std::vector<double>& val, int& n, int k, const amrex::IntVect& lo)
+    void burner_overrides(int kind, std::vector<int>& dir, std::vector<int>& idx, std::vector<double>& val, int& n, int k, const amrex::Box& vbx)
     {
         const int l = static_cast<int>(c - lc.data());
         if (l < 1 || l >= static_cast<int>(burner.size()) || k >= static_cast<int>(burner[l].size())) return;
@@ -1780,7 +1783,7 @@ struct TimeLoop::Impl {
         }
         for (std::size_t f = 0; f < b.sf.size(); f += 4) { dir.push_back(b.sf[f]); idx.insert(idx.end(), b.sf.begin() + f + 1, b.sf.begin() + f + 4); val.insert(val.end(), ns, 0.0); ++n; }
         if (kind == 1) {   // no diffusion through an open domain face of a fine box (its ghost layer holds the ambient state at an inflow; FDS walls carry the parent's wall value: not modelled here)
-            const amrex::Box bx = L.m_reg->level(l).ba[k], dom = L.m_reg->level(l).geom.Domain();
+            const amrex::Box bx = vbx, dom = L.m_reg->level(l).geom.Domain();   // the box itself (k is the local MFIter count, not the BoxArray index, with several ranks)
             for (int d = 0; d < 3; ++d) {
                 if (L.m_reg->level(l).geom.isPeriodic(d)) continue;
                 for (int side = 0; side < 2; ++side) {
@@ -1794,7 +1797,6 @@ struct TimeLoop::Impl {
                 }
             }
         }
-        (void)lo;
     }
 #endif
 #ifdef FDS_HAVE_FINE_LEVEL
