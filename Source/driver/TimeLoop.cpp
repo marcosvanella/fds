@@ -117,6 +117,7 @@ int fds_p_vent_count(int nm);
 void fds_p_vent_get(int nm, int nv, int* ip, double* rp);
 void fds_get_face_bc(int nm, int* code);   // fds_mesh_query.f90 (patch 0015)
 void fds_get_face_wall_types(int nm, int f, int n1, int n2, int* t);   // fds_mesh_query.f90 (mixed face)
+void fds_get_ground_roughness(int nm, int n1, int n2, double* r);   // fds_fine_level.f90 (wall-model ghost)
 void fds_p_iter_init();
 void fds_p_iter_inc();
 int fds_p_iter_baro();
@@ -223,6 +224,7 @@ struct TimeLoop::Impl {
     int bc_type[6] = {0, 0, 0, 0, 0, 0};   // pb::BC per domain face (side*3+dir)
     FaceBc vel_bc{};                        // wall type per domain face (2*dir+side) for the fine-level velocity ghosts (BcStep::vel_bc, patch 0015)
     std::array<std::vector<int>, 6> face_wtype;   // mixed domain face: level-0 wall type per face cell (BcStep::face_wtype)
+    std::vector<double> ground_rough;              // ground wall ROUGHNESS per level-0 column (BcStep::ground_rough)
     bool solve_dir[3] = {true, true, true};
     std::string dir;
     std::vector<std::string> log_steps;
@@ -335,6 +337,7 @@ struct TimeLoop::Impl {
         o.bc->ext_ghost = true;   // requirement of levels > 0 (BcStep::exchange): the driver saves the face velocities, MATCH_VELOCITY is not run
         o.bc->vel_bc = vel_bc;    // fine boxes have no wall cells: the domain-face wall type of level 0 (patch 0015)
         o.bc->face_wtype = face_wtype; o.bc->l0_len = l0.geom.Domain().length();   // mixed face: per level-0 face cell
+        o.bc->ground_rough = ground_rough;
         LevelCtx x;
         x.lev = &Lv; x.F = &F; x.bc = o.bc.get(); x.sd = &L.m_reg->side_data(lev); x.drho = o.drho.get(); x.dzz = o.dzz.get();
         x.nbox = nb; x.fds0 = nm0; x.off = total_boxes();
@@ -576,6 +579,17 @@ struct TimeLoop::Impl {
             amrex::ParallelAllReduce::Max(m.data(), static_cast<int>(m.size()), amrex::ParallelContext::CommunicatorSub());
             face_wtype[f] = m;
         }
+        // ground ROUGHNESS per level-0 column for the wall-model ghost of fine boxes on the ground: a fine box need not sit over a level-0 mesh of its own rank, so the map is global
+        // (each column comes from one ground mesh, zeros elsewhere: MAX is exact)
+        ground_rough.assign(static_cast<std::size_t>(dom.length(0)) * dom.length(1), 0.0);
+        for (int i = 0; i < nbox; ++i) {
+            const amrex::Box vb = l0.ba[i];
+            if (!local(i) || vb.smallEnd(2) != dom.smallEnd(2)) continue;
+            std::vector<double> r(static_cast<std::size_t>(vb.length(0)) * vb.length(1));
+            fds_get_ground_roughness(i + 1, vb.length(0), vb.length(1), r.data());
+            for (int b = 0; b < vb.length(1); ++b) for (int a = 0; a < vb.length(0); ++a) ground_rough[(vb.smallEnd(0) - dom.smallEnd(0) + a) + dom.length(0) * (vb.smallEnd(1) - dom.smallEnd(1) + b)] = r[a + vb.length(0) * b];
+        }
+        amrex::ParallelAllReduce::Max(ground_rough.data(), static_cast<int>(ground_rough.size()), amrex::ParallelContext::CommunicatorSub());
         if (!L.m_o.quiet) amrex::Print() << "driver set-up: fine-level wall types -x..+z (1 INERT, 3 MIRROR, else plain mirror) " << vel_bc[0] << " " << vel_bc[1] << " " << vel_bc[2] << " " << vel_bc[3] << " " << vel_bc[4] << " " << vel_bc[5] << "\n";
         if (std::getenv("FDSTL_PBV")) std::fprintf(stderr, "[rank %d] codes %d %d %d %d %d %d\n", amrex::ParallelDescriptor::MyProc(), code[0], code[1], code[2], code[3], code[4], code[5]);
         DirBc dm[3];
@@ -743,7 +757,7 @@ struct TimeLoop::Impl {
                     }
                 }
 #ifdef FDS_HAVE_FINE_LEVEL
-            burner_overrides(kind, dir, idx, val, n, k, lo);
+            burner_overrides(kind, dir, idx, val, n, k, vbx);
 #endif
             const int r = fds_flux_set_override(nm, kind, n, dir.data(), idx.data(), ns, val.data());
             if (r != 0) die(std::string("flux override rejected (") + (r == 2 ? "a face outside the valid range of the box" : "bad argument") + ") on box " + std::to_string(mfi.index()));
@@ -1766,7 +1780,7 @@ struct TimeLoop::Impl {
             }
         }
     }
-    void burner_overrides(int kind, std::vector<int>& dir, std::vector<int>& idx, std::vector<double>& val, int& n, int k, const amrex::IntVect& lo)
+    void burner_overrides(int kind, std::vector<int>& dir, std::vector<int>& idx, std::vector<double>& val, int& n, int k, const amrex::Box& bx)   // k: local box (MFIter order), bx: its box
     {
         const int l = static_cast<int>(c - lc.data());
         if (l < 1 || l >= static_cast<int>(burner.size()) || k >= static_cast<int>(burner[l].size())) return;
@@ -1780,7 +1794,7 @@ struct TimeLoop::Impl {
         }
         for (std::size_t f = 0; f < b.sf.size(); f += 4) { dir.push_back(b.sf[f]); idx.insert(idx.end(), b.sf.begin() + f + 1, b.sf.begin() + f + 4); val.insert(val.end(), ns, 0.0); ++n; }
         if (kind == 1) {   // no diffusion through an open domain face of a fine box (its ghost layer holds the ambient state at an inflow; FDS walls carry the parent's wall value: not modelled here)
-            const amrex::Box bx = L.m_reg->level(l).ba[k], dom = L.m_reg->level(l).geom.Domain();
+            const amrex::Box dom = L.m_reg->level(l).geom.Domain();
             for (int d = 0; d < 3; ++d) {
                 if (L.m_reg->level(l).geom.isPeriodic(d)) continue;
                 for (int side = 0; side < 2; ++side) {
@@ -1794,7 +1808,6 @@ struct TimeLoop::Impl {
                 }
             }
         }
-        (void)lo;
     }
 #endif
 #ifdef FDS_HAVE_FINE_LEVEL

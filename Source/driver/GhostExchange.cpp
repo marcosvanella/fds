@@ -20,7 +20,7 @@ void fds_g_velocity_bc(double t, int nm, int est);
 void fds_g_viscosity_bc(int nm, int est);
 void fds_g_mu_edges(int nm);
 void fds_g_mu_edges_dom(int nm, int mask, int which);
-void fds_wall_ghost(double u, double rho, double tmp, double muc, double dz, int ic, int jc, double* g);
+void fds_wall_ghost(double u, double rho, double tmp, double muc, double dz, double rough, double* g);
 void fds_ambient_state(int k, int nz, double* rho, double* tmp, double* zz);
 int fds_n_tracked_species();
 }
@@ -208,7 +208,7 @@ void BcStep::ground_wall_ghosts(const std::string& n)
             if (u == 0.0) return;
             const int ic = std::max(i, cells.smallEnd(0)), jc = std::max(j, cells.smallEnd(1));
             double g;
-            fds_wall_ghost(u, rho(ic, jc, k + 1), tmp(ic, jc, k + 1), mu(ic, jc, k + 1), dz, amrex::coarsen(ic, rx) + 1, amrex::coarsen(jc, ry) + 1, &g);
+            fds_wall_ghost(u, rho(ic, jc, k + 1), tmp(ic, jc, k + 1), mu(ic, jc, k + 1), dz, ground_rough[amrex::coarsen(ic, rx) + l0_len[0] * amrex::coarsen(jc, ry)], &g);
             a(i, j, k) = g;
         });
     }

@@ -85,6 +85,7 @@ public:
     // tangential directions of the level-0 domain, l0_len cells per direction; empty = not mixed). The normal velocity and FV are 0 on the fine faces over a SOLID cell (TimeLoop sets it).
     std::array<std::vector<int>, 6> face_wtype;
     amrex::IntVect l0_len{1, 1, 1};
+    std::vector<double> ground_rough;   // INERT floor: ROUGHNESS of the level-0 ground wall per level-0 column (x fastest, all ranks; TimeLoop sets it), for the wall-model ghost
     void zero_mixed_wall(amrex::MultiFab& mf, int d, bool cell_shaped);
     // ghost_exchange(F, code, predictor) followed by cf_ghost_hook (if set). The time loop calls this at every exchange position.
     void exchange(int code, bool predictor = true);

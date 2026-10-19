@@ -825,7 +825,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     amrex::Print() << tag << " RESULT flux registers: stale (old-hierarchy) read-out arrays " << stale_regs << " (gate: 0)\n";
     const bool deref_ok = deref_n == 0 || (deref_worst <= 1e-12 && deref_div <= 1e-9);
     if (deref_n > 0) amrex::Print() << tag << " RESULT derefinement invariance (" << deref_n << " derefining regrids): worst relative change of T, Z, background pressure " << deref_worst << " (<= 1e-12), worst max|div u - D| after " << deref_div << " (<= 1e-9): " << (deref_ok ? "PASS" : "FAIL") << "\n";
-    const bool gate = worst_fine <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok;
+    const bool gate = std::isfinite(m1[0] - inflow[0]) && worst_fine <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok;
     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked << " (info only)"
                    << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x (initial mass + through-flow), open" : "1e-10 x initial mass, closed") << ")\n";
     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel

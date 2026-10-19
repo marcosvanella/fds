@@ -1030,28 +1030,23 @@ INTEGER(C_INT), VALUE :: K,NZ
 REAL(C_DOUBLE), INTENT(OUT) :: RHO,TMP,ZZ(*)
 REAL(EB) :: RSUM,Z0(1:N_TRACKED_SPECIES)
 INTEGER :: KK
-KK = MAX(1,MIN(K,MESHES(1)%KBAR))
+KK = MAX(1,MIN(K,MESHES(LOWER_MESH_INDEX)%KBAR))   ! a local level-0 mesh: TMP_0 and PBAR exist on the meshes of this rank only
 Z0 = SPECIES_MIXTURE(1:N_TRACKED_SPECIES)%ZZ0
 CALL GET_SPECIFIC_GAS_CONSTANT(Z0,RSUM)
-TMP = MESHES(1)%TMP_0(KK) ; RHO = MESHES(1)%PBAR(KK,0)/(RSUM*TMP) ; ZZ(1:NZ) = Z0(1:NZ)
+TMP = MESHES(LOWER_MESH_INDEX)%TMP_0(KK) ; RHO = MESHES(LOWER_MESH_INDEX)%PBAR(KK,0)/(RSUM*TMP) ; ZZ(1:NZ) = Z0(1:NZ)
 END SUBROUTINE FDS_AMBIENT_STATE
 
 !> Tangential ghost value G of a fine cell next to the ground: the wall model stress RHO*U_TAU**2 of the FDS ground wall (WALL_MODEL at the cell centre height DZ/2, roughness of the
-!> level-0 wall of the cell IC,JC under it) written as the gradient (U-G)/DZ times the cell's viscosity MUC (FDS gives the edge the stress directly and uses the ghost only for the
-!> gradient). G lies between -|U| (no slip) and |U|.
-SUBROUTINE FDS_WALL_GHOST(U,RHO,TMP,MUC,DZ,IC,JC,G) BIND(C,NAME='fds_wall_ghost')
+!> level-0 ground wall under the cell, ROUGH, from fds_get_ground_roughness) written as the gradient (U-G)/DZ times the cell's viscosity MUC (FDS gives the edge the stress directly and
+!> uses the ghost only for the gradient). G lies between -|U| (no slip) and |U|.
+SUBROUTINE FDS_WALL_GHOST(U,RHO,TMP,MUC,DZ,ROUGH,G) BIND(C,NAME='fds_wall_ghost')
 USE TYPES, ONLY: SURFACE
 USE TURBULENCE, ONLY: WALL_MODEL
 USE GLOBAL_CONSTANTS, ONLY: I_MAX_TEMP,MU_RSQMW_Z,RSQ_MW_Z
-REAL(C_DOUBLE), VALUE :: U,RHO,TMP,MUC,DZ
-INTEGER(C_INT), VALUE :: IC,JC
+REAL(C_DOUBLE), VALUE :: U,RHO,TMP,MUC,DZ,ROUGH
 REAL(C_DOUBLE), INTENT(OUT) :: G
-REAL(EB) :: SLIP,UTAU,YPLUS,NU,ROUGH,TAU,GM
-INTEGER :: IW,I,J,ITMP
-ROUGH = 0._EB
-I = MAX(1,MIN(IC,MESHES(1)%IBAR)) ; J = MAX(1,MIN(JC,MESHES(1)%JBAR))
-IW = MESHES(1)%CELL(MESHES(1)%CELL_INDEX(I,J,1))%WALL_INDEX(-3)
-IF (IW>0) ROUGH = SURFACE(MESHES(1)%BOUNDARY_PROP1(MESHES(1)%WALL(IW)%B1_INDEX)%SURF_INDEX)%ROUGHNESS
+REAL(EB) :: SLIP,UTAU,YPLUS,NU,TAU,GM
+INTEGER :: ITMP
 ITMP = MIN(I_MAX_TEMP,NINT(TMP))
 NU = MU_RSQMW_Z(ITMP,1)/RSQ_MW_Z(1)/RHO
 CALL WALL_MODEL(SLIP,UTAU,YPLUS,NU,ROUGH,0.5_EB*DZ,ABS(U))
@@ -1059,6 +1054,21 @@ TAU = RHO*UTAU**2
 GM = MAX(-ABS(U),MIN(ABS(U),ABS(U)-TAU*DZ/MAX(MUC,TINY(1._EB))))
 G = SIGN(1._EB,U)*GM
 END SUBROUTINE FDS_WALL_GHOST
+
+!> ROUGHNESS of the ground wall (cell K=1, face -3) of every column of the local level-0 mesh NM (0 without a wall); the driver makes the map global (TimeLoop, ground_rough).
+SUBROUTINE FDS_GET_GROUND_ROUGHNESS(NM,N1,N2,R) BIND(C,NAME='fds_get_ground_roughness')
+USE TYPES, ONLY: SURFACE
+INTEGER(C_INT), VALUE :: NM,N1,N2
+REAL(C_DOUBLE), INTENT(OUT) :: R(N1,N2)
+INTEGER :: I,J,IW
+R = 0._EB
+DO J=1,N2
+   DO I=1,N1
+      IW = MESHES(NM)%CELL(MESHES(NM)%CELL_INDEX(I,J,1))%WALL_INDEX(-3)
+      IF (IW>0) R(I,J) = SURFACE(MESHES(NM)%BOUNDARY_PROP1(MESHES(NM)%WALL(IW)%B1_INDEX)%SURF_INDEX)%ROUGHNESS
+   ENDDO
+ENDDO
+END SUBROUTINE FDS_GET_GROUND_ROUGHNESS
 
 !> 1 if the case has a prevailing wind at the open boundaries (OPEN_WIND_BOUNDARY).
 INTEGER(C_INT) FUNCTION FDS_OPEN_WIND() BIND(C,NAME='fds_open_wind')
