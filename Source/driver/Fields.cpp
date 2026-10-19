@@ -3,6 +3,7 @@
 #include "Fields.H"
 
 #include <AMReX_BLassert.H>
+#include <AMReX_BoxList.H>
 #include <AMReX_IntVect.H>
 #include <AMReX_Print.H>
 #include <AMReX_ParallelDescriptor.H>
@@ -131,7 +132,29 @@ void Fields::fill_ghosts(const std::string& name) const
 {
     const double t0 = amrex::second();
     amrex::MultiFab& mf = const_cast<amrex::MultiFab&>((*this)[name]);
-    mf.FillBoundary(0, mf.nComp(), mf.nGrowVect(), m_l0.geom.periodicity(), /*cross=*/false);
+    const amrex::IntVect nod = mf.ixType().toIntVect();
+    if (nod == amrex::IntVect::TheZeroVector() || mf.size() == 1) { mf.FillBoundary(0, mf.nComp(), mf.nGrowVect(), m_l0.geom.periodicity(), /*cross=*/false); g_prof[0] += amrex::second() - t0; return; }
+    // Face field: a seam face lies in both of its boxes (FDS: each mesh keeps its own copy), so a ghost point on a seam plane has two sources and FillBoundary keeps the
+    // one copied last (local copies before received ones): rank dependent. Fill from boxes without their high face (kept at a non-periodic domain end): one source each.
+    // The boxes are cell-centred with cell index = face index (a box of one cell stays valid).
+    const amrex::Box& dom = m_l0.geom.Domain();
+    amrex::BoxList bl;
+    for (int i = 0; i < static_cast<int>(mf.size()); ++i) {
+        amrex::Box b = amrex::enclosedCells(mf.boxArray()[i]);
+        for (int d = 0; d < 3; ++d) if (nod[d] && !m_l0.geom.isPeriodic(d) && b.bigEnd(d) == dom.bigEnd(d)) b.growHi(d, 1);
+        bl.push_back(b);
+    }
+    amrex::MultiFab t(amrex::BoxArray(std::move(bl)), mf.DistributionMap(), mf.nComp(), mf.nGrowVect() + nod);
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        auto f = mf.array(mfi); auto c = t.array(mfi);
+        amrex::LoopOnCpu(mf[mfi].box(), mf.nComp(), [&](int i, int j, int k, int n) { c(i, j, k, n) = f(i, j, k, n); });
+    }
+    t.FillBoundary(m_l0.geom.periodicity());
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+        auto f = mf.array(mfi); auto c = t.array(mfi);
+        for (const amrex::Box& g : amrex::boxDiff(mf[mfi].box(), mfi.validbox()))   // ghosts only: the box keeps its own faces
+            amrex::LoopOnCpu(g, mf.nComp(), [&](int i, int j, int k, int n) { f(i, j, k, n) = c(i, j, k, n); });
+    }
     g_prof[0] += amrex::second() - t0;
 }
 
