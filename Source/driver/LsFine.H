@@ -9,7 +9,7 @@
 namespace fdsamr {
 
 struct LsFineConfig {
-    int mode = 0;    // 0 off, 2 shadow beside the original with the gathered wind (ratio 1, one level-0 mesh), 3: the LS grid drives the fire (not yet)
+    int mode = 0;    // 0 off, 2 shadow beside the original with the gathered wind (ratio 1, one level-0 mesh), 3 the LS grid drives the fire (--ls-fine)
     int ratio = 1;   // LS cell = level-0 cell / ratio
 };
 LsFineConfig& ls_fine_config();

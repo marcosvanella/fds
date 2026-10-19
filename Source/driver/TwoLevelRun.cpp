@@ -1,5 +1,6 @@
 #include <memory>
 // TwoLevelRun.cpp: see TwoLevelRun.H.
+#include "LsFine.H"
 #include "ObstList.H"
 #include "TwoLevelRun.H"
 #include "CompositeOps.H"
@@ -323,6 +324,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (o.max_level < 0 || o.max_level > 8) { amrex::Print() << "MULTI-LEVEL: max_level must be 0..8, got " << o.max_level << "\n"; return 1; }
     const char* tag = (o.max_level == 1) ? "TWO-LEVEL" : "MULTI-LEVEL";
     amrex::IntVect rr(o.ratio, o.ratio, o.ratio);
+    if (ls_fine_config().mode >= 3) { int r = 1; for (int l = 0; l < o.max_level; ++l) r *= o.ratio; ls_fine_config().ratio = r; }   // --ls-fine: LS cell = finest possible cell
     for (int d = 0; d < 3; ++d) if (dom.length(d) == 1) rr[d] = 1;
     const int plo[3] = {o.patch[0], dom.smallEnd(1), o.patch[2]}, phi_[3] = {o.patch[1], dom.bigEnd(1), o.patch[3]};
     amrex::Box patch(amrex::IntVect(plo[0], plo[1], plo[2]), amrex::IntVect(phi_[0], phi_[1], phi_[2]));

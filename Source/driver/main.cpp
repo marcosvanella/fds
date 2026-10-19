@@ -254,6 +254,7 @@ int main(int argc, char** argv)
                         if (i + 1 < argc && argv[i + 1][0] != '-') to.tag_phi_buf = std::atoi(argv[++i]);
                     }
                     else if (std::strcmp(argv[i], "--fine-zmax") == 0 && i + 1 < argc) to.fine_zmax = std::atof(argv[++i]);
+                    else if (std::strcmp(argv[i], "--ls-fine") == 0) { fds_ls_set_mode(2); fdsamr::ls_fine_config().mode = 3; }   // the level set on one global grid at the finest cell size drives the fire (ratio set by the run)
                     else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
                     else if (std::strcmp(argv[i], "--stage-boundary-test") == 0) to.boundary_test = (i + 1 < argc && std::strcmp(argv[i + 1], "legacy") == 0) ? (++i, 2) : 1;
                     else if (std::strcmp(argv[i], "--outdir") == 0 && i + 1 < argc) { to.outdir = argv[++i]; ro.outdir = to.outdir; }
@@ -285,6 +286,7 @@ int main(int argc, char** argv)
                     else if (std::strcmp(argv[i], "--quiet") == 0) ro.quiet = true;
                     else if (std::strcmp(argv[i], "--exact-zone-sums") == 0) ro.exact_zone_sums = true;
                     else if (std::strcmp(argv[i], "--ls-fine-shadow") == 0) fds_ls_set_mode(1);   // level set on a global grid equal to the level-0 mesh, run beside the original and compared (<CHID>_ls_shadow.txt)
+                    else if (std::strcmp(argv[i], "--ls-fine") == 0) { fds_ls_set_mode(2); fdsamr::ls_fine_config().mode = 3; }   // the level set on a global grid equal to the level-0 mesh drives the fire
                     else if (std::strcmp(argv[i], "--ls-fine-shadow-gather") == 0) { fds_ls_set_mode(1); fdsamr::ls_fine_config().mode = 2; }   // the same with the wind gathered from the leaf cells (LsFine.cpp)
                     else if (std::strcmp(argv[i], "--fine-b-shadow") == 0) fine_shadow = true;
                     else if (std::strcmp(argv[i], "--fine-b-build") == 0) { fine_shadow = true; fine_build = 1; }
