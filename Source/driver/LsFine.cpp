@@ -72,16 +72,18 @@ int ls_fine_gather_wind(const LevelRegistry& reg)
             }
         }
     }
-    if (amrex::ParallelDescriptor::NProcs() > 1) {
+    if (amrex::ParallelDescriptor::NProcs() > 1) {   // two collectives: MAX over [zlo, -zhi], then SUM over [ulo, vlo, uhi, vhi] with the losing ranks' samples zeroed
         const MPI_Comm comm = amrex::ParallelContext::CommunicatorSub();
-        std::vector<double> zl = zlo, zh = zhi;
-        amrex::ParallelAllReduce::Max(zlo.data(), static_cast<int>(n), comm);
-        amrex::ParallelAllReduce::Min(zhi.data(), static_cast<int>(n), comm);
+        std::vector<double> z(2 * n), w(4 * n);
+        for (std::size_t m = 0; m < n; ++m) { z[m] = zlo[m]; z[n + m] = -zhi[m]; }
+        amrex::ParallelAllReduce::Max(z.data(), static_cast<int>(2 * n), comm);
         for (std::size_t m = 0; m < n; ++m) {
-            if (zl[m] != zlo[m]) { ulo[m] = 0.0; vlo[m] = 0.0; }
-            if (zh[m] != zhi[m]) { uhi[m] = 0.0; vhi[m] = 0.0; }
+            const bool l = (z[m] == zlo[m]), h = (-z[n + m] == zhi[m]);
+            w[m] = l ? ulo[m] : 0.0; w[n + m] = l ? vlo[m] : 0.0; w[2 * n + m] = h ? uhi[m] : 0.0; w[3 * n + m] = h ? vhi[m] : 0.0;
+            zlo[m] = z[m]; zhi[m] = -z[n + m];
         }
-        for (std::vector<double>* a : {&ulo, &vlo, &uhi, &vhi}) amrex::ParallelAllReduce::Sum(a->data(), static_cast<int>(n), comm);
+        amrex::ParallelAllReduce::Sum(w.data(), static_cast<int>(4 * n), comm);
+        for (std::size_t m = 0; m < n; ++m) { ulo[m] = w[m]; vlo[m] = w[n + m]; uhi[m] = w[2 * n + m]; vhi[m] = w[3 * n + m]; }
     }
     int nbad = 0;
     fds_ls_wind_from_pairs(zlo.data(), ulo.data(), vlo.data(), zhi.data(), uhi.data(), vhi.data(), &nbad);
