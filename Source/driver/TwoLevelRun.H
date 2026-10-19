@@ -41,6 +41,7 @@ struct TwoLevelOptions {
     // tag_vort_auto: thr = 0.45 * max|VORT| on level 0, recomputed at every regrid (VORT rescaled; AmrParams thr is the t=0 value); TAG_KEEP=0.85 (tight core).
     double tag_phi = std::numeric_limits<double>::quiet_NaN();   // --tag-phi D [NBUF]: TAG_PHI_DIFF=D (level-set front band), N_ERROR_BUF=NBUF
     int tag_phi_buf = 1;
+    double fine_zmax = std::numeric_limits<double>::quiet_NaN();   // --fine-zmax Z [m]: the refinable region (AMR_REGION) ends at Z in z (fine cells only below it)
     double tag_vort = std::numeric_limits<double>::quiet_NaN();
     bool tag_vort_auto = false;
     double tag_temp = std::numeric_limits<double>::quiet_NaN();   // --tag-temp [T]: also tag TMP > T K (default 400), OR with the other TAG_*; NaN off
