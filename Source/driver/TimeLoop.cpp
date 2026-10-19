@@ -142,6 +142,7 @@ int fds_fine_b_set_view(int l, int ib, int which, const int* lb, const int* ext,
 void fds_leaf_register();   // fds_leaf_devc.f90: leaf-cell hooks of the gas devices
 int fds_fine_level_create(int lev, int nbox, const int* ijk, const double* xb, const int* local, int* nm0);   // fds_fine_level.f90
 void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
+void fds_fine_walls_parent_xchg();                          // fds_fine_level.f90: level-0 parent state of the hidden walls whose parent mesh is on another rank (collective)
 void fds_fine_walls_rad_xchg(int lev);                      // fds_fine_level.f90: pull the hidden-wall radiation state of level lev from level lev-1 (collective)
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
 void fds_fine_walls_sums(int lev, double t, int chk, double* q);
@@ -346,6 +347,7 @@ struct TimeLoop::Impl {
         dt_new.resize(total_boxes(), L.m_dt);
         chg.resize(total_boxes(), 0);
         pend_restore(lev);
+        fds_fine_walls_parent_xchg();   // collective: remote parent state of the new hidden walls
         record_vent_faces();   // the vent faces of the old box layout (box index, cell) mean nothing on the new one
         fine_burner_state(false);   // burner face lists of the new box layout: the first stage after a (re)bind applies them in its flux override, a list kept from the old layout has faces outside the new boxes
         select(0);
@@ -1728,6 +1730,7 @@ struct TimeLoop::Impl {
     std::vector<std::vector<BurnerFaces>> burner;   // [level][local box, MFIter order]
     void fine_burner_state(bool pred)
     {
+        fds_fine_walls_parent_xchg();   // collective, after the level-0 WALL_BC of the stage: remote parent state for this and the later fine-wall calls of the stage
         burner.assign(lc.size(), {});
         const int w = 5 + 2 * nt;
         for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
