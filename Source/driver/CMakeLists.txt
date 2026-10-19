@@ -79,10 +79,11 @@ target_sources(fds PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_ls_grid.f90
     ${CMAKE_CURRENT_LIST_DIR}/fds_alias.c
 )
 set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/fds_box_shim.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_box_obj.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_flux_hooks.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_wall_seam.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_mesh_query.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_kernels.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_ghost_bc.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_amrex_hooks.f90
-    ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90
+    ${CMAKE_CURRENT_LIST_DIR}/fds_density_split.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_clip_gather.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_step.f90 ${CMAKE_CURRENT_LIST_DIR}/fds_ls_grid.f90
     PROPERTIES COMPILE_OPTIONS "$<$<Fortran_COMPILER_ID:GNU>:-ffree-line-length-none>")
 # Role 2's composite (multi-level) solve lives in its own file once it exists (PressureIface.cpp then references pb::solve_composite); listed only when the file is present.
 if (EXISTS ${CMAKE_CURRENT_LIST_DIR}/../pressure_backend/CompositeSolve.cpp)
