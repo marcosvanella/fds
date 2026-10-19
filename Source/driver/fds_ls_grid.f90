@@ -17,7 +17,7 @@ USE MESH_VARIABLES, ONLY: MESHES,MESH_TYPE
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
 PUBLIC :: LS_DRIVE,LS_APPLY_L0,LS_FLUX_ACTIVE,LS_BLOCK_FLUX,LS_ACTIVE,LS_INIT,LS_STEP,LS_REF_WIND,LS_REF_HEIGHT,LS_NX,LS_NY,LS_PHI,LS_PHI1,LS_T_IGN,LS_TAU,LS_BURN_DUR,LS_AREA_ADJ,LS_SURF,LS_DX,LS_DY, &
-   LS_UREF,LS_VREF,LS_U,LS_V,LS_SHADOW_MODE,FDS_LS_SET_MODE,FDS_LS_SHADOW_RUN,FDS_LS_SHADOW_CMP,FDS_LS_PREPARE,FDS_LS_WIND_FROM_SLOTS
+   LS_UREF,LS_VREF,LS_U,LS_V,LS_SHADOW_MODE,FDS_LS_SET_MODE,FDS_LS_SHADOW_RUN,FDS_LS_SHADOW_CMP,FDS_LS_PREPARE,FDS_LS_WIND_FROM_SLOTS,FDS_LS_DRIVE_STEP,LS_RESTRICT_PHI
 
 REAL(EB), PARAMETER :: PHI_LS_MIN=-1._EB, PHI_LS_MAX=1._EB
 
@@ -26,6 +26,8 @@ LOGICAL :: LS_WIND_SET=.FALSE.        !< LS_UREF/LS_VREF were set by FDS_LS_WIND
 INTEGER :: LS_RATIO=1                 !< LS cell = level-0 cell / LS_RATIO
 LOGICAL :: LS_DRIVE=.FALSE.           !< --ls-fine: the LS grid drives the fire (the original LEVEL_SET_FIRESPREAD is not called; level-0 walls get the LS cell means)
 REAL(EB) :: LS_X0=0._EB,LS_Y0=0._EB      !< lower corner of the LS grid
+INTEGER, ALLOCATABLE :: LS_MI0(:),LS_MJ0(:)   !< level-0 cell offset of mesh NM in the LS grid (level-0 cells)
+LOGICAL, ALLOCATABLE :: LS_MGROUND(:)        !< mesh NM sits on the ground (lowest ZS) and owns LS cells
 REAL(EB), ALLOCATABLE :: LS_FLUX(:,:)    !< fuel mass flux of every LS cell at the current stage, kg/m2/s (LS_APPLY_L0)
 INTEGER :: LS_SHADOW_MODE=0           !< --ls-fine-shadow: run beside the original LEVEL_SET_FIRESPREAD and compare (level-0 equal grid)
 INTEGER :: LS_NX=0,LS_NY=0,LIMITER_LS=1
@@ -454,74 +456,145 @@ END FUNCTION SCALAR_FACE_VALUE_LS
 !> \brief Build the LS grid from level-0 mesh 1 (one mesh, flat terrain): LS cell = level-0 cell / R, surface index and wall state injected from the level-0 ground wall of the cell.
 SUBROUTINE LS_INIT_FROM_MESH(R)
 
+USE MPI_F08
+USE GLOBAL_CONSTANTS, ONLY: MY_RANK,PROCESS,N_MPI_PROCESSES,N_SURF
 INTEGER, INTENT(IN) :: R
 TYPE(MESH_TYPE), POINTER :: M
-INTEGER :: I,J,IC,JC,IW,NX,NY
-REAL(EB), ALLOCATABLE :: DXF(:),DYF(:),T0(:,:),B0(:,:),A0(:,:),TA0(:,:)
+INTEGER :: I,J,IC,JC,IG,JG,IW,NX,NY,NM,NXC,NYC,IERR
+REAL(EB) :: ZB,X0,X1,Y0,Y1,DX0,DY0
+REAL(EB), ALLOCATABLE :: DXF(:),DYF(:),T0(:,:),B0(:,:),A0(:,:),TA0(:,:),SFR(:,:),CV(:,:)
 INTEGER, ALLOCATABLE :: SF0(:,:)
+LOGICAL, ALLOCATABLE :: SEEN(:)
+REAL(EB) :: E_ROTH,BETA_OP_ROTH
+TYPE(SURFACE_TYPE), POINTER :: SFP
 
 IF (LS_ACTIVE) RETURN
-IF (NMESHES/=1) THEN
-   WRITE(0,'(A)') 'ERROR: the LS grid supports one level-0 mesh only (multi-mesh: global surface/wall injection not done yet)'
-   STOP 1
-ENDIF
-IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) THEN
-   WRITE(0,'(A)') 'ERROR: the LS grid supports LEVEL_SET_MODE 1, 3 and 4 only'
-   STOP 1
-ENDIF
-M => MESHES(1)
-NX = M%IBAR*R ; NY = M%JBAR*R
-ALLOCATE(DXF(NX),DYF(NY),T0(NX,NY),B0(NX,NY),A0(NX,NY),TA0(NX,NY),SF0(NX,NY))
-DO I=1,NX
-   DXF(I) = M%DX((I-1)/R+1)/REAL(R,EB)
+IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) CALL ABORT_INIT('the LS grid supports LEVEL_SET_MODE 1, 3 and 4 only')
+IF (NMESHES>1 .AND. .NOT.LS_DRIVE) CALL ABORT_INIT('the LS shadow test supports one level-0 mesh only')
+! the ground meshes (lowest ZS) tile the LS grid; uniform level-0 cells of one size in all of them
+ZB = MINVAL(MESHES(1:NMESHES)%ZS)
+X0 = HUGE(1._EB) ; X1 = -HUGE(1._EB) ; Y0 = X0 ; Y1 = X1 ; DX0 = -1._EB ; DY0 = -1._EB
+ALLOCATE(LS_MI0(NMESHES),LS_MJ0(NMESHES),LS_MGROUND(NMESHES))
+DO NM=1,NMESHES
+   M => MESHES(NM)
+   LS_MGROUND(NM) = (M%ZS<=ZB)
+   IF (.NOT.LS_MGROUND(NM)) CYCLE
+   X0 = MIN(X0,M%XS) ; X1 = MAX(X1,M%XF) ; Y0 = MIN(Y0,M%YS) ; Y1 = MAX(Y1,M%YF)
+   IF (DX0<0._EB) THEN ; DX0 = (M%XF-M%XS)/REAL(M%IBAR,EB) ; DY0 = (M%YF-M%YS)/REAL(M%JBAR,EB) ; ENDIF
+   IF (ABS((M%XF-M%XS)/REAL(M%IBAR,EB)-DX0)>1.E-6_EB*DX0 .OR. ABS((M%YF-M%YS)/REAL(M%JBAR,EB)-DY0)>1.E-6_EB*DY0) &
+      CALL ABORT_INIT('the LS grid needs level-0 ground meshes of one cell size')
 ENDDO
-DO J=1,NY
-   DYF(J) = M%DY((J-1)/R+1)/REAL(R,EB)
+NXC = NINT((X1-X0)/DX0) ; NYC = NINT((Y1-Y0)/DY0)
+DO NM=1,NMESHES
+   LS_MI0(NM) = NINT((MESHES(NM)%XS-X0)/DX0) ; LS_MJ0(NM) = NINT((MESHES(NM)%YS-Y0)/DY0)
 ENDDO
-IF (R==1) THEN
-   DXF = M%DX(1:NX) ; DYF = M%DY(1:NY)
+NX = NXC*R ; NY = NYC*R
+ALLOCATE(DXF(NX),DYF(NY),T0(NX,NY),B0(NX,NY),A0(NX,NY),TA0(NX,NY),SFR(NX,NY),CV(NX,NY),SF0(NX,NY))
+DXF = -HUGE(1._EB) ; DYF = -HUGE(1._EB) ; T0 = 0._EB ; B0 = 0._EB ; A0 = 0._EB ; TA0 = 0._EB ; SFR = 0._EB ; CV = 0._EB
+! every rank fills the LS cells of its ground meshes; one exact reduction makes the map global (each cell has one owner: SUM of one value and zeros, MAX for the spacings)
+DO NM=1,NMESHES
+   IF (.NOT.LS_MGROUND(NM) .OR. PROCESS(NM)/=MY_RANK) CYCLE
+   M => MESHES(NM)
+   IF (.NOT.ALLOCATED(M%CELL_INDEX)) CYCLE
+   IF (MAXVAL(M%DX(1:M%IBAR))-MINVAL(M%DX(1:M%IBAR))>1.E-6_EB*DX0 .OR. MAXVAL(M%DY(1:M%JBAR))-MINVAL(M%DY(1:M%JBAR))>1.E-6_EB*DY0) &
+      CALL ABORT_INIT('the LS grid needs uniform level-0 cells (no stretched meshes)')
+   DO I=1,M%IBAR*R
+      IG = LS_MI0(NM)*R+I
+      DXF(IG) = M%DX((I-1)/R+1)/REAL(R,EB)
+      IF (R==1) DXF(IG) = M%DX(I)
+   ENDDO
+   DO J=1,M%JBAR*R
+      JG = LS_MJ0(NM)*R+J
+      DYF(JG) = M%DY((J-1)/R+1)/REAL(R,EB)
+      IF (R==1) DYF(JG) = M%DY(J)
+   ENDDO
+   DO J=1,M%JBAR*R
+      DO I=1,M%IBAR*R
+         IC = (I-1)/R+1 ; JC = (J-1)/R+1 ; IG = LS_MI0(NM)*R+I ; JG = LS_MJ0(NM)*R+J
+         IF (ABS(M%Z_LS(IC,JC))>0._EB .OR. M%K_LS(IC,JC)/=1) CALL ABORT_INIT('the LS grid supports flat terrain only')
+         SFR(IG,JG) = REAL(M%LS_SURF_INDEX(IC,JC),EB)
+         IW = M%CELL(M%CELL_INDEX(IC,JC,M%K_LS(IC,JC)))%WALL_INDEX(-3)
+         T0(IG,JG) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%T_IGN
+         B0(IG,JG) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%BURN_DURATION
+         A0(IG,JG) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%AREA_ADJUST
+         TA0(IG,JG) = M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX)%TAU_LS
+         CV(IG,JG) = CV(IG,JG) + 1._EB
+      ENDDO
+   ENDDO
+ENDDO
+IF (N_MPI_PROCESSES>1) THEN
+   CALL MPI_ALLREDUCE(MPI_IN_PLACE,DXF,NX,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
+   CALL MPI_ALLREDUCE(MPI_IN_PLACE,DYF,NY,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
+   DO I=1,6
+      SELECT CASE(I)
+         CASE(1) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,T0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+         CASE(2) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,B0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+         CASE(3) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,A0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+         CASE(4) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,TA0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+         CASE(5) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,SFR,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+         CASE(6) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,CV,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+      END SELECT
+   ENDDO
 ENDIF
+IF (ANY(CV/=1._EB)) CALL ABORT_INIT('the level-0 ground meshes do not tile the LS grid (gap or overlap)')
+SF0 = NINT(SFR)
+! surface constants that INITIALIZE_LEVEL_SET_FIRESPREAD_2 (vege.f90) sets only for the surfaces of the rank's own meshes: set them for every spreading surface of the
+! global map, same formulas (identical values where the rank had them already)
+ALLOCATE(SEEN(0:N_SURF)) ; SEEN = .FALSE.
 DO J=1,NY
    DO I=1,NX
-      IC = (I-1)/R+1 ; JC = (J-1)/R+1
-      IF (ABS(M%Z_LS(IC,JC))>0._EB .OR. M%K_LS(IC,JC)/=1) THEN
-         WRITE(0,'(A)') 'ERROR: the LS grid supports flat terrain only'
-         STOP 1
-      ENDIF
-      SF0(I,J) = M%LS_SURF_INDEX(IC,JC)
-      IW = M%CELL(M%CELL_INDEX(IC,JC,M%K_LS(IC,JC)))%WALL_INDEX(-3)
-      T0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%T_IGN
-      B0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%BURN_DURATION
-      A0(I,J) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%AREA_ADJUST
-      TA0(I,J) = M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX)%TAU_LS
+      SEEN(SF0(I,J)) = .TRUE.
    ENDDO
+ENDDO
+DO I=0,N_SURF
+   IF (.NOT.SEEN(I)) CYCLE
+   SFP => SURFACE(I)
+   IF (.NOT.SFP%VEG_LSET_SPREAD) CYCLE
+   SFP%VEG_LSET_HT = MAX(0.001_EB,SFP%VEG_LSET_HT)
+   SFP%B_ROTH = 0.15988_EB * (SFP%VEG_LSET_SIGMA**0.54_EB)
+   SFP%C_ROTH = 7.47_EB * EXP(-0.8711_EB * (SFP%VEG_LSET_SIGMA**0.55_EB))
+   E_ROTH = 0.715_EB * EXP(-0.01094_EB * SFP%VEG_LSET_SIGMA)
+   BETA_OP_ROTH = 0.20395_EB * (SFP%VEG_LSET_SIGMA**(-0.8189_EB))
+   SFP%BETA_ROTH = (SFP%VEG_LSET_BETA/BETA_OP_ROTH)**(-E_ROTH)
 ENDDO
 CALL LS_INIT(NX,NY,DXF,DYF,SF0,T0,B0,A0,TA0)
 LS_RATIO = R
-LS_X0 = M%XS ; LS_Y0 = M%YS
+LS_X0 = X0 ; LS_Y0 = Y0
 ALLOCATE(LS_FLUX(NX,NY)) ; LS_FLUX = 0._EB
-IF (LS_DRIVE .AND. (STORE_FIRE_ARRIVAL .OR. STORE_FIRE_RESIDENCE)) THEN
-   WRITE(0,'(A)') 'ERROR: --ls-fine does not support fire arrival / residence outputs (the level-0 walls carry LS cell means)'
-   STOP 1
-ENDIF
+IF (LS_DRIVE .AND. (STORE_FIRE_ARRIVAL .OR. STORE_FIRE_RESIDENCE)) &
+   CALL ABORT_INIT('--ls-fine does not support fire arrival / residence outputs (the level-0 walls carry LS cell means)')
+
+CONTAINS
+SUBROUTINE ABORT_INIT(MSG)
+CHARACTER(*), INTENT(IN) :: MSG
+WRITE(0,'(A)') 'ERROR: '//MSG
+STOP 1
+END SUBROUTINE ABORT_INIT
 
 END SUBROUTINE LS_INIT_FROM_MESH
 
 
 
-!> \brief Level-0 PHI_LS (cell means of the LS cells under it) for the PHI plotfile / tagging and the "LEVEL SET VALUE" output
-SUBROUTINE LS_RESTRICT_PHI(M)
+!> \brief Level-0 PHI_LS of mesh NM (cell means of the LS cells under it) for the PHI plotfile / tagging and the "LEVEL SET VALUE" output; the ghost cells that lie in
+!> another ground mesh get that mesh's mean too (the global grid has it), ghost cells outside the domain are left alone
+SUBROUTINE LS_RESTRICT_PHI(NM)
 
+INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
-INTEGER :: I,J,II,JJ,R
+INTEGER :: I,J,II,JJ,R,IG,JG,ILO,IHI,JLO,JHI
 REAL(EB) :: S
 
-R = LS_RATIO
-DO J=1,M%JBAR
-   DO I=1,M%IBAR
+IF (.NOT.LS_ACTIVE .OR. NM>SIZE(LS_MGROUND)) RETURN
+IF (.NOT.LS_MGROUND(NM)) RETURN
+M => MESHES(NM) ; R = LS_RATIO
+ILO = MERGE(0,1,LS_MI0(NM)>0) ; IHI = MERGE(M%IBP1,M%IBAR,(LS_MI0(NM)+M%IBAR)*R<LS_NX)
+JLO = MERGE(0,1,LS_MJ0(NM)>0) ; JHI = MERGE(M%JBP1,M%JBAR,(LS_MJ0(NM)+M%JBAR)*R<LS_NY)
+DO J=JLO,JHI
+   DO I=ILO,IHI
+      IG = LS_MI0(NM)+I ; JG = LS_MJ0(NM)+J
       S = 0._EB
-      DO JJ=(J-1)*R+1,J*R
-         DO II=(I-1)*R+1,I*R
+      DO JJ=(JG-1)*R+1,JG*R
+         DO II=(IG-1)*R+1,IG*R
             S = S + LS_PHI(II,JJ)
          ENDDO
       ENDDO
@@ -530,6 +603,19 @@ DO J=1,M%JBAR
 ENDDO
 
 END SUBROUTINE LS_RESTRICT_PHI
+
+
+!> \brief --ls-fine: one stage of the LS grid with the wind gathered for this stage (C++ density(), after ls_fine_gather_wind; once per rank and stage)
+SUBROUTINE FDS_LS_DRIVE_STEP(T,DT) BIND(C,NAME='fds_ls_drive_step')
+REAL(C_DOUBLE), VALUE :: T,DT
+IF (.NOT.LS_DRIVE) RETURN
+IF (.NOT.LS_WIND_SET) THEN
+   WRITE(0,'(A)') 'ERROR: ls-fine: the wind of the LS grid was not gathered'
+   STOP 1
+ENDIF
+LS_WIND_SET = .FALSE.
+CALL LS_STEP(T,DT)
+END SUBROUTINE FDS_LS_DRIVE_STEP
 
 
 !> \brief Fraction of the plateau fuel flux of an LS cell at this stage: the trapezoid of WALL_BC (wall.f90) from the LS cell's T_IGN, TAU_LS and BURN_DURATION
@@ -571,8 +657,9 @@ TYPE(SURFACE_TYPE), POINTER :: SF
 INTEGER :: I,J,II,JJ,IW,R
 REAL(EB) :: SM,SP,MF0,TOT,AA,FR,TEFF,RR
 
-IF (.NOT.LS_DRIVE .OR. .NOT.LS_ACTIVE .OR. NM/=1) RETURN
-M => MESHES(1) ; R = LS_RATIO ; RR = REAL(R*R,EB)
+IF (.NOT.LS_DRIVE .OR. .NOT.LS_ACTIVE .OR. NM>SIZE(LS_MGROUND)) RETURN
+IF (.NOT.LS_MGROUND(NM)) RETURN
+M => MESHES(NM) ; R = LS_RATIO ; RR = REAL(R*R,EB)
 TEFF = MERGE(T+DT,T,PREDICTOR)
 IF (LEVEL_SET_COUPLED_FIRE) THEN
    DO J=1,LS_NY
@@ -592,8 +679,8 @@ DO J=1,M%JBAR
       SF => SURFACE(M%WALL(IW)%SURF_INDEX)
       IF (.NOT.SF%VEG_LSET_SPREAD) CYCLE
       SM = 0._EB ; SP = 0._EB
-      DO JJ=(J-1)*R+1,J*R
-         DO II=(I-1)*R+1,I*R
+      DO JJ=(LS_MJ0(NM)+J-1)*R+1,(LS_MJ0(NM)+J)*R
+         DO II=(LS_MI0(NM)+I-1)*R+1,(LS_MI0(NM)+I)*R
             SP = SP + LS_PHI(II,JJ)
             IF (LEVEL_SET_COUPLED_FIRE) SM = SM + LS_FLUX(II,JJ)
          ENDDO
@@ -732,9 +819,8 @@ REAL(EB), ALLOCATABLE :: ZS(:),US(:),VS(:)
 IF (NM/=1 .OR. NMESHES/=1) RETURN
 M => MESHES(NM)
 IF (.NOT.LS_ACTIVE) CALL LS_INIT_FROM_MESH(1)
-IF (LS_RATIO/=1 .AND. .NOT.LS_DRIVE) CALL ABORT_LS('ls-fine-shadow: the LS grid must equal the level-0 mesh (ratio 1)')
+IF (LS_RATIO/=1) CALL ABORT_LS('ls-fine-shadow: the LS grid must equal the level-0 mesh (ratio 1)')
 IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) CALL ABORT_LS('ls-fine-shadow: LEVEL_SET_MODE 2 and 5 are not supported')
-IF (.NOT.LS_WIND_SET .AND. LS_RATIO/=1) CALL ABORT_LS('ls-fine: the wind of the LS grid was not gathered')
 IF (.NOT.LS_WIND_SET) THEN    ! no gathered wind for this stage: sample the level-0 mesh the way the original does
    ALLOCATE(ZS(M%KBAR),US(M%KBAR),VS(M%KBAR))
    DO J=1,M%JBAR
@@ -753,7 +839,6 @@ IF (.NOT.LS_WIND_SET) THEN    ! no gathered wind for this stage: sample the leve
 ENDIF
 LS_WIND_SET = .FALSE.
 CALL LS_STEP(T,DT)
-IF (LS_DRIVE) CALL LS_RESTRICT_PHI(M)
 
 CONTAINS
 SUBROUTINE ABORT_LS(MSG)
