@@ -253,7 +253,11 @@ void fill_phi(LevelRegistry& reg, int nl)
         const amrex::Box vb = mfi.validbox();
         std::vector<double> buf(static_cast<size_t>(vb.length(0) + 2) * (vb.length(1) + 2));
         fds_k_phi(mfi.index() + 1, buf.data());
-        amrex::LoopOnCpu(amrex::grow(mfi.fabbox(), 0), [&](int i, int j, int k) { p(i, j, k) = buf[(i + 1) + static_cast<size_t>(j + 1) * (vb.length(0) + 2)]; });
+        const int ilo = vb.smallEnd(0), jlo = vb.smallEnd(1), nbx = vb.length(0) + 2, nby = vb.length(1) + 2;   // buf: cells 0:IBP1 x 0:JBP1 of the mesh (box-local, x fastest)
+        amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
+            const int ib = std::min(std::max(i - ilo + 1, 0), nbx - 1), jb = std::min(std::max(j - jlo + 1, 0), nby - 1);
+            p(i, j, k) = buf[ib + static_cast<size_t>(jb) * nbx];
+        });
     }
     std::vector<double> lsphi;   // --ls-fine: the finer levels take PHI from the global LS grid (mean of the LS cells of the level cell), so tagging follows the fine front
     int lsnx = 0, lsny = 0, lsR = 1;
