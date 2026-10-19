@@ -17,12 +17,12 @@ USE MESH_VARIABLES, ONLY: MESHES,MESH_TYPE
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
 PUBLIC :: LS_DRIVE,LS_APPLY_L0,LS_FLUX_ACTIVE,LS_BLOCK_FLUX,LS_ACTIVE,LS_INIT,LS_STEP,LS_REF_WIND,LS_REF_HEIGHT,LS_NX,LS_NY,LS_PHI,LS_PHI1,LS_T_IGN,LS_TAU,LS_BURN_DUR,LS_AREA_ADJ,LS_SURF,LS_DX,LS_DY, &
-   LS_UREF,LS_VREF,LS_U,LS_V,LS_SHADOW_MODE,FDS_LS_SET_MODE,FDS_LS_SHADOW_RUN,FDS_LS_SHADOW_CMP,FDS_LS_PREPARE,FDS_LS_WIND_FROM_SLOTS,FDS_LS_DRIVE_STEP,LS_RESTRICT_PHI
+   LS_UREF,LS_VREF,LS_U,LS_V,LS_SHADOW_MODE,FDS_LS_SET_MODE,FDS_LS_SHADOW_RUN,FDS_LS_SHADOW_CMP,FDS_LS_PREPARE,FDS_LS_WIND_FROM_PAIRS,FDS_LS_REF_HEIGHTS,FDS_LS_DRIVE_STEP,LS_RESTRICT_PHI
 
 REAL(EB), PARAMETER :: PHI_LS_MIN=-1._EB, PHI_LS_MAX=1._EB
 
 LOGICAL :: LS_ACTIVE=.FALSE.          !< the LS grid exists
-LOGICAL :: LS_WIND_SET=.FALSE.        !< LS_UREF/LS_VREF were set by FDS_LS_WIND_FROM_SLOTS for the coming stage
+LOGICAL :: LS_WIND_SET=.FALSE.        !< LS_UREF/LS_VREF were set by FDS_LS_WIND_FROM_PAIRS for the coming stage
 INTEGER :: LS_RATIO=1                 !< LS cell = level-0 cell / LS_RATIO
 LOGICAL :: LS_DRIVE=.FALSE.           !< --ls-fine: the LS grid drives the fire (the original LEVEL_SET_FIRESPREAD is not called; level-0 walls get the LS cell means)
 REAL(EB) :: LS_X0=0._EB,LS_Y0=0._EB      !< lower corner of the LS grid
@@ -763,37 +763,47 @@ ENDDO
 END SUBROUTINE FDS_LS_PREPARE
 
 
-!> \brief C entry: wind at the reference height of every spreading LS cell from the column samples gathered from the leaf cells (ZS: height of the cell centre above the ground,
-!> US, VS: cell-centre wind, CNT: 1 where the slot holds a sample; slot index fastest, then LS i, then LS j). NBAD counts spreading columns without any sample.
-SUBROUTINE FDS_LS_WIND_FROM_SLOTS(NKS,ZS,US,VS,CNT,NBAD) BIND(C,NAME='fds_ls_wind_from_slots')
+!> \brief C entry: reference height of every LS column (x fastest), -1 where the cell does not spread
+SUBROUTINE FDS_LS_REF_HEIGHTS(NX,NY,H) BIND(C,NAME='fds_ls_ref_heights')
+INTEGER(C_INT), VALUE :: NX,NY
+REAL(C_DOUBLE), INTENT(OUT) :: H(NX,NY)
+INTEGER :: I,J
+H = -1._EB
+DO J=1,MIN(NY,LS_NY)
+   DO I=1,MIN(NX,LS_NX)
+      IF (SURFACE(LS_SURF(I,J))%VEG_LSET_SPREAD) H(I,J) = LS_REF_HEIGHT(I,J)
+   ENDDO
+ENDDO
+END SUBROUTINE FDS_LS_REF_HEIGHTS
 
-INTEGER(C_INT), VALUE :: NKS
-REAL(C_DOUBLE), INTENT(IN) :: ZS(NKS,LS_NX,LS_NY),US(NKS,LS_NX,LS_NY),VS(NKS,LS_NX,LS_NY),CNT(NKS,LS_NX,LS_NY)
+
+!> \brief C entry: wind at the reference height of every spreading LS cell from the two leaf samples of its column that bracket the height (pre-reduced by LsFine.cpp:
+!> ZLO/ULO/VLO the highest sample below it, -1E300 if none; ZHI/UHI/VHI the lowest at or above it, 1E300 if none; heights above the ground, cell-centre wind).
+!> LS_REF_WIND gives the same result as with the whole column. NBAD counts spreading columns without any sample.
+SUBROUTINE FDS_LS_WIND_FROM_PAIRS(ZLO,ULO,VLO,ZHI,UHI,VHI,NBAD) BIND(C,NAME='fds_ls_wind_from_pairs')
+
+REAL(C_DOUBLE), INTENT(IN), DIMENSION(LS_NX,LS_NY) :: ZLO,ULO,VLO,ZHI,UHI,VHI
 INTEGER(C_INT), INTENT(OUT) :: NBAD
-INTEGER :: I,J,K,NS
-REAL(EB), ALLOCATABLE :: ZC(:),UC(:),VC(:)
+INTEGER :: I,J,NS
+REAL(EB) :: ZC(2),UC(2),VC(2)
 
-ALLOCATE(ZC(NKS),UC(NKS),VC(NKS))
 NBAD = 0
 DO J=1,LS_NY
    DO I=1,LS_NX
       IF (.NOT.SURFACE(LS_SURF(I,J))%VEG_LSET_SPREAD) CYCLE
       NS = 0
-      DO K=1,NKS
-         IF (CNT(K,I,J)>0.5_EB) THEN
-            NS = NS+1 ; ZC(NS) = ZS(K,I,J) ; UC(NS) = US(K,I,J) ; VC(NS) = VS(K,I,J)
-         ENDIF
-      ENDDO
+      IF (ZLO(I,J)>-1.E299_EB) THEN ; NS = NS+1 ; ZC(NS) = ZLO(I,J) ; UC(NS) = ULO(I,J) ; VC(NS) = VLO(I,J) ; ENDIF
+      IF (ZHI(I,J)< 1.E299_EB) THEN ; NS = NS+1 ; ZC(NS) = ZHI(I,J) ; UC(NS) = UHI(I,J) ; VC(NS) = VHI(I,J) ; ENDIF
       IF (NS==0) THEN
          NBAD = NBAD+1 ; LS_UREF(I,J) = 0._EB ; LS_VREF(I,J) = 0._EB
       ELSE
-         CALL LS_REF_WIND(NS,ZC,UC,VC,LS_REF_HEIGHT(I,J),LS_UREF(I,J),LS_VREF(I,J))
+         CALL LS_REF_WIND(NS,ZC(1:NS),UC(1:NS),VC(1:NS),LS_REF_HEIGHT(I,J),LS_UREF(I,J),LS_VREF(I,J))
       ENDIF
    ENDDO
 ENDDO
 LS_WIND_SET = .TRUE.
 
-END SUBROUTINE FDS_LS_WIND_FROM_SLOTS
+END SUBROUTINE FDS_LS_WIND_FROM_PAIRS
 
 
 !> \brief --ls-fine-shadow: C entry that switches the shadow mode on
