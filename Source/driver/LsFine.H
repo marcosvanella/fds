@@ -1,6 +1,6 @@
 // LsFine.H: level set on one global 2-D grid (fds_ls_grid.f90): the C++ side. Every rank holds the whole LS grid (flat terrain, ratio R to the level-0 cells, R = the cumulative refinement
 // ratio of the finest level that can exist). The wind at the reference height of every LS cell is gathered from the LEAF cells of all levels (cells not covered by a finer level), one
-// MPI_Allreduce(SUM) of the column samples per stage, so every rank advances the same LS grid with the same input.
+// MPI_Allreduce of the pre-reduced column samples per stage (MAX/MIN of the bracketing heights, SUM of their wind; 6 doubles per LS column), so every rank advances the same LS grid with the same input.
 #ifndef FDS_LSFINE_H_
 #define FDS_LSFINE_H_
 
@@ -14,7 +14,7 @@ struct LsFineConfig {
 };
 LsFineConfig& ls_fine_config();
 
-// Gathers the wind at the reference height of every spreading LS cell from the leaf cells of `reg` and hands it to the Fortran LS grid (fds_ls_wind_from_slots). Collective.
+// Gathers the wind at the reference height of every spreading LS cell from the leaf cells of `reg` and hands it to the Fortran LS grid (fds_ls_wind_from_pairs: per column the two leaf samples that bracket the reference height). Collective.
 // Returns the number of spreading columns without a sample (0 expected).
 int ls_fine_gather_wind(const LevelRegistry& reg);
 
