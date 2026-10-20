@@ -8003,7 +8003,7 @@ DEVICE_LOOP: DO N=1,N_DEVC
                NBX = NM
 #ifdef WITH_AMREX
                ! Leaf cell: a point under a finer level reads the finest cell there (POINT_TO_BOX for the call)
-               IF (ASSOCIATED(LEAF_COVERED_PROC)) THEN
+               IF (ASSOCIATED(LEAF_COVERED_PROC) .AND. SDV%N_PATH==0) THEN   ! a path device (FIRE DEPTH, TRANSMISSION, ...) holds level-0 cell indices: it stays on the mesh
                   IF (LEAF_COVERED_PROC(NM,XC(I),YC(J),ZC(K))) NBX = LEAF_FINEST_PROC(DV%X,DV%Y,DV%Z,IL,JL,KL)
                   IF (NBX==0) NBX = NM
                   IF (NBX/=NM) THEN ; CALL POINT_TO_BOX(NBX) ; I = IL ; J = JL ; K = KL ; ENDIF
