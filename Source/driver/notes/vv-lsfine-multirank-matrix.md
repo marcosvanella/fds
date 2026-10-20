@@ -115,3 +115,13 @@ Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full tabl
   - L2 nf0/nf1 4m/2r and 4m/4r: c_hrr PASS (MLR_FUEL VAPOR 4e-15, Q_ENTH <= 1.55e-12) and leaf PHI PASS (1.3-1.6e-15). c_multi_level FAIL: `mass_rel_change` 1.0-1.2, and `divmax`/`div_l0`/`div_l1` 2e-4 to 7.6e-4 relative to column max (~1e-12, round-off-level quantities).
   - All other rows unchanged (PASS).
 - Open point: `mass_rel_change` and the `div*` columns are round-off-sized quantities, so a column-max-relative 1e-11 tolerance cannot pass them. They need either an absolute floor or exclusion; this needs an owner decision.
+
+## Ruling 2026-10-20, round-off floor (approved by Role 1, CEO informed)
+
+- In same-mesh comparisons across rank counts, the c_multi_level columns `mass_rel_change` and `div*` (divmax, div_l0, div_l1, any div_l*) are tested per entry: |diff| <= max(1e-11*|ref|, 1e-13). Every other summary column keeps the pure relative 1e-11 test (relative to the column max). Leaf PHI stays at 1e-11 relative. Devc, front x and gate verdicts stay strict.
+- This is the default in lsfine_compare.py and lsfine_multirank_gate.sh. Override the floor with `RANK_ABS_FLOOR` (default 1e-13).
+- Re-score of the 63a11fd048 outputs (no reruns): every same-mesh rank row is PASS.
+  - L1 2m/2r, 4m/2r, 4m/4r: PASS.
+  - L2 nf0/nf1 at 2m/2r, 4m/2r and 4m/4r: PASS.
+  - Max diff in the floor columns: mass_rel_change 4.9e-14 to 7.5e-14; divmax 2.5e-16 to 2.6e-16; div_l0 2.5e-16 to 2.6e-16; div_l1 4.9e-16 to 5.6e-16. `mass` is 4.3e-14 to 7.0e-14 relative.
+  - Note: mass_rel_change reaches 75% of the floor (7.5e-14 at L2 nf0 4m/4r).
