@@ -835,15 +835,8 @@ ALLOCATE(KEY(NTOT),IX(NTOT))
 DO I=1,NTOT ; KEY(I) = KEYOF(NINT(RB(1:3,I)),NINT(RB(4,I))) ; IX(I) = I ; ENDDO
 CALL SORT_KEYS(NTOT,KEY,IX)
 ! parent lookup of every wall of the local boxes of level LEV
-DXP = 0._EB   ! cell size of level LP: from a box of this rank (a box of another rank has no cells here), the largest over the ranks
-IF (LP==0) THEN
-   DXP = (MESHES(1)%XF-MESHES(1)%XS)/MESHES(1)%IBAR
-ELSE
-   DO IB=1,FINE_LEVEL(LP)%N_BOXES
-      IF (FINE_LEVEL(LP)%BOX(IB)%IBAR>0) DXP = MAX(DXP,(FINE_LEVEL(LP)%BOX(IB)%XF-FINE_LEVEL(LP)%BOX(IB)%XS)/FINE_LEVEL(LP)%BOX(IB)%IBAR)
-   ENDDO
-   IF (N_MPI_PROCESSES>1) CALL MPI_ALLREDUCE(MPI_IN_PLACE,DXP,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
-ENDIF
+DXP = (MESHES(1)%XF-MESHES(1)%XS)/MESHES(1)%IBAR   ! cell size of level LP, the same on every rank (IBAR of a box of another rank is not set: it gave a wrong RATIO there)
+IF (LP>0) DXP = DXLEV(1,LP)
 IF (SIZE(FWALL)<LEV) RETURN
 IF (.NOT.ALLOCATED(FWALL(LEV)%B)) RETURN
 DO IB=1,SIZE(FWALL(LEV)%B)
