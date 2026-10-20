@@ -92,3 +92,15 @@ Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full tabl
 | radiation: patch-over-vent 3 levels at 2/4 ranks | **FAIL**: residual −1.707 kW (limit 5.7e-3); gas loss 5.7456 vs 5.7013 at 1 rank |
 
 **PUSH-READY: NO** (GATE FAIL with 9 rows, plus radiation o3 at np2/np4).
+
+## Owner ruling 2026-10-20: same-mesh cross-rank tolerance for c_hrr.csv Q columns
+
+- For same-mesh runs compared across rank counts, the c_hrr.csv columns `Q_*` (and `HRR`; including HRR is our interpretation, to be confirmed, set by env `HRR_Q_RANK_EXTRA`) may differ by up to **1e-11 relative** (round-off). Encoded as `HRR_Q_RANK_TOL=1e-11` in lsfine_compare.py and lsfine_multirank_gate.sh. Any other differing column in c_hrr.csv (e.g. `MLR_*`) is still a strict FAIL.
+- Devc, front x and gate verdicts, and all other csvs, stay STRICT. The cross-mesh tolerance is unchanged: front x and verdict identical, mean HRR within 2%. KNOWN Integration items stay FAIL KNOWN.
+- New verdict, NEEDS-RULING (comparator exit 3; not counted as FAIL, but it blocks push): (a) a leaf PHI difference > 0 (~1.3-1.6e-15); (b) a c_multi_level.csv diff confined to `mass`/`mass_rel_change`.
+- Sanity run on 63a11fd048 (b-63a11fd048, sha256 d9b89f0a…, OMP_NUM_THREADS=1, pop-os, 2026-10-20 19:22-19:33 EDT): GATE FAIL (4; needs-ruling 2).
+  - L1 2m/2r, 4m/2r, 4m/4r BITID: now PASS under the ruling (Q_TOTAL 6.7e-12). CHANGED vs f910 (was FAIL).
+  - L2 nf0 2m/2r and nf1 2m/2r: hrr PASS under the ruling (1.2e-12, 8.4e-13). multi_level: mass-only diffs, so NEEDS-RULING.
+  - L2 nf0/nf1 4m/2r and 4m/4r: FAIL KNOWN. Q_ENTH is down to 6e-13 to 1.6e-12 (was 3e-10 to 5.2e-10), but `MLR_FUEL VAPOR` differs (4e-15) and multi_level differs beyond mass. Leaf PHI 1.3-1.6e-15 is NEEDS-RULING.
+  - Cross-mesh rows, the 120 s row, existing gates and the L0 bitcheck (18 csv, 0 differ): PASS.
+  - Radiation was stopped before it ran: the fix d02b4bf134 is pending a new tip.
