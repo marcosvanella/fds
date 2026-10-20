@@ -304,9 +304,7 @@ void fill_undivided_vorticity(LevelRegistry& reg, int nl)
         Fields& F = reg.fields(l);
         F.ensure("VORT");
         const amrex::Periodicity per = reg.level(l).geom.periodicity();
-        F["U"].FillBoundary(per);
-        F["V"].FillBoundary(per);
-        F["W"].FillBoundary(per);
+        for (const char* n : {"U", "V", "W"}) F.fill_ghosts(n);   // one source per seam ghost
         const amrex::Box dom = reg.level(l).geom.Domain();
         const int dx_on = (dom.length(0) > 1) ? 1 : 0;
         const int dy_on = (dom.length(1) > 1) ? 1 : 0;
@@ -599,7 +597,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             for (int l = 0; l < nl; ++l) {
                 Fields& F = reg.fields(l);
                 const char* st[3] = {"US", "VS", "WS"}; const char* vn[3] = {"U", "V", "W"};
-                for (int d = 0; d < 3; ++d) { amrex::MultiFab::Copy(F[st[d]], F[vn[d]], 0, 0, 1, 0); F[st[d]].FillBoundary(reg.level(l).geom.periodicity()); F[vn[d]].FillBoundary(reg.level(l).geom.periodicity()); }
+                for (int d = 0; d < 3; ++d) { amrex::MultiFab::Copy(F[st[d]], F[vn[d]], 0, 0, 1, 0); F.fill_ghosts(st[d]); F.fill_ghosts(vn[d]); }
             }
             loop.prime_levels();   // ghost faces of the projected velocity, D of the projected state
         }
