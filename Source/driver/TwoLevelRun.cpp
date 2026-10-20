@@ -208,12 +208,17 @@ void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, TimeLoo
         std::vector<amrex::MultiFab> keep;
         for (const char* n : {"U", "V", "W", "H"}) { keep.emplace_back(F[n].boxArray(), F[n].DistributionMap(), 1, F[n].nGrow()); amrex::MultiFab::Copy(keep.back(), F[n], 0, 0, 1, F[n].nGrow()); }
         loop.stage_exchange(l, 6, false);
-        mf[l].define(Lv.ba, Lv.dm, phi ? 7 : 6, 0);
+        const int nz = F["ZZ"].nComp(), c0 = phi ? 7 : 6;   // after the base fields: HRRPUV, ZZ components, LEVEL, BOX_ID
+        mf[l].define(Lv.ba, Lv.dm, c0 + 3 + nz, 0);
         amrex::MultiFab::Copy(mf[l], F["RHO"], 0, 0, 1, 0);
         amrex::Array<const amrex::MultiFab*, 3> faces{&F["U"], &F["V"], &F["W"]};
         amrex::average_face_to_cellcenter(mf[l], 1, faces);
         amrex::MultiFab::Copy(mf[l], F["TMP"], 0, 5, 1, 0);
         if (phi) amrex::MultiFab::Copy(mf[l], F["PHI"], 0, 6, 1, 0);
+        amrex::MultiFab::Copy(mf[l], F["Q"], 0, c0, 1, 0); mf[l].mult(0.001, c0, 1);   // HRRPUV, kW/m3 (FDS Q is W/m3)
+        amrex::MultiFab::Copy(mf[l], F["ZZ"], 0, c0 + 1, nz, 0);
+        mf[l].setVal(l, c0 + 1 + nz, 1);
+        for (amrex::MFIter mfi(mf[l]); mfi.isValid(); ++mfi) mf[l][mfi].setVal<amrex::RunOn::Host>(mfi.index(), mfi.validbox(), c0 + 2 + nz, 1);
         const double fz = 0.25 / Lv.dx[2], fx = 0.25 / Lv.dx[0];
         for (amrex::MFIter mfi(mf[l]); mfi.isValid(); ++mfi) {
             auto a = mf[l].array(mfi);
@@ -232,8 +237,11 @@ void write_rho_vel_plotfile(const std::string& path, LevelRegistry& reg, TimeLoo
     }
     amrex::Vector<std::string> names{"RHO", "U", "V", "W", "OMEGA_Y", "TMP"};
     if (phi) names.push_back("PHI");
+    names.push_back("HRRPUV");
+    for (int n = 0; n < reg.fields(0)["ZZ"].nComp(); ++n) names.push_back("ZZ" + std::to_string(n + 1));   // tracked species mass fractions, FDS order
+    names.push_back("LEVEL"); names.push_back("BOX_ID");
     amrex::WriteMultiLevelPlotfile(path, nl, pmf, names, geom, loop.time(), level_steps, ref_ratio);
-    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W,OMEGA_Y,TMP[,PHI] cell-centred; OMEGA_Y = du/dz - dw/dx [1/s] from the 4 cell edges, " << nl << " level(s))\n";
+    amrex::Print() << "PLOTFILE wrote " << path << " (RHO,U,V,W,OMEGA_Y,TMP[,PHI],HRRPUV,ZZ1..,LEVEL,BOX_ID cell-centred; OMEGA_Y = du/dz - dw/dx [1/s] from the 4 cell edges, " << nl << " level(s))\n";
 }
 
 }  // namespace
