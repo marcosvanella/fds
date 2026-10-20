@@ -72,3 +72,23 @@ Plain (non-ls-fine) LEVEL_SET_MODE with more than one mesh aborts by design ("PH
 - **Long option:** `T_END=120 TIMES=40,80,120`.
 - Exit code 0 only if every non-XFAIL row passes.
 - Dry run logs: `scratch/mr-ls/vv/dry_gate3.log` (agreed tolerance, current). Superseded: `dry_gate.log` and `dry_gate2.log` (provisional 1e-8 tolerance, 09:26 build).
+
+## Full gate on ls-mr5b `f910dd53f3` (2026-10-20, pop-os, all rows)
+
+Source: `f910dd53f3` (contains `df9f8474cc`). pop-os binary `GROK/lsmr5/b-f910dd53f3/fds_amr`, GCC 13.3 / Open MPI 5.0.1, sha256 `2129aea1…`. Its source tree was verified identical to `git archive f910dd53f3`.
+Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full table, harness changes, HIER review and radiation table: `scratch/mr-ls/vv/RESULTS.md`.
+**Harness changes:** 4m/2r uses `C064_4mesh_np2.fds` (MPI_PROCESS); generated inputs use SIG_FIGS=15 so csv bit-identity is meaningful; CFL_VELOCITY_NORM=3 guard (not present in any input); the L0 bitcheck case is `C064_1mesh.fds` (BLOCKING_FACTOR 2, MAX_GRID_SIZE 12, which divides the 12-cell L0); the comparator prints the first differing row and column. Role 1's HIER box/cell-count check was reviewed and kept: sound, fails properly, masks nothing (BITID stays separate).
+
+| group | result |
+|---|---|
+| 1m/1r repeats (L1, nf0, nf1) | PASS (bit-identical) |
+| cross-mesh-count rows (2m/1r, 2m/2r, 4m/1r, 4m/2r, 4m/4r; L1, nf0, nf1) | **all PASS**: front x identical; verdict identical where the run completed; mean HRR rel 3.4e-4 to 4.8e-3 |
+| same-mesh bit-identity, 1 level (2m/2r, 4m/2r, 4m/4r) | **FAIL** (not on the KNOWN list, same class): `c_hrr.csv` differs from t=0 (Q_CONV), max rel 1.2e-12 to 6.8e-12; devc and driver csvs identical |
+| same-mesh bit-identity, 2 levels (nf0 2m/2r; nf1 2m/2r, 4m/2r, 4m/4r) | **FAIL KNOWN**: Q_ENTH max rel 3.0e-10 to 5.2e-10, from t=0. Composite mass sum differs from step 1 (6e-14 rel). Leaf PHI 1.3e-15 at nf1 4m/2r and 4m/4r (not on the list). HIER PASS |
+| nf0 4m/2r, 4m/4r | **FAIL KNOWN**: mass balance 2.332x limit, species 1.32x (4m/1r passes) |
+| 120 s row | PASS (front x 15/35/55 m) |
+| existing gates: drive_check, tag_phi, regrid_transfer_ground, L0 bitcheck (18 csv, 0 differ vs `df9f8474cc`) | PASS |
+| radiation: box 2 levels and Gaussian 2/3 levels at 1/2/4 ranks; patch-over-vent 2 levels at 1/2/4 ranks | PASS (residuals 0, −5.2e-5, −5.6e-5, +3.5e-3 kW; gas loss identical across ranks) |
+| radiation: patch-over-vent 3 levels at 2/4 ranks | **FAIL**: residual −1.707 kW (limit 5.7e-3); gas loss 5.7456 vs 5.7013 at 1 rank |
+
+**PUSH-READY: NO** (GATE FAIL with 9 rows, plus radiation o3 at np2/np4).
