@@ -162,7 +162,7 @@ void composite_fill_fine_face_ghosts(LevelRegistry& reg, int l, const std::array
             const amrex::Box x = (*tmp[d])[mfi].box() & dst[mfi].box();
             amrex::LoopOnCpu(x, [&](int i, int j, int k) { if (!vb.contains(i, j, k)) a(i, j, k) = s(i, j, k); });
         }
-        Ff.fill_ghosts(names[d]);   // one source per seam ghost
+        dst.FillBoundary(lf.geom.periodicity());
     }
 }
 
