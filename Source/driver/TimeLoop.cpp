@@ -1828,6 +1828,7 @@ struct TimeLoop::Impl {
                 amrex::FArrayBox& fab = L.m_reg->fields(l)[nm[f.d]][mfi];
                 if (fab.box().contains(f.c)) fab(f.c) = f.v;
             }
+        for (const char* n : nm) L.m_reg->fields(l).fill_ghosts(n);   // the ghost copy of a vent face in a box of another rank (collective: every rank calls it)
     }
     // vent_keep of both stages from the parent's current vent state (a new box layout: the first exchange after the bind restores them)
     void record_vent_faces()
