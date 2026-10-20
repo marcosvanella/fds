@@ -687,6 +687,19 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     loop.set_flux_overwrite(o.overwrite);
                 }
                 if (changed || rebound) loop.prime_levels();
+                if (finest > fb0) {   // a new level: the hook projected onto the D it inherited from its parent; its own D comes from the prime, so project again and prime (as the initial setup does)
+                    std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, finest + 1);
+                    pst.before(lv);
+                    const fdsrt::ProjectionReport pr = fdsrt::project_after_regrid(lv, &solver, pst.options);
+                    if (pr.ran && pr.solved) {
+                        for (int l = 0; l <= finest; ++l) {
+                            Fields& F = reg.fields(l);
+                            const char* st[3] = {"US", "VS", "WS"}; const char* vn[3] = {"U", "V", "W"};
+                            for (int d = 0; d < 3; ++d) { amrex::MultiFab::Copy(F[st[d]], F[vn[d]], 0, 0, 1, 0); F.fill_ghosts(st[d]); F.fill_ghosts(vn[d]); }
+                        }
+                        loop.prime_levels();
+                    }
+                }
                 if (ldiag) { leaf_diag(reg, "post-regrid", s, loop.time(), ns); leaf_boxes(reg, "post-regrid", s); old_ba.resize(std::max<std::size_t>(old_ba.size(), reg.num_levels())); leaf_diag(reg, "new-cells", s, loop.time(), ns, &old_ba); }
                 if (finest < fb0) {   // derefinement: relative change of T, each Z and the background pressure at level 0, and div u - D of the remaining levels
                     amrex::BoxArray cov_new; if (finest >= 1) { cov_new = reg.level(1).ba; cov_new.coarsen(reg.level(1).ref_ratio_from_parent); }   // still covered: not a leaf cell at level 0
