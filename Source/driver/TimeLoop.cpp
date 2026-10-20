@@ -2688,6 +2688,10 @@ struct TimeLoop::Impl {
         const int nl = static_cast<int>(lc.size());
         std::fill(leaf, leaf + nc, 0.0); std::fill(l0, l0 + nc, 0.0);
         std::vector<double> t(nc);
+        // Per-box partial sums, made global (one source per entry: exact) and added in box order on rank 0 only (0 elsewhere): the result does not depend on
+        // the rank layout. A per-rank sum of a difference of large integrals (Q_ENTH = dE/dt) carried round-off of the rank grouping (about 5e-10 rel).
+        const int nbt = static_cast<int>(lc.back().off + lc.back().nbox);
+        std::vector<double> bl(static_cast<std::size_t>(2 * nbt * nc), 0.0);   // [box][0: leaf, 1: l0][nc]
         for (int l = 0; l < nl; ++l) {
             const amrex::MultiFab& q = (*lc[l].F)["Q"];
             amrex::iMultiFab cov(q.boxArray(), q.DistributionMap(), 1, 0);
@@ -2697,22 +2701,27 @@ struct TimeLoop::Impl {
                 const amrex::Box vb = mfi.validbox();
                 auto c = cov.const_array(mfi);
                 const int nm = lc[l].fds0 + mfi.index() + 1;
+                double* bleaf = &bl[static_cast<std::size_t>((lc[l].off + mfi.index()) * 2 * nc)];
+                double* bl0 = bleaf + nc;
                 std::vector<int> m(static_cast<std::size_t>(vb.numPts()));
                 std::size_t n = 0;
                 if (l == 0) {   // level 0: all cells (l0), then remove the covered ones
                     std::fill(m.begin(), m.end(), 1);
                     f(nm, m.data(), t.data());
-                    for (int i = 0; i < nc; ++i) { l0[i] += t[i]; leaf[i] += t[i]; }
+                    for (int i = 0; i < nc; ++i) { bl0[i] += t[i]; bleaf[i] += t[i]; }
                     amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 1 : 0; });
                     f(nm, m.data(), t.data());
-                    for (int i = 0; i < nc; ++i) leaf[i] -= t[i];
+                    for (int i = 0; i < nc; ++i) bleaf[i] -= t[i];
                 } else {        // finer: add the cells not covered by the next level
                     amrex::LoopOnCpu(vb, [&](int i, int j, int k) { m[n++] = c(i, j, k) != 0 ? 0 : 1; });
                     f(nm, m.data(), t.data());
-                    for (int i = 0; i < nc; ++i) leaf[i] += t[i];
+                    for (int i = 0; i < nc; ++i) bleaf[i] += t[i];
                 }
             }
         }
+        amrex::ParallelAllReduce::Sum(bl.data(), static_cast<int>(bl.size()), amrex::ParallelContext::CommunicatorSub());
+        if (amrex::ParallelDescriptor::MyProc() != 0) return;
+        for (int b = 0; b < nbt; ++b) for (int i = 0; i < nc; ++i) { leaf[i] += bl[(b * 2) * nc + i]; l0[i] += bl[(b * 2 + 1) * nc + i]; }
     }
     // E (composite) and E0 (level 0 alone, as UPDATE_HRR).
     void energy_sums(double& e, double& e0) { leaf_sums(1, [](int nm, const int* m, double* o) { fds_p_esums(nm, m, o); }, &e, &e0); }
@@ -2737,7 +2746,12 @@ struct TimeLoop::Impl {
         double e, e0;
         energy_sums(e, e0);
         double es_old = 0.0;   // UPDATE_HRR's ENTHALPY_SUM_OLD (local level-0 meshes)
-        for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) es_old += fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
+        {   // global in box order on rank 0, as energy_sums
+            std::vector<double> eb(static_cast<std::size_t>(lc[0].nbox), 0.0);
+            for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) eb[mfi.index()] = fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
+            amrex::ParallelAllReduce::Sum(eb.data(), static_cast<int>(eb.size()), amrex::ParallelContext::CommunicatorSub());
+            if (amrex::ParallelDescriptor::MyProc() == 0) for (double v : eb) es_old += v;
+        }
         if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
         e_old = e; have_e_old = true;
         // Q_CONV, Q_COND, Q_DIFF (leaf-only, any number of levels): the level-0 walls under level 1 are removed (level 1 call, q[3..5]); every hidden wall whose gas cell is not covered by
