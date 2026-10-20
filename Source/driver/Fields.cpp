@@ -144,6 +144,9 @@ void Fields::fill_ghosts(const std::string& name) const
         for (int d = 0; d < 3; ++d) if (nod[d] && !m_l0.geom.isPeriodic(d) && b.bigEnd(d) == dom.bigEnd(d)) b.growHi(d, 1);
         bl.push_back(b);
     }
+    // A ghost point on the high face of a box only (no box has it as its low face: an edge or a coarse-fine face) has no source in t: FillBoundary first gives it
+    // the face value (single source there unless the point is the high face of two boxes, which then hold the same value); t then overwrites the two-source seam points.
+    mf.FillBoundary(0, mf.nComp(), mf.nGrowVect(), m_l0.geom.periodicity(), /*cross=*/false);
     amrex::MultiFab t(amrex::BoxArray(std::move(bl)), mf.DistributionMap(), mf.nComp(), mf.nGrowVect() + nod);
     for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
         auto f = mf.array(mfi); auto c = t.array(mfi);
