@@ -104,3 +104,14 @@ Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full tabl
   - L2 nf0/nf1 4m/2r and 4m/4r: FAIL KNOWN. Q_ENTH is down to 6e-13 to 1.6e-12 (was 3e-10 to 5.2e-10), but `MLR_FUEL VAPOR` differs (4e-15) and multi_level differs beyond mass. Leaf PHI 1.3-1.6e-15 is NEEDS-RULING.
   - Cross-mesh rows, the 120 s row, existing gates and the L0 bitcheck (18 csv, 0 differ): PASS.
   - Radiation was stopped before it ran: the fix d02b4bf134 is pending a new tip.
+
+## Ruling 2026-10-20, extended (approved, relayed by Role 1)
+
+- For same-mesh runs compared across rank counts, EVERY summary column in c_hrr.csv and c_multi_level.csv, plus leaf PHI, passes at <= 1e-11 relative (relative to the reference column max; leaf PHI relative to max|PHI|). Devc, front x and gate verdicts stay STRICT. HRR_Q_RANK_EXTRA=HRR stays on.
+- Encoded as the toggle `RANK_SUMMARY_TOL_ALL` (default 1 = ON) with `RANK_SUMMARY_TOL=1e-11`, in lsfine_compare.py and lsfine_multirank_gate.sh (scratch/mr-ls/vv/ and pop-os GROK/vv-lsfine/pkg63x/). With `RANK_SUMMARY_TOL_ALL=0` the earlier behaviour is restored (Q-only rule, NEEDS-RULING category).
+- Re-evaluation of the existing 63a11fd048 outputs (no reruns), toggle ON:
+  - L1 2m/2r, 4m/2r, 4m/4r: PASS (c_hrr max 6.75e-12).
+  - L2 nf0/nf1 2m/2r: c_hrr PASS (<= 1.24e-12). c_multi_level FAIL: `mass` 4-6e-14 passes, but `mass_rel_change` differs at 1.0-1.1 relative to its column max (6.6e-14, itself round-off).
+  - L2 nf0/nf1 4m/2r and 4m/4r: c_hrr PASS (MLR_FUEL VAPOR 4e-15, Q_ENTH <= 1.55e-12) and leaf PHI PASS (1.3-1.6e-15). c_multi_level FAIL: `mass_rel_change` 1.0-1.2, and `divmax`/`div_l0`/`div_l1` 2e-4 to 7.6e-4 relative to column max (~1e-12, round-off-level quantities).
+  - All other rows unchanged (PASS).
+- Open point: `mass_rel_change` and the `div*` columns are round-off-sized quantities, so a column-max-relative 1e-11 tolerance cannot pass them. They need either an absolute floor or exclusion; this needs an owner decision.
