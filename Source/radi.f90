@@ -3898,13 +3898,9 @@ RSA_RAT = 1._EB/(1._EB-1._EB/NRA)
 
 ! Check if it time to update radiation intensity field
 
-IF ( MOD(RAD_CALL_COUNTER,TIME_STEP_INCREMENT)==0 .OR. INITIALIZATION_PHASE .OR. ICYC==1 .OR. UPDATE_ALL_ANGLES .OR. RAD_FRESH) THEN
-   UPDATE_INTENSITY   = .TRUE.
-   EXCHANGE_RADIATION = .TRUE.
-ELSE
-   UPDATE_INTENSITY   = .FALSE.
-   EXCHANGE_RADIATION = .FALSE.
-ENDIF
+! EXCHANGE_RADIATION (global, read by the level-0 MESH_EXCHANGE(2)) must not depend on RAD_FRESH: a new fine box exists on some ranks only
+EXCHANGE_RADIATION = MOD(RAD_CALL_COUNTER,TIME_STEP_INCREMENT)==0 .OR. INITIALIZATION_PHASE .OR. ICYC==1 .OR. UPDATE_ALL_ANGLES
+UPDATE_INTENSITY   = EXCHANGE_RADIATION .OR. RAD_FRESH
 
 ! If this is the last iteration of the solver in a single time step, update the call counter.
 

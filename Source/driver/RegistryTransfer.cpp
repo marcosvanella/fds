@@ -179,7 +179,7 @@ void RegistryTransfer::hierarchy_done(bool initial)
         Fields& F = m_reg.fields(l);
         const amrex::Periodicity per = m_reg.level(l).geom.periodicity();
         for (const char* nm : kCell) F[nm].FillBoundary(per);
-        for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) F[kFace[d][s]].FillBoundary(per);
+        for (int d = 0; d < 3; ++d) for (int s = 0; s < 2; ++s) F.fill_ghosts(kFace[d][s]);   // face fields: one source per seam ghost (Fields::fill_ghosts)
     }
     if (after_hierarchy) after_hierarchy(initial);
 }
