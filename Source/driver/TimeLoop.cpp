@@ -685,7 +685,7 @@ struct TimeLoop::Impl {
 
     void state(bool pred, bool first) { fds_k_state(pred ? 1 : 0, first ? 1 : 0, L.m_icyc, L.m_rmin, L.m_rmax); }
     // Particle count and total mass (PWT*MASS) over every bound level at the start of the run; with FDSTL_PART_DUMP each rank writes X Y Z mass (%a) to part_<rank>.txt
-    void particle_report()
+    double particle_report(bool quiet = false)
     {
         double n = 0, mass = 0;
         std::FILE* fp = std::getenv("FDSTL_PART_DUMP") ? std::fopen((dir + "/part_" + std::to_string(amrex::ParallelDescriptor::MyProc()) + ".txt").c_str(), "w") : nullptr;
@@ -702,7 +702,8 @@ struct TimeLoop::Impl {
         if (fp) std::fclose(fp);
         amrex::ParallelDescriptor::ReduceRealSum(n);
         amrex::ParallelDescriptor::ReduceRealSum(mass);
-        if (n > 0) amrex::Print() << "particles at t=" << L.m_t << ": " << static_cast<long>(n) << ", total mass " << std::setprecision(17) << mass << " kg\n";
+        if (n > 0 && !quiet) amrex::Print() << "particles at t=" << L.m_t << ": " << static_cast<long>(n) << ", total mass " << std::setprecision(17) << mass << " kg\n";
+        return mass;
     }
     // W2 (PV-2): stock particle insertion on the bed level lev at t=0, once; the level-0 particles under level 1 go (leaf rule)
     void insert_bed(int lev)
@@ -3006,6 +3007,7 @@ void TimeLoop::bind_level(int lev) { m->bind_level(lev); }
 void TimeLoop::unbind_level(int lev) { m->unbind_level(lev); }
 void TimeLoop::insert_bed(int lev) { m->insert_bed(lev); }
 void TimeLoop::particle_report() { m->particle_report(); }
+double TimeLoop::particle_mass() { return m->particle_report(true); }
 bool TimeLoop::level_bound(int lev) const { return lev >= 0 && lev < static_cast<int>(m->lc.size()); }
 #define FDSTL_LEVEL_STAGE(lev, body) do { m->select(lev); body; m->select(0); } while (0)
 void TimeLoop::stage_viscosity(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_visc_mfd(predictor)); }

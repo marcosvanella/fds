@@ -90,6 +90,7 @@ public:
     void bind_level(int lev);
     void unbind_level(int lev);
     void insert_bed(int lev);
+    double particle_mass();     // total particle mass over the bound levels (collective, no output)
     void particle_report();     // particle count and total mass over the bound levels (FDSTL_PART_DUMP: positions per rank)   // W2: particles of the bed level lev at t=0 (stock insertion), none under it on level 0
     bool level_bound(int lev) const;
     // Per-level stage entry points. Each is the exact body that advance() runs for that level at that position of MAIN_LOOP (same calls, same order), on the level's boxes

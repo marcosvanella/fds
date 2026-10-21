@@ -642,6 +642,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // Species: the reaction source sum_n C(n) * Q is added to the inflow (COMBUSTION's M_DOT_PPP of step s enters RHO*Z in DENSITY of step s+1 with that step's DT).
     std::vector<double> inflow(1 + ns, 0.0), r(2 + ns), reac(ns, 0.0), rc(std::max(ns, 1), 0.0);
     double through = 0.0;
+    // particle mass that became gas: DENSITY of step s takes the particle sources of step s-1, so the gas change of step s matches the particle loss up to step s-1
+    const double pm0 = loop.particle_mass();
+    double pm_prev = pm0;
     auto mass_limit = [&] { return through > 1e-10 * m0[0] ? 1e-6 * (m0[0] + through) : 1e-10 * m0[0]; };
     const bool have_rc = ns > 0 && fds_p_reac_coef(ns, rc.data()) != 0;
     double hrr_prev = composite_hrr(reg, nl), hrr_sum = 0.0, hrr_last = 0.0;
@@ -661,6 +664,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     int s_done = 0; bool t_end_hit = false;
     for (int s = 1; s <= o.steps; ++s) {
         s_done = s;
+        { const double pm = loop.particle_mass(); inflow[0] += pm_prev - pm; pm_prev = pm; }   // particle mass lost up to step s-1 (gas source of this step)
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         fds_p_bnd_rate(ns, r.data());
         amrex::ParallelAllReduce::Sum(r.data(), 2 + ns, amrex::ParallelContext::CommunicatorSub());
