@@ -154,6 +154,8 @@ ABSTRACT INTERFACE
    END SUBROUTINE RAD_WALLS_IF
 END INTERFACE
 PROCEDURE(RAD_WALLS_IF), POINTER, PUBLIC, SAVE :: RAD_WALLS_PROC => NULL()
+!> Fine box NM: ON=1 points the WALL/BOUNDARY_* mesh pointers and wall counts at its hidden walls (velo.f90 near-wall viscosity), ON=0 restores the box.
+PROCEDURE(RAD_WALLS_IF), POINTER, PUBLIC, SAVE :: FINE_WALLS_PTR_PROC => NULL()
 
 !> Rank-invariant HRR file (driver runs, HRR_DET): the step terms of each level-0 mesh (UPDATE_HRR: HRR_QM, HRR_MM; leaf wall corrections: HRR_QW, HRR_MW) are
 !> tallied per mesh (HRR_QDM, HRR_MDM); rank-level terms that have no mesh (particles; composite Q_ENTH of rank 0) go to HRR_QDR, HRR_MDR. At an HRR dump the
