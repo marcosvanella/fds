@@ -89,6 +89,8 @@ public:
     void stage_init_divergence();
     void bind_level(int lev);
     void unbind_level(int lev);
+    void insert_bed(int lev);
+    void particle_report();     // particle count and total mass over the bound levels (FDSTL_PART_DUMP: positions per rank)   // W2: particles of the bed level lev at t=0 (stock insertion), none under it on level 0
     bool level_bound(int lev) const;
     // Per-level stage entry points. Each is the exact body that advance() runs for that level at that position of MAIN_LOOP (same calls, same order), on the level's boxes
     // of this rank. `predictor` selects the stage (true = predictor). t and dt are the loop's current time and step. A level without an FDS binding aborts with a

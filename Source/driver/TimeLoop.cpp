@@ -53,7 +53,10 @@ void fds_k_dens_post(double t, double dt, int nm);
 void fds_ls_drive_step(double t, double dt);   // fds_ls_grid.f90
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
-void fds_k_part(int mode, double t, double dt, int nm);   // fds_kernels.f90: main.f90 particle calls (level 0)
+void fds_k_part(int mode, double t, double dt, int nm);
+void fds_k_bed_insert(double t, int nm);          // W2: stock insertion on a fine box
+void fds_k_drop_covered(int nm, const int* covered);
+int fds_k_part_list(int nm, int n, double* buf);   // W2: remove level-0 particles under a finer level   // fds_kernels.f90: main.f90 particle calls (level 0)
 int fds_k_rad_src_fill(int nm, double* dat);                // radiation source average-down (radi.f90 RAD_SRC_FILL)
 void fds_k_rad_src_set(int nm, int ib, int jb, int kb, const double* dat);
 void fds_k_rad_src_wscale(int nm, int ib, int jb, int kb, double* dat, int ratio);
@@ -677,6 +680,41 @@ struct TimeLoop::Impl {
     }
 
     void state(bool pred, bool first) { fds_k_state(pred ? 1 : 0, first ? 1 : 0, L.m_icyc, L.m_rmin, L.m_rmax); }
+    // Particle count and total mass (PWT*MASS) over every bound level at the start of the run; with FDSTL_PART_DUMP each rank writes X Y Z mass (%a) to part_<rank>.txt
+    void particle_report()
+    {
+        double n = 0, mass = 0;
+        std::FILE* fp = std::getenv("FDSTL_PART_DUMP") ? std::fopen((dir + "/part_" + std::to_string(amrex::ParallelDescriptor::MyProc()) + ".txt").c_str(), "w") : nullptr;
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l) {
+            select(l);
+            each_local([&](int nm) {
+                const int k = fds_k_part_list(nm, 0, nullptr);
+                std::vector<double> b(4 * static_cast<std::size_t>(k));
+                if (k > 0) fds_k_part_list(nm, k, b.data());
+                for (int i = 0; i < k; ++i) { n += 1; mass += b[4 * i + 3]; if (fp) std::fprintf(fp, "%a %a %a %a\n", b[4 * i], b[4 * i + 1], b[4 * i + 2], b[4 * i + 3]); }
+            });
+        }
+        select(0);
+        if (fp) std::fclose(fp);
+        amrex::ParallelDescriptor::ReduceRealSum(n);
+        amrex::ParallelDescriptor::ReduceRealSum(mass);
+        if (n > 0) amrex::Print() << "particles at t=" << L.m_t << ": " << static_cast<long>(n) << ", total mass " << std::setprecision(17) << mass << " kg\n";
+    }
+    // W2 (PV-2): stock particle insertion on the bed level lev at t=0, once; the level-0 particles under level 1 go (leaf rule)
+    void insert_bed(int lev)
+    {
+        select(lev);
+        each_local([&](int nm) { fds_k_bed_insert(L.m_t, nm); });
+        const amrex::BoxArray cov = amrex::coarsen(lc[1].lev->ba, lc[1].lev->ref_ratio_from_parent);
+        select(0);
+        each_local([&](int nm) {
+            const amrex::Box vb = l0.ba[nm - 1];
+            std::vector<int> m(vb.numPts(), 0);
+            for (const auto& is : cov.intersections(vb))
+                for (amrex::BoxIterator it(is.second); it.ok(); ++it) { const amrex::IntVect q = it() - vb.smallEnd(); m[q[0] + vb.length(0) * (q[1] + vb.length(1) * q[2])] = 1; }
+            fds_k_drop_covered(nm, m.data());
+        });
+    }
     template <class F> void each_local(F f) { for (int i = 0; i < c->nbox; ++i) if (local(i)) f(c->fds0 + i + 1); }
 
     // ------------------------------------------------------------ S10.2 interface flux hooks (notes/flux-hooks-design.md)
@@ -2954,6 +2992,8 @@ void TimeLoop::stage_state(bool predictor, bool first_pass) { m->state(predictor
 void TimeLoop::stage_init_divergence() { fds_p_init_div(); }
 void TimeLoop::bind_level(int lev) { m->bind_level(lev); }
 void TimeLoop::unbind_level(int lev) { m->unbind_level(lev); }
+void TimeLoop::insert_bed(int lev) { m->insert_bed(lev); }
+void TimeLoop::particle_report() { m->particle_report(); }
 bool TimeLoop::level_bound(int lev) const { return lev >= 0 && lev < static_cast<int>(m->lc.size()); }
 #define FDSTL_LEVEL_STAGE(lev, body) do { m->select(lev); body; m->select(0); } while (0)
 void TimeLoop::stage_viscosity(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_visc_mfd(predictor)); }
@@ -3050,6 +3090,7 @@ bool TimeLoop::advance() { const double t0 = amrex::second(); const bool ok = m-
 int TimeLoop::run()
 {
     m->log_mass.push_back(m->mass_row(m_t));
+    m->particle_report();
     int fails = 0;
     for (;;) {
         if (m_o.max_steps >= 0 && m_icyc >= m_o.max_steps) break;

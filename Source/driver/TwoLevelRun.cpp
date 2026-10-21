@@ -530,6 +530,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (pst.calls > 0) amrex::Print() << " (max|div u - D| before " << pst.last.div_before << ", after " << pst.last.div_after << ", accepted " << pst.last.accepted << ")";
     amrex::Print() << "\n";
     for (int l = 1; l <= finest; ++l) loop.bind_level(l);   // mesh offset + derive of parent stage arrays already done by RegistryTransfer::derive at make_level
+    if (!pb::bed_list().empty() && finest >= 1 && o.bed.size() != 6) { loop.insert_bed(finest); loop.particle_report(); }   // W2: L_ins carries the bed particles
     fdsrt::CfHookStats cfs;
     fdsrt::install_cf_ghost_hooks(loop, finest, fdsrt::ThermoProvider(), &cfs);
     loop.set_flux_overwrite(o.overwrite);
