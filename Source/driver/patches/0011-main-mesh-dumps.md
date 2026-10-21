@@ -16,7 +16,7 @@ Sources: `docs/upstream-patches/line-check-firex-1fb5c300.md`, `line-check-outpu
 - When `OUT_MESH_DUMPS` is true it runs the per-mesh dump loop of `MAIN_LOOP` (reference sequence: `N_WRITTEN=0`, the five `WROTE_*` resets, then
   `DUMP_MESH_OUTPUTS(T,DT,NM,.FALSE.)` for `NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX`).
 - `OUT_MESH_DUMPS` is a flag of `fds_amrex_hooks.f90` (default false, so the behaviour of 0006 is unchanged), set by `fds_hook_set_mesh_dumps`; the driver calls it when
-  `FDSTL_MESH_DUMPS` is set and the FDS writers are available.
+  the FDS writers are available and `FDSTL_NO_MESH_DUMPS` is not set.
 - Not replicated: the VTK-HDF padding loop and `INITIALIZE_VTKHDF_FILES` of `MAIN_LOOP`, and `IF (CTRL_STOP_STATUS) STOP_STATUS = CTRL_STOP`.
 
 ## Applied

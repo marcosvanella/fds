@@ -4425,8 +4425,8 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                         ENDDO
                         IL(II,JJ,KK) = IL(II,JJ,KK)/REAL(EXTERNAL_WALL(IW)%NIC_MAX-EXTERNAL_WALL(IW)%NIC_MIN+1,EB)
                      CASE DEFAULT ! solid wall
-                        BR%BAND(IBND)%ILW(N) = OUTRAD_W(IW) + RPI*((1._EB-B1%EMISSIVITY)*INRAD_W(IW) &
-                                                   -B1%EMISSIVITY*RAD_WALL_DQ(NM,IW))
+                        BR%BAND(IBND)%ILW(N) = OUTRAD_W(IW) + RPI*(1._EB-B1%EMISSIVITY)*INRAD_W(IW) &   ! stock association: bitwise when the correction is 0
+                                               - RPI*B1%EMISSIVITY*RAD_WALL_DQ(NM,IW)
                         IC = CELL_INDEX(BC%IIG,BC%JJG,BC%KKG)
                         IF (IC>0) CELL_ILW(IC,ABS(IOR)) = BR%BAND(IBND)%ILW(N)
                   END SELECT

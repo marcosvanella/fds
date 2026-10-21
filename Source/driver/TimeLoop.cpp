@@ -90,6 +90,7 @@ void fds_clip_renorm(const int* rlo, const int* rhi, const int* alo, const int* 
 void fds_p_params(int* ip, double* rp);
 void fds_p_mesh_info(int nm, int* ip, double* rp);
 void fds_p_part_scope(int* ip, char* name);
+void fds_p_fft(int nm);
 void fds_p_get(int nm, const char* name, double* buf, long ntot, int* ierr);
 void fds_p_mfd(int nm);
 int fds_p_dens_skip();   // fds_step.f90: 1 when DENSITY returns at once (ICYC<=1 etc.): no level clip then
@@ -515,9 +516,9 @@ struct TimeLoop::Impl {
         zone_setup();
         fds_outputs = fds_hook_step_outputs() != 0 && std::getenv("FDSTL_NO_FDS_OUTPUTS") == nullptr;
         amrex::Print() << "FDS-AMReX: FDS output writers (devc/hrr/mass/steps/out) " << (fds_outputs ? "driven through fds_setup(mode=3)" : "not available (main.f90 patch 0006 absent or FDSTL_NO_FDS_OUTPUTS set)") << "\n";
-        if (fds_outputs && std::getenv("FDSTL_MESH_DUMPS") != nullptr) {  // patch 0011 (per-mesh dumps: slices, boundary files, Plot3D, ...)
+        if (fds_outputs && std::getenv("FDSTL_NO_MESH_DUMPS") == nullptr) {  // patch 0011 (per-mesh dumps: slices, boundary files, Plot3D, particles at DT_PART, ...)
             fds_hook_set_mesh_dumps(1);
-            amrex::Print() << "FDS-AMReX: per-mesh FDS dumps on (FDSTL_MESH_DUMPS, needs main.f90 patch 0011)\n";
+            amrex::Print() << "FDS-AMReX: per-mesh FDS dumps on (FDSTL_NO_MESH_DUMPS turns them off)\n";
         }
         if (const char* e = std::getenv("FDSTL_FLUXCHK")) fluxchk = std::atoi(e);
         if (const char* e = std::getenv("FDSTL_FLUXCHK_KINDS")) fluxchk_kinds = std::atoi(e);
@@ -1082,6 +1083,7 @@ struct TimeLoop::Impl {
     void solve_poisson_impl(bool pred)
     {
         Fields& F = *L.m_F;
+        if (std::getenv("FDSTL_PRESSURE_FDS")) { each_local([&](int nm) { fds_p_fft(nm); }); return; }   // per-mesh FDS solve, as main.f90
         level0_rhs_and_check();
         solve_level0(pred, F);
     }
