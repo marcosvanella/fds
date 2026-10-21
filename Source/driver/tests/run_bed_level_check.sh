@@ -2,7 +2,9 @@
 # W2a (PV-10) particle bed level check, setup only (--bind-only): a gas-only cut-down C064 (x -10..70, y -20..20, z 0..20 at 1 m) with the
 # C064 bed XB passed by --bed (the &INIT PART_ID path is the same list once particle cases pass the driver scope, W0/W7).
 # (a) 2 levels: L_ins 1 (0.5 m) covers the bed; (b) 3 levels: L_ins 2 (0.25 m); (c) 1 level: no bed line (no-op);
-# (d) a heat-flux VENT inside the bed kept on level 0 (D-010, --nofine 1): the bed level cannot cover the bed, the run stops.
+# (d) a heat-flux VENT inside the bed kept on level 0 (D-010, default --nofine): the bed level cannot cover the bed, the run stops;
+# (e) the C064 IGNITION burner (HRRPUA+RAMP, TMP_FRONT, SPREAD_RATE/XYZ; D-010 exempt) inside the bed: 2 levels with the default --nofine
+#     build the bed level, and the burner BURNING RATE surface integral equals the 1-level run at every output (relative 1e-12).
 # usage: run_bed_level_check.sh <build-dir (absolute)> [work-dir]
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd); source "$HERE/env.sh" > /dev/null 2>&1
@@ -21,7 +23,7 @@ cat > "$W/cut.fds" <<'FDS'
 FDS
 sed -e 's/^&TAIL/\&SURF ID='"'B'"', NET_HEAT_FLUX=50. \/\n\&VENT XB=10.,20.,-5.,5.,0.,0., SURF_ID='"'B'"' \/\n\&TAIL/' "$W/cut.fds" > "$W/cutv.fds"
 run() {  # levels expected-line [case nofine]
-  (cd "$W" && timeout 900 mpirun --bind-to none --oversubscribe -np 1 "$B/fds_amr" "${3:-cut}.fds" --two-level-run --levels "$1" --bind-only --blocking 2 --maxsize 32 --nofine "${4:-0}" \
+  (cd "$W" && timeout 900 mpirun --bind-to none --oversubscribe -np 1 "$B/fds_amr" "${3:-cut}.fds" --two-level-run --levels "$1" --bind-only --blocking 2 --maxsize 32 --nofine "${4:-2}" \
      --regrid-every 0 --bed 0 100 -50 50 0 0.21 --outdir . --chid "l$1${3:-}" > "l$1${3:-}.log" 2>&1)
   if [ -z "$2" ]; then grep -q "L_ins" "$W/l$1${3:-}.log" && { echo "FAIL levels $1: unexpected bed line"; rc=1; } || echo "PASS levels $1: no bed line (no-op)"
   elif [ -n "${3:-}" ]; then grep -q "$2" "$W/l$1$3.log" && ! grep -q "BIND-ONLY PASS" "$W/l$1$3.log" && echo "PASS levels $1 $3: stops ($2)" || { echo "FAIL levels $1 $3: no stop"; rc=1; }
@@ -30,5 +32,11 @@ run() {  # levels expected-line [case nofine]
 run 2 "particle bed level L_ins 1, dx 0.5 0.5 0.5"
 run 3 "particle bed level L_ins 2, dx 0.25 0.25 0.25"
 run 1 ""
-run 2 "does NOT cover the whole bed" cutv 1
+run 2 "does NOT cover the whole bed" cutv
+sed -e 's/^&TIME T_END=1. \//\&TIME T_END=1., DT=0.05, LOCK_TIME_STEP=T \/\n\&DUMP DT_DEVC=0.05, SIG_FIGS=16, SIG_FIGS_EXP=3 \/\n\&REAC FUEL='"'PROPANE'"' \//' \
+    -e 's/^&TAIL/\&RAMP ID='"'ig'"', T=0., F=0. \/\n\&RAMP ID='"'ig'"', T=1., F=1. \/\n\&SURF ID='"'IGNITION'"', HRRPUA=1500., TMP_FRONT=100., RAMP_Q='"'ig'"' \/\n\&VENT XB=0.0,1.6,-20.,20.,0.,0., SURF_ID='"'IGNITION'"', XYZ=0,0,0, SPREAD_RATE=1. \/\n\&DEVC ID='"'MLRB'"', QUANTITY='"'BURNING RATE'"', SPATIAL_STATISTIC='"'SURFACE INTEGRAL'"', SURF_ID='"'IGNITION'"', XB=0,1.6,-20,20,0,0 \/\n\&TAIL/' "$W/cut.fds" > "$W/cutb.fds"
+for l in 1 2; do (cd "$W" && timeout 900 mpirun --bind-to none --oversubscribe -np 1 "$B/fds_amr" cutb.fds --two-level-run --levels $l --steps 20 --blocking 2 --maxsize 32 --regrid-every 0 \
+  --bed 0 100 -50 50 0 0.21 --outdir . --chid b$l > b$l.log 2>&1 && mv cut_devc.csv b$l.csv) || { echo "FAIL burner levels $l: rc"; rc=1; }; done
+grep -q "L_ins 1, dx 0.5 0.5 0.5$" "$W/b2.log" && paste -d, "$W/b1.csv" "$W/b2.csv" | awk -F, 'NR>2{n++; m+=$2>0; d=$2-$4; if(d<0)d=-d; if(d>1e-12*($2<0?-$2:$2)+1e-300)bad++} END{exit !(n>=20 && m>0 && !bad)}' \
+  && echo "PASS burner: bed level built at default --nofine, leaf burner MLR = 1-level at every output" || { echo "FAIL burner"; rc=1; }
 exit $rc
