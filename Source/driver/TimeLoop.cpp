@@ -47,6 +47,7 @@
 extern "C" {
 int fds_shim_bind(int nm, const char* name, void* base, const int* lb, const int* ext, const long* stride);
 void fds_k_state(int pred, int first, int icyc, double rmin, double rmax);
+void fds_k_edge_keep(int nm, int mode);
 void fds_k_visc(int nm, int est);
 void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* data, int mode, long* ncnt, long* nbad, int* ierr);
 void fds_k_dens_post(double t, double dt, int nm);
@@ -541,6 +542,7 @@ struct TimeLoop::Impl {
             // FDS ends its own initialisation with MATCH_VELOCITY, VISCOSITY_BC, VELOCITY_BC (main.f90 ~445-455) on the multi-mesh state, which leaves the interface-edge
             // arrays (EDGE%OMEGA, EDGE%TAU) from the interpolation branch. Redo it here with the interfaces as regular faces, so that the first step starts from the
             // edge data that a single mesh has (no interface edge data).
+            each_local([&](int nm) { fds_k_edge_keep(nm, 0); });   // only the interface edges take the redo; the others keep FDS's initial edge data (vegetation drag)
             state(false, true);
             amrex::MultiFab& mu = (*L.m_F)["MU"];   // FDS's initial DIVERGENCE_PART_1 reads the MU of its set-up viscosity, made before the initial WALL_BC changed the wall cells
             amrex::MultiFab mu0(mu.boxArray(), mu.DistributionMap(), mu.nComp(), mu.nGrow());
@@ -551,6 +553,7 @@ struct TimeLoop::Impl {
             L.m_bc->after_exchange(4, L.m_t, L.m_dt);
             ghost_exchange(*L.m_F, 6);
             L.m_bc->after_exchange(6, L.m_t, L.m_dt);
+            each_local([&](int nm) { fds_k_edge_keep(nm, 1); });
             // and FDS's initial DIVERGENCE_PART_1 (main.f90 ~632, D of the first step) with the interfaces as regular faces
             fds_p_init_div();
             iface(true);
