@@ -53,6 +53,7 @@ void fds_k_dens_post(double t, double dt, int nm);
 void fds_ls_drive_step(double t, double dt);   // fds_ls_grid.f90
 void fds_k_vflux(double t, double dt, int nm, int est);
 void fds_k_div1(double t, double dt, int nm);
+void fds_k_part(int mode, double t, double dt, int nm);   // fds_kernels.f90: main.f90 particle calls (level 0)
 int fds_k_rad_src_fill(int nm, double* dat);                // radiation source average-down (radi.f90 RAD_SRC_FILL)
 void fds_k_rad_src_set(int nm, int ib, int jb, int kb, const double* dat);
 void fds_k_rad_src_wscale(int nm, int ib, int jb, int kb, double* dat, int ratio);
@@ -88,7 +89,7 @@ void fds_clip_renorm(const int* rlo, const int* rhi, const int* alo, const int* 
 // fds_step.f90
 void fds_p_params(int* ip, double* rp);
 void fds_p_mesh_info(int nm, int* ip, double* rp);
-void fds_p_part_scope(int* ip);
+void fds_p_part_scope(int* ip, char* name);
 void fds_p_get(int nm, const char* name, double* buf, long ntot, int* ierr);
 void fds_p_mfd(int nm);
 int fds_p_dens_skip();   // fds_step.f90: 1 when DENSITY returns at once (ICYC<=1 etc.): no level clip then
@@ -288,7 +289,8 @@ struct TimeLoop::Impl {
         if (lev < static_cast<int>(lc.size()) - 1) die("bind_level(" + std::to_string(lev) + "): only the top bound level can be rebound");
         if (lev == static_cast<int>(lc.size()) - 1) unbind_level(lev);
         int ps[2];
-        fds_p_part_scope(ps);
+        char pn[129] = {0};
+        fds_p_part_scope(ps, pn);
         if (ps[1] > 0) die("bind_level(" + std::to_string(lev) + "): oriented particles are refused when a fine level exists (PV-7)");
         const Level& Lv = L.m_reg->level(lev);
         Fields& F = L.m_reg->fields(lev);
@@ -460,8 +462,11 @@ struct TimeLoop::Impl {
         // D-090: INIT_HRRPUV (IP[25]) allowed for manufactured-HRR / TAG_HRRPUV gates (R4-T2); reactions (IP[9]) allowed on level 0 (COMBUSTION in the corrector).
         chk(IP[26] && !IP[11], "TERRAIN_CASE"); chk(IP[27], "READ_EXTERNAL"); chk(IP[28], "SYNTHETIC_EDDY_METHOD");
         int ps[2];
-        fds_p_part_scope(ps);
-        chk(ps[0] > 0, "solid particle class with more than one cell and ALLOW_SHRINKING or ALLOW_SWELLING (PV-6: its node count can change)");
+        char pn[129] = {0};
+        fds_p_part_scope(ps, pn);
+        std::string pv6(pn);
+        pv6 = "solid particle class with more than one cell and ALLOW_SHRINKING or ALLOW_SWELLING (PV-6: its node count can change; class / material: " + pv6.erase(pv6.find_last_not_of(' ') + 1) + ")";
+        chk(ps[0] > 0, pv6.c_str());
         if (!bad.empty()) {
             std::string s;
             for (auto& b : bad) s += " " + b;
@@ -2332,6 +2337,7 @@ struct TimeLoop::Impl {
 
         // ---------------- predictor
         state(true, true);
+        if (IP[17] > 0) each_local([&](int nm) { fds_k_part(1, t, dt, nm); });
         for_levels([&](int) { s_visc_mfd(true); });
         div_report("start of step", false);
         first_pass = true;
@@ -2362,6 +2368,7 @@ struct TimeLoop::Impl {
             ghost_report("p_exch1");
             stage_raw(passes == 1 ? "p1_b_fill" : "p2_b_fill", {"RHOS", "TMP"});
             for_levels([&](int) { s_after(1); });
+            if (IP[17] > 0 && first_pass) { double d; fds_setup(6, "", &d); }   // main.f90: exchange of newly inserted particles
             ghost_report(passes == 1 ? "p1_after1" : "p2_after1");
             stage_raw(passes == 1 ? "p1_c_visc" : "p2_c_visc", {"RHOS", "TMP"});
             stage_raw(passes == 1 ? "p1_prevflux" : "p2_prevflux", {"RHO", "RHOS", "U", "V", "W", "MU", "KRES", "H", "HS", "ZZ", "TMP"});
@@ -2371,6 +2378,7 @@ struct TimeLoop::Impl {
             ghost_report("pd_vflux");
             fds_p_init_div();
             for_levels([&](int) { s_wall_bc(true); });
+            if (IP[15]) each_local([&](int nm) { fds_k_part(2, t, dt, nm); });
 #ifdef FDS_HAVE_FINE_LEVEL
             if (multi()) fine_burner_state(true);
 #endif
@@ -2441,6 +2449,9 @@ struct TimeLoop::Impl {
         if (IP[9] > 0) for_levels([&](int) { each_local([&](int nm) { fds_k_comb(t, dt, nm); }); });   // main.f90 ~1060: COMBUSTION_LOAD_BALANCED after VELOCITY_FLUX, before WALL_BC; every mesh of every level
         // WP1b / 7.13b: edge tables + vorticity/stress work arrays right after VELOCITY_FLUX (corrector); FDSTL_STAGES=<icyc>
         stage_scratch("c_vfluxE", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"DS", 3}, {"FVX", 3}, {"FVY", 3}, {"FVZ", 3}, {"ED_OMEGA", 2}, {"ED_TAU", 2}, {"CE_EDGE_INDEX", 4}});
+        if (IP[17] > 0) each_local([&](int nm) { fds_k_part(3, t, dt, nm); });
+        if (IP[15]) { double d; fds_setup(7, "", &d); each_local([&](int nm) { fds_k_part(2, t, dt, nm); }); }
+        if (IP[17] > 0) { double d; fds_setup(5, "", &d); }
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);
         for_levels([&](int) { s_wall_bc(false); });
@@ -3044,6 +3055,8 @@ int TimeLoop::run()
         const bool adv_ok = m->advance();
         m->t_loop += amrex::second() - tl0;
         if (!adv_ok) { ++fails; amrex::Print() << "time loop: STOP (instability or non-finite DT) at step " << m_icyc << "\n"; break; }
+        const std::string& r = m->log_mass.back();   // %E prints NAN / INF
+        if (!std::isfinite(m_dt) || r.find("NAN") != std::string::npos || r.find("INF") != std::string::npos) { ++fails; amrex::Print() << "time loop: FAIL non-finite mass or DT at step " << m_icyc << ": " << r << "\n"; break; }
         if (m_t >= m->tc.t_end && m_icyc > 0) break;
     }
     m->finish();

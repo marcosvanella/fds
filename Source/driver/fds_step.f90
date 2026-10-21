@@ -97,20 +97,32 @@ RP(7) = ITERATION_SUSPEND_FACTOR
 RP(8) = T_END
 END SUBROUTINE FDS_P_PARAMS
 
-!> Particle classes outside phase 1: IP(1) solid classes whose node count can change (PV-6: more than one cell and an ALLOW_SHRINKING or ALLOW_SWELLING material), IP(2) oriented classes (PV-7)
-SUBROUTINE FDS_P_PART_SCOPE(IP) BIND(C,NAME='fds_p_part_scope')
+!> Particle classes outside phase 1: IP(1) solid classes whose node count can change (PV-6: more than one cell and an ALLOW_SHRINKING or ALLOW_SWELLING material),
+!> IP(2) oriented classes (PV-7); NAME: 'class / material' of the first PV-6 case, blank padded
+SUBROUTINE FDS_P_PART_SCOPE(IP,NAME) BIND(C,NAME='fds_p_part_scope')
 INTEGER(C_INT), INTENT(OUT) :: IP(2)
-INTEGER :: N
+CHARACTER(KIND=C_CHAR), INTENT(OUT) :: NAME(128)
+CHARACTER(128) :: S
+INTEGER :: N,I,J
 IP = 0
+S = ' '
 DO N=1,N_LAGRANGIAN_CLASSES
    ASSOCIATE (LPC=>LAGRANGIAN_PARTICLE_CLASS(N))
    IF (LPC%N_ORIENTATION>0) IP(2) = IP(2) + 1
    IF (.NOT.LPC%SOLID_PARTICLE) CYCLE
    ASSOCIATE (SF=>SURFACE(LPC%SURF_INDEX))
-   IF (SF%N_CELLS_INI>1 .AND. ANY(MATERIAL(SF%MATL_INDEX(1:SF%N_MATL))%ALLOW_SHRINKING .OR. &
-       MATERIAL(SF%MATL_INDEX(1:SF%N_MATL))%ALLOW_SWELLING)) IP(1) = IP(1) + 1
+   DO I=1,SF%N_MATL
+      J = SF%MATL_INDEX(I)
+      IF (SF%N_CELLS_INI<=1 .OR. .NOT.(MATERIAL(J)%ALLOW_SHRINKING .OR. MATERIAL(J)%ALLOW_SWELLING)) CYCLE
+      IF (IP(1)==0) S = TRIM(LPC%ID)//' / '//TRIM(MATERIAL(J)%ID)
+      IP(1) = IP(1) + 1
+      EXIT
+   ENDDO
    END ASSOCIATE
    END ASSOCIATE
+ENDDO
+DO I=1,128
+   NAME(I) = S(I:I)
 ENDDO
 END SUBROUTINE FDS_P_PART_SCOPE
 

@@ -305,6 +305,7 @@ int main(int argc, char** argv)
 #endif
                 amrex::Print() << (nfail == 0 ? "RUN COMPLETE" : "RUN FAILED") << ": steps = " << loop.icyc() << ", T = " << loop.time() << "\n";
                 if (nfail == 0) mode_end = 1;
+                else amrex::Abort("run failed");
             }
             if (argc > 3 && std::strcmp(argv[2], "--kernelcheck") == 0) {
                 bool window = false;

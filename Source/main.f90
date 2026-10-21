@@ -128,6 +128,20 @@ IF (MODE==4) THEN
    ENDIF
    RETURN
 ENDIF
+IF (MODE>=5 .AND. MODE<=7) THEN
+   ! Particle exchanges of MAIN_LOOP for the C++ driver: 5 the corrector exchange after MOVE_PARTICLES (7, 11), 6 the predictor exchange of newly
+   ! inserted particles (first pass), 7 the drag exchange before the corrector PARTICLE_MOMENTUM_TRANSFER (20)
+   IF (MODE==7 .AND. NMESHES>1) CALL MESH_EXCHANGE(20)
+   IF (MODE==6 .AND. MPI_PARTICLE_EXCHANGE) &
+      CALL MPI_ALLREDUCE(MPI_IN_PLACE,EXCHANGE_INSERTED_PARTICLES,INTEGER_ONE,MPI_LOGICAL,MPI_LOR,MPI_COMM_WORLD,IERR)
+   IF (MPI_PARTICLE_EXCHANGE .AND. (MODE==5 .OR. (MODE==6 .AND. EXCHANGE_INSERTED_PARTICLES))) THEN
+      CALL MESH_EXCHANGE(7)
+      CALL POST_RECEIVES(11)
+      CALL MESH_EXCHANGE(11)
+      IF (MODE==6) EXCHANGE_INSERTED_PARTICLES = .FALSE.
+   ENDIF
+   RETURN
+ENDIF
 IF (MODE==3) THEN
    ! End-of-step outputs for the C++ driver: the same calls, in the same order, as the end of MAIN_LOOP (UPDATE_GLOBAL_OUTPUTS per mesh,
    ! EXCHANGE_GLOBAL_OUTPUTS, UPDATE_CONTROLS, DUMP_GLOBAL_OUTPUTS, WRITE_DIAGNOSTICS). The driver has set T, DT, ICYC (FDS_HOOK_SET_STEP)
