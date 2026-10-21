@@ -58,6 +58,10 @@ void fds_k_div1(double t, double dt, int nm);
 void fds_k_part(int mode, double t, double dt, int nm);
 void fds_k_bed_insert(double t, int nm);          // W2: stock insertion on a fine box
 void fds_k_drop_covered(int nm, const int* covered);
+long fds_k_part_stash(int nm, long nb, double* buf);   // W8 (PV-9): particle records of a box over a regrid
+void fds_k_part_place(int nm, int nr, const double* buf);
+void fds_k_part_deposit(int nm, double sgn);
+void fds_k_part_wall(int on);
 int fds_k_part_list(int nm, int n, double* buf);   // W2: remove level-0 particles under a finer level   // fds_kernels.f90: main.f90 particle calls (level 0)
 int fds_k_rad_src_fill(int nm, double* dat);                // radiation source average-down (radi.f90 RAD_SRC_FILL)
 void fds_k_rad_src_set(int nm, int ib, int jb, int kb, const double* dat);
@@ -725,6 +729,101 @@ struct TimeLoop::Impl {
                 for (amrex::BoxIterator it(is.second); it.ok(); ++it) { const amrex::IntVect q = it() - vb.smallEnd(); m[q[0] + vb.length(0) * (q[1] + vb.length(1) * q[2])] = 1; }
             fds_k_drop_covered(nm, m.data());
         });
+    }
+    // W8 (PV-9): whole particle records over a regrid. part_stash before the unbind (bound levels coarse to fine, local boxes in index order): each particle first
+    // takes back the D_SOURCE/M_DOT_PPP of its last corrector deposit (the pending sources pend_save carries are then the gas-phase part only) and leaves its box as a
+    // stock PACK_PARTICLE record, chunks [level, box, words, records]. part_place after the bind: each record goes to the finest level whose boxes hold its cell
+    // (half-open, lowest box index) on that box's rank and is unpacked there in the order (old level, old box, old index), independent of the rank count.
+    std::vector<double> pstash;
+    bool pdep = false;
+    void part_stash() { pdep = false; pack_all(pstash, true); }
+    void pack_all(std::vector<double>& v, bool dep)
+    {
+        v.clear();
+        for_levels([&](int l) { each_local([&](int nm) {
+            if (dep) fds_k_part_deposit(nm, -1.0);
+            const long n = fds_k_part_stash(nm, 0, nullptr);
+            const std::size_t q = v.size();
+            v.resize(q + 3 + n);
+            v[q] = l; v[q + 1] = bi(nm); v[q + 2] = static_cast<double>(n);
+            fds_k_part_stash(nm, n, v.data() + q + 3);
+        }); });
+    }
+    // FDSTL_W8_CHECK: count and order-free sum of record hashes over all ranks, without the words the new box sets (real 17 RVC; integers 4 WALL_INDEX, 8 CFACE_INDEX,
+    // 10-18 the cell indices of BOUNDARY_COORD)
+    std::pair<double, std::uint64_t> part_hash(const std::vector<double>& v)
+    {
+        double n = 0; std::uint64_t hs = 0;
+        for (std::size_t q = 0; q < v.size(); q += 3 + static_cast<std::size_t>(v[q + 2]))
+            for (std::size_t r = q + 3; r < q + 3 + static_cast<std::size_t>(v[q + 2]); r += static_cast<std::size_t>(v[r])) {
+                const std::size_t i0 = r + 8 + static_cast<std::size_t>(v[r + 5]) - 1;   // integer k is word i0 + k
+                std::uint64_t h = 1469598103934665603ULL;
+                for (std::size_t w = r; w < r + static_cast<std::size_t>(v[r]); ++w) {
+                    if (w == r + 24 || w == i0 + 4 || w == i0 + 8 || (w >= i0 + 10 && w <= i0 + 18)) continue;
+                    std::uint64_t b; std::memcpy(&b, &v[w], 8); h = (h ^ b) * 1099511628211ULL;
+                }
+                hs += h; n += 1;
+            }
+        amrex::ParallelDescriptor::ReduceRealSum(n);
+#ifdef AMREX_USE_MPI
+        MPI_Allreduce(MPI_IN_PLACE, &hs, 1, MPI_UINT64_T, MPI_SUM, amrex::ParallelDescriptor::Communicator());
+#endif
+        return {n, hs};
+    }
+    void part_place()
+    {
+        const int np = amrex::ParallelDescriptor::NProcs(), nl = static_cast<int>(lc.size());
+        std::vector<std::vector<double>> out(np);   // per rank: [old level, old box, new level, new box, record]
+        for (std::size_t q = 0; q < pstash.size(); q += 3 + static_cast<std::size_t>(pstash[q + 2]))
+            for (std::size_t r = q + 3; r < q + 3 + static_cast<std::size_t>(pstash[q + 2]); r += static_cast<std::size_t>(pstash[r])) {
+                int l = nl - 1, b = -1;
+                for (; l >= 0 && b < 0; --l) {
+                    const amrex::Geometry& g = lc[l].lev->geom;
+                    amrex::IntVect iv;
+                    for (int d = 0; d < 3; ++d) iv[d] = std::min(std::max(static_cast<int>(std::floor((pstash[r + 2 + d] - g.ProbLo(d)) * g.InvCellSize(d))), g.Domain().smallEnd(d)), g.Domain().bigEnd(d));
+                    for (const auto& is : lc[l].lev->ba.intersections(amrex::Box(iv, iv))) b = (b < 0 ? is.first : std::min(b, is.first));
+                }
+                ++l;
+                std::vector<double>& o = out[lc[l].lev->dm[b]];
+                o.insert(o.end(), {pstash[q], pstash[q + 1], static_cast<double>(l), static_cast<double>(b)});
+                o.insert(o.end(), pstash.begin() + r, pstash.begin() + r + static_cast<std::size_t>(pstash[r]));
+            }
+        const bool chk = std::getenv("FDSTL_W8_CHECK") != nullptr;
+        const std::pair<double, std::uint64_t> h0 = chk ? part_hash(pstash) : std::pair<double, std::uint64_t>();
+        pstash.clear();
+        std::vector<double> in = out[0];
+#ifdef AMREX_USE_MPI
+        std::vector<int> sc(np), rc(np), sd(np, 0), rd(np, 0);
+        std::vector<double> snd;
+        for (int k = 0; k < np; ++k) { sc[k] = static_cast<int>(out[k].size()); sd[k] = static_cast<int>(snd.size()); snd.insert(snd.end(), out[k].begin(), out[k].end()); }
+        MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT, amrex::ParallelDescriptor::Communicator());
+        for (int k = 1; k < np; ++k) rd[k] = rd[k - 1] + rc[k - 1];
+        in.assign(static_cast<std::size_t>(rd[np - 1] + rc[np - 1]), 0.0);
+        MPI_Alltoallv(snd.data(), sc.data(), sd.data(), MPI_DOUBLE, in.data(), rc.data(), rd.data(), MPI_DOUBLE, amrex::ParallelDescriptor::Communicator());
+#endif
+        std::vector<std::size_t> at;   // record starts, stably sorted by (old level, old box): one old box comes from one rank in index order
+        for (std::size_t r = 0; r < in.size(); r += 4 + static_cast<std::size_t>(in[r + 4])) at.push_back(r);
+        std::stable_sort(at.begin(), at.end(), [&](std::size_t a, std::size_t b) { return in[a] != in[b] ? in[a] < in[b] : in[a + 1] < in[b + 1]; });
+        for (std::size_t r : at) fds_k_part_place(lc[static_cast<int>(in[r + 2])].fds0 + static_cast<int>(in[r + 3]) + 1, 1, in.data() + r + 4);
+        if (!chk) return;
+        std::vector<double> v;
+        pack_all(v, false);
+        const std::pair<double, std::uint64_t> h1 = part_hash(v);
+        for (std::size_t q = 0; q < v.size(); q += 3 + static_cast<std::size_t>(v[q + 2])) {
+            int nr = 0;
+            for (std::size_t r = q + 3; r < q + 3 + static_cast<std::size_t>(v[q + 2]); r += static_cast<std::size_t>(v[r])) ++nr;
+            fds_k_part_place(lc[static_cast<int>(v[q])].fds0 + static_cast<int>(v[q + 1]) + 1, nr, v.data() + q + 3);
+        }
+        amrex::Print() << "W8 CHECK records " << static_cast<long>(h0.first) << " -> " << static_cast<long>(h1.first) << " hash " << h0.second << " -> " << h1.second
+                       << ((h0 == h1) ? " SAME" : " DIFFER") << "\n";
+    }
+    // W8 deposit-only step: the stored stock-step rates into D_SOURCE/M_DOT_PPP with the new RVC, once after a part_place (a second call adds nothing: neither the
+    // prime, whose WALL_BC skips the particles, nor the projection clears or rebuilds D_SOURCE/M_DOT_PPP)
+    void part_deposit()
+    {
+        if (pdep) return;
+        pdep = true;
+        for_levels([&](int) { each_local([&](int nm) { fds_k_part_deposit(nm, 1.0); }); });
     }
     template <class F> void each_local(F f) { for (int i = 0; i < c->nbox; ++i) if (local(i)) f(c->fds0 + i + 1); }
 
@@ -2219,7 +2318,9 @@ struct TimeLoop::Impl {
             fds_p_init_div();   // as before the stage DIVERGENCE_PART_1 (the full-prime path does the same)
             // DIVERGENCE_PART_1 reads the wall-cell values of WALL_BC (after the velocity flux): stale ones from the old hierarchy moved rho*Z between species
             for_levels([&](int) { s_vflux(false); });
+            fds_k_part_wall(0);   // W8: the prime must not advance the particle heat transfer nor deposit again (part_deposit owns the particle sources)
             for_levels([&](int) { s_wall_bc(false); });
+            fds_k_part_wall(1);
             divergence1_all();
             zone_restore();
             int q = 0;
@@ -3013,6 +3114,9 @@ void TimeLoop::bind_level(int lev) { m->bind_level(lev); }
 void TimeLoop::unbind_level(int lev) { m->unbind_level(lev); }
 void TimeLoop::insert_bed(int lev) { m->insert_bed(lev); }
 void TimeLoop::particle_report() { m->particle_report(); }
+void TimeLoop::part_stash() { m->part_stash(); }
+void TimeLoop::part_place() { m->part_place(); }
+void TimeLoop::part_deposit() { m->part_deposit(); }
 double TimeLoop::particle_mass() { return m->particle_report(true); }
 bool TimeLoop::level_bound(int lev) const { return lev >= 0 && lev < static_cast<int>(m->lc.size()); }
 #define FDSTL_LEVEL_STAGE(lev, body) do { m->select(lev); body; m->select(0); } while (0)

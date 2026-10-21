@@ -92,6 +92,9 @@ public:
     void insert_bed(int lev);
     double particle_mass();     // total particle mass over the bound levels (collective, no output)
     void particle_report();     // particle count and total mass over the bound levels (FDSTL_PART_DUMP: positions per rank)   // W2: particles of the bed level lev at t=0 (stock insertion), none under it on level 0
+    void part_stash();          // W8 (PV-9): before the unbind of a regrid, every particle as a whole record (its last deposit taken back)
+    void part_place();          // W8: after the bind, each record on its new leaf box / level / rank in a fixed order
+    void part_deposit();        // W8: deposit-only step (stored rates into D_SOURCE/M_DOT_PPP), once after part_place
     bool level_bound(int lev) const;
     // Per-level stage entry points. Each is the exact body that advance() runs for that level at that position of MAIN_LOOP (same calls, same order), on the level's boxes
     // of this rank. `predictor` selects the stage (true = predictor). t and dt are the loop's current time and step. A level without an FDS binding aborts with a
