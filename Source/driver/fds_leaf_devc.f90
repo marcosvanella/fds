@@ -1,6 +1,6 @@
 !> \brief Leaf-cell queries for the gas SPATIAL_STATISTIC / point devices of dump.f90 (UPDATE_DEVICES_1): which level-0 or fine cells are covered by a finer level, the fine boxes to add,
 !> and the finest cell at a point. Registered by fds_leaf_register (TimeLoop::bind_level); without a fine level the hooks are never set and the devices are the level-0 ones unchanged.
-!> A fine box belongs to the level-0 mesh whose extent the device range was clipped to (SDV%X1..Z2), so its cells add to that mesh's subdevice (fine boxes sit on the rank of their parent).
+!> A fine box belongs to the level-0 mesh whose extent the device range was clipped to (SDV%X1..Z2); a box of another rank than that mesh is added by its own rank (dump.f90 LEAF_FOREIGN_DEVICES).
 MODULE FDS_LEAF_DEVC
 
 USE ISO_C_BINDING

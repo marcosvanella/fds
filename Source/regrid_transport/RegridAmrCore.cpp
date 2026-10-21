@@ -45,6 +45,8 @@ amrex::AmrInfo make_amr_info(const Hierarchy& h, const AmrParams& p)
     if (info.ref_ratio.empty()) info.ref_ratio.push_back(amrex::IntVect(2));  // AmrInfo needs at least one entry
     info.grid_eff = p.grid_eff;
     info.n_proper = p.n_proper;
+    // D-084: no extra chopping of new fine grids to reach one box per rank (AMReX refine_grid_layout): the fine box layout must not depend on the rank count
+    info.refine_grid_layout = false;
     info.check_input = false;  // level-0 grids are the meshes as given (not blocking-factor multiples); R1 already ran the checks
     return info;
 }
@@ -79,11 +81,14 @@ LevelLayout RegridAmrCore::layout(int level) const
 void RegridAmrCore::init_static(LevelListener& listener, bool notify_level0, const DmFn& dm_fn, const amrex::DistributionMapping* level0_dm)
 {
     listener_ = &listener;
+    dm_fn_ = dm_fn;   // later regrids (MakeDistributionMap) use the same mapping
+    if (level0_dm) { level0_dm_ = *level0_dm; have_level0_dm_ = true; }
     const int top = h_.top_level();
     for (int l = 0; l <= top; ++l) {
         amrex::BoxList bl;
         for (const GridBox& g : h_.levels[l].grids) bl.push_back(to_amrex(g.box));
         amrex::BoxArray ba(bl);
+        if (l > 0) ba = chop_at_level0(l, ba);
         amrex::DistributionMapping dm;
         if (l == 0 && level0_dm) dm = *level0_dm;
         else if (dm_fn) dm = dm_fn(l, ba);
@@ -127,6 +132,43 @@ amrex::DistributionMapping RegridAmrCore::MakeDistributionMap(int lev, amrex::Bo
     if (lev == 0 && have_level0_dm_) return level0_dm_;
     if (dm_fn_) return dm_fn_(lev, ba);
     return amrex::AmrCore::MakeDistributionMap(lev, ba);
+}
+
+amrex::BoxArray RegridAmrCore::chop_at_level0(int lev, const amrex::BoxArray& ba) const
+{
+    const amrex::BoxArray& ba0 = boxArray(0);
+    if (lev < 1 || ba0.size() <= 1) return ba;
+    amrex::IntVect r(1);
+    for (int l = 0; l < lev; ++l) r *= refRatio(l);
+    amrex::BoxList bl;
+    for (int i = 0; i < static_cast<int>(ba.size()); ++i)
+        for (int m = 0; m < static_cast<int>(ba0.size()); ++m) {
+            const amrex::Box p = ba[i] & amrex::refine(ba0[m], r);
+            if (p.ok()) bl.push_back(p);
+        }
+    return amrex::BoxArray(bl);
+}
+
+void RegridAmrCore::regrid(int lbase, amrex::Real time, bool)
+{
+    if (lbase >= max_level) return;
+    int new_finest;
+    amrex::Vector<amrex::BoxArray> new_grids(finest_level + 2);
+    MakeNewGrids(lbase, time, new_finest, new_grids);
+    bool coarse_changed = false;
+    for (int lev = lbase + 1; lev <= new_finest; ++lev) {
+        const amrex::BoxArray ba = chop_at_level0(lev, new_grids[lev]);
+        if (lev <= finest_level) {   // an old level: remade when its grids or those of the level below changed (RemakeLevel sets the grids and the mapping)
+            const bool changed = !(ba == grids[lev]);
+            if (changed) RemakeLevel(lev, time, ba, MakeDistributionMap(lev, ba));
+            else if (coarse_changed) RemakeLevel(lev, time, grids[lev], dmap[lev]);
+            coarse_changed = changed;
+        } else {
+            MakeNewLevelFromCoarse(lev, time, ba, MakeDistributionMap(lev, ba));
+        }
+    }
+    for (int lev = new_finest + 1; lev <= finest_level; ++lev) { ClearLevel(lev); ClearBoxArray(lev); ClearDistributionMap(lev); }
+    finest_level = new_finest;
 }
 
 void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time, int)
@@ -249,6 +291,7 @@ void RegridAmrCore::init_from_tags(LevelListener& listener, amrex::Real time, bo
             MakeNewGrids(finest_level, time, new_finest, new_grids);   // calls ErrorEst on the current finest level
             if (new_finest <= finest_level) break;
             finest_level = new_finest;
+            new_grids[new_finest] = chop_at_level0(new_finest, new_grids[new_finest]);
             amrex::DistributionMapping dm = MakeDistributionMap(new_finest, new_grids[new_finest]);
             MakeNewLevelFromScratch(new_finest, time, new_grids[new_finest], dm);   // make_level + fill_initial_level (new_finest is one more than before)
         } while (finest_level < max_level);

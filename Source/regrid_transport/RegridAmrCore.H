@@ -123,6 +123,10 @@ public:
     void ManualTagsPlacement(int lev, amrex::TagBoxArray& tags, const amrex::Vector<amrex::IntVect>& bf_lev) override;
 protected:
     amrex::DistributionMapping MakeDistributionMap(int lev, amrex::BoxArray const& ba) override;
+    // AmrCore::regrid with the new grids of each level cut at the level-0 box boundaries (chop_at_level0) before they are compared, mapped and made
+    void regrid(int lbase, amrex::Real time, bool initial = false) override;
+    // The boxes of `ba` (level lev >= 1) cut at the level-0 box boundaries, so every box lies over one level-0 box (= one FDS mesh); `ba` itself when level 0 has one box
+    amrex::BoxArray chop_at_level0(int lev, const amrex::BoxArray& ba) const;
 
 private:
     Hierarchy h_;
