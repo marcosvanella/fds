@@ -88,6 +88,7 @@ void fds_clip_renorm(const int* rlo, const int* rhi, const int* alo, const int* 
 // fds_step.f90
 void fds_p_params(int* ip, double* rp);
 void fds_p_mesh_info(int nm, int* ip, double* rp);
+void fds_p_part_scope(int* ip);
 void fds_p_get(int nm, const char* name, double* buf, long ntot, int* ierr);
 void fds_p_mfd(int nm);
 int fds_p_dens_skip();   // fds_step.f90: 1 when DENSITY returns at once (ICYC<=1 etc.): no level clip then
@@ -286,6 +287,10 @@ struct TimeLoop::Impl {
         if (lev > static_cast<int>(lc.size())) die("bind_level(" + std::to_string(lev) + "): levels are bound in order, the next one is " + std::to_string(lc.size()));
         if (lev < static_cast<int>(lc.size()) - 1) die("bind_level(" + std::to_string(lev) + "): only the top bound level can be rebound");
         if (lev == static_cast<int>(lc.size()) - 1) unbind_level(lev);
+        int ps[2];
+        fds_p_part_scope(ps);
+        if (ps[1] > 0) die("bind_level(" + std::to_string(lev) + "): oriented particles are refused when a fine level exists (PV-7)");
+        if (IP[15] || IP[17] > 0 || IP[22]) die("bind_level(" + std::to_string(lev) + "): Lagrangian particles run on level 0 only; a fine level is refused until fine boxes carry particles");
         const Level& Lv = L.m_reg->level(lev);
         Fields& F = L.m_reg->fields(lev);
         const int nb = static_cast<int>(Lv.ba.size());
@@ -449,12 +454,15 @@ struct TimeLoop::Impl {
         std::vector<std::string> bad;
         auto chk = [&](bool cond, const char* what) { if (cond) bad.push_back(what); };
         chk(IP[7], "CC_IBM"); chk(IP[8], "HVAC"); chk(IP[11] != 0 && l0.mesh.size() > 1 && ls_fine_config().mode < 3, "LEVEL_SET_MODE with several meshes (PHI_LS exchange, FDS code 14, is not routed; --ls-fine supports it)");
-        chk(IP[12], "TUNNEL_PRECONDITIONER"); chk(IP[13] != 1, "pressure solver other than FFT"); chk(IP[14], "CYLINDRICAL"); chk(IP[15], "particle drag");
+        chk(IP[12], "TUNNEL_PRECONDITIONER"); chk(IP[13] != 1, "pressure solver other than FFT"); chk(IP[14], "CYLINDRICAL");
         // D-089: FREEZE_VELOCITY (IP[18]) allowed in AMR TimeLoop for cold-flow / passive-scalar adaptive demos; reacting-flow production must not depend on freeze.
-        chk(IP[16], "SOLID_HEAT_TRANSFER_3D"); chk(IP[17] > 0, "Lagrangian particles"); chk(IP[19], "SOLID_PHASE_ONLY");
-        chk(IP[22], "MPI particle exchange"); chk(IP[23], "obstruction mass exchange"); chk(IP[24] > 0, "agglomeration");
+        chk(IP[16], "SOLID_HEAT_TRANSFER_3D"); chk(IP[19], "SOLID_PHASE_ONLY");
+        chk(IP[23], "obstruction mass exchange"); chk(IP[24] > 0, "agglomeration");
         // D-090: INIT_HRRPUV (IP[25]) allowed for manufactured-HRR / TAG_HRRPUV gates (R4-T2); reactions (IP[9]) allowed on level 0 (COMBUSTION in the corrector).
         chk(IP[26] && !IP[11], "TERRAIN_CASE"); chk(IP[27], "READ_EXTERNAL"); chk(IP[28], "SYNTHETIC_EDDY_METHOD");
+        int ps[2];
+        fds_p_part_scope(ps);
+        chk(ps[0] > 0, "solid particle class with more than one cell and ALLOW_SHRINKING or ALLOW_SWELLING (PV-6: its node count can change)");
         if (!bad.empty()) {
             std::string s;
             for (auto& b : bad) s += " " + b;
