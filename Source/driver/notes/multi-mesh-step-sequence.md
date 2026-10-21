@@ -31,3 +31,4 @@ Ruling: single-mesh FDS is the ground truth and a multi-mesh run must equal it; 
 run is not a reference. It is in the regular list (`run_driver_tests.sh`).
 
 - With EXTERNAL_GHOSTS_FILLED, MATCH_VELOCITY returns at once; `fds_p_save_uvw` (after exchange 3 and 6) stands in for it and also sets U_GHOST/V_GHOST/W_GHOST, the ghost-cell midpoint velocities that COMPUTE_VISCOSITY (Deardorff UP/VP/WP) and VELOCITY_FLUX put in the interface ghost cells. Without them the ghosts keep the initial wind profile from INITIALIZE_MESH_VARIABLES_1.
+- Known difference (accepted, not reproduced): at an interface face the sub-ground ghost face value (k=0 row) is one shared level-face value, while stock keeps a per-mesh value there. On the 2.5 m 2x2 UGLMAT case at step 1 this gives 23 cells on m3 (j=1, k=1) with 4.5e-4 rel in the corrector MU, and 21 cells at 2.7e-10 in the predictor (near-wall viscosity stencil reads that face).
