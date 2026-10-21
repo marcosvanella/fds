@@ -487,7 +487,6 @@ DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
    ! The parent mesh may belong to another rank (the fine-level boxes follow the AMReX distribution, not the level-0 owner): its WALL array is not stored here, so such a wall has no parent state here.
    LOCAL0 = PROCESS(NM0)==MY_RANK
    IF (LOCAL0) CALL GET_IJK(R%XC(I),R%YC(J),R%ZC(K),NM0,XI,YJ,ZK,I0,J0,K0)
-   IF (.NOT.LOCAL0) N_SKIP = N_SKIP+1
    DO D=-3,3
       IF (D==0) CYCLE
       CALL FACE_SURFACE(R,I,J,K,D,SI,BT,WALLQ)
@@ -519,12 +518,13 @@ DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
       ENDIF
       GK = -1
       IF (.NOT.LOCAL0) CALL REMOTE_PARENT_CELL(R,I,J,K,D,NM0,GK)
+      IF (.NOT.LOCAL0) N_SKIP = N_SKIP+1   ! a hidden wall over another rank's mesh (cells without walls there are allowed: test FDS_AMR_DEBUG_FOREIGN_BOXES)
       N = N+1 ; T(:,N) = (/I,J,K,D,NMP,IW0,SI,BT,GK,FVT/)
    ENDDO
 ENDDO ; ENDDO ; ENDDO
 
-IF (N_SKIP>0) THEN   ! cannot happen: fine boxes are cut at the level-0 mesh boundaries and owned by the rank of their mesh (RegridAmrCore::chop_at_level0, TwoLevelRun owner_dm)
-   WRITE(0,'(A,I0,A,I0,A,I0,A)') 'fds_amr ERROR in FDS_FINE_WALLS_BUILD (rank ',MY_RANK,'): level ',LEV,' box ',IB,' has fine cells over a level-0 mesh of another rank (fine boxes must lie in one level-0 mesh of their own rank)'
+IF (N_SKIP>0) THEN   ! hidden walls: cannot happen, fine boxes are cut at the level-0 mesh boundaries and owned by the rank of their mesh (RegridAmrCore::chop_at_level0, TwoLevelRun owner_dm)
+   WRITE(0,'(A,I0,A,I0,A,I0,A)') 'fds_amr ERROR in FDS_FINE_WALLS_BUILD (rank ',MY_RANK,'): level ',LEV,' box ',IB,' has hidden walls over a level-0 mesh of another rank (fine boxes must lie in one level-0 mesh of their own rank)'
    ERROR STOP 1
 ENDIF
 ASSOCIATE(FB=>FWALL(LEV)%B(IB))

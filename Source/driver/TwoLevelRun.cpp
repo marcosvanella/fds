@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <memory>
 // TwoLevelRun.cpp: see TwoLevelRun.H.
 #include "LsFine.H"
@@ -495,6 +496,23 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             const amrex::Box b = amrex::coarsen(ba[i], r);
             for (int m = 0; m < static_cast<int>(l0.ba.size()); ++m)
                 if (l0.ba[m].contains(b.smallEnd())) { pmap[i] = l0.dm[m]; break; }
+        }
+        // Test only (FDS_AMR_DEBUG_FOREIGN_BOXES set): a fine box that touches no level-0 domain face (no hidden walls in an OBST-free case) goes to the next
+        // rank, so the leaf devices over another rank's mesh (dump.f90 FOREIGN pass, main.f90 LEAF_SUM_IN_RANK_ORDER) are exercised.
+        static const bool dbg_foreign = std::getenv("FDS_AMR_DEBUG_FOREIGN_BOXES") != nullptr;
+        const int np = amrex::ParallelDescriptor::NProcs();
+        if (dbg_foreign && np > 1) {
+            const amrex::Box dom = core.Geom(0).Domain();
+            int nmoved = 0;
+            for (int i = 0; i < static_cast<int>(ba.size()); ++i) {
+                const amrex::Box b = amrex::coarsen(ba[i], r);
+                bool inner = true;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) inner = inner && b.smallEnd(d) > dom.smallEnd(d) && b.bigEnd(d) < dom.bigEnd(d);
+                if (!inner) continue;
+                pmap[i] = (pmap[i] + 1) % np; ++nmoved;
+                amrex::Print() << "DEBUG-FOREIGN level " << lev << " box " << i << " " << ba[i] << " to rank " << pmap[i] << "\n";
+            }
+            amrex::Print() << "DEBUG-FOREIGN level " << lev << ": " << nmoved << " of " << ba.size() << " boxes on a non-parent rank\n";
         }
         return amrex::DistributionMapping(pmap);
     };
