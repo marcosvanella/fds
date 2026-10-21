@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <memory>
 // TwoLevelRun.cpp: see TwoLevelRun.H.
 #include "LsFine.H"
@@ -29,7 +30,7 @@
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
 extern "C" void fds_p_bnd_rate(int ns, double* r);
 extern "C" void fds_fine_set_bed();   // fds_fine_level.f90
-extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR over leaf walls (diagnostic)
+extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR and burning area over leaf walls, r[6] (diagnostic)
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
 extern "C" int fds_p_reac_coef(int ns, double* c);   // fds_step.f90: species production per unit heat release (one reaction), else 0
 extern "C" void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);   // T_END etc.   // fds_step.f90: level-0 wall inflow rate of the last step (stage mean): total, per tracked species, through-flow
@@ -496,6 +497,23 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             for (int m = 0; m < static_cast<int>(l0.ba.size()); ++m)
                 if (l0.ba[m].contains(b.smallEnd())) { pmap[i] = l0.dm[m]; break; }
         }
+        // Test only (FDS_AMR_DEBUG_FOREIGN_BOXES set): a fine box that touches no level-0 domain face (no hidden walls in an OBST-free case) goes to the next
+        // rank, so the leaf devices over another rank's mesh (dump.f90 FOREIGN pass, main.f90 LEAF_SUM_IN_RANK_ORDER) are exercised.
+        static const bool dbg_foreign = std::getenv("FDS_AMR_DEBUG_FOREIGN_BOXES") != nullptr;
+        const int np = amrex::ParallelDescriptor::NProcs();
+        if (dbg_foreign && np > 1) {
+            const amrex::Box dom = core.Geom(0).Domain();
+            int nmoved = 0;
+            for (int i = 0; i < static_cast<int>(ba.size()); ++i) {
+                const amrex::Box b = amrex::coarsen(ba[i], r);
+                bool inner = true;
+                for (int d = 0; d < AMREX_SPACEDIM; ++d) inner = inner && b.smallEnd(d) > dom.smallEnd(d) && b.bigEnd(d) < dom.bigEnd(d);
+                if (!inner) continue;
+                pmap[i] = (pmap[i] + 1) % np; ++nmoved;
+                amrex::Print() << "DEBUG-FOREIGN level " << lev << " box " << i << " " << ba[i] << " to rank " << pmap[i] << "\n";
+            }
+            amrex::Print() << "DEBUG-FOREIGN level " << lev << ": " << nmoved << " of " << ba.size() << " boxes on a non-parent rank\n";
+        }
         return amrex::DistributionMapping(pmap);
     };
     core.init_static(reg, false, owner_dm, &l0.dm);
@@ -685,6 +703,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 std::vector<amrex::BoxArray> old_ba;
                 if (ldiag) { leaf_diag(reg, "pre-regrid", s, loop.time(), ns); leaf_boxes(reg, "pre-regrid", s); for (int l = 0; l < reg.num_levels(); ++l) old_ba.push_back(reg.level(l).ba); }
                 const int fb = loop.finest_bound();
+                // leaf fuel rate and burning area before / after the regrid (re-snapped burner faces change the area, so the fuel rate HRRPUA*A changes with it)
+                auto leaf_fuel = [&](double* a) { double r[6]; fds_fine_fuel_mdot(1, r); amrex::ParallelAllReduce::Sum(r, 6, amrex::ParallelContext::CommunicatorSub()); a[0] = r[0] - r[1] + r[2]; a[1] = r[3] - r[4] + r[5]; };
+                double fuel0[2], fuel1[2]; leaf_fuel(fuel0);
                 for (int l = fb; l >= 1; --l) loop.unbind_level(l);
                 if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
                 if (use_tag_phi) fill_phi(reg, reg.num_levels());
@@ -741,10 +762,12 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     for (std::size_t n = 0; n < dZ.size(); ++n) amrex::Print() << " " << dZ[n];
                     amrex::Print() << ", background pressure " << dP << " (each <= 1e-12), max|div u - D| " << dD << " (<= 1e-9)\n";
                 }
+                leaf_fuel(fuel1);
                 nl_now = finest + 1;
                 amrex::Print() << tag << " mid-regrid after step " << s << " t " << loop.time()
                                << " changed " << changed << " finest " << finest
-                               << " boxes L1 " << (finest >= 1 ? reg.level(1).ba.size() : 0) << " cells L1 " << (finest >= 1 ? reg.level(1).ba.numPts() : 0) << "\n";
+                               << " boxes L1 " << (finest >= 1 ? reg.level(1).ba.size() : 0) << " cells L1 " << (finest >= 1 ? reg.level(1).ba.numPts() : 0)
+                               << " leaf fuel rate " << std::setprecision(10) << fuel0[0] << " -> " << fuel1[0] << " kg/s, burning area " << fuel0[1] << " -> " << fuel1[1] << " m2\n";
                 // Mid-run dump shares the same write helper (Architect: regrid dump path); only without a --plot-every cadence (else it dumped every regrid).
                 if (!o.plotfile.empty() && o.plot_every <= 0) {
                     const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
@@ -807,8 +830,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
         const double dts = loop.steps().empty() ? 0.0 : loop.steps().back().dt;
         // CLIP_MASS / CLIP_CELLS (P3-C11/C12): every dump step when P3-C01 CSV path is active (emit zeros too).
-        double fm[3] = {0.0, 0.0, 0.0};   // leaf fuel MLR (diagnostic): collective, so every rank takes part (lf is open on rank 0 only)
-        if (nl >= 2) { fds_fine_fuel_mdot(1, fm); amrex::ParallelAllReduce::Sum(fm, 3, amrex::ParallelContext::CommunicatorSub()); }
+        double fm[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};   // leaf fuel MLR (diagnostic): collective, so every rank takes part (lf is open on rank 0 only)
+        if (nl >= 2) { fds_fine_fuel_mdot(1, fm); amrex::ParallelAllReduce::Sum(fm, 6, amrex::ParallelContext::CommunicatorSub()); }
         if (lf) {
             const int ntr = l0.dom.n_tracked;
             for (int l = 0; l < nl_now; ++l)

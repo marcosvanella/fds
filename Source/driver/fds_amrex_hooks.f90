@@ -140,7 +140,25 @@ ABSTRACT INTERFACE
 END INTERFACE
 PROCEDURE(RAD_WALLS_IF), POINTER, PUBLIC, SAVE :: RAD_WALLS_PROC => NULL()
 
+!> Rank-invariant HRR file (driver runs, HRR_DET): the step terms of each level-0 mesh (UPDATE_HRR: HRR_QM, HRR_MM; leaf wall corrections: HRR_QW, HRR_MW) are
+!> tallied per mesh (HRR_QDM, HRR_MDM); rank-level terms that have no mesh (particles; composite Q_ENTH of rank 0) go to HRR_QDR, HRR_MDR. At an HRR dump the
+!> tallies are reduced (one source per entry) and summed in mesh order, then rank order, on rank 0 (main.f90). HRR_QADD, HRR_MADD: the per-rank driver
+!> additions already in Q_DOT, M_DOT (removed from the rank residual).
+LOGICAL,  PUBLIC, SAVE :: HRR_DET = .FALSE., HRR_QENTH_ON = .FALSE.
+REAL(EB), PUBLIC, SAVE :: HRR_QENTH = 0._EB
+REAL(EB), ALLOCATABLE, PUBLIC, SAVE :: HRR_QM(:,:),HRR_MM(:,:),HRR_QW(:,:),HRR_MW(:,:),HRR_QDM(:,:),HRR_MDM(:,:),HRR_QDR(:),HRR_MDR(:),HRR_QADD(:),HRR_MADD(:)
+PUBLIC :: HRR_DET_ALLOC
+
 CONTAINS
+
+!> Allocate (once) the HRR_DET arrays: NQ terms, NS tracked species, NM level-0 meshes.
+SUBROUTINE HRR_DET_ALLOC(NQ,NS,NM)
+INTEGER, INTENT(IN) :: NQ,NS,NM
+IF (ALLOCATED(HRR_QM)) RETURN
+ALLOCATE(HRR_QM(NQ,NM),HRR_MM(NS,NM),HRR_QW(3,NM),HRR_MW(NS,NM),HRR_QDM(NQ,NM),HRR_MDM(NS,NM),HRR_QDR(NQ),HRR_MDR(NS),HRR_QADD(NQ),HRR_MADD(NS))
+HRR_QM = 0._EB ; HRR_MM = 0._EB ; HRR_QW = 0._EB ; HRR_MW = 0._EB ; HRR_QDM = 0._EB ; HRR_MDM = 0._EB
+HRR_QDR = 0._EB ; HRR_MDR = 0._EB ; HRR_QADD = 0._EB ; HRR_MADD = 0._EB
+END SUBROUTINE HRR_DET_ALLOC
 
 !> Set or clear EXTERNAL_GHOSTS_FILLED.
 SUBROUTINE FDS_HOOK_SET_FLAG(FLAG) BIND(C,NAME='fds_hook_set_flag')
