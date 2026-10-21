@@ -5,7 +5,7 @@
 #include <AMReX_ParallelDescriptor.H>
 
 extern "C" {
-int fds_obst_count (); void fds_obst_xb (int n, double* xb); int fds_stateful_vents (int n, double* xb); int fds_bed_xb (int n, double* xb);
+int fds_obst_count (); void fds_obst_xb (int n, double* xb); int fds_stateful_vents (int n, double* xb, int ex); int fds_bed_xb (int n, double* xb);
 void fds_obst_surf (int n, int* s); int fds_vent_list (int n, double* xb, int* v);                                          // fds_mesh_query.f90
 void fds_fine_set_lists (int no, const double* oxb, const int* osf, int nv, const double* vxb, const int* vi);          // fds_fine_level.f90
 }
@@ -43,6 +43,14 @@ inline void gather_xb (std::vector<double> const& loc, std::vector<std::array<do
     for (int i = 0; i + 5 < tot; i += 6) { L.push_back({all[i], all[i+1], all[i+2], all[i+3], all[i+4], all[i+5]}); }
 }
 
+// pb::nofine_list(): stateful VENT XB (D-010); ex = 1 (bed runs) drops the analytic burners from it
+inline void load_nofine (int ex)
+{
+    std::vector<double> loc(6 * static_cast<size_t>(fds_stateful_vents(0, nullptr, ex)), 0.0);
+    if (!loc.empty()) { fds_stateful_vents(static_cast<int>(loc.size() / 6), loc.data(), ex); }
+    gather_xb(loc, pb::nofine_list());
+}
+
 // pb::obst_list() (OBST XB) and pb::nofine_list() (stateful VENT XB, D-010), once
 inline void load_obst_list ()
 {
@@ -53,9 +61,7 @@ inline void load_obst_list ()
     std::vector<double> loc(6 * static_cast<size_t>(n));
     if (n > 0) { fds_obst_xb(n, loc.data()); }
     gather_xb(loc, pb::obst_list());
-    loc.assign(6 * static_cast<size_t>(fds_stateful_vents(0, nullptr)), 0.0);
-    if (!loc.empty()) { fds_stateful_vents(static_cast<int>(loc.size() / 6), loc.data()); }
-    gather_xb(loc, pb::nofine_list());
+    load_nofine(0);
     const int nb = fds_bed_xb(0, nullptr);   // global INIT list: no gather
     loc.assign(6 * static_cast<size_t>(nb), 0.0);
     if (nb > 0) { fds_bed_xb(nb, loc.data()); }

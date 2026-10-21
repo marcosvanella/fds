@@ -187,11 +187,11 @@ ENDDO
 END FUNCTION FDS_BED_XB
 
 !> \brief D-010: XB of the stateful VENTs of the local meshes (SURF with a specified mass flux (MASS_FLUX, HRRPUA, MLRPUA), a specified heat flux or a pyrolysis model),
-!> 6 per VENT. With XB = NULL (N = 0) only the count is returned. These walls stay on level 0 (no-refine buffer, RegridAmrCore::ManualTagsPlacement).
-FUNCTION FDS_STATEFUL_VENTS(N,XB) BIND(C,NAME='fds_stateful_vents') RESULT(M)
+!> 6 per VENT; EX = 1 (bed runs) leaves out the analytic burners. With XB = NULL (N = 0) only the count is returned. These walls stay on level 0 (no-refine buffer, RegridAmrCore::ManualTagsPlacement).
+FUNCTION FDS_STATEFUL_VENTS(N,XB,EX) BIND(C,NAME='fds_stateful_vents') RESULT(M)
 USE TYPES, ONLY: SURFACE
 USE GLOBAL_CONSTANTS, ONLY: SPECIFIED_MASS_FLUX,NET_FLUX_BC,CONVECTIVE_FLUX_BC,PYROLYSIS_NONE,SPECIFIED_TEMPERATURE
-INTEGER(C_INT), VALUE :: N
+INTEGER(C_INT), VALUE :: N,EX
 REAL(C_DOUBLE), INTENT(OUT) :: XB(6,*)
 INTEGER(C_INT) :: M
 INTEGER :: NM,I
@@ -203,7 +203,7 @@ DO NM=1,NMESHES
       ASSOCIATE (SF=>SURFACE(VT%SURF_INDEX))
       IF (SF%SPECIES_BC_INDEX/=SPECIFIED_MASS_FLUX .AND. SF%THERMAL_BC_INDEX/=NET_FLUX_BC .AND. SF%THERMAL_BC_INDEX/=CONVECTIVE_FLUX_BC &
           .AND. SF%PYROLYSIS_MODEL==PYROLYSIS_NONE) CYCLE
-      IF ((SF%HRRPUA>0. .OR. SF%MLRPUA>0.) .AND. SF%THERMAL_BC_INDEX==SPECIFIED_TEMPERATURE) CYCLE   ! D-010 exemption: burner state analytic in x,t (RAMP, TMP_FRONT, SPREAD_RATE/XYZ; no ONE_D/HT3D)
+      IF (EX==1 .AND. (SF%HRRPUA>0. .OR. SF%MLRPUA>0.) .AND. SF%THERMAL_BC_INDEX==SPECIFIED_TEMPERATURE) CYCLE   ! D-010 exemption: burner state analytic in x,t (RAMP, TMP_FRONT, SPREAD_RATE/XYZ; no ONE_D/HT3D)
       M = M + 1
       IF (M<=N) XB(:,M) = [VT%X1,VT%X2,VT%Y1,VT%Y2,VT%Z1,VT%Z2]
       END ASSOCIATE

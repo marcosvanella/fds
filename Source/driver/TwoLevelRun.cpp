@@ -364,6 +364,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     load_obst_list();   // the bed list (W2a) is needed for the refinable region below
     if (o.bed.size() == 6) pb::bed_list().push_back({o.bed[0], o.bed[1], o.bed[2], o.bed[3], o.bed[4], o.bed[5]});
+    if (!pb::bed_list().empty()) load_nofine(1);   // D-010 exemption of analytic burners, bed runs only
     std::ostringstream amr;
     amr << "&AMR MAX_LEVEL=" << o.max_level << ", REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize
         << ", N_PROPER=1, N_ERROR_BUF=" << (std::isnan(o.tag_phi) ? 1 : o.tag_phi_buf) << ", REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "'";
