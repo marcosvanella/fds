@@ -710,6 +710,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 // leaf fuel rate and burning area before / after the regrid (re-snapped burner faces change the area, so the fuel rate HRRPUA*A changes with it)
                 auto leaf_fuel = [&](double* a) { double r[6]; fds_fine_fuel_mdot(1, r); amrex::ParallelAllReduce::Sum(r, 6, amrex::ParallelContext::CommunicatorSub()); a[0] = r[0] - r[1] + r[2]; a[1] = r[3] - r[4] + r[5]; };
                 double fuel0[2], fuel1[2]; leaf_fuel(fuel0);
+                loop.part_stash();   // W8: migrate, deposit, prime, project, deposit, prime
                 for (int l = fb; l >= 1; --l) loop.unbind_level(l);
                 if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
                 if (use_tag_phi) fill_phi(reg, reg.num_levels());
@@ -723,6 +724,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     fdsrt::install_cf_ghost_hooks(loop, finest, fdsrt::ThermoProvider(), &cfs);
                     loop.set_flux_overwrite(o.overwrite);
                 }
+                loop.part_place();
+                loop.part_deposit();   // before the prime: the projection must see the particle divergence
                 if (changed || rebound) loop.prime_levels();
                 if (finest > fb0) {   // a new level: the hook projected onto the D it inherited from its parent; its own D comes from the prime, so project again and prime (as the initial setup does)
                     std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, finest + 1);
@@ -734,6 +737,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                             const char* st[3] = {"US", "VS", "WS"}; const char* vn[3] = {"U", "V", "W"};
                             for (int d = 0; d < 3; ++d) { amrex::MultiFab::Copy(F[st[d]], F[vn[d]], 0, 0, 1, 0); F.fill_ghosts(st[d]); F.fill_ghosts(vn[d]); }
                         }
+                        loop.part_deposit();   // the prime rebuilds D after the projection: the particle sources must be in place for it
                         loop.prime_levels();
                     }
                 }
