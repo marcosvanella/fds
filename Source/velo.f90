@@ -174,6 +174,19 @@ SELECT_TURB: SELECT CASE (TURB_MODEL)
       !$OMP END DO
 
       !$OMP END PARALLEL
+#ifdef WITH_AMREX
+      IF (NM>NMESHES) THEN   ! fine box (no external wall cells): ghost ring from the AMReX ghost faces, as U_GHOST; domain faces 0
+         UP(0:IBP1,:,:) = 0.5_EB*(UU(-1:IBAR,:,:)+UU(0:IBP1,:,:))
+         VP(:,0:JBP1,:) = 0.5_EB*(VV(:,-1:JBAR,:)+VV(:,0:JBP1,:))
+         WP(:,:,0:KBP1) = 0.5_EB*(WW(:,:,-1:KBAR)+WW(:,:,0:KBP1))
+         IF (XS<XS_MIN+TWO_EPSILON_EB) THEN ; UP(0,:,:)=0._EB ; VP(0,:,:)=0._EB ; WP(0,:,:)=0._EB ; ENDIF
+         IF (XF>XF_MAX-TWO_EPSILON_EB) THEN ; UP(IBP1,:,:)=0._EB ; VP(IBP1,:,:)=0._EB ; WP(IBP1,:,:)=0._EB ; ENDIF
+         IF (YS<YS_MIN+TWO_EPSILON_EB) THEN ; UP(:,0,:)=0._EB ; VP(:,0,:)=0._EB ; WP(:,0,:)=0._EB ; ENDIF
+         IF (YF>YF_MAX-TWO_EPSILON_EB) THEN ; UP(:,JBP1,:)=0._EB ; VP(:,JBP1,:)=0._EB ; WP(:,JBP1,:)=0._EB ; ENDIF
+         IF (ZS<ZS_MIN+TWO_EPSILON_EB) THEN ; UP(:,:,0)=0._EB ; VP(:,:,0)=0._EB ; WP(:,:,0)=0._EB ; ENDIF
+         IF (ZF>ZF_MAX-TWO_EPSILON_EB) THEN ; UP(:,:,KBP1)=0._EB ; VP(:,:,KBP1)=0._EB ; WP(:,:,KBP1)=0._EB ; ENDIF
+      ENDIF
+#endif
 
       ! fill edge and corner ghost cells
 
