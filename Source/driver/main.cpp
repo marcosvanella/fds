@@ -54,7 +54,7 @@ namespace {
 bool pressure_flag(int argc, char** argv, int& i, fdsamr::RunOptions& ro)
 {
     const std::string a = argv[i];
-    if ((a.rfind("hypre.", 0) == 0 || a.rfind("pressure.", 0) == 0) && a.find('=') != std::string::npos) {   // pb::query_options keys, e.g. hypre.strong_threshold=0.5
+    if ((a.rfind("hypre.", 0) == 0 || a.rfind("pressure.", 0) == 0 || a.rfind("pb_mlmg_bottom.", 0) == 0) && a.find('=') != std::string::npos) {   // pb::query_options keys, e.g. hypre.strong_threshold=0.5; pb_mlmg_bottom.* (masked composite MLMG bottom, CompositeSolve.cpp)
         amrex::ParmParse().add(a.substr(0, a.find('=')).c_str(), a.substr(a.find('=') + 1));
         return true;
     }

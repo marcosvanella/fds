@@ -1088,7 +1088,7 @@ std::string build_masked_mlmg (PressureWorkspace::Impl const& W, PressureProblem
     M.mlmg = std::make_unique<MLMG>(*M.op);
     {
         std::string bot = bicg_bottom ? "bicgstab" : "hypre";   // pb_mlmg_bottom.solver (diagnostics) = smoother | bicgstab: pb_mlmg_bottom.solver = smoother | bicgstab
-        ParmParse("pb_mlmg_bottom").query("solver", bot);
+        if (ParmParse("pb_mlmg_bottom").query("solver", bot)) { amrex::Print() << "masked composite MLMG: bottom solver " << bot << " (pb_mlmg_bottom.solver)\n"; }
         M.mlmg->setBottomSolver(bot == "smoother" ? BottomSolver::smoother : bot == "bicgstab" ? BottomSolver::bicgstab : BottomSolver::hypre);
     }
     M.mlmg->setHypreInterface(Hypre::Interface::ij);
