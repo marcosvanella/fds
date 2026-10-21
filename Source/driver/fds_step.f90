@@ -1164,33 +1164,53 @@ END SUBROUTINE FDS_P_WALL_TABLE_DUMP
 !> Verification only (FDSTL_VERIFY_STOCK_EDGE_LAG, fds_amrex_hooks.f90): MODE 0/1 save U,V (US,VS) of box NM before the ghost fill; MODE 2 (set-up redo): US as the
 !> previous U of the ground edges (the interface ghosts of US still hold the initial field that FDS's set-up VELOCITY_BC read).
 SUBROUTINE FDS_P_LAG_SAVE(NM,MODE) BIND(C,NAME='fds_p_lag_save')
-USE MESH_POINTERS, ONLY: POINT_TO_BOX,PU=>U,PV=>V,PUS=>US,PVS=>VS
+USE MESH_POINTERS, ONLY: POINT_TO_BOX,PU=>U,PV=>V,PW=>W,PUS=>US,PVS=>VS,PWS=>WS
 USE FDS_AMREX_HOOKS, ONLY: FDS_HOOK_LAG_SAVE,LAG
 INTEGER(C_INT), VALUE :: NM,MODE
-INTEGER :: IE
+INTEGER :: IE,KM,KP
 CALL POINT_TO_BOX(NM)
-IF (.NOT.ALLOCATED(LAG)) CALL FDS_HOOK_LAG_SAVE(NM,0,NMESHES,PU,PV)   ! allocates LAG
-IF (.NOT.ALLOCATED(LAG(0,NM)%IEU)) THEN   ! the z-axis edges of stock's 'ghost cell values at the edge of the computational domain' (velo.f90 VELOCITY_BC)
-   ALLOCATE(LAG(0,NM)%IEU(LBOUND(PU,1):UBOUND(PU,1),LBOUND(PU,2):UBOUND(PU,2),LBOUND(PU,3):UBOUND(PU,3)))
-   ALLOCATE(LAG(0,NM)%IEV(LBOUND(PV,1):UBOUND(PV,1),LBOUND(PV,2):UBOUND(PV,2),LBOUND(PV,3):UBOUND(PV,3)))
-   LAG(0,NM)%IEU = 0 ; LAG(0,NM)%IEV = 0
+IF (.NOT.ALLOCATED(LAG)) CALL FDS_HOOK_LAG_SAVE(NM,0,NMESHES,PU,PV,PW)   ! allocates LAG
+IF (.NOT.ALLOCATED(LAG(0,NM)%KU)) THEN   ! stock VELOCITY_BC's 'ghost cell values at the edge of the computational domain' writes (velo.f90), first key per ghost
+   ALLOCATE(LAG(0,NM)%KU(LBOUND(PU,1):UBOUND(PU,1),LBOUND(PU,2):UBOUND(PU,2),LBOUND(PU,3):UBOUND(PU,3)))
+   ALLOCATE(LAG(0,NM)%KV(LBOUND(PV,1):UBOUND(PV,1),LBOUND(PV,2):UBOUND(PV,2),LBOUND(PV,3):UBOUND(PV,3)))
+   ALLOCATE(LAG(0,NM)%KW(LBOUND(PW,1):UBOUND(PW,1),LBOUND(PW,2):UBOUND(PW,2),LBOUND(PW,3):UBOUND(PW,3)))
+   LAG(0,NM)%KU = HUGE(1) ; LAG(0,NM)%KV = HUGE(1) ; LAG(0,NM)%KW = HUGE(1)
    ASSOCIATE (M=>MESHES(NM))
    DO IE=1,EDGE_COUNT(NM)
-      ASSOCIATE (ED=>M%EDGE(IE))
-      IF (ED%AXIS/=3) CYCLE
-      IF (ED%I==0)      LAG(0,NM)%IEV(0,ED%J,ED%K)        = IE
-      IF (ED%I==M%IBAR) LAG(0,NM)%IEV(M%IBAR+1,ED%J,ED%K) = IE
-      IF (ED%J==0)      LAG(0,NM)%IEU(ED%I,0,ED%K)        = IE
-      IF (ED%J==M%JBAR) LAG(0,NM)%IEU(ED%I,M%JBAR+1,ED%K) = IE
+      ASSOCIATE (ED=>M%EDGE(IE),KU=>LAG(0,NM)%KU,KV=>LAG(0,NM)%KV,KW=>LAG(0,NM)%KW)
+      SELECT CASE(ED%AXIS)   ! key of orientation IOR: IE*8 + P, P = 0..2 for IOR = -1..-3 and 3..5 for IOR = 1..3
+         CASE(1)
+            KP = IE*8+3+1 ; KM = IE*8+1   ! IOR = +-2
+            IF (ED%J==0)      KW(ED%I,0,ED%K)        = MIN(KW(ED%I,0,ED%K),KP)
+            IF (ED%J==M%JBAR) KW(ED%I,M%JBAR+1,ED%K) = MIN(KW(ED%I,M%JBAR+1,ED%K),KM)
+            KP = IE*8+3+2 ; KM = IE*8+2   ! IOR = +-3
+            IF (ED%K==0)      KV(ED%I,ED%J,0)        = MIN(KV(ED%I,ED%J,0),KP)
+            IF (ED%K==M%KBAR) KV(ED%I,ED%J,M%KBAR+1) = MIN(KV(ED%I,ED%J,M%KBAR+1),KM)
+         CASE(2)
+            KP = IE*8+3 ; KM = IE*8       ! IOR = +-1
+            IF (ED%I==0)      KW(0,ED%J,ED%K)        = MIN(KW(0,ED%J,ED%K),KP)
+            IF (ED%I==M%IBAR) KW(M%IBAR+1,ED%J,ED%K) = MIN(KW(M%IBAR+1,ED%J,ED%K),KM)
+            KP = IE*8+3+2 ; KM = IE*8+2   ! IOR = +-3
+            IF (ED%K==0)      KU(ED%I,ED%J,0)        = MIN(KU(ED%I,ED%J,0),KP)
+            IF (ED%K==M%KBAR) KU(ED%I,ED%J,M%KBAR+1) = MIN(KU(ED%I,ED%J,M%KBAR+1),KM)
+         CASE(3)
+            KP = IE*8+3 ; KM = IE*8       ! IOR = +-1
+            IF (ED%I==0)      KV(0,ED%J,ED%K)        = MIN(KV(0,ED%J,ED%K),KP)
+            IF (ED%I==M%IBAR) KV(M%IBAR+1,ED%J,ED%K) = MIN(KV(M%IBAR+1,ED%J,ED%K),KM)
+            KP = IE*8+3+1 ; KM = IE*8+1   ! IOR = +-2
+            IF (ED%J==0)      KU(ED%I,0,ED%K)        = MIN(KU(ED%I,0,ED%K),KP)
+            IF (ED%J==M%JBAR) KU(ED%I,M%JBAR+1,ED%K) = MIN(KU(ED%I,M%JBAR+1,ED%K),KM)
+      END SELECT
       END ASSOCIATE
    ENDDO
    END ASSOCIATE
 ENDIF
 SELECT CASE(MODE)
-   CASE(0) ; CALL FDS_HOOK_LAG_SAVE(NM,0,NMESHES,PU,PV)
-   CASE(1) ; CALL FDS_HOOK_LAG_SAVE(NM,1,NMESHES,PUS,PVS)
-   CASE(2) ; CALL FDS_HOOK_LAG_SAVE(NM,0,NMESHES,PUS,PV)
+   CASE(0) ; CALL FDS_HOOK_LAG_SAVE(NM,0,NMESHES,PU,PV,PW)
+   CASE(1) ; CALL FDS_HOOK_LAG_SAVE(NM,1,NMESHES,PUS,PVS,PWS)
+   CASE(2) ; CALL FDS_HOOK_LAG_SAVE(NM,0,NMESHES,PUS,PV,PWS)
 END SELECT
 END SUBROUTINE FDS_P_LAG_SAVE
 
 END MODULE FDS_STEP
+

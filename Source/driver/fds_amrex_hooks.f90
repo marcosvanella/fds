@@ -29,12 +29,14 @@ LOGICAL, PUBLIC, SAVE :: EXTERNAL_GHOSTS_FILLED = .FALSE.
 !> The switch also keeps the diagonal ghosts (outside the box in two or three directions, across a mesh-corner line) out of the fill (GhostExchange.cpp
 !> ghost_exchange): stock does not refresh them (cell fields, US,VS,WS) or refreshes them a step late (U,V,W, VELOCITY_BC corrector branch).
 LOGICAL, PUBLIC, SAVE :: VERIFY_STOCK_EDGE_LAG = .FALSE.
+!> The OPEN-boundary branch of the same loop has the same lag: its inflow test (U_NORM) reads interface ghosts that a later edge, or a later orientation of the same
+!> edge, refreshes (STOCK_EDGE_LAG_UN). Read and write order is the key IE*8+P of the edge loop, P = 3*(I_SGN+1)/2+IS-1 (SIGN_LOOP, ORIENTATION_LOOP).
 TYPE :: LAG_T
-   REAL(EB), ALLOCATABLE :: U(:,:,:),V(:,:,:)
-   INTEGER, ALLOCATABLE :: IEU(:,:,:),IEV(:,:,:)   !< slot 0: index of the edge whose stock VELOCITY_BC writes that interface ghost U, V (0: none)
+   REAL(EB), ALLOCATABLE :: U(:,:,:),V(:,:,:),W(:,:,:)
+   INTEGER, ALLOCATABLE :: KU(:,:,:),KV(:,:,:),KW(:,:,:)   !< slot 0: first key of stock VELOCITY_BC's 'ghost cell values at the edge' write of that ghost U, V, W (HUGE: none)
 END TYPE LAG_T
 TYPE(LAG_T), ALLOCATABLE, SAVE :: LAG(:,:)
-PUBLIC :: LAG_T,LAG,FDS_HOOK_LAG_SAVE,STOCK_EDGE_LAG_VT
+PUBLIC :: LAG_T,LAG,FDS_HOOK_LAG_SAVE,STOCK_EDGE_LAG_VT,STOCK_EDGE_LAG_UN
 
 !> Time, time step and cycle number that the driver hands to FDS_SETUP(MODE=3) (end-of-step outputs, patch 0006).
 REAL(EB), PUBLIC, SAVE :: OUT_T = 0._EB, OUT_DT = 0._EB
@@ -315,30 +317,73 @@ IF (ASSOCIATED(SHADOW_PROC)) CALL SHADOW_PROC(PHASE,KIND,NM,T,DT,EST,DTNEW,ICHG)
 
 END SUBROUTINE FDS_HOOK_SHADOW
 
-SUBROUTINE FDS_HOOK_LAG_SAVE(NM,EST,NMAX,U,V)
+SUBROUTINE FDS_HOOK_LAG_SAVE(NM,EST,NMAX,U,V,W)
 INTEGER, INTENT(IN) :: NM,EST,NMAX
-REAL(EB), POINTER, INTENT(IN) :: U(:,:,:),V(:,:,:)
+REAL(EB), POINTER, INTENT(IN) :: U(:,:,:),V(:,:,:),W(:,:,:)
 VERIFY_STOCK_EDGE_LAG = .TRUE.
 IF (.NOT.ALLOCATED(LAG)) ALLOCATE(LAG(0:1,NMAX))
-LAG(EST,NM)%U = U ; LAG(EST,NM)%V = V
+LAG(EST,NM)%U = U ; LAG(EST,NM)%V = V ; LAG(EST,NM)%W = W
 END SUBROUTINE FDS_HOOK_LAG_SAVE
 
-!> VEL_T of the ground-edge branch of edge IE: a ghost U or V at gas cell (I,J,K) that stock writes later in the same edge loop (writer edge index > IE) is the saved value.
-REAL(EB) FUNCTION STOCK_EDGE_LAG_VT(NM,EST,IE,I,J,K,UC,VC) RESULT(R)
-INTEGER, INTENT(IN) :: NM,IE,I,J,K
+!> Value of component IC (1 U, 2 V, 3 W) at (I,J,K) that stock's edge loop sees at read key KEYR: the saved (previous-call) value when that ghost is written later.
+REAL(EB) FUNCTION STOCK_LAG_VAL(NM,E,KEYR,IC,I,J,K,CUR) RESULT(R)
+INTEGER, INTENT(IN) :: NM,E,KEYR,IC,I,J,K
+REAL(EB), INTENT(IN) :: CUR
+R = CUR
+IF (.NOT.ALLOCATED(LAG)) RETURN
+IF (.NOT.ALLOCATED(LAG(E,NM)%U) .OR. .NOT.ALLOCATED(LAG(0,NM)%KU)) RETURN
+SELECT CASE(IC)
+   CASE(1) ; IF (LAG(0,NM)%KU(I,J,K)>KEYR .AND. LAG(0,NM)%KU(I,J,K)<HUGE(1)) R = LAG(E,NM)%U(I,J,K)
+   CASE(2) ; IF (LAG(0,NM)%KV(I,J,K)>KEYR .AND. LAG(0,NM)%KV(I,J,K)<HUGE(1)) R = LAG(E,NM)%V(I,J,K)
+   CASE(3) ; IF (LAG(0,NM)%KW(I,J,K)>KEYR .AND. LAG(0,NM)%KW(I,J,K)<HUGE(1)) R = LAG(E,NM)%W(I,J,K)
+END SELECT
+END FUNCTION STOCK_LAG_VAL
+
+!> VEL_T of the ground-edge branch (read key KEYR) at gas cell (I,J,K).
+REAL(EB) FUNCTION STOCK_EDGE_LAG_VT(NM,EST,KEYR,I,J,K,UC,VC) RESULT(R)
+INTEGER, INTENT(IN) :: NM,KEYR,I,J,K
 LOGICAL, INTENT(IN) :: EST
 REAL(EB), INTENT(IN) :: UC,VC
-REAL(EB) :: UU,VV
 INTEGER :: E
 E = MERGE(1,0,EST)
-UU = UC ; VV = VC
-IF (ALLOCATED(LAG)) THEN
-   IF (ALLOCATED(LAG(E,NM)%U) .AND. ALLOCATED(LAG(0,NM)%IEU)) THEN
-      IF (LAG(0,NM)%IEU(I,J,K)>IE) UU = LAG(E,NM)%U(I,J,K)
-      IF (LAG(0,NM)%IEV(I,J,K)>IE) VV = LAG(E,NM)%V(I,J,K)
-   ENDIF
-ENDIF
-R = SQRT(UU**2 + VV**2)
+R = SQRT(STOCK_LAG_VAL(NM,E,KEYR,1,I,J,K,UC)**2 + STOCK_LAG_VAL(NM,E,KEYR,2,I,J,K,VC)**2)
 END FUNCTION STOCK_EDGE_LAG_VT
+
+!> U_NORM of the OPEN-boundary branch (velo.f90 OPEN_AND_WIND_BC, same expressions) with the reads that stock makes before their refresh replaced by the saved values.
+REAL(EB) FUNCTION STOCK_EDGE_LAG_UN(NM,EST,KEYR,IEC,IOR,II,JJ,KK,IBAR,JBAR,KBAR,UU,VV,WW,UNC) RESULT(UN)
+INTEGER, INTENT(IN) :: NM,KEYR,IEC,IOR,II,JJ,KK,IBAR,JBAR,KBAR
+LOGICAL, INTENT(IN) :: EST
+REAL(EB), POINTER, INTENT(IN) :: UU(:,:,:),VV(:,:,:),WW(:,:,:)
+REAL(EB), INTENT(IN) :: UNC
+INTEGER :: E
+E = MERGE(1,0,EST)
+UN = UNC
+SELECT CASE(IEC)
+   CASE(1)
+      IF (JJ==0    .AND. IOR== 2) UN = 0.5_EB*(G(2,II,   0,KK) + G(2,II,   0,KK+1))
+      IF (JJ==JBAR .AND. IOR==-2) UN = 0.5_EB*(G(2,II,JBAR,KK) + G(2,II,JBAR,KK+1))
+      IF (KK==0    .AND. IOR== 3) UN = 0.5_EB*(G(3,II,JJ,0)    + G(3,II,JJ+1,   0))
+      IF (KK==KBAR .AND. IOR==-3) UN = 0.5_EB*(G(3,II,JJ,KBAR) + G(3,II,JJ+1,KBAR))
+   CASE(2)
+      IF (II==0    .AND. IOR== 1) UN = 0.5_EB*(G(1,   0,JJ,KK) + G(1,   0,JJ,KK+1))
+      IF (II==IBAR .AND. IOR==-1) UN = 0.5_EB*(G(1,IBAR,JJ,KK) + G(1,IBAR,JJ,KK+1))
+      IF (KK==0    .AND. IOR== 3) UN = 0.5_EB*(G(3,II,JJ,   0) + G(3,II+1,JJ,   0))
+      IF (KK==KBAR .AND. IOR==-3) UN = 0.5_EB*(G(3,II,JJ,KBAR) + G(3,II+1,JJ,KBAR))
+   CASE(3)
+      IF (II==0    .AND. IOR== 1) UN = 0.5_EB*(G(1,   0,JJ,KK) + G(1,   0,JJ+1,KK))
+      IF (II==IBAR .AND. IOR==-1) UN = 0.5_EB*(G(1,IBAR,JJ,KK) + G(1,IBAR,JJ+1,KK))
+      IF (JJ==0    .AND. IOR== 2) UN = 0.5_EB*(G(2,II,   0,KK) + G(2,II+1,   0,KK))
+      IF (JJ==JBAR .AND. IOR==-2) UN = 0.5_EB*(G(2,II,JBAR,KK) + G(2,II+1,JBAR,KK))
+END SELECT
+CONTAINS
+REAL(EB) FUNCTION G(IC,I,J,K)
+INTEGER, INTENT(IN) :: IC,I,J,K
+SELECT CASE(IC)
+   CASE(1) ; G = STOCK_LAG_VAL(NM,E,KEYR,1,I,J,K,UU(I,J,K))
+   CASE(2) ; G = STOCK_LAG_VAL(NM,E,KEYR,2,I,J,K,VV(I,J,K))
+   CASE DEFAULT ; G = STOCK_LAG_VAL(NM,E,KEYR,3,I,J,K,WW(I,J,K))
+END SELECT
+END FUNCTION G
+END FUNCTION STOCK_EDGE_LAG_UN
 
 END MODULE FDS_AMREX_HOOKS

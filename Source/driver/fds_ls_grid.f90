@@ -645,7 +645,7 @@ END FUNCTION LS_FRAC
 
 !> \brief Before WALL_BC of level-0 mesh NM (FDS_G_WALL_BC): the fuel flux of every LS cell at this stage (LS_FLUX), and on every level-0 spreading wall the LS cell means:
 !> B2%PHI_LS = mean PHI; the wall trapezoid of WALL_BC is made to return mean(flux)/(MASS_FLUX*ADJUST_FAC) of the wall: T_IGN = T_stage - F*LAM, TAU_LS = LAM, BURN_DURATION huge
-!> (so TSI/TAU = F, any value of F in 0..1) and AREA_ADJUST = max(1,total) with F = total/AREA_ADJUST. M_DOT_G_PP_ADJUST (and the burning rate output) is then the mean LS flux.
+!> (so TSI/TAU = F, any value of F in 0..1) and AREA_ADJUST = mean LS AREA_ADJUST (as vege.f90; DIVERGENCE_PART_1 scales Q_CON_F by it) with F = total/AREA_ADJUST. M_DOT_G_PP_ADJUST (and the burning rate output) is then the mean LS flux.
 !> No flux is touched when LEVEL_SET_COUPLED_FIRE is off (only PHI_LS).
 SUBROUTINE LS_APPLY_L0(T,DT,NM)
 
@@ -655,7 +655,7 @@ REAL(EB), PARAMETER :: LAM=1.E6_EB
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(SURFACE_TYPE), POINTER :: SF
 INTEGER :: I,J,II,JJ,IW,R
-REAL(EB) :: SM,SP,MF0,TOT,AA,FR,TEFF,RR
+REAL(EB) :: SM,SP,SA,MF0,TOT,AA,FR,TEFF,RR
 
 IF (.NOT.LS_DRIVE .OR. .NOT.LS_ACTIVE .OR. NM>SIZE(LS_MGROUND)) RETURN
 IF (.NOT.LS_MGROUND(NM)) RETURN
@@ -678,11 +678,12 @@ DO J=1,M%JBAR
       IF (M%WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
       SF => SURFACE(M%WALL(IW)%SURF_INDEX)
       IF (.NOT.SF%VEG_LSET_SPREAD) CYCLE
-      SM = 0._EB ; SP = 0._EB
+      SM = 0._EB ; SP = 0._EB ; SA = 0._EB
       DO JJ=(LS_MJ0(NM)+J-1)*R+1,(LS_MJ0(NM)+J)*R
          DO II=(LS_MI0(NM)+I-1)*R+1,(LS_MI0(NM)+I)*R
             SP = SP + LS_PHI(II,JJ)
             IF (LEVEL_SET_COUPLED_FIRE) SM = SM + LS_FLUX(II,JJ)
+            SA = SA + LS_AREA_ADJ(II,JJ)
          ENDDO
       ENDDO
       ASSOCIATE(B1=>M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX),B2=>M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX))
@@ -692,11 +693,14 @@ DO J=1,M%JBAR
          IF (ABS(MF0)>TWENTY_EPSILON_EB) THEN
             TOT = SM/RR/MF0
             B2%TAU_LS = LAM
+            ! AREA_ADJUST = mean LS AREA_ADJUST (vege.f90 value at R=1; DIVERGENCE_PART_1 also scales Q_CON_F by it), F = total/AREA_ADJUST (<= max LS fraction <= 1)
+            AA = SA/RR
+            B1%AREA_ADJUST = AA
             IF (TOT>0._EB) THEN
-               AA = MAX(1._EB,TOT) ; FR = TOT/AA
-               B1%T_IGN = TEFF-FR*LAM ; B1%BURN_DURATION = 1.E30_EB ; B1%AREA_ADJUST = AA
+               FR = TOT/AA
+               B1%T_IGN = TEFF-FR*LAM ; B1%BURN_DURATION = 1.E30_EB
             ELSE
-               B1%T_IGN = -1._EB ; B1%BURN_DURATION = -1._EB ; B1%AREA_ADJUST = 1._EB
+               B1%T_IGN = -1._EB ; B1%BURN_DURATION = -1._EB
             ENDIF
          ENDIF
       ENDIF
