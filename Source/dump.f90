@@ -56,6 +56,8 @@ LOGICAL :: DRY,FROM_BNDF=.FALSE.
 !> reduced with the subdevices in EXCHANGE_GLOBAL_OUTPUTS. LEAF_SDV_ON(NM,N): device N has a subdevice on level-0 mesh NM (any rank).
 TYPE(SUBDEVICE_TYPE), ALLOCATABLE, TARGET, SAVE, PUBLIC :: LEAF_FSDV(:)
 LOGICAL, ALLOCATABLE, SAVE, PUBLIC :: LEAF_SDV_ON(:,:)
+!> layer devices on leaf cells: bottom leaf temperature where this rank holds it, else -HUGE (MAX over ranks)
+REAL(EB), ALLOCATABLE, SAVE :: LEAF_TLOW(:)
 PUBLIC :: LEAF_FOREIGN_DEVICES
 #endif
 
@@ -110,6 +112,12 @@ ENDDO
 CALL POINT_TO_MESH(LOWER_MESH_INDEX)
 END SUBROUTINE LEAF_FOREIGN_DEVICES
 
+!> Line devices evaluated on leaf cells (LEAF_LINE_DEVICE)
+LOGICAL FUNCTION LEAF_LINE_Q(IQ)
+INTEGER, INTENT(IN) :: IQ
+LEAF_LINE_Q = IQ==164 .OR. IQ==154 .OR. IQ==155 .OR. (IQ>=105 .AND. IQ<=107)
+END FUNCTION LEAF_LINE_Q
+
 !> True if fine box NB is stored on this rank.
 LOGICAL FUNCTION LEAF_BOX_LOCAL(NB)
 INTEGER, INTENT(IN) :: NB
@@ -123,54 +131,115 @@ DO LEV=1,SIZE(FINE_LEVEL)
 ENDDO
 END FUNCTION LEAF_BOX_LOCAL
 
-!> FIRE DEPTH on leaf cells (D-084): the stock path of read.f90 (10000 scan points along the device line, each of length SCANDISTANCE, in the mesh SEARCH_OTHER_MESHES
-!> gives) over level-0 mesh NM, each point read on the finest level covering it. An uncovered level-0 path cell counts as in stock (owner pass only); a point in a
-!> covered level-0 cell is read on the finest box there (that box's rank adds it: owner pass for local boxes, FOREIGN pass for boxes over another rank's mesh), never
-!> on the covered level-0 cell. Threshold: the default MIN(200,20/dx) kW/m3 with dx the cube root of the leaf cell volume; a user QUANTITY_RANGE stays as given.
-REAL(EB) FUNCTION LEAF_FIRE_DEPTH(NM,NMR,FRN,DV,SDV) RESULT(V)
+!> Line devices on leaf cells (D-084): FIRE DEPTH (164), TRANSMISSION / PATH OBSCURATION (154:155) and the layer devices LAYER HEIGHT, UPPER / LOWER TEMPERATURE
+!> (105:107) over level-0 mesh NM. The level-0 cells that no finer level covers count as in stock (owner pass only: the read.f90 path cells, or the layer column
+!> K1..K2). The line is also sampled as read.f90 does for the path (10000 scan points from (X1,Y1,Z1) to (X2,Y2,Z2), each of length SCAN, in the mesh
+!> SEARCH_OTHER_MESHES gives); a point in a covered level-0 cell is read on the finest box there, never on the covered cell (a box of this rank: owner pass for its
+!> own mesh, FOREIGN pass over another rank's mesh). V(1:4) are the subdevice sums: 164 the depth, 154:155 the mass extinction integral, 105:107 I_1..I_4 of
+!> GET_LAYER_HEIGHT_INTEGRALS. FIRE DEPTH threshold: the default MIN(200,20/dx) kW/m3 with dx the cube root of the leaf cell volume; a user QUANTITY_RANGE stays.
+!> Layer devices: TLOW = the leaf temperature at the bottom point of the column (-HUGE where this rank does not hold it; UPDATE_DEVICES_2 takes the maximum).
+SUBROUTINE LEAF_LINE_DEVICE(NM,NMR,FRN,DV,SDV,V,TLOW)
 USE GEOMETRY_FUNCTIONS, ONLY: SEARCH_OTHER_MESHES
+USE PHYSICAL_FUNCTIONS, ONLY: GET_MASS_FRACTION
 INTEGER, INTENT(IN) :: NM,NMR
 LOGICAL, INTENT(IN) :: FRN
 TYPE(DEVICE_TYPE), INTENT(IN) :: DV
 TYPE(SUBDEVICE_TYPE), INTENT(IN) :: SDV
+REAL(EB), INTENT(OUT) :: V(4),TLOW
 TYPE(MESH_TYPE), POINTER :: M0
 LOGICAL :: DEF
-INTEGER :: NN,NNN,NOM,I,J,K,IL,JL,KL,NB,NBP
-REAL(EB) :: DX0,DY0,DZ0,THR,DXS,DYS,DZS,SCAN,XX,YY,ZZ,XCC,YCC,ZCC
-V = 0._EB
+INTEGER :: IQ,NN,NNN,NOM,I,J,K,IL,JL,KL,NB,NBP
+REAL(EB) :: DX0,DY0,DZ0,THR,DXS,DYS,DZS,SCAN,XP,YP,ZP,XCC,YCC,ZCC,MEC,ZT,ZB,F
+V = 0._EB ; TLOW = -HUGE(1._EB)
+IQ = DV%QUANTITY_INDEX(1)
 M0 => MESHES(NM)
 DX0 = (M0%XF-M0%XS)/REAL(M0%IBAR,EB) ; DY0 = (M0%YF-M0%YS)/REAL(M0%JBAR,EB) ; DZ0 = (M0%ZF-M0%ZS)/REAL(M0%KBAR,EB)
 DEF = ABS(DV%QUANTITY_RANGE(1)-MIN(200._EB,20._EB/CHARACTERISTIC_CELL_SIZE))<=1.E-12_EB*MAX(1._EB,ABS(DV%QUANTITY_RANGE(1)))
-IF (.NOT.FRN) THEN   ! uncovered level-0 path cells, as stock
-   THR = DV%QUANTITY_RANGE(1) ; IF (DEF) THR = MIN(200._EB,20._EB/(DX0*DY0*DZ0)**ONTH)
-   DO NN=1,SDV%N_PATH
-      I = SDV%I_PATH(NN) ; J = SDV%J_PATH(NN) ; K = SDV%K_PATH(NN)
-      XCC = M0%XS+(REAL(I,EB)-0.5_EB)*DX0 ; YCC = M0%YS+(REAL(J,EB)-0.5_EB)*DY0 ; ZCC = M0%ZS+(REAL(K,EB)-0.5_EB)*DZ0
-      IF (LEAF_COVERED_PROC(NM,XCC,YCC,ZCC)) CYCLE
-      IF (M0%Q(I,J,K)>1.E3_EB*THR) V = V + SDV%D_PATH(NN)
-   ENDDO
+MEC = 0._EB
+IF (IQ==154 .OR. IQ==155) THEN
+   ASSOCIATE (PY=>PROPERTY(DV%PROP_INDEX))
+   IF (PY%Y_INDEX>0) THEN ; MEC = SPECIES(PY%Y_INDEX)%MASS_EXTINCTION_COEFFICIENT
+   ELSEIF (PY%Z_INDEX>0) THEN ; MEC = SPECIES_MIXTURE(PY%Z_INDEX)%MASS_EXTINCTION_COEFFICIENT
+   ELSEIF (SOOT_INDEX>0) THEN ; MEC = SPECIES(SOOT_INDEX)%MASS_EXTINCTION_COEFFICIENT ; ENDIF
+   END ASSOCIATE
+ENDIF
+ZT = DV%Z1 + DV%Z_INT   ! layer interface (Z_LO = DV%Z1, Z_INT of the previous step), as GET_LAYER_HEIGHT_INTEGRALS
+IF (.NOT.FRN) THEN   ! uncovered level-0 cells, as stock
+   IF (IQ>=105 .AND. IQ<=107) THEN
+      I = SDV%I1 ; J = SDV%J1
+      DO K=SDV%K1,SDV%K2
+         IF (COVERED(I,J,K)) CYCLE
+         IF (M0%CELL(M0%CELL_INDEX(I,J,K))%SOLID) CYCLE
+         CALL LAYER_ADD(M0%TMP(I,J,K),M0%Z(K-1),M0%Z(K))
+      ENDDO
+      IF (.NOT.COVERED(I,J,SDV%K1) .AND. NM==DV%LOWEST_MESH) TLOW = M0%TMP(I,J,SDV%K1)
+   ELSE
+      DO NN=1,SDV%N_PATH
+         I = SDV%I_PATH(NN) ; J = SDV%J_PATH(NN) ; K = SDV%K_PATH(NN)
+         IF (COVERED(I,J,K)) CYCLE
+         V(1) = V(1) + SDV%D_PATH(NN)*CELL_F(M0%Q(I,J,K),M0%RHO(I,J,K),M0%ZZ(I,J,K,:),DX0*DY0*DZ0)
+      ENDDO
+   ENDIF
 ENDIF
 DXS = (DV%X2-DV%X1)*0.0001_EB ; DYS = (DV%Y2-DV%Y1)*0.0001_EB ; DZS = (DV%Z2-DV%Z1)*0.0001_EB
 SCAN = SQRT(DXS**2+DYS**2+DZS**2)
 NBP = 0
-DO NNN=1,10000
-   XX = DV%X1+(NNN-0.5_EB)*DXS ; YY = DV%Y1+(NNN-0.5_EB)*DYS ; ZZ = DV%Z1+(NNN-0.5_EB)*DZS
-   CALL SEARCH_OTHER_MESHES(XX,YY,ZZ,NOM,I,J,K)
+DO NNN=0,10000   ! NNN=0: the bottom point of a layer column (TLOW only)
+   IF (NNN==0 .AND. (IQ<105 .OR. IQ>107)) CYCLE
+   XP = DV%X1+(NNN-0.5_EB)*DXS ; YP = DV%Y1+(NNN-0.5_EB)*DYS ; ZP = DV%Z1+(NNN-0.5_EB)*DZS
+   IF (NNN==0) ZP = DV%Z1+0.5_EB*DZS
+   CALL SEARCH_OTHER_MESHES(XP,YP,ZP,NOM,I,J,K)
    IF (NOM/=NM) CYCLE
-   I = MIN(M0%IBAR,MAX(1,FLOOR((XX-M0%XS)/DX0)+1)) ; J = MIN(M0%JBAR,MAX(1,FLOOR((YY-M0%YS)/DY0)+1))
-   K = MIN(M0%KBAR,MAX(1,FLOOR((ZZ-M0%ZS)/DZ0)+1))
+   I = MIN(M0%IBAR,MAX(1,FLOOR((XP-M0%XS)/DX0)+1)) ; J = MIN(M0%JBAR,MAX(1,FLOOR((YP-M0%YS)/DY0)+1))
+   K = MIN(M0%KBAR,MAX(1,FLOOR((ZP-M0%ZS)/DZ0)+1))
+   IF (IQ>=105 .AND. IQ<=107) THEN ; I = SDV%I1 ; J = SDV%J1 ; IF (K<SDV%K1 .OR. K>SDV%K2) CYCLE ; ENDIF
+   IF (.NOT.COVERED(I,J,K)) CYCLE
    XCC = M0%XS+(REAL(I,EB)-0.5_EB)*DX0 ; YCC = M0%YS+(REAL(J,EB)-0.5_EB)*DY0 ; ZCC = M0%ZS+(REAL(K,EB)-0.5_EB)*DZ0
-   IF (.NOT.LEAF_COVERED_PROC(NM,XCC,YCC,ZCC)) CYCLE
    ! a point on a cell face goes to the fine cell inside this level-0 cell
-   NB = LEAF_FINEST_PROC(XX+1.E-6_EB*(XCC-XX),YY+1.E-6_EB*(YCC-YY),ZZ+1.E-6_EB*(ZCC-ZZ),IL,JL,KL)
+   NB = LEAF_FINEST_PROC(XP+1.E-6_EB*(XCC-XP),YP+1.E-6_EB*(YCC-YP),ZP+1.E-6_EB*(ZCC-ZP),IL,JL,KL)
    IF (NB==0) CYCLE
    IF (.NOT.LEAF_BOX_LOCAL(NB)) CYCLE
    IF (NB/=NBP) THEN ; CALL POINT_TO_BOX(NB) ; NBP = NB ; ENDIF
-   THR = DV%QUANTITY_RANGE(1) ; IF (DEF) THR = MIN(200._EB,20._EB/(DX(IL)*DY(JL)*DZ(KL))**ONTH)
-   IF (Q(IL,JL,KL)>1.E3_EB*THR) V = V + SCAN
+   IF (IQ>=105 .AND. IQ<=107) THEN
+      IF (NNN==0) THEN ; IF (NM==DV%LOWEST_MESH) TLOW = TMP(IL,JL,KL) ; CYCLE ; ENDIF
+      IF (CELL(CELL_INDEX(IL,JL,KL))%SOLID) CYCLE
+      ZB = ZP-0.5_EB*DZS
+      CALL LAYER_ADD(TMP(IL,JL,KL),ZB,ZB+DZS)
+   ELSE
+      V(1) = V(1) + SCAN*CELL_F(Q(IL,JL,KL),RHO(IL,JL,KL),ZZ(IL,JL,KL,:),DX(IL)*DY(JL)*DZ(KL))
+   ENDIF
 ENDDO
 IF (NBP/=0) CALL POINT_TO_MESH(NMR)
-END FUNCTION LEAF_FIRE_DEPTH
+CONTAINS
+LOGICAL FUNCTION COVERED(I,J,K)
+INTEGER, INTENT(IN) :: I,J,K
+COVERED = LEAF_COVERED_PROC(NM,M0%XS+(REAL(I,EB)-0.5_EB)*DX0,M0%YS+(REAL(J,EB)-0.5_EB)*DY0,M0%ZS+(REAL(K,EB)-0.5_EB)*DZ0)
+END FUNCTION COVERED
+!> integrand per unit length of the cell: FIRE DEPTH 1 above the threshold, TRANSMISSION / PATH OBSCURATION the extinction MEC*Y*RHO
+REAL(EB) FUNCTION CELL_F(QC,RHOC,ZZC,VOLC)
+REAL(EB), INTENT(IN) :: QC,RHOC,ZZC(:),VOLC
+REAL(EB) :: YMF
+CELL_F = 0._EB
+IF (IQ==164) THEN
+   THR = DV%QUANTITY_RANGE(1) ; IF (DEF) THR = MIN(200._EB,20._EB/VOLC**ONTH)
+   IF (QC>1.E3_EB*THR) CELL_F = 1._EB
+ELSE
+   ASSOCIATE (PY=>PROPERTY(DV%PROP_INDEX))
+   IF (PY%Y_INDEX>0) THEN ; CALL GET_MASS_FRACTION(ZZC(1:N_TRACKED_SPECIES),PY%Y_INDEX,YMF)
+   ELSEIF (PY%Z_INDEX>0) THEN ; YMF = ZZC(PY%Z_INDEX)
+   ELSE ; CALL GET_MASS_FRACTION(ZZC(1:N_TRACKED_SPECIES),SOOT_INDEX,YMF) ; ENDIF
+   END ASSOCIATE
+   CELL_F = MEC*YMF*RHOC
+ENDIF
+END FUNCTION CELL_F
+!> GET_LAYER_HEIGHT_INTEGRALS terms of a column piece Z1P..Z2P at temperature TC
+SUBROUTINE LAYER_ADD(TC,Z1P,Z2P)
+REAL(EB), INTENT(IN) :: TC,Z1P,Z2P
+V(1) = V(1) + (Z2P-Z1P)*TC ; V(2) = V(2) + (Z2P-Z1P)/TC ; V(4) = V(4) + (Z2P-Z1P)
+IF (Z1P>=ZT) THEN ; V(3) = V(3) + TC*(Z2P-Z1P)
+ELSEIF (Z2P>ZT) THEN ; V(3) = V(3) + TC*(Z2P-ZT) ; ENDIF
+END SUBROUTINE LAYER_ADD
+END SUBROUTINE LEAF_LINE_DEVICE
 
 #endif
 
@@ -7891,6 +7960,7 @@ LOGICAL :: FRN,SKIPV
 INTEGER :: NMR
 REAL(EB) :: XCC,YCC,ZCC
 INTEGER :: IL,JL,KL,IWP
+REAL(EB) :: VL(4),TLW
 TYPE (MESH_TYPE), POINTER :: M0
 #endif
 TYPE (BOUNDARY_PROP1_TYPE), POINTER :: B1
@@ -7926,7 +7996,7 @@ DEVICE_LOOP: DO N=1,N_DEVC
       IF (DV%QUANTITY_INDEX(1)<1 .AND. DV%SPATIAL_STATISTIC=='null') CYCLE DEVICE_LOOP
       IF (DV%QUANTITY_INDEX(1)<-1000 .OR. (DV%QUANTITY_INDEX(1)>=300 .AND. DV%QUANTITY_INDEX(1)<500)) CYCLE DEVICE_LOOP
       ! a null statistic over an extent (path, layer, fire depth) reads the level-0 subdevice path of its owner
-      IF (DV%SPATIAL_STATISTIC=='null' .AND. DV%X1>-1.E5_EB .AND. DV%QUANTITY_INDEX(1)/=164) CYCLE DEVICE_LOOP   ! FIRE DEPTH: leaf points
+      IF (DV%SPATIAL_STATISTIC=='null' .AND. DV%X1>-1.E5_EB .AND. .NOT.LEAF_LINE_Q(DV%QUANTITY_INDEX(1))) CYCLE DEVICE_LOOP   ! line devices: leaf
       IF (ABS(T-T_BEGIN)>TWENTY_EPSILON_EB) THEN   ! a frozen device keeps the owner's smoothed value
          IF (DV%NO_UPDATE_DEVC_INDEX>0) THEN ; IF (DEVICE(DV%NO_UPDATE_DEVC_INDEX)%CURRENT_STATE) CYCLE DEVICE_LOOP ; ENDIF
          IF (DV%NO_UPDATE_CTRL_INDEX>0) THEN ; IF (CONTROL(DV%NO_UPDATE_CTRL_INDEX)%CURRENT_STATE) CYCLE DEVICE_LOOP ; ENDIF
@@ -8141,10 +8211,20 @@ DEVICE_LOOP: DO N=1,N_DEVC
             CASE('null') GAS_STATS_SELECT
 
 #ifdef WITH_AMREX
-               ! FIRE DEPTH on leaf cells
-               IF (DV%QUANTITY_INDEX(1)==164 .AND. ASSOCIATED(LEAF_FINEST_PROC) .AND. ASSOCIATED(LEAF_COVERED_PROC)) THEN
-                  VALUE = LEAF_FIRE_DEPTH(NM,NMR,FRN,DV,SDV)
-                  IF (FRN) THEN ; SDV%VALUE_1 = SDV%VALUE_1 + VALUE ; ELSE ; SDV%VALUE_1 = VALUE ; ENDIF
+               ! line devices (FIRE DEPTH, TRANSMISSION, PATH OBSCURATION, layer) on leaf cells
+               IF (LEAF_LINE_Q(DV%QUANTITY_INDEX(1)) .AND. ASSOCIATED(LEAF_FINEST_PROC) .AND. ASSOCIATED(LEAF_COVERED_PROC)) THEN
+                  IF (.NOT.ALLOCATED(LEAF_TLOW)) THEN ; ALLOCATE(LEAF_TLOW(N_DEVC)) ; LEAF_TLOW = -HUGE(1._EB) ; ENDIF
+                  CALL LEAF_LINE_DEVICE(NM,NMR,FRN,DV,SDV,VL,TLW)
+                  IF (FRN) THEN
+                     SDV%VALUE_1 = SDV%VALUE_1 + VL(1) ; SDV%VALUE_2 = SDV%VALUE_2 + VL(2)
+                     SDV%VALUE_3 = SDV%VALUE_3 + VL(3) ; SDV%VALUE_4 = SDV%VALUE_4 + VL(4)
+                  ELSE
+                     SDV%VALUE_1 = VL(1) ; SDV%VALUE_2 = VL(2) ; SDV%VALUE_3 = VL(3) ; SDV%VALUE_4 = VL(4)
+                     ! TRANSMISSION: PATHLENGTH (geometry)
+                     IF (DV%N_QUANTITY>1 .AND. DV%QUANTITY_INDEX(1)>=154 .AND. DV%QUANTITY_INDEX(1)<=155) &
+                        SDV%VALUE_2 = GAS_PHASE_OUTPUT(T,DT,NM,DV%I(2),DV%J(2),DV%K(2),DV%QUANTITY_INDEX(2),DEVC_INDEX=N)
+                  ENDIF
+                  IF (DV%QUANTITY_INDEX(1)>=105 .AND. DV%QUANTITY_INDEX(1)<=107) LEAF_TLOW(N) = MAX(LEAF_TLOW(N),TLW)
                   CYCLE DEVICE_LOOP
                ENDIF
                SKIPV = FRN
@@ -8654,7 +8734,19 @@ DEVICE_LOOP: DO N=1,N_DEVC
    IF (DV%QUANTITY(1)=='PATH OBSCURATION') DV%INSTANT_VALUE = (1._EB-EXP(-DV%VALUE_1))*100._EB
 
    IF (DV%QUANTITY(1)=='LAYER HEIGHT' .OR. DV%QUANTITY(1)=='UPPER TEMPERATURE' .OR. DV%QUANTITY(1)=='LOWER TEMPERATURE') THEN
+#ifdef WITH_AMREX
+      ! leaf layer device: the bottom leaf temperature from the rank that holds it
+      IF (ASSOCIATED(LEAF_FINEST_PROC) .AND. ASSOCIATED(LEAF_COVERED_PROC)) THEN
+         IF (.NOT.ALLOCATED(LEAF_TLOW)) THEN ; ALLOCATE(LEAF_TLOW(N_DEVC)) ; LEAF_TLOW = -HUGE(1._EB) ; ENDIF
+         IF (N_MPI_PROCESSES>1) CALL MPI_ALLREDUCE(MPI_IN_PLACE,LEAF_TLOW(N),1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
+         IF (LEAF_TLOW(N)>-1.E30_EB) DV%TMP_LOW = LEAF_TLOW(N)
+         LEAF_TLOW(N) = -HUGE(1._EB)
+      ELSE
+#endif
       IF (N_MPI_PROCESSES>1) CALL MPI_BCAST(DV%TMP_LOW,1,MPI_DOUBLE_PRECISION,PROCESS(DV%LOWEST_MESH),MPI_COMM_WORLD,IERR)
+#ifdef WITH_AMREX
+      ENDIF
+#endif
       IF (ABS(DV%VALUE_3)<=TWENTY_EPSILON_EB) THEN  ! VALUE_3 is Integral_z_int^H T(z) dz
          DV%TMP_UP = DV%TMP_LOW
       ELSE
