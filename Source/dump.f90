@@ -123,6 +123,55 @@ DO LEV=1,SIZE(FINE_LEVEL)
 ENDDO
 END FUNCTION LEAF_BOX_LOCAL
 
+!> FIRE DEPTH on leaf cells (D-084): the stock path of read.f90 (10000 scan points along the device line, each of length SCANDISTANCE, in the mesh SEARCH_OTHER_MESHES
+!> gives) over level-0 mesh NM, each point read on the finest level covering it. An uncovered level-0 path cell counts as in stock (owner pass only); a point in a
+!> covered level-0 cell is read on the finest box there (that box's rank adds it: owner pass for local boxes, FOREIGN pass for boxes over another rank's mesh), never
+!> on the covered level-0 cell. Threshold: the default MIN(200,20/dx) kW/m3 with dx the cube root of the leaf cell volume; a user QUANTITY_RANGE stays as given.
+REAL(EB) FUNCTION LEAF_FIRE_DEPTH(NM,NMR,FRN,DV,SDV) RESULT(V)
+USE GEOMETRY_FUNCTIONS, ONLY: SEARCH_OTHER_MESHES
+INTEGER, INTENT(IN) :: NM,NMR
+LOGICAL, INTENT(IN) :: FRN
+TYPE(DEVICE_TYPE), INTENT(IN) :: DV
+TYPE(SUBDEVICE_TYPE), INTENT(IN) :: SDV
+TYPE(MESH_TYPE), POINTER :: M0
+LOGICAL :: DEF
+INTEGER :: NN,NNN,NOM,I,J,K,IL,JL,KL,NB,NBP
+REAL(EB) :: DX0,DY0,DZ0,THR,DXS,DYS,DZS,SCAN,XX,YY,ZZ,XCC,YCC,ZCC
+V = 0._EB
+M0 => MESHES(NM)
+DX0 = (M0%XF-M0%XS)/REAL(M0%IBAR,EB) ; DY0 = (M0%YF-M0%YS)/REAL(M0%JBAR,EB) ; DZ0 = (M0%ZF-M0%ZS)/REAL(M0%KBAR,EB)
+DEF = ABS(DV%QUANTITY_RANGE(1)-MIN(200._EB,20._EB/CHARACTERISTIC_CELL_SIZE))<=1.E-12_EB*MAX(1._EB,ABS(DV%QUANTITY_RANGE(1)))
+IF (.NOT.FRN) THEN   ! uncovered level-0 path cells, as stock
+   THR = DV%QUANTITY_RANGE(1) ; IF (DEF) THR = MIN(200._EB,20._EB/(DX0*DY0*DZ0)**ONTH)
+   DO NN=1,SDV%N_PATH
+      I = SDV%I_PATH(NN) ; J = SDV%J_PATH(NN) ; K = SDV%K_PATH(NN)
+      XCC = M0%XS+(REAL(I,EB)-0.5_EB)*DX0 ; YCC = M0%YS+(REAL(J,EB)-0.5_EB)*DY0 ; ZCC = M0%ZS+(REAL(K,EB)-0.5_EB)*DZ0
+      IF (LEAF_COVERED_PROC(NM,XCC,YCC,ZCC)) CYCLE
+      IF (M0%Q(I,J,K)>1.E3_EB*THR) V = V + SDV%D_PATH(NN)
+   ENDDO
+ENDIF
+DXS = (DV%X2-DV%X1)*0.0001_EB ; DYS = (DV%Y2-DV%Y1)*0.0001_EB ; DZS = (DV%Z2-DV%Z1)*0.0001_EB
+SCAN = SQRT(DXS**2+DYS**2+DZS**2)
+NBP = 0
+DO NNN=1,10000
+   XX = DV%X1+(NNN-0.5_EB)*DXS ; YY = DV%Y1+(NNN-0.5_EB)*DYS ; ZZ = DV%Z1+(NNN-0.5_EB)*DZS
+   CALL SEARCH_OTHER_MESHES(XX,YY,ZZ,NOM,I,J,K)
+   IF (NOM/=NM) CYCLE
+   I = MIN(M0%IBAR,MAX(1,FLOOR((XX-M0%XS)/DX0)+1)) ; J = MIN(M0%JBAR,MAX(1,FLOOR((YY-M0%YS)/DY0)+1))
+   K = MIN(M0%KBAR,MAX(1,FLOOR((ZZ-M0%ZS)/DZ0)+1))
+   XCC = M0%XS+(REAL(I,EB)-0.5_EB)*DX0 ; YCC = M0%YS+(REAL(J,EB)-0.5_EB)*DY0 ; ZCC = M0%ZS+(REAL(K,EB)-0.5_EB)*DZ0
+   IF (.NOT.LEAF_COVERED_PROC(NM,XCC,YCC,ZCC)) CYCLE
+   ! a point on a cell face goes to the fine cell inside this level-0 cell
+   NB = LEAF_FINEST_PROC(XX+1.E-6_EB*(XCC-XX),YY+1.E-6_EB*(YCC-YY),ZZ+1.E-6_EB*(ZCC-ZZ),IL,JL,KL)
+   IF (NB==0) CYCLE
+   IF (.NOT.LEAF_BOX_LOCAL(NB)) CYCLE
+   IF (NB/=NBP) THEN ; CALL POINT_TO_BOX(NB) ; NBP = NB ; ENDIF
+   THR = DV%QUANTITY_RANGE(1) ; IF (DEF) THR = MIN(200._EB,20._EB/(DX(IL)*DY(JL)*DZ(KL))**ONTH)
+   IF (Q(IL,JL,KL)>1.E3_EB*THR) V = V + SCAN
+ENDDO
+IF (NBP/=0) CALL POINT_TO_MESH(NMR)
+END FUNCTION LEAF_FIRE_DEPTH
+
 #endif
 
 !> \brief Call subroutines that output quantities associated with each mesh, like slice, boundary, and particle files
@@ -7877,7 +7926,7 @@ DEVICE_LOOP: DO N=1,N_DEVC
       IF (DV%QUANTITY_INDEX(1)<1 .AND. DV%SPATIAL_STATISTIC=='null') CYCLE DEVICE_LOOP
       IF (DV%QUANTITY_INDEX(1)<-1000 .OR. (DV%QUANTITY_INDEX(1)>=300 .AND. DV%QUANTITY_INDEX(1)<500)) CYCLE DEVICE_LOOP
       ! a null statistic over an extent (path, layer, fire depth) reads the level-0 subdevice path of its owner
-      IF (DV%SPATIAL_STATISTIC=='null' .AND. DV%X1>-1.E5_EB) CYCLE DEVICE_LOOP
+      IF (DV%SPATIAL_STATISTIC=='null' .AND. DV%X1>-1.E5_EB .AND. DV%QUANTITY_INDEX(1)/=164) CYCLE DEVICE_LOOP   ! FIRE DEPTH: leaf points
       IF (ABS(T-T_BEGIN)>TWENTY_EPSILON_EB) THEN   ! a frozen device keeps the owner's smoothed value
          IF (DV%NO_UPDATE_DEVC_INDEX>0) THEN ; IF (DEVICE(DV%NO_UPDATE_DEVC_INDEX)%CURRENT_STATE) CYCLE DEVICE_LOOP ; ENDIF
          IF (DV%NO_UPDATE_CTRL_INDEX>0) THEN ; IF (CONTROL(DV%NO_UPDATE_CTRL_INDEX)%CURRENT_STATE) CYCLE DEVICE_LOOP ; ENDIF
@@ -8092,6 +8141,12 @@ DEVICE_LOOP: DO N=1,N_DEVC
             CASE('null') GAS_STATS_SELECT
 
 #ifdef WITH_AMREX
+               ! FIRE DEPTH on leaf cells
+               IF (DV%QUANTITY_INDEX(1)==164 .AND. ASSOCIATED(LEAF_FINEST_PROC) .AND. ASSOCIATED(LEAF_COVERED_PROC)) THEN
+                  VALUE = LEAF_FIRE_DEPTH(NM,NMR,FRN,DV,SDV)
+                  IF (FRN) THEN ; SDV%VALUE_1 = SDV%VALUE_1 + VALUE ; ELSE ; SDV%VALUE_1 = VALUE ; ENDIF
+                  CYCLE DEVICE_LOOP
+               ENDIF
                SKIPV = FRN
                IF (.NOT.FRN) THEN
                   I = MIN( IBP1, MAX(0, DV%I(1)) )
