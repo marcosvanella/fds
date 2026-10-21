@@ -48,6 +48,7 @@ extern "C" {
 int fds_shim_bind(int nm, const char* name, void* base, const int* lb, const int* ext, const long* stride);
 void fds_k_state(int pred, int first, int icyc, double rmin, double rmax);
 void fds_k_edge_keep(int nm, int mode);
+void fds_p_lag_save(int nm, int mode);
 void fds_k_visc(int nm, int est);
 void fds_k_xfer(int nm, const char* name, int rnk, int* lb, int* ub, double* data, int mode, long* ncnt, long* nbad, int* ierr);
 void fds_k_dens_post(double t, double dt, int nm);
@@ -552,6 +553,8 @@ struct TimeLoop::Impl {
             ghost_exchange(*L.m_F, 4);
             L.m_bc->after_exchange(4, L.m_t, L.m_dt);
             ghost_exchange(*L.m_F, 6);
+            // FDSTL_VERIFY_STOCK_EDGE_LAG=1 (verification only, fds_amrex_hooks.f90): the previous VELOCITY_BC call of stock here is FDS's set-up one
+            if (const char* e = std::getenv("FDSTL_VERIFY_STOCK_EDGE_LAG"); e && std::atoi(e) == 1) each_local([&](int nm) { fds_p_lag_save(nm, 2); });
             L.m_bc->after_exchange(6, L.m_t, L.m_dt);
             each_local([&](int nm) { fds_k_edge_keep(nm, 1); });
             // and FDS's initial DIVERGENCE_PART_1 (main.f90 ~632, D of the first step) with the interfaces as regular faces

@@ -23,6 +23,19 @@ PRIVATE
 
 LOGICAL, PUBLIC, SAVE :: EXTERNAL_GHOSTS_FILLED = .FALSE.
 
+!> Verification only (env FDSTL_VERIFY_STOCK_EDGE_LAG=1, off by default): stock VELOCITY_BC's ground-edge (vegetation) branch reads the tangential velocity of an
+!> interface ghost cell before the same edge loop refreshes it, i.e. the value left by the previous call. fds_p_lag_save (fds_step.f90) keeps U,V of box NM (US,VS when EST=1)
+!> just before the driver's ghost fill; STOCK_EDGE_LAG_VT gives that edge the saved values in the ghost cells, which reproduces stock bitwise.
+!> The switch also keeps the diagonal ghosts (outside the box in two or three directions, across a mesh-corner line) out of the fill (GhostExchange.cpp
+!> ghost_exchange): stock does not refresh them (cell fields, US,VS,WS) or refreshes them a step late (U,V,W, VELOCITY_BC corrector branch).
+LOGICAL, PUBLIC, SAVE :: VERIFY_STOCK_EDGE_LAG = .FALSE.
+TYPE :: LAG_T
+   REAL(EB), ALLOCATABLE :: U(:,:,:),V(:,:,:)
+   INTEGER, ALLOCATABLE :: IEU(:,:,:),IEV(:,:,:)   !< slot 0: index of the edge whose stock VELOCITY_BC writes that interface ghost U, V (0: none)
+END TYPE LAG_T
+TYPE(LAG_T), ALLOCATABLE, SAVE :: LAG(:,:)
+PUBLIC :: LAG_T,LAG,FDS_HOOK_LAG_SAVE,STOCK_EDGE_LAG_VT
+
 !> Time, time step and cycle number that the driver hands to FDS_SETUP(MODE=3) (end-of-step outputs, patch 0006).
 REAL(EB), PUBLIC, SAVE :: OUT_T = 0._EB, OUT_DT = 0._EB
 INTEGER,  PUBLIC, SAVE :: OUT_ICYC = 0
@@ -301,5 +314,31 @@ REAL(EB), INTENT(IN) :: T,DT,DTNEW
 IF (ASSOCIATED(SHADOW_PROC)) CALL SHADOW_PROC(PHASE,KIND,NM,T,DT,EST,DTNEW,ICHG)
 
 END SUBROUTINE FDS_HOOK_SHADOW
+
+SUBROUTINE FDS_HOOK_LAG_SAVE(NM,EST,NMAX,U,V)
+INTEGER, INTENT(IN) :: NM,EST,NMAX
+REAL(EB), POINTER, INTENT(IN) :: U(:,:,:),V(:,:,:)
+VERIFY_STOCK_EDGE_LAG = .TRUE.
+IF (.NOT.ALLOCATED(LAG)) ALLOCATE(LAG(0:1,NMAX))
+LAG(EST,NM)%U = U ; LAG(EST,NM)%V = V
+END SUBROUTINE FDS_HOOK_LAG_SAVE
+
+!> VEL_T of the ground-edge branch of edge IE: a ghost U or V at gas cell (I,J,K) that stock writes later in the same edge loop (writer edge index > IE) is the saved value.
+REAL(EB) FUNCTION STOCK_EDGE_LAG_VT(NM,EST,IE,I,J,K,UC,VC) RESULT(R)
+INTEGER, INTENT(IN) :: NM,IE,I,J,K
+LOGICAL, INTENT(IN) :: EST
+REAL(EB), INTENT(IN) :: UC,VC
+REAL(EB) :: UU,VV
+INTEGER :: E
+E = MERGE(1,0,EST)
+UU = UC ; VV = VC
+IF (ALLOCATED(LAG)) THEN
+   IF (ALLOCATED(LAG(E,NM)%U) .AND. ALLOCATED(LAG(0,NM)%IEU)) THEN
+      IF (LAG(0,NM)%IEU(I,J,K)>IE) UU = LAG(E,NM)%U(I,J,K)
+      IF (LAG(0,NM)%IEV(I,J,K)>IE) VV = LAG(E,NM)%V(I,J,K)
+   ENDIF
+ENDIF
+R = SQRT(UU**2 + VV**2)
+END FUNCTION STOCK_EDGE_LAG_VT
 
 END MODULE FDS_AMREX_HOOKS

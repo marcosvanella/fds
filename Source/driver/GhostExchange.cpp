@@ -11,6 +11,7 @@
 #include <string>
 
 extern "C" {
+void fds_p_lag_save(int nm, int mode);
 int fds_g_fill_om(int nm, int nom, int which, const int* lb, const int* ext, int nc, const double* data);
 void fds_g_phase(int pred);
 void fds_g_match(int nm);
@@ -42,9 +43,24 @@ namespace fdsamr {
 
 void ghost_exchange(Fields& F, int code, bool predictor)
 {
+    // FDSTL_VERIFY_STOCK_EDGE_LAG=1 (verification only): the ghosts outside the box in two or three directions (diagonal, across a mesh-corner line) keep their values, as in stock
+    static const bool diag = std::getenv("FDSTL_VERIFY_STOCK_EDGE_LAG") && std::atoi(std::getenv("FDSTL_VERIFY_STOCK_EDGE_LAG")) == 1;
     for (const auto& n : exchange_fields(code, predictor)) {
         if (!F.has(n)) continue;
+        if (!diag) { F.fill_ghosts(n); continue; }
+        amrex::MultiFab& mf = F[n];
+        amrex::MultiFab keep(mf.boxArray(), mf.DistributionMap(), mf.nComp(), mf.nGrowVect());
+        amrex::MultiFab::Copy(keep, mf, 0, 0, mf.nComp(), mf.nGrowVect());
         F.fill_ghosts(n);
+        for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+            const amrex::Box v = mfi.validbox();
+            auto a = mf.array(mfi); auto b = keep.const_array(mfi);
+            amrex::LoopOnCpu(mf[mfi].box(), mf.nComp(), [&](int i, int j, int k, int c) {
+                const int p[3] = {i, j, k}; int out = 0;
+                for (int d = 0; d < 3; ++d) out += p[d] < v.smallEnd(d) || p[d] > v.bigEnd(d);
+                if (out >= 2) a(i, j, k, c) = b(i, j, k, c);
+            });
+        }
     }
 }
 
@@ -116,6 +132,8 @@ void BcStep::fill_omesh()
 void BcStep::exchange(int code, bool predictor)
 {
     if (m_l0.level > 0 && !ext_ghost) amrex::Abort("BcStep: a level > 0 has coarse-fine faces and needs EXTERNAL_GHOSTS_FILLED (ext_ghost, patches 0003/0004); the OMESH route is same-level only");
+    static const bool lag = std::getenv("FDSTL_VERIFY_STOCK_EDGE_LAG") && std::atoi(std::getenv("FDSTL_VERIFY_STOCK_EDGE_LAG")) == 1;   // verification only (fds_amrex_hooks.f90)
+    if (lag && m_l0.level == 0 && (code == 3 || code == 6)) for (int nm = 0; nm < static_cast<int>(m_l0.ba.size()); ++nm) if (local(nm)) fds_p_lag_save(nm + 1 + m_mesh_offset, code == 3 ? 1 : 0);
     ghost_exchange(m_F, code, predictor);
     if (cf_ghost_hook) {
         ProfScope prof_cf(5);
