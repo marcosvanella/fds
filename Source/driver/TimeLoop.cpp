@@ -290,7 +290,6 @@ struct TimeLoop::Impl {
         int ps[2];
         fds_p_part_scope(ps);
         if (ps[1] > 0) die("bind_level(" + std::to_string(lev) + "): oriented particles are refused when a fine level exists (PV-7)");
-        if (IP[15] || IP[17] > 0 || IP[22]) die("bind_level(" + std::to_string(lev) + "): Lagrangian particles run on level 0 only; a fine level is refused until fine boxes carry particles");
         const Level& Lv = L.m_reg->level(lev);
         Fields& F = L.m_reg->fields(lev);
         const int nb = static_cast<int>(Lv.ba.size());
