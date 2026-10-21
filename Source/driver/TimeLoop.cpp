@@ -362,6 +362,15 @@ struct TimeLoop::Impl {
         pend_restore(lev);
         fds_fine_walls_parent_xchg();   // collective: remote parent state of the new hidden walls
         record_vent_faces();   // the vent faces of the old box layout (box index, cell) mean nothing on the new one
+        for (int k = 0; k < 2; ++k)   // a vent face of the old layout inside the new one keeps the velocity of the last stage's projection (the parent state may not be there yet, and the mirror would zero it: L1 div jump at the burner on every regrid)
+            if (lev < static_cast<int>(vent_keep[k].size()) && lev < static_cast<int>(vent_old[k].size()))
+                for (const VentFace& g : vent_old[k][lev]) {
+                    bool in = false;
+                    for (VentFace& f : vent_keep[k][lev]) if (f.c == g.c && f.d == g.d) { f.v = g.v; in = true; }
+                    if (in) continue;
+                    amrex::IntVect cc = g.c; if (cc[g.d] > L.m_reg->level(lev).geom.Domain().bigEnd(g.d)) cc[g.d] -= 1;   // the gas cell of the face
+                    if (Lv.ba.contains(cc)) vent_keep[k][lev].push_back(g);
+                }
         fine_burner_state(false);   // burner face lists of the new box layout: the first stage after a (re)bind applies them in its flux override, a list kept from the old layout has faces outside the new boxes
         select(0);
 #endif
@@ -444,6 +453,10 @@ struct TimeLoop::Impl {
     {
 #ifdef FDS_HAVE_FINE_LEVEL
         if (lev < 1 || lev != static_cast<int>(lc.size()) - 1) die("unbind_level(" + std::to_string(lev) + "): only the top bound level (> 0) can be unbound");
+        for (int k = 0; k < 2; ++k) {   // the stage's vent faces survive a rebind
+            if (static_cast<int>(vent_old[k].size()) <= lev) vent_old[k].resize(lev + 1);
+            vent_old[k][lev] = lev < static_cast<int>(vent_keep[k].size()) ? vent_keep[k][lev] : std::vector<VentFace>();
+        }
         pend_save(lev);
         if (fds_fine_level_destroy(lev) != 0) die("unbind_level: fds_fine_level_destroy failed");
         lc.pop_back();
@@ -1966,6 +1979,7 @@ struct TimeLoop::Impl {
     // of the following exchange zeroes them; they get this value back (the parent's U_NORMAL may already have moved on to the next step's state).
     struct VentFace { amrex::IntVect c; int box; int d; double v; };
     std::vector<std::vector<VentFace>> vent_keep[2];
+    std::vector<std::vector<VentFace>> vent_old[2];   // vent_keep of the levels last unbound (rebind)
     void restore_vent_faces(bool pred, int l)
     {
         const auto& vk = vent_keep[pred ? 1 : 0];
