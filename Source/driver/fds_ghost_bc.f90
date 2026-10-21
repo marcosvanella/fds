@@ -22,6 +22,7 @@ USE VELO, ONLY: MATCH_VELOCITY,MATCH_VELOCITY_FLUX,VELOCITY_BC,VISCOSITY_BC
 USE WALL_ROUTINES, ONLY: WALL_BC
 USE FDS_BOX_OBJ, ONLY: BOX_OBJ
 USE FDS_LS_GRID, ONLY: LS_APPLY_L0
+USE FDS_AMREX_HOOKS, ONLY: EXTERNAL_GHOSTS_FILLED
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
@@ -121,10 +122,16 @@ INTEGER(C_INT), VALUE :: NM
 CALL MATCH_VELOCITY(NM)
 END SUBROUTINE FDS_G_MATCH
 
-!> MATCH_VELOCITY_FLUX(NM), unmodified (returns at once for a single FDS mesh).
+!> MATCH_VELOCITY_FLUX(NM), unmodified (returns at once for a single FDS mesh). A level-0 mesh runs it with EXTERNAL_GHOSTS_FILLED cleared: each mesh computes FVX.. of a
+!> shared mesh face itself, and only FDS's average of the two (OMESH holds the neighbour's) gives both meshes the same face velocity; without it the two copies differ and
+!> mass leaks through every mesh interface (multi-mesh --levels 1 mass gate).
 SUBROUTINE FDS_G_MATCH_FLUX(NM) BIND(C,NAME='fds_g_match_flux')
 INTEGER(C_INT), VALUE :: NM
+LOGICAL :: EGF
+EGF = EXTERNAL_GHOSTS_FILLED
+IF (NM<=NMESHES) EXTERNAL_GHOSTS_FILLED = .FALSE.
 CALL MATCH_VELOCITY_FLUX(NM)
+EXTERNAL_GHOSTS_FILLED = EGF
 END SUBROUTINE FDS_G_MATCH_FLUX
 
 !> VELOCITY_BC(T,NM,EST), unmodified.
