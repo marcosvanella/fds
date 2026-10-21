@@ -975,9 +975,10 @@ DO LEV=1,SIZE(FWALL)
       DO IW=1,FB%NW
          IF (FB%W%WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
          K = 0
-         IF (FB%RKEY(IW)/=0) THEN   ! parent on another rank
-            I = FIND_KEY(NTOT,KEY,FB%RKEY(IW))
-            IF (I>0) K = IX(I)
+         IF (FB%RKEY(IW)/=0) THEN   ! parent on another rank: unreachable (FDS_FINE_WALLS_BUILD stops on fine cells over another rank's mesh)
+            WRITE(0,'(A,I0,A,I0,A,I0,A)') 'fds_amr ERROR in FDS_FINE_WALLS_PARENT_XCHG (rank ',MY_RANK,'): level ',LEV,' box ',IB, &
+               ' has a hidden wall whose level-0 parent wall is not on this rank (fine boxes must lie in one level-0 mesh of their own rank)'
+            ERROR STOP 1
          ELSEIF (FB%PNM(IW)==0) THEN   ! no parent: nearest record of the same surface and IOR, in key order (rank independent)
             DB = HUGE(1._EB)
             ASSOCIATE(BC=>FB%W%BOUNDARY_COORD(FB%W%WALL(IW)%BC_INDEX))
