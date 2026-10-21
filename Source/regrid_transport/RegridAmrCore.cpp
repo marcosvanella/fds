@@ -45,6 +45,8 @@ amrex::AmrInfo make_amr_info(const Hierarchy& h, const AmrParams& p)
     if (info.ref_ratio.empty()) info.ref_ratio.push_back(amrex::IntVect(2));  // AmrInfo needs at least one entry
     info.grid_eff = p.grid_eff;
     info.n_proper = p.n_proper;
+    // D-084: no extra chopping of new fine grids to reach one box per rank (AMReX refine_grid_layout): the fine box layout must not depend on the rank count
+    info.refine_grid_layout = false;
     info.check_input = false;  // level-0 grids are the meshes as given (not blocking-factor multiples); R1 already ran the checks
     return info;
 }
