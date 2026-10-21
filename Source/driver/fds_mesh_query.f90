@@ -170,6 +170,22 @@ DO NM=1,NMESHES
 ENDDO
 END SUBROUTINE FDS_OBST_XB
 
+!> \brief W2a: XB of the particle beds (&INIT with PART_ID), 6 per INIT; the INIT list is global (every rank). With N = 0 only the count is returned.
+FUNCTION FDS_BED_XB(N,XB) BIND(C,NAME='fds_bed_xb') RESULT(M)
+USE TYPES, ONLY: INITIALIZATION
+USE GLOBAL_CONSTANTS, ONLY: N_INIT
+INTEGER(C_INT), VALUE :: N
+REAL(C_DOUBLE), INTENT(OUT) :: XB(6,*)
+INTEGER(C_INT) :: M
+INTEGER :: I
+M = 0
+DO I=1,N_INIT
+   IF (INITIALIZATION(I)%PART_INDEX<=0) CYCLE
+   M = M + 1
+   IF (M<=N) XB(:,M) = [INITIALIZATION(I)%X1,INITIALIZATION(I)%X2,INITIALIZATION(I)%Y1,INITIALIZATION(I)%Y2,INITIALIZATION(I)%Z1,INITIALIZATION(I)%Z2]
+ENDDO
+END FUNCTION FDS_BED_XB
+
 !> \brief D-010: XB of the stateful VENTs of the local meshes (SURF with a specified mass flux (MASS_FLUX, HRRPUA, MLRPUA), a specified heat flux or a pyrolysis model),
 !> 6 per VENT. With XB = NULL (N = 0) only the count is returned. These walls stay on level 0 (no-refine buffer, RegridAmrCore::ManualTagsPlacement).
 FUNCTION FDS_STATEFUL_VENTS(N,XB) BIND(C,NAME='fds_stateful_vents') RESULT(M)

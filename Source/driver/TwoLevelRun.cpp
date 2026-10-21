@@ -362,6 +362,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         amrex::Print() << tag << ": patch2 must lie inside patch (level-0 cells)\n";
         return 1;
     }
+    load_obst_list();   // the bed list (W2a) is needed for the refinable region below
+    if (o.bed.size() == 6) pb::bed_list().push_back({o.bed[0], o.bed[1], o.bed[2], o.bed[3], o.bed[4], o.bed[5]});
     std::ostringstream amr;
     amr << "&AMR MAX_LEVEL=" << o.max_level << ", REF_RATIO=" << o.ratio << ", BLOCKING_FACTOR=" << o.blocking << ", MAX_GRID_SIZE=" << o.maxsize
         << ", N_PROPER=1, N_ERROR_BUF=" << (std::isnan(o.tag_phi) ? 1 : o.tag_phi_buf) << ", REGRID_INTERVAL=" << o.regrid_every << ", POST_REGRID_PROJECTION='" << o.projection << "'";
@@ -369,7 +371,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     const bool use_tag_phi = !std::isnan(o.tag_phi);
     const bool use_tag_vort = o.tag_vort_auto || !std::isnan(o.tag_vort);
     const bool use_tag_temp = !std::isnan(o.tag_temp), use_tag_obst = o.tag_obst >= 0;
-    const bool adaptive_free = use_tag_vort || use_tag_phi || (o.regrid_every > 0 && (use_tag_temp || use_tag_obst));   // criteria that move the fine region by themselves: the refinable region is the whole domain
+    const bool adaptive_free = use_tag_vort || use_tag_phi || (o.regrid_every > 0 && (use_tag_temp || use_tag_obst)) || !pb::bed_list().empty();   // criteria that move the fine region by themselves: the refinable region is the whole domain
     double tag_vort_thr = o.tag_vort;
     if (o.regrid_every > 0 && use_tag_vort) {
         fill_undivided_vorticity(reg, 1);   // L0 |ω| before AmrParams (auto thr needs max)
@@ -516,6 +518,13 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (finest != o.max_level) {
         amrex::Print() << tag << ": expected finest level " << o.max_level << ", got " << finest << " (tagging / blocking / region)\n";
         return 1;
+    }
+    if (!pb::bed_list().empty() && finest >= 1) {   // W2a (PV-10): particles are inserted on L_ins = the finest level, which must cover every bed cell
+        const amrex::Geometry& g = core.Geom(finest);
+        bool ok = true;
+        for (auto const& xb : pb::bed_list()) { const amrex::Box b = pb::obst_tag_box(g, xb, 0) & g.Domain(); ok = ok && (!b.ok() || core.boxArray(finest).contains(b)); }
+        amrex::Print() << tag << ": particle bed level L_ins " << finest << ", dx " << g.CellSize(0) << " " << g.CellSize(1) << " " << g.CellSize(2) << (ok ? "" : ": does NOT cover the whole bed") << "\n";
+        if (!ok) return 1;
     }
     amrex::Print() << tag << " regrid_dynamic: changed " << core.last_outcome().changed << ", new cells " << core.last_outcome().new_cells << ", retained " << core.last_outcome().retained_cells
                    << ", post-regrid hook calls " << pst.calls;

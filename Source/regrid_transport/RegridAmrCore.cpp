@@ -164,6 +164,12 @@ void RegridAmrCore::ErrorEst(int lev, amrex::TagBoxArray& tags, amrex::Real time
         }
         if (!forced.empty()) tag_boxes(tags, forced);
     }
+    // W2a (PV-10): the particle bed is refined on every level, from the initial grid on (static: every regrid tags it again)
+    if (lev < maxLevel() && !pb::bed_list().empty()) {
+        std::vector<amrex::Box> forced;
+        for (auto const& xb : pb::bed_list()) { const amrex::Box b = pb::obst_tag_box(Geom(lev), xb, 0) & Geom(lev).Domain(); if (b.ok()) forced.push_back(b); }
+        if (!forced.empty()) tag_boxes(tags, forced);
+    }
     // --tag-obst-snap: OBSTs whose snap at level lev+1 is not the refinement of the snap at level lev
     if (tag_obst_snap_ && lev < maxLevel() && !pb::obst_list().empty()) {
         const amrex::IntVect r = amrex::AmrCore::refRatio(lev);
