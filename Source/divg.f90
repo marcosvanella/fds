@@ -1664,7 +1664,11 @@ REAL(EB) :: DIV,RES,TNOW
 REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW,DP
 
 TNOW=CURRENT_TIME()
+#ifdef WITH_AMREX
+CALL POINT_TO_BOX(NM)   ! FDS-AMReX: the driver's velocity and divergence arrays
+#else
 CALL POINT_TO_MESH(NM)
+#endif
 
 IF (PREDICTOR) THEN
    UU=>US
