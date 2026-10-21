@@ -36,6 +36,7 @@
 namespace fdsamr { int level_bind_check(TimeLoop& loop, const Level0& l0, double dt0); }   // tests/level_bind_check.cpp
 
 extern "C" void fds_setup(int mode, const char* fname, double* dt_out);
+extern "C" void fds_p_flush_all();   // fds_step.f90: flush the open Fortran units (outputs on disk before an abort)
 extern "C" void fds_hook_set_out_meshes(int n);  // patch 0012: output-mesh count for the output tables (default NMESHES)
 extern "C" void fds_p_params(int* ip, double* rp);
 extern "C" void fds_ls_set_mode(int mode);   // fds_ls_grid.f90
@@ -271,7 +272,7 @@ int main(int argc, char** argv)
                 const char* msg = (to.max_level == 1) ? (nfail == 0 ? "TWO-LEVEL RUN PASS" : "TWO-LEVEL RUN FAIL")
                                                       : (nfail == 0 ? "MULTI-LEVEL RUN PASS" : "MULTI-LEVEL RUN FAIL");
                 amrex::Print() << msg << "\n";
-                if (nfail != 0) amrex::Abort("multi-level run failed");
+                if (nfail != 0) { fds_p_flush_all(); amrex::Abort("multi-level run failed"); }
             }
             if (argc > 2 && std::strcmp(argv[2], "--run") == 0) {
                 // --run [--steps N] [--outdir D] [--chid C] [--quiet] [--exact-zone-sums] [P2 solver-study flags as --two-level-run]: the C++ time loop (S5)
