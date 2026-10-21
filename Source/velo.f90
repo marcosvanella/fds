@@ -669,6 +669,10 @@ DO K=0,KBAR
    ENDDO
 ENDDO
 !$OMP END PARALLEL DO
+#ifdef WITH_AMREX
+IF (NM>NMESHES .AND. ZS<ZS_MIN+TWO_EPSILON_EB .AND. ASSOCIATED(FINE_WALLS_PTR_PROC)) &
+   CALL FINE_GROUND_STRESS(NM,UU,VV,WW,RHOP,TXZ,TYZ)
+#endif
 
 ! Compute gravity components
 
@@ -1231,6 +1235,74 @@ ENDDO DEVC_LOOP
 END SUBROUTINE PATCH_VELOCITY_FLUX
 
 END SUBROUTINE VELOCITY_FLUX
+
+#ifdef WITH_AMREX
+!> Fine box NM on the ground (it has no EDGE): the ground-edge stresses TXZ, TYZ (K=0) of VELOCITY_BC (wall model, no slip, free slip, boundary fuel drag),
+!> from the box's hidden ground walls; the cross term is MUA*DW/DX, DW/DY as in VELOCITY_FLUX.
+SUBROUTINE FINE_GROUND_STRESS(NM,UU,VV,WW,RHOP,TXZ,TYZ)
+USE TURBULENCE, ONLY: WALL_MODEL
+INTEGER, INTENT(IN) :: NM
+REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW,RHOP,TXZ,TYZ
+INTEGER, ALLOCATABLE :: S(:,:)
+INTEGER :: IW,IWA,I,J,D,IA,JA,IB,JB,SI,ITMP,VBC
+REAL(EB) :: VG,VT,MUA,RW,NUW,SLIP,UTAU,YP,VH,DF,HSF,RDN,TAU,DWD
+TYPE(SURFACE_TYPE), POINTER :: SF
+CALL FINE_WALLS_PTR_PROC(NM,1)
+ALLOCATE(S(0:IBP1,0:JBP1)) ; S = 0
+DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
+   IF (WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+   ASSOCIATE(BC=>BOUNDARY_COORD(WALL(IW)%BC_INDEX))
+   IF (BC%IOR==3 .AND. BC%KKG==1) S(BC%IIG,BC%JJG) = IW
+   END ASSOCIATE
+ENDDO
+DO D=1,2
+   DO J=2-D,JBAR
+      DO I=D-1,IBAR
+         IA = I ; JA = J ; IB = I+2-D ; JB = J+D-1   ! the gas cells on either side of the U (D=1) or V (D=2) face
+         IF (S(IA,JA)==0 .AND. S(IB,JB)==0) CYCLE
+         IWA = MAX(S(IA,JA),S(IB,JB)) ; IF (S(IA,JA)>0) IWA = S(IA,JA)   ! one side without a ground wall: the other side's
+         IW  = MAX(S(IA,JA),S(IB,JB)) ; IF (S(IB,JB)>0) IW  = S(IB,JB)
+         SI  = MAX(WALL(IWA)%SURF_INDEX,WALL(IW)%SURF_INDEX)
+         RDN = 0.5_EB*(BOUNDARY_PROP1(WALL(IWA)%B1_INDEX)%RDN+BOUNDARY_PROP1(WALL(IW)%B1_INDEX)%RDN)
+         SF => SURFACE(SI)
+         VBC = SF%VELOCITY_BC_INDEX
+         IF (SF%ROUGHNESS>2._EB/RDN) VBC = NO_SLIP_BC
+         IF (D==1) THEN
+            VG = UU(I,J,1) ; DWD = RDXN(I)*(WW(I+1,J,0)-WW(I,J,0))
+         ELSE
+            VG = VV(I,J,1) ; DWD = RDYN(J)*(WW(I,J+1,0)-WW(I,J,0))
+         ENDIF
+         MUA = 0.5_EB*(MU(IA,JA,1)+MU(IB,JB,1))
+         RW = 0.5_EB*(RHOP(IA,JA,1)+RHOP(IB,JB,1))
+         SELECT CASE(VBC)
+            CASE(FREE_SLIP_BC) ; TAU = 0._EB
+            CASE(NO_SLIP_BC)   ; TAU = MUA*2._EB*VG*RDZ(1)
+            CASE(WALL_MODEL_BC)
+               ITMP = MIN(I_MAX_TEMP,NINT(0.5_EB*(TMP(IA,JA,1)+TMP(IB,JB,1))))
+               NUW = MU_RSQMW_Z(ITMP,1)/RSQ_MW_Z(1)/RW
+               CALL WALL_MODEL(SLIP,UTAU,YP,NUW,SF%ROUGHNESS,0.5_EB/RDZ(1),VG)
+               TAU = RW*UTAU**2*SIGN(1._EB,VG) ; IF (VG==0._EB) TAU = 0._EB
+            CASE(BOUNDARY_FUEL_MODEL_BC)
+               VT = SQRT(UU(IA,JA,1)**2+VV(IA,JA,1)**2)
+               IF (SF%VEG_LSET_SPREAD) THEN
+                  VH = SF%VEG_LSET_HT
+                  DF = 0.5_EB*SF%DRAG_COEFFICIENT*SF%SHAPE_FACTOR*SF%VEG_LSET_BETA*(SF%VEG_LSET_SIGMA*100._EB)
+               ELSE
+                  VH = SF%LAYER_THICKNESS(1)
+                  DF = 0.5_EB*SF%DRAG_COEFFICIENT*SF%SHAPE_FACTOR*SF%PACKING_RATIO(1)*SF%SURFACE_VOLUME_RATIO(1)
+               ENDIF
+               HSF = MIN(1._EB,RDN*VH)
+               TAU = RW*DF*VH*HSF**2*VG*VT
+            CASE DEFAULT ; CYCLE
+         END SELECT
+         IF (D==1) THEN ; TXZ(I,J,0) = TAU + MUA*DWD ; ELSE ; TYZ(I,J,0) = TAU + MUA*DWD ; ENDIF
+      ENDDO
+   ENDDO
+ENDDO
+DEALLOCATE(S)
+CALL FINE_WALLS_PTR_PROC(NM,0)
+END SUBROUTINE FINE_GROUND_STRESS
+#endif
 
 
 !> \brief Compute convective and diffusive terms of the momentum equations in 2-D cylindrical coordinates
