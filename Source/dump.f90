@@ -11871,11 +11871,15 @@ REAL(EB) :: QB(N_Q_DOT),MB(N_TRACKED_SPECIES)
 ! hold beyond the driver additions (particles) is a rank-level term (HRR_QDR, HRR_MDR).
 IF (HRR_DET) THEN
    CALL HRR_DET_ALLOC(N_Q_DOT,N_TRACKED_SPECIES,NMESHES)
-   IF (NM==LOWER_MESH_INDEX) THEN
-      HRR_QDR = HRR_QDR + DT*(Q_DOT-HRR_QADD) ; HRR_MDR = HRR_MDR + DT*(M_DOT-HRR_MADD)
-      HRR_QADD = 0._EB ; HRR_MADD = 0._EB
+   IF (NMESHES==1) THEN   ! one mesh (one rank): the particle terms stay in the mesh terms, added in the stock order
+      QB = -HRR_QADD ; MB = -HRR_MADD
+   ELSE
+      IF (NM==LOWER_MESH_INDEX) THEN
+         HRR_QDR = HRR_QDR + DT*(Q_DOT-HRR_QADD) ; HRR_MDR = HRR_MDR + DT*(M_DOT-HRR_MADD)
+      ENDIF
+      QB = Q_DOT ; MB = M_DOT ; Q_DOT = 0._EB ; M_DOT = 0._EB
    ENDIF
-   QB = Q_DOT ; MB = M_DOT ; Q_DOT = 0._EB ; M_DOT = 0._EB
+   HRR_QADD = 0._EB ; HRR_MADD = 0._EB
 ENDIF
 #endif
 
@@ -12047,8 +12051,12 @@ ENDDO CFACE_LOOP_2
 ! When it is time for a dump to the CHID_hrr.csv file, sum up (i.e. MPI_ALLREDUCE) Q_DOT_SUM and M_DOT_SUM in main.f90.
 #ifdef WITH_AMREX
 IF (HRR_DET) THEN
-   HRR_QM(:,NM) = Q_DOT ; HRR_MM(:,NM) = M_DOT
-   Q_DOT = QB + Q_DOT ; M_DOT = MB + M_DOT
+   IF (NMESHES==1) THEN
+      HRR_QM(:,NM) = Q_DOT + QB ; HRR_MM(:,NM) = M_DOT + MB   ! driver additions (QB = -HRR_QADD) are tallied apart
+   ELSE
+      HRR_QM(:,NM) = Q_DOT ; HRR_MM(:,NM) = M_DOT
+      Q_DOT = QB + Q_DOT ; M_DOT = MB + M_DOT
+   ENDIF
    IF (ICYC<=0) Q_DOT(9) = 0._EB
 ENDIF
 #endif
