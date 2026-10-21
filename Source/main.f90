@@ -4621,12 +4621,7 @@ EXCHANGE_DEVICE: IF (N_DEVC>0) THEN
          IF (ALLOCATED(LEAF_FSDV)) THEN   ! leaf devices: the cells of this rank's fine boxes over level-0 meshes of other ranks
             SDV => LEAF_FSDV(N)
             SELECT CASE(OP_INDEX)
-               CASE(1)
-                  TC_ARRAY(N)          = TC_ARRAY(N)          + SDV%VALUE_1
-                  TC_ARRAY(N+N_DEVC)   = TC_ARRAY(N+N_DEVC)   + SDV%VALUE_2
-                  TC_ARRAY(N+2*N_DEVC) = TC_ARRAY(N+2*N_DEVC) + SDV%VALUE_3
-                  TC_ARRAY(N+3*N_DEVC) = TC_ARRAY(N+3*N_DEVC) + SDV%VALUE_4
-               CASE(2)
+               CASE(2)   ! sums (OP_INDEX 1): added after the reduction in rank order (LEAF_SUM_IN_RANK_ORDER)
                   IF (SDV%VALUE_1<TC2_ARRAY(1,N)) THEN ; TC2_ARRAY(1,N) = SDV%VALUE_1 ; TC2_ARRAY(2,N) = SDV%VALUE_2 ; ENDIF
                CASE(3)
                   IF (SDV%VALUE_1>TC2_ARRAY(1,N)) THEN ; TC2_ARRAY(1,N) = SDV%VALUE_1 ; TC2_ARRAY(2,N) = SDV%VALUE_2 ; ENDIF
@@ -4641,6 +4636,9 @@ EXCHANGE_DEVICE: IF (N_DEVC>0) THEN
          SELECT CASE(OP_INDEX)
             CASE(1)
                CALL MPI_ALLREDUCE(MPI_IN_PLACE,TC_ARRAY,DIM_FAC*N_DEVC,MPI_DOUBLE_PRECISION,MPI_OP_INDEX,MPI_COMM_WORLD,IERR)
+#ifdef WITH_AMREX
+               IF (ALLOCATED(LEAF_FSDV)) CALL LEAF_SUM_IN_RANK_ORDER
+#endif
             CASE(2:3)
                CALL MPI_ALLREDUCE(MPI_IN_PLACE,TC2_ARRAY,N_DEVC,MPI_2DOUBLE_PRECISION,MPI_OP_INDEX,MPI_COMM_WORLD,IERR)
          END SELECT
@@ -4662,6 +4660,10 @@ EXCHANGE_DEVICE: IF (N_DEVC>0) THEN
          ENDIF
          IF (OP_INDEX>1 .AND.  (DV%SPATIAL_STATISTIC=='MIN'.OR.DV%SPATIAL_STATISTIC=='MAX')) THEN
             DV%VALUE_1 = TC2_ARRAY(1,N)
+#ifdef WITH_AMREX
+            ! a solid-phase statistic that found no wall on any rank (each subdevice kept its neutral value): 0, as on one rank
+            IF (ALLOCATED(LEAF_FSDV) .AND. DV%QUANTITY_INDEX(1)<=0 .AND. ABS(TC2_ARRAY(1,N))>=1.E10_EB) DV%VALUE_1 = 0._EB
+#endif
          ENDIF
 
          ! Special case for MINLOC or MAXLOC
@@ -4777,8 +4779,31 @@ IF (.NOT.ALLOCATED(LEAF_SDV_ON)) THEN
 ENDIF
 CALL LEAF_FOREIGN_DEVICES(T,DT)
 END SUBROUTINE LEAF_REMOTE_DEVICES
-#endif
 
+!> Sums of the leaf partials LEAF_FSDV (EXCHANGE_GLOBAL_OUTPUTS, OP_INDEX 1): gathered from every rank and added to TC_ARRAY in rank order 0,1,..,
+!> so the result does not depend on the reduction tree or on message arrival. Collective.
+SUBROUTINE LEAF_SUM_IN_RANK_ORDER
+REAL(EB), ALLOCATABLE :: MINE(:,:),ALLP(:,:,:)
+INTEGER :: N,R
+ALLOCATE(MINE(4,N_DEVC),ALLP(4,N_DEVC,0:N_MPI_PROCESSES-1)) ; MINE = 0._EB
+DO N=1,N_DEVC
+   IF (DEVICE(N)%SPATIAL_STATISTIC(1:3)=='MIN' .OR. DEVICE(N)%SPATIAL_STATISTIC(1:3)=='MAX') CYCLE
+   MINE(:,N) = (/LEAF_FSDV(N)%VALUE_1,LEAF_FSDV(N)%VALUE_2,LEAF_FSDV(N)%VALUE_3,LEAF_FSDV(N)%VALUE_4/)
+ENDDO
+CALL MPI_ALLGATHER(MINE,4*N_DEVC,MPI_DOUBLE_PRECISION,ALLP,4*N_DEVC,MPI_DOUBLE_PRECISION,MPI_COMM_WORLD,IERR)
+DO R=0,N_MPI_PROCESSES-1
+   DO N=1,N_DEVC
+      IF (ALL(ALLP(:,N,R)==0._EB)) CYCLE
+      TC_ARRAY(N)          = TC_ARRAY(N)          + ALLP(1,N,R)
+      TC_ARRAY(N+N_DEVC)   = TC_ARRAY(N+N_DEVC)   + ALLP(2,N,R)
+      TC_ARRAY(N+2*N_DEVC) = TC_ARRAY(N+2*N_DEVC) + ALLP(3,N,R)
+      TC_ARRAY(N+3*N_DEVC) = TC_ARRAY(N+3*N_DEVC) + ALLP(4,N,R)
+   ENDDO
+ENDDO
+DEALLOCATE(MINE,ALLP)
+END SUBROUTINE LEAF_SUM_IN_RANK_ORDER
+
+#endif
 
 !> \brief Dump HRR data to CHID_hrr.csv, MASS data to CHID_mass.csv, DEVICE data to _devc.csv
 

@@ -121,8 +121,8 @@ DO LEV=1,SIZE(FINE_LEVEL)
    ENDIF
 ENDDO
 END FUNCTION LEAF_BOX_LOCAL
-#endif
 
+#endif
 
 !> \brief Call subroutines that output quantities associated with each mesh, like slice, boundary, and particle files
 
@@ -7821,7 +7821,11 @@ END SUBROUTINE DUMP_SLCF_VTK
 !> \param DT Current time step size (s)
 !> \param NM Mesh number
 
+#ifdef WITH_AMREX
 SUBROUTINE UPDATE_DEVICES_1(T,DT,NM,FOREIGN)
+#else
+SUBROUTINE UPDATE_DEVICES_1(T,DT,NM)
+#endif
 
 USE MEMORY_FUNCTIONS, ONLY : GET_LAGRANGIAN_PARTICLE_INDEX
 USE TRAN, ONLY: GET_IJK
@@ -7830,12 +7834,12 @@ INTEGER, INTENT(IN) :: NM
 REAL(EB) :: VALUE,VOL,AREA,CFACE_AREA,XI,YJ,ZK,X_CENTER,Y_CENTER,Z_CENTER,WGT,EPS_X1,EPS_X2,EPS_Y1,EPS_Y2,EPS_Z1,EPS_Z2,&
             WALL_VALUE,WALL_WGT
 INTEGER :: N,I,J,K,IW,ICC,ICF,SURF_INDEX,LP_INDEX,IP,AXIS,IR(6),NBX,IBX,NW0,NFW
+#ifdef WITH_AMREX
 !< leaf devices: only the cells of the local fine boxes over level-0 mesh NM of another rank, into LEAF_FSDV
 LOGICAL, INTENT(IN), OPTIONAL :: FOREIGN
 LOGICAL :: FRN,SKIPV
 INTEGER :: NMR
 REAL(EB) :: XCC,YCC,ZCC
-#ifdef WITH_AMREX
 INTEGER :: IL,JL,KL,IWP
 TYPE (MESH_TYPE), POINTER :: M0
 #endif
@@ -7851,9 +7855,13 @@ TYPE (LAGRANGIAN_PARTICLE_TYPE), POINTER :: LP
 
 ! If any device has QUANTITY='PARTICLE FLUX N', pre-compute PARTICLE fluxes
 
+#ifdef WITH_AMREX
 FRN = PRESENT(FOREIGN) ; NMR = NM
 IF (FRN) NMR = LOWER_MESH_INDEX
 IF (DEVC_PARTICLE_FLUX .AND. .NOT.FRN) CALL COMPUTE_PARTICLE_FLUXES
+#else
+IF (DEVC_PARTICLE_FLUX) CALL COMPUTE_PARTICLE_FLUXES
+#endif
 
 ! Loop over all devices, calculate quantity, and perform spatial averaging, min/max, etc.
 
@@ -7864,8 +7872,9 @@ DEVICE_LOOP: DO N=1,N_DEVC
 #ifdef WITH_AMREX
    FOREIGN_SETUP: IF (FRN) THEN
       IF (.NOT.LEAF_SDV_ON(NM,N) .OR. DV%INIT_ID/='null' .OR. DV%LP_TAG>0) CYCLE DEVICE_LOOP
-      ! gas phase only
-      IF (DV%QUANTITY_INDEX(1)<1 .OR. (DV%QUANTITY_INDEX(1)>=300 .AND. DV%QUANTITY_INDEX(1)<500)) CYCLE DEVICE_LOOP
+      ! gas phase, and solid-phase statistics over the leaf walls
+      IF (DV%QUANTITY_INDEX(1)<1 .AND. DV%SPATIAL_STATISTIC=='null') CYCLE DEVICE_LOOP
+      IF (DV%QUANTITY_INDEX(1)<-1000 .OR. (DV%QUANTITY_INDEX(1)>=300 .AND. DV%QUANTITY_INDEX(1)<500)) CYCLE DEVICE_LOOP
       ! a null statistic over an extent (path, layer, fire depth) reads the level-0 subdevice path of its owner
       IF (DV%SPATIAL_STATISTIC=='null' .AND. DV%X1>-1.E5_EB) CYCLE DEVICE_LOOP
       IF (ABS(T-T_BEGIN)>TWENTY_EPSILON_EB) THEN   ! a frozen device keeps the owner's smoothed value
@@ -7881,10 +7890,10 @@ DEVICE_LOOP: DO N=1,N_DEVC
       DRY = DV%DRY
       PY => PROPERTY(DV%PROP_INDEX)
    ENDIF FOREIGN_SETUP
-#endif
+
 
    OWNER_SETUP: IF (.NOT.FRN) THEN
-
+#endif
    IF (DV%N_SUBDEVICES==0) CYCLE DEVICE_LOOP
    IF (DV%SUBDEVICE_INDEX(NM)==0) CYCLE DEVICE_LOOP
 
@@ -7944,8 +7953,10 @@ DEVICE_LOOP: DO N=1,N_DEVC
    IF (DV%SPATIAL_STATISTIC(1:3)=='MAX') SDV%VALUE_1 = -HUGE(0.0_EB) + 1.0_EB
    IF (DV%SPATIAL_STATISTIC(1:3)=='MIN') SDV%VALUE_1 =  HUGE(0.0_EB) - 1.0_EB
 
-   ENDIF OWNER_SETUP
+#ifdef WITH_AMREX
 
+   ENDIF OWNER_SETUP
+#endif
    ! Select hvac or gas phase or solid phase output quantity
 
    OUTPUT_INDEX_SELECT: SELECT CASE(DV%QUANTITY_INDEX(1))
@@ -7974,6 +7985,7 @@ DEVICE_LOOP: DO N=1,N_DEVC
                ! Leaf walls: the level-0 walls with hidden fine children are replaced by those (IW>NW0, POINT_TO_BOX for their gas cell) for the quantities whose fine wall value differs
                NW0 = N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS ; NFW = 0
 #ifdef WITH_AMREX
+               IF (FRN) NW0 = 0   ! level-0 mesh of another rank: only the leaf walls of this rank's fine boxes over it
                IF (ASSOCIATED(LEAF_WALL_COUNT_PROC)) NFW = LEAF_WALL_COUNT_PROC(NM,DV%QUANTITY_INDEX(1))
 #endif
                WALL_CELL_LOOP: DO IW=1,NW0+NFW
@@ -8023,7 +8035,8 @@ DEVICE_LOOP: DO N=1,N_DEVC
                   CALL SELECT_SPATIAL_STATISTIC(OPT_CUT_FACE_INDEX=WC%CUT_FACE_INDEX)
                ENDDO WALL_CELL_LOOP
 #ifdef WITH_AMREX
-               IF (NFW>0) CALL POINT_TO_MESH(NM)
+               IF (NFW>0) CALL POINT_TO_MESH(NMR)
+               FOREIGN_SKIP: IF (.NOT.FRN) THEN
 #endif
 
                CFACE_LOOP : DO ICF=INTERNAL_CFACE_CELLS_LB+1,INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS
@@ -8061,7 +8074,13 @@ DEVICE_LOOP: DO N=1,N_DEVC
 
                ! If no WALL, CFACE, or PARTICLE is found, set the value of the device to 0
 
+#ifdef WITH_AMREX
+               ! with leaf partials of other ranks (LEAF_FSDV) the neutral value stays; EXCHANGE_GLOBAL_OUTPUTS sets 0 if no rank found one
+               IF (ABS(VALUE)>1.E+100_EB .AND. .NOT.ALLOCATED(LEAF_FSDV)) SDV%VALUE_1 = 0._EB
+               ENDIF FOREIGN_SKIP
+#else
                IF (ABS(VALUE)>1.E+100_EB) SDV%VALUE_1 = 0._EB
+#endif
 
          END SELECT SOLID_STATS_SELECT
 
@@ -8071,13 +8090,13 @@ DEVICE_LOOP: DO N=1,N_DEVC
 
             CASE('null') GAS_STATS_SELECT
 
+#ifdef WITH_AMREX
                SKIPV = FRN
                IF (.NOT.FRN) THEN
                   I = MIN( IBP1, MAX(0, DV%I(1)) )
                   J = MIN( JBP1, MAX(0, DV%J(1)) )
                   K = MIN( KBP1, MAX(0, DV%K(1)) )
                   XCC = XC(I) ; YCC = YC(J) ; ZCC = ZC(K)
-#ifdef WITH_AMREX
                ELSE   ! level-0 mesh of another rank: the centre of the device cell on its uniform grid
                   M0 => MESHES(NM)
                   I = MIN(M0%IBAR,MAX(1,FLOOR((DV%X-M0%XS)*M0%IBAR/(M0%XF-M0%XS))+1))
@@ -8086,10 +8105,8 @@ DEVICE_LOOP: DO N=1,N_DEVC
                   YCC = M0%YS+(REAL(J,EB)-0.5_EB)*(M0%YF-M0%YS)/M0%JBAR
                   K = MIN(M0%KBAR,MAX(1,FLOOR((DV%Z-M0%ZS)*M0%KBAR/(M0%ZF-M0%ZS))+1))
                   ZCC = M0%ZS+(REAL(K,EB)-0.5_EB)*(M0%ZF-M0%ZS)/M0%KBAR
-#endif
                ENDIF
                NBX = NM
-#ifdef WITH_AMREX
                ! Leaf cell: a point under a finer level reads the finest cell there (POINT_TO_BOX for the call). A finest box of another rank: that rank reads it (FOREIGN pass).
                ! An extent device (path, layer, fire depth) stays on its level-0 subdevice path.
                IF (ASSOCIATED(LEAF_COVERED_PROC) .AND. DV%X1<=-1.E5_EB) THEN
@@ -8100,7 +8117,6 @@ DEVICE_LOOP: DO N=1,N_DEVC
                      IF (.NOT.SKIPV) THEN ; CALL POINT_TO_BOX(NBX) ; I = IL ; J = JL ; K = KL ; ENDIF
                   ENDIF
                ENDIF
-#endif
                IF (SKIPV) THEN
                   IF (.NOT.FRN) SDV%VALUE_1 = 0._EB
                ELSE
@@ -8108,12 +8124,32 @@ DEVICE_LOOP: DO N=1,N_DEVC
                                               ELEM_INDX=DV%ELEM_INDEX,PART_INDEX=DV%PART_CLASS_INDEX,VELO_INDEX=DV%VELO_INDEX,&
                                               PIPE_INDEX=DV%PIPE_INDEX,PROP_INDEX=DV%PROP_INDEX,REAC_INDEX=DV%REAC_INDEX,&
                                               DEVC_INDEX=N)
-#ifdef WITH_AMREX
                IF (NBX/=NM) CALL POINT_TO_MESH(NMR)
-#endif
                ENDIF
-
                IF (DV%N_QUANTITY>1 .AND. .NOT.FRN) &
+#else
+               I = MIN( IBP1, MAX(0, DV%I(1)) )
+               J = MIN( JBP1, MAX(0, DV%J(1)) )
+               K = MIN( KBP1, MAX(0, DV%K(1)) )
+               NBX = NM
+#ifdef WITH_AMREX
+               ! Leaf cell: a point under a finer level reads the finest cell there (POINT_TO_BOX for the call)
+               IF (ASSOCIATED(LEAF_COVERED_PROC)) THEN
+                  IF (LEAF_COVERED_PROC(NM,XC(I),YC(J),ZC(K))) NBX = LEAF_FINEST_PROC(DV%X,DV%Y,DV%Z,IL,JL,KL)
+                  IF (NBX==0) NBX = NM
+                  IF (NBX/=NM) THEN ; CALL POINT_TO_BOX(NBX) ; I = IL ; J = JL ; K = KL ; ENDIF
+               ENDIF
+#endif
+               SDV%VALUE_1 = GAS_PHASE_OUTPUT(T,DT,NBX,I,J,K,DV%QUANTITY_INDEX(1),Y_INDEX=DV%Y_INDEX,Z_INDEX=DV%Z_INDEX,&
+                                              ELEM_INDX=DV%ELEM_INDEX,PART_INDEX=DV%PART_CLASS_INDEX,VELO_INDEX=DV%VELO_INDEX,&
+                                              PIPE_INDEX=DV%PIPE_INDEX,PROP_INDEX=DV%PROP_INDEX,REAC_INDEX=DV%REAC_INDEX,&
+                                              DEVC_INDEX=N)
+#ifdef WITH_AMREX
+               IF (NBX/=NM) CALL POINT_TO_MESH(NM)
+#endif
+
+               IF (DV%N_QUANTITY>1) &
+#endif
                   SDV%VALUE_2 = GAS_PHASE_OUTPUT(T,DT,NM,DV%I(2),DV%J(2),DV%K(2),DV%QUANTITY_INDEX(2),Y_INDEX=DV%Y_INDEX,&
                                                  Z_INDEX=DV%Z_INDEX,ELEM_INDX=DV%ELEM_INDEX,PART_INDEX=DV%PART_CLASS_INDEX,&
                                                  VELO_INDEX=DV%VELO_INDEX,PIPE_INDEX=DV%PIPE_INDEX,PROP_INDEX=DV%PROP_INDEX,&
@@ -8123,7 +8159,9 @@ DEVICE_LOOP: DO N=1,N_DEVC
 
                ! Leaf cells only: the level-0 cells under a finer level are skipped and the fine boxes follow (IBX>0) with the cells of the device extent in them
                IR = (/SDV%I1,SDV%I2,SDV%J1,SDV%J2,SDV%K1,SDV%K2/) ; NBX = NM ; IBX = 0
+#ifdef WITH_AMREX
                IF (FRN) IR = (/1,0,1,0,1,0/)   ! level 0 of another rank: its owner adds those cells
+#endif
                LEAF_BOX_LOOP: DO
                K_DEVICE_CELL_LOOP: DO K=IR(5),IR(6)
                   J_DEVICE_CELL_LOOP: DO J=IR(3),IR(4)
