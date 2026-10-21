@@ -156,7 +156,8 @@ void fds_fine_set_solid(int lev, int ib, const int* s);   // fds_fine_level.f90
 void fds_fine_walls_parent_xchg();                          // fds_fine_level.f90: level-0 parent state of the hidden walls whose parent mesh is on another rank (collective)
 void fds_fine_walls_rad_xchg(int lev);                      // fds_fine_level.f90: pull the hidden-wall radiation state of level lev from level lev-1 (collective)
 void fds_fine_walls_build(int lev, int ib);                  // fds_fine_level.f90: hidden fine walls (patch 0026)
-void fds_fine_walls_sums(int lev, double t, int chk, double* q);
+void fds_fine_walls_sums(int lev, double t, int chk, double* q);   // q[14]
+void fds_p_qopen(int nm, double* s);
 int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90 (frozen/fine-wall-state.md)
 int fds_n_tracked_species();
 int fds_open_wind();
@@ -2907,10 +2908,12 @@ struct TimeLoop::Impl {
         // Q_CONV, Q_COND, Q_DIFF (leaf-only, any number of levels): the level-0 walls under level 1 are removed (level 1 call, q[3..5]); every hidden wall whose gas cell is not covered by
         // the next level is added at its own level, each location at the finest level covering it
         const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only
+        qopen_adj = 0.0;
         for (int lev = 1; lev < static_cast<int>(lc.size()); ++lev) {
-            double q[12];
+            double q[14];
             fds_fine_walls_sums(lev, L.m_t, prt ? 1 : 0, q);
             for (int n = 0; n < 3; ++n) fds_p_add_qdot(4 + n, q[n] - q[3 + n]);   // Q_DOT is per rank (summed by FDS), in W
+            qopen_adj += q[12] - q[13];
             if (prt) {
                 amrex::ParallelDescriptor::ReduceRealSum(q, 8);
                 amrex::ParallelDescriptor::ReduceRealMax(q[8]);
@@ -2922,8 +2925,19 @@ struct TimeLoop::Impl {
         }
     }
 
+    // FDSTL_QOPEN (tests/run_qcond_open_check.sh): leaf Q_COND over the OPEN boundary faces per step, kW (level-0 OPEN walls, minus the covered ones, plus the leaf fine ones)
+    double qopen_adj = 0.0;
+    void qopen_print()
+    {
+        double q = qopen_adj, s;
+        select(0);
+        each_local([&](int nm) { fds_p_qopen(nm, &s); q += s; });
+        amrex::ParallelDescriptor::ReduceRealSum(q);
+        amrex::Print() << "QOPEN " << std::setprecision(17) << L.m_t << " " << -1e-3 * q << "\n";
+    }
     void outputs(const StepRecord& r)
     {
+        if (std::getenv("FDSTL_QOPEN")) qopen_print();
         log_steps.push_back([&] { char b[256]; std::snprintf(b, sizeof b, "%d,%.17E,%.17E,%d,%d,%d,%.6E,%.6E,%.6E,%.6E,%.3E", r.step, L.m_t, r.dt, r.passes, r.it_pred, r.it_corr, r.perr_pred, r.verr_pred, r.perr_corr, r.verr_corr, r.zone_rel); return std::string(b); }());
         log_mass.push_back(mass_row(L.m_t));
         if (fds_outputs) {

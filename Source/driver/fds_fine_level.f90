@@ -1402,7 +1402,8 @@ END SUBROUTINE FDS_FINE_FUEL_MDOT
 !> their own near-wall gas (GAS_VARIABLES) and Q_CON_F (SURFACE_HEAT_TRANSFER; OPEN walls: the INFLOW_OUTFLOW arithmetic without its ghost writes).
 !> Q(1:3) fine Q_CONV,Q_COND,Q_DIFF; Q(4:6) covered parent share; Q(7) fine sum Q_CON_F*A; Q(8) parent share of it; Q(9) max |Q_CON_F - parent Q_CON_F| when the fine wall is
 !> evaluated on the parent's own data (identity check of the fine-wall path, only when CHK/=0; HTC still reads the hidden wall's BC slot, which holds the
-!> parent's BC during the check); Q(10) number of fine walls; Q(11) fine non-OPEN wall area; Q(12) level-0 SOLID wall area (CHK/=0 only).
+!> parent's BC during the check); Q(10) number of fine walls; Q(11) fine non-OPEN wall area; Q(12) level-0 SOLID wall area (CHK/=0 only); Q(13) Q_CON_F*A of the leaf OPEN
+!> fine walls, Q(14) of the covered level-0 OPEN walls (W).
 SUBROUTINE FDS_FINE_WALLS_SUMS(LEV,TT,CHK,Q) BIND(C,NAME='fds_fine_walls_sums')
 USE MESH_VARIABLES, ONLY: MESH_OBJ
 USE OUTPUT_DATA, ONLY: M_DOT,N_Q_DOT
@@ -1415,7 +1416,7 @@ USE WALL_ROUTINES, ONLY: SURFACE_HEAT_TRANSFER
 USE PRECISION_PARAMETERS, ONLY: TWENTY_EPSILON_EB
 INTEGER(C_INT), VALUE :: LEV,CHK
 REAL(C_DOUBLE), VALUE :: TT
-REAL(C_DOUBLE), INTENT(OUT) :: Q(12)
+REAL(C_DOUBLE), INTENT(OUT) :: Q(14)
 INTEGER :: IB,IW,NM,NM0,NMB
 REAL(EB) :: T,RDN,AREA,FR,UN,QV(3),Q0(3),RSUM_F,RAT
 TYPE(MESH_TYPE), POINTER :: R,WM,M0
@@ -1462,6 +1463,7 @@ IF (LEV==1) THEN   ! the level-0 walls under level 1 are not leaf: their terms (
          IF (HRR_DET) HRR_QW(:,NM0) = HRR_QW(:,NM0) - Q0
          Q(4:6) = Q(4:6) + Q0
          Q(8) = Q(8) + B10%Q_CON_F*B10%AREA
+         IF (WC0%BOUNDARY_TYPE==OPEN_BOUNDARY) Q(14) = Q(14) + B10%Q_CON_F*B10%AREA
       ENDDO
    ENDDO
 ENDIF
@@ -1536,6 +1538,7 @@ DO IB=1,SIZE(FWALL(LEV)%B)
       Q(1:3) = Q(1:3) + QV
       IF (HRR_DET) HRR_QW(:,NMB) = HRR_QW(:,NMB) + QV
       Q(7) = Q(7) + B1%Q_CON_F*AREA
+      IF (WC%BOUNDARY_TYPE==OPEN_BOUNDARY) Q(13) = Q(13) + B1%Q_CON_F*AREA
       Q(10) = Q(10) + 1._EB
       IF (SF%THERMAL_BC_INDEX/=INFLOW_OUTFLOW) Q(11) = Q(11) + AREA
    ENDDO
