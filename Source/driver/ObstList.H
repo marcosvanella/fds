@@ -71,7 +71,7 @@ inline void load_obst_list ()
     if (n > 0) { std::vector<int> si(7 * static_cast<size_t>(n)); fds_obst_surf(n, si.data()); osf.assign(si.begin(), si.end()); }
     const std::vector<double> gosf = gather_flat(osf);
     const int nv = fds_vent_list(0, nullptr, nullptr);
-    std::vector<double> vxb(6 * static_cast<size_t>(nv)), vi_d(3 * static_cast<size_t>(nv));
+    std::vector<double> vxb(11 * static_cast<size_t>(nv)), vi_d(3 * static_cast<size_t>(nv));
     if (nv > 0) { std::vector<int> vi(3 * static_cast<size_t>(nv)); fds_vent_list(nv, vxb.data(), vi.data()); vi_d.assign(vi.begin(), vi.end()); }
     const std::vector<double> gvxb = gather_flat(vxb), gvi = gather_flat(vi_d);
     const std::vector<int> iosf(gosf.begin(), gosf.end()), ivi(gvi.begin(), gvi.end());

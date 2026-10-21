@@ -16,6 +16,7 @@ void fds_g_phase(int pred);
 void fds_g_match(int nm);
 void fds_p_save_uvw(int nm, int pred);
 void fds_g_wall_bc(double t, double dt, int nm);
+void fds_fine_burner_bc(double t, double dt, int nm);   // fds_fine_level.f90
 void fds_g_velocity_bc(double t, int nm, int est);
 void fds_g_viscosity_bc(int nm, int est);
 void fds_g_mu_edges(int nm);
@@ -354,7 +355,7 @@ void BcStep::wall_bc(int predictor, double t, double dt)
 {
     fds_g_phase(predictor);
     for (int nm = 0; nm < static_cast<int>(m_l0.ba.size()); ++nm)
-        if (local(nm)) fds_g_wall_bc(t, dt, nm + 1 + m_mesh_offset);
+        if (local(nm)) { fds_g_wall_bc(t, dt, nm + 1 + m_mesh_offset); if (m_l0.level > 0) fds_fine_burner_bc(t, dt, nm + 1 + m_mesh_offset); }
 }
 
 void BcStep::replay_velocity(double t, double dt, bool predictor)
