@@ -542,7 +542,11 @@ struct TimeLoop::Impl {
             // arrays (EDGE%OMEGA, EDGE%TAU) from the interpolation branch. Redo it here with the interfaces as regular faces, so that the first step starts from the
             // edge data that a single mesh has (no interface edge data).
             state(false, true);
+            amrex::MultiFab& mu = (*L.m_F)["MU"];   // FDS's initial DIVERGENCE_PART_1 reads the MU of its set-up viscosity, made before the initial WALL_BC changed the wall cells
+            amrex::MultiFab mu0(mu.boxArray(), mu.DistributionMap(), mu.nComp(), mu.nGrow());
+            amrex::MultiFab::Copy(mu0, mu, 0, 0, mu.nComp(), mu.nGrow());
             each_local([&](int nm) { fds_k_visc(nm, 0); });
+            amrex::MultiFab::Copy(mu, mu0, 0, 0, mu.nComp(), mu.nGrow());
             ghost_exchange(*L.m_F, 4);
             L.m_bc->after_exchange(4, L.m_t, L.m_dt);
             ghost_exchange(*L.m_F, 6);
