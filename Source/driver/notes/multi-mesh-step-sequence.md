@@ -29,3 +29,5 @@ Ruling: single-mesh FDS is the ground truth and a multi-mesh run must equal it; 
 `tests/run_step_sequence_check.sh` compares the driver (4-mesh input at 1 and 4 ranks, and the 1-mesh input) with the SINGLE-MESH FDS baseline
 `shunn3_4mesh_32__1mesh` only: the three driver runs must be identical, DT within the .csv rounding (6e-3) and T within 5e-4 over the first 40 steps. The multi-mesh FDS
 run is not a reference. It is in the regular list (`run_driver_tests.sh`).
+
+- With EXTERNAL_GHOSTS_FILLED, MATCH_VELOCITY returns at once; `fds_p_save_uvw` (after exchange 3 and 6) stands in for it and also sets U_GHOST/V_GHOST/W_GHOST, the ghost-cell midpoint velocities that COMPUTE_VISCOSITY (Deardorff UP/VP/WP) and VELOCITY_FLUX put in the interface ghost cells. Without them the ghosts keep the initial wind profile from INITIALIZE_MESH_VARIABLES_1.

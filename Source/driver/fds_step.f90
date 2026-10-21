@@ -1052,7 +1052,7 @@ ENDIF
 END SUBROUTINE FDS_P_IFACE_WALLS
 
 !> What MATCH_VELOCITY leaves behind for the rest of the step when EXTERNAL_GHOSTS_FILLED is set and it returns at once: UVW_SAVE(IW) = the normal velocity of the
-!> face (the value DENSITY restores) and BOUNDARY_TYPE_PREVIOUS. The average with the neighbouring box is not formed: the faces of two boxes are the same face of
+!> face (the value DENSITY restores), U_GHOST/V_GHOST/W_GHOST and BOUNDARY_TYPE_PREVIOUS. The average with the neighbouring box is not formed: the faces of two boxes are the same face of
 !> the level (same data after the driver's exchange), so the average is the face value itself.
 SUBROUTINE FDS_P_SAVE_UVW(NM,PRED) BIND(C,NAME='fds_p_save_uvw')
 INTEGER(C_INT), VALUE :: NM,PRED
@@ -1075,6 +1075,11 @@ DO IW=1,M%N_EXTERNAL_WALL_CELLS
       CASE( 3) ; M%UVW_SAVE(IW) = WW(BC%II,BC%JJ,0)
       CASE(-3) ; M%UVW_SAVE(IW) = WW(BC%II,BC%JJ,M%KBAR)
    END SELECT
+   IF (M%EXTERNAL_WALL(IW)%NOM>0) THEN   ! the ghost cell midpoint velocities (COMPUTE_VISCOSITY, VELOCITY_FLUX) from the box's exchanged ghost faces
+      M%U_GHOST(IW) = 0.5_EB*(UU(BC%II,BC%JJ,BC%KK)+UU(BC%II-1,BC%JJ,BC%KK))
+      M%V_GHOST(IW) = 0.5_EB*(VV(BC%II,BC%JJ,BC%KK)+VV(BC%II,BC%JJ-1,BC%KK))
+      M%W_GHOST(IW) = 0.5_EB*(WW(BC%II,BC%JJ,BC%KK)+WW(BC%II,BC%JJ,BC%KK-1))
+   ENDIF
    END ASSOCIATE
 ENDDO
 END SUBROUTINE FDS_P_SAVE_UVW

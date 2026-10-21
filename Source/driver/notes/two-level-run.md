@@ -73,3 +73,6 @@ overwrite. The last step is the comparison that matters: np 1 0.633 (two-level) 
 ## Three or more levels
 See `notes/three-level-run.md` (D-053): `--two-level-run --levels 3` builds and binds a nested hierarchy; composite solve uses all bound levels.
 
+
+## Known round-off across rank counts
+2-level hrr.csv/mass.csv across rank counts differ by up to 4.3e-13 (hrr) / 4.6e-15 (mass) relative, from the particle terms summed in rank order (within the 1e-11 rule, 1e-13 floor).
