@@ -12,7 +12,7 @@
 !> \param DT_OUT Initial time step from READ_DATA (passed out to the driver)
 SUBROUTINE FDS_SETUP(MODE,FNAME,DT_OUT) BIND(C,NAME='fds_setup')
 USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_DOUBLE,C_CHAR,C_NULL_CHAR,C_INT
-USE FDS_AMREX_HOOKS, ONLY: OUT_T,OUT_DT,OUT_ICYC,STEP_OUTPUTS_PATCHED,OUT_MESH_DUMPS,FINE_DEVC_PROC
+USE FDS_AMREX_HOOKS, ONLY: OUT_T,OUT_DT,OUT_ICYC,STEP_OUTPUTS_PATCHED,OUT_MESH_DUMPS,FINE_DEVC_PROC,LEAF_FINEST_PROC
 #else
 PROGRAM FDS
 #endif
@@ -152,6 +152,7 @@ IF (MODE==3) THEN
    DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       CALL UPDATE_GLOBAL_OUTPUTS(T,DT,NM)
    ENDDO
+   CALL LEAF_REMOTE_DEVICES(T,DT)
    IF (ASSOCIATED(FINE_DEVC_PROC)) CALL FINE_DEVC_PROC(T)
    CALL EXCHANGE_GLOBAL_OUTPUTS
    CALL UPDATE_CONTROLS(T,DT,CTRL_STOP_STATUS,.FALSE.)
@@ -4616,6 +4617,22 @@ EXCHANGE_DEVICE: IF (N_DEVC>0) THEN
                   ENDIF
             END SELECT
          ENDDO
+#ifdef WITH_AMREX
+         IF (ALLOCATED(LEAF_FSDV)) THEN   ! leaf devices: the cells of this rank's fine boxes over level-0 meshes of other ranks
+            SDV => LEAF_FSDV(N)
+            SELECT CASE(OP_INDEX)
+               CASE(1)
+                  TC_ARRAY(N)          = TC_ARRAY(N)          + SDV%VALUE_1
+                  TC_ARRAY(N+N_DEVC)   = TC_ARRAY(N+N_DEVC)   + SDV%VALUE_2
+                  TC_ARRAY(N+2*N_DEVC) = TC_ARRAY(N+2*N_DEVC) + SDV%VALUE_3
+                  TC_ARRAY(N+3*N_DEVC) = TC_ARRAY(N+3*N_DEVC) + SDV%VALUE_4
+               CASE(2)
+                  IF (SDV%VALUE_1<TC2_ARRAY(1,N)) THEN ; TC2_ARRAY(1,N) = SDV%VALUE_1 ; TC2_ARRAY(2,N) = SDV%VALUE_2 ; ENDIF
+               CASE(3)
+                  IF (SDV%VALUE_1>TC2_ARRAY(1,N)) THEN ; TC2_ARRAY(1,N) = SDV%VALUE_1 ; TC2_ARRAY(2,N) = SDV%VALUE_2 ; ENDIF
+            END SELECT
+         ENDIF
+#endif
       ENDDO DEVICE_LOOP_1
 
       ! Perform MPI exchanges to sum or take max/min of device values collected on meshes controlled by different processes
@@ -4664,6 +4681,19 @@ EXCHANGE_DEVICE: IF (N_DEVC>0) THEN
                   ENDIF
                ENDIF
             ENDDO
+#ifdef WITH_AMREX
+            ! the extreme is in a fine box of this rank over a level-0 mesh of another rank (index -(rank+1))
+            IF (ALLOCATED(LEAF_FSDV)) THEN
+               IF (NINT(TC2_ARRAY(2,N))==-(MY_RANK+1)) THEN
+                  DV%VALUE_1 = LEAF_FSDV(N)%VALUE_3
+                  IF (MY_RANK>0) THEN
+                     CALL MPI_SEND(DV%VALUE_1,1,MPI_DOUBLE_PRECISION,0,999,MPI_COMM_WORLD,IERR)
+                  ELSE
+                     NO_NEED_TO_RECV = .TRUE.
+                  ENDIF
+               ENDIF
+            ENDIF
+#endif
             IF (N_MPI_PROCESSES>1 .AND. MY_RANK==0 .AND. .NOT.NO_NEED_TO_RECV) &
                CALL MPI_RECV(DV%VALUE_1,1,MPI_DOUBLE_PRECISION,MPI_ANY_SOURCE,MPI_ANY_TAG,MPI_COMM_WORLD,STATUS,IERR)
             CALL MPI_BARRIER(MPI_COMM_WORLD,IERR)
@@ -4730,6 +4760,24 @@ ENDDO DEVICE_LOOP
 
 T_USED(7) = T_USED(7) + CURRENT_TIME() - TNOW
 END SUBROUTINE EXCHANGE_GLOBAL_OUTPUTS
+
+#ifdef WITH_AMREX
+!> Leaf devices whose fine boxes lie on another rank than the level-0 mesh of the subdevice: the rank of each such box adds its cells (LEAF_FSDV, dump.f90), and
+!> EXCHANGE_GLOBAL_OUTPUTS reduces them with the subdevices. Collective; nothing on one rank or without a fine level.
+SUBROUTINE LEAF_REMOTE_DEVICES(T,DT)
+REAL(EB), INTENT(IN) :: T,DT
+INTEGER :: N
+IF (N_MPI_PROCESSES<=1 .OR. N_DEVC==0 .OR. .NOT.ASSOCIATED(LEAF_FINEST_PROC)) RETURN
+IF (.NOT.ALLOCATED(LEAF_SDV_ON)) THEN
+   ALLOCATE(LEAF_SDV_ON(NMESHES,N_DEVC)) ; LEAF_SDV_ON = .FALSE.
+   DO N=1,N_DEVC
+      IF (ALLOCATED(DEVICE(N)%SUBDEVICE_INDEX)) LEAF_SDV_ON(:,N) = DEVICE(N)%SUBDEVICE_INDEX(1:NMESHES)>0
+   ENDDO
+   CALL MPI_ALLREDUCE(MPI_IN_PLACE,LEAF_SDV_ON,NMESHES*N_DEVC,MPI_LOGICAL,MPI_LOR,MPI_COMM_WORLD,IERR)
+ENDIF
+CALL LEAF_FOREIGN_DEVICES(T,DT)
+END SUBROUTINE LEAF_REMOTE_DEVICES
+#endif
 
 
 !> \brief Dump HRR data to CHID_hrr.csv, MASS data to CHID_mass.csv, DEVICE data to _devc.csv
