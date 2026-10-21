@@ -125,3 +125,22 @@ Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full tabl
   - L2 nf0/nf1 at 2m/2r, 4m/2r and 4m/4r: PASS.
   - Max diff in the floor columns: mass_rel_change 4.9e-14 to 7.5e-14; divmax 2.5e-16 to 2.6e-16; div_l0 2.5e-16 to 2.6e-16; div_l1 4.9e-16 to 5.6e-16. `mass` is 4.3e-14 to 7.0e-14 relative.
   - Note: mass_rel_change reaches 75% of the floor (7.5e-14 at L2 nf0 4m/4r).
+
+## FINAL gate, ls-mr5b tip 3caed8b4de (2026-10-20, pop-os, OMP_NUM_THREADS=2, Open MPI 5, pkg63x defaults)
+
+- Tip 3caed8b4de contains df9f8474cc. It contains d02b4bf134 as a cherry-pick: 3caed8b4de itself has the same stable patch-id (448a4534…). It also contains 9ec5e8bc5f (plotfile fields).
+- Binary b-3caed8b4de/fds_amr: sha256 2a7c98262b89a7a60f45cf5ab1ac31c7824395b77843866920bbe134fa5b952b. Its src-3caed8b4de tree matches git archive (Source md5-of-md5s d708f0f6…).
+- Tolerances: summary columns 1e-11 relative, round-off floor 1e-13 (mass_rel_change, div*), HRR_Q_RANK_EXTRA=HRR. Devc, front x and gate verdicts strict.
+- Gate: **GATE PASS**, 0 FAIL, 0 needs-ruling.
+  - Cross-mesh: all PASS, mean HRR rel 3.4e-4 to 4.8e-3.
+  - Same-mesh across ranks: all BITID rows PASS for L1, L2 nf0 and L2 nf1 at 2m/2r, 4m/2r and 4m/4r.
+  - HIER: 38 and 31 layouts, all PASS.
+  - Repeat rows PASS. Perturb spread at most 1.3e-5.
+  - The 120 s row PASS (front x 15/35/55 m).
+  - Existing gates (drive check, tag phi, regrid transfer ground) PASS.
+  - L0 bitcheck vs df9f8474cc: 18 csv, 0 differ.
+- Multi-rank radiation (steady balance |res| <= 1e-3*E_ref, floor 1e-4 kW). Each row is identical at 1, 2 and 4 ranks:
+  - box (4 meshes): resid 0, PASS.
+  - Gaussian 2 levels: -5.2e-5, PASS. Gaussian 3 levels: -5.6e-5, PASS.
+  - Patch-over-vent 2 levels: +3.539e-3, PASS. Patch-over-vent 3 levels: +4.202e-3, PASS at 1/2/4 ranks; loss 5.701336 at every rank count. At f910 and 63a it was -1.707 FAIL at 2 and 4 ranks, so this is fixed by d02b4bf134.
+- PUSH-READY: YES.
