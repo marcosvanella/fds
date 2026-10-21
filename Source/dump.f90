@@ -41,6 +41,7 @@ USE COMP_FUNCTIONS, ONLY : SHUTDOWN
 #ifdef WITH_AMREX
 USE FDS_AMREX_HOOKS, ONLY: N_OUT_MESHES,LEAF_COVERED_PROC,LEAF_BOX_PROC,LEAF_FINEST_PROC
 USE FDS_AMREX_HOOKS, ONLY: LEAF_WALL_COUNT_PROC,LEAF_WALL_PROC,LEAF_WALL_COVERED_PROC
+USE FDS_AMREX_HOOKS, ONLY: HRR_DET,HRR_DET_ALLOC,HRR_QM,HRR_MM,HRR_QDR,HRR_MDR,HRR_QADD,HRR_MADD
 #endif
 
 IMPLICIT NONE (TYPE,EXTERNAL)
@@ -11863,6 +11864,20 @@ TYPE(CFACE_TYPE), POINTER :: CFA
 TYPE(WALL_TYPE), POINTER :: WC
 TYPE(LAGRANGIAN_PARTICLE_CLASS_TYPE), POINTER :: LPC
 TYPE(LAGRANGIAN_PARTICLE_TYPE), POINTER :: LP
+#ifdef WITH_AMREX
+REAL(EB) :: QB(N_Q_DOT),MB(N_TRACKED_SPECIES)
+
+! HRR_DET: this mesh's terms accumulate from zero (HRR_QM, HRR_MM); the rank's Q_DOT, M_DOT are restored with them added. Before the first mesh, what Q_DOT, M_DOT
+! hold beyond the driver additions (particles) is a rank-level term (HRR_QDR, HRR_MDR).
+IF (HRR_DET) THEN
+   CALL HRR_DET_ALLOC(N_Q_DOT,N_TRACKED_SPECIES,NMESHES)
+   IF (NM==LOWER_MESH_INDEX) THEN
+      HRR_QDR = HRR_QDR + DT*(Q_DOT-HRR_QADD) ; HRR_MDR = HRR_MDR + DT*(M_DOT-HRR_MADD)
+      HRR_QADD = 0._EB ; HRR_MADD = 0._EB
+   ENDIF
+   QB = Q_DOT ; MB = M_DOT ; Q_DOT = 0._EB ; M_DOT = 0._EB
+ENDIF
+#endif
 
 ! Compute volume integral of certain quantities like the HRR
 
@@ -12030,6 +12045,13 @@ ENDDO CFACE_LOOP_2
 ! Muliply the energy and mass  rates (Q_DOT, M_DOT (W)) for this time step by the time step size, DT.
 ! For all the meshes belonging to the current MPI process, keep a running tally of the rates (Q_DOT_SUM, M_DOT_SUM (J)).
 ! When it is time for a dump to the CHID_hrr.csv file, sum up (i.e. MPI_ALLREDUCE) Q_DOT_SUM and M_DOT_SUM in main.f90.
+#ifdef WITH_AMREX
+IF (HRR_DET) THEN
+   HRR_QM(:,NM) = Q_DOT ; HRR_MM(:,NM) = M_DOT
+   Q_DOT = QB + Q_DOT ; M_DOT = MB + M_DOT
+   IF (ICYC<=0) Q_DOT(9) = 0._EB
+ENDIF
+#endif
 
 IF (NM==UPPER_MESH_INDEX) THEN
    Q_DOT_SUM = Q_DOT_SUM + DT*Q_DOT
