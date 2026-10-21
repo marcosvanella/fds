@@ -7,7 +7,7 @@ MODULE FDS_FINE_LEVEL
 USE ISO_C_BINDING
 USE PRECISION_PARAMETERS, ONLY: EB
 USE GLOBAL_CONSTANTS, ONLY: N_TOTAL_SCALARS,FLUX_LIMITER_MW_CORRECTION,N_TRACKED_SPECIES,TMPA,RHOA,RSUM0,U0,V0,W0,PARTICLE_DRAG,CHECK_VN,REAC_SOURCE_CHECK, &
-   STORE_SPECIES_FLUX,N_ZONE,STRATIFICATION,I_RAMP_TMP0_Z,I_RAMP_P0_Z,P_INF,STORE_PRESSURE_POISSON_RESIDUAL,STORE_CUTCELL_DIVERGENCE,STORE_CARTESIAN_DIVERGENCE,N_LP_ARRAY_INDICES,N_REACTIONS,RADIATION,N_LAGRANGIAN_CLASSES,NULL_BOUNDARY,DEFAULT_SURF_INDEX
+   STORE_SPECIES_FLUX,N_ZONE,STRATIFICATION,I_RAMP_TMP0_Z,I_RAMP_P0_Z,P_INF,STORE_PRESSURE_POISSON_RESIDUAL,STORE_CUTCELL_DIVERGENCE,STORE_CARTESIAN_DIVERGENCE,N_LP_ARRAY_INDICES,N_REACTIONS,RADIATION,N_LAGRANGIAN_CLASSES,PARTICLE_FILE,NULL_BOUNDARY,DEFAULT_SURF_INDEX
 USE MESH_VARIABLES, ONLY: MESHES,MESH_TYPE
 USE FDS_LS_GRID, ONLY: LS_FLUX_ACTIVE,LS_BLOCK_FLUX
 USE GLOBAL_CONSTANTS, ONLY: LOWER_MESH_INDEX,TURB_MODEL,C_SMAGORINSKY,CONSMAG,DYNSMAG
@@ -127,6 +127,7 @@ DO IB=1,NBOX
    END ASSOCIATE
    IF (LOCAL(IB)/=0) CALL BUILD_FINE_BOX(FINE_LEVEL(LEV)%BOX(IB),IJK(1,IB),IJK(2,IB),IJK(3,IB),XB(1,IB),XB(2,IB),XB(3,IB),XB(4,IB),XB(5,IB),XB(6,IB))
    IF (LOCAL(IB)/=0) THEN
+      FINE_LEVEL(LEV)%BOX(IB)%PARTICLE_TAG = N0+IB   ! as init.f90 (PARTICLE_TAG = NM): unique tags, stepped by NMESHES in part.f90
       FINE_LEVEL(LEV)%BOX(IB)%PRESSURE_ZONE = Z0
       CALL FINE_BOX_ZONES(FINE_LEVEL(LEV)%BOX(IB))   ! D7: every cell inherits the zone of its level-0 cell (zones are never renumbered, so the chain l-1,...,0 ends there)
       ! zone-wide background pressure state (PBAR, PBAR_S, D_PBAR_DT, D_PBAR_DT_S, U_LEAK, R_PBAR) of a new box = the one of the level-0 mesh (without STRATIFICATION PBAR is uniform in K;
@@ -208,7 +209,8 @@ END SUBROUTINE FDS_FINE_SET_SOLID
 !> Allocate the arrays of a fine-level mesh object of NI x NJ x NK cells on [XS,XF]x[YS,YF]x[ZS,ZF] (axis-aligned, uniform, Cartesian, no obstructions) with the contents the kernels read
 !> (level-interface.md section 3): metrics (the arithmetic of READ_MESH for an untransformed grid), cell tables (ghost ring SOLID/EXTERIOR as READ_OBST sets it), empty edge and wall tables
 !> (a fine box has no WALL cells: its non-domain faces are interface faces whose ghost values the driver fills, and there is no OMESH neighbour), and the state, field and work arrays of
-!> INITIALIZE_MESH_VARIABLES_1 (initial values as there). Models with particles or radiation are not supported on fine levels yet.
+!> INITIALIZE_MESH_VARIABLES_1 (initial values as there), including the Lagrangian particle storage of init.f90 (W7, PV-1: stock LAGRANGIAN_PARTICLE records; BOUNDARY_* storage grows
+!> in ALLOCATE_STORAGE from the empty arrays). PARTICLE_TAG is set by the caller (mesh number of the box).
 SUBROUTINE BUILD_FINE_BOX(M,NI,NJ,NK,XS,XF,YS,YF,ZS,ZF)
 
 TYPE(MESH_TYPE), INTENT(INOUT) :: M
@@ -216,9 +218,6 @@ INTEGER, INTENT(IN) :: NI,NJ,NK
 REAL(EB), INTENT(IN) :: XS,XF,YS,YF,ZS,ZF
 INTEGER :: I,J,K,IC,NC,IBP1,JBP1,KBP1,N_LOWER_SCALARS
 
-IF (N_LAGRANGIAN_CLASSES>0 .OR. N_LP_ARRAY_INDICES>0) THEN
-   WRITE(0,'(A)') 'fds_amr ERROR in BUILD_FINE_BOX: fine-level boxes do not support particles yet.' ; ERROR STOP 1
-ENDIF
 N_LOWER_SCALARS = MERGE(0,1,FLUX_LIMITER_MW_CORRECTION)   ! as in INITIALIZE_MESH_VARIABLES_1
 ! the largest box dimensions are sizes of automatic arrays in the kernels (VELOCITY_FLUX: GX(0:IBAR_MAX), GY, GZ): a fine box larger than every level-0 mesh must raise them
 IBAR_MAX=MAX(IBAR_MAX,NI,NJ,NK) ; JBAR_MAX=MAX(JBAR_MAX,NJ) ; KBAR_MAX=MAX(KBAR_MAX,NK)
@@ -340,6 +339,9 @@ ALLOCATE(M%PBAR(0:KBP1,0:N_ZONE),M%PBAR_S(0:KBP1,0:N_ZONE),M%R_PBAR(0:KBP1,0:N_Z
 M%D_PBAR_DT=0._EB ; M%D_PBAR_DT_S=0._EB ; M%U_LEAK=0._EB ; M%R_PBAR=0._EB
 DO K=0,KBP1 ; M%PBAR(K,:)=M%P_0(K) ; M%PBAR_S(K,:)=M%P_0(K) ; ENDDO
 ALLOCATE(M%BOUNDARY_COORD(0),M%BOUNDARY_PROP1(0),M%BOUNDARY_PROP2(0),M%BOUNDARY_RADIA(0))
+M%NLP=0 ; M%NLPDIM=50   ! particle storage as init.f90 (INITIALIZE_MESH_VARIABLES_1)
+IF (N_LAGRANGIAN_CLASSES>0) THEN ; ALLOCATE(M%PARTICLE_LAST(N_LAGRANGIAN_CLASSES)) ; M%PARTICLE_LAST=0 ; ENDIF
+IF (PARTICLE_FILE) ALLOCATE(M%LAGRANGIAN_PARTICLE(M%NLPDIM))
 M%CLIP_RHOMIN=.FALSE. ; M%CLIP_RHOMAX=.FALSE. ; M%DT_RESTRICT_COUNT=0
 
 END SUBROUTINE BUILD_FINE_BOX
@@ -601,21 +603,29 @@ DO L=1,MIN(NMESHES,SIZE(MESHES))
 ENDDO
 END SUBROUTINE NEAREST_L0_WALL
 
-!> True if the point lies inside a box of fine level LEV (extents of the boxes of all ranks).
+!> True if the point lies inside a box of fine level LEV (extents of the boxes of all ranks; half-open, see FINE_OWNER_BOX).
 LOGICAL FUNCTION POINT_COVERED(LEV,X,Y,Z)
 INTEGER, INTENT(IN) :: LEV
 REAL(EB), INTENT(IN) :: X,Y,Z
+POINT_COVERED = FINE_OWNER_BOX(LEV,X,Y,Z)>0
+END FUNCTION POINT_COVERED
+
+!> Box of fine level LEV that owns the point (0 if none): half-open intervals [XS,XF) x [YS,YF) x [ZS,ZF), so a point on a face shared by two boxes (a particle on a
+!> box edge) has exactly one owner, the box on its high side; boxes of a level do not overlap. Cell centres never lie on a box face, so leaf flags of cells and walls are as before.
+INTEGER FUNCTION FINE_OWNER_BOX(LEV,X,Y,Z)
+INTEGER, INTENT(IN) :: LEV
+REAL(EB), INTENT(IN) :: X,Y,Z
 INTEGER :: IB
-POINT_COVERED = .FALSE.
+FINE_OWNER_BOX = 0
 IF (.NOT.ALLOCATED(FINE_LEVEL)) RETURN
 IF (LEV<1 .OR. LEV>SIZE(FINE_LEVEL)) RETURN
 IF (.NOT.ALLOCATED(FINE_LEVEL(LEV)%BOX)) RETURN
 DO IB=1,FINE_LEVEL(LEV)%N_BOXES
    ASSOCIATE(B=>FINE_LEVEL(LEV)%BOX(IB))
-   IF (X>B%XS .AND. X<B%XF .AND. Y>B%YS .AND. Y<B%YF .AND. Z>B%ZS .AND. Z<B%ZF) THEN ; POINT_COVERED = .TRUE. ; RETURN ; ENDIF
+   IF (X>=B%XS .AND. X<B%XF .AND. Y>=B%YS .AND. Y<B%YF .AND. Z>=B%ZS .AND. Z<B%ZF) THEN ; FINE_OWNER_BOX = IB ; RETURN ; ENDIF
    END ASSOCIATE
 ENDDO
-END FUNCTION POINT_COVERED
+END FUNCTION FINE_OWNER_BOX
 
 !> Leaf flag of every hidden wall: its gas cell is not inside a box of the next level (leaf-only sums: each location counted at the finest level covering it).
 SUBROUTINE REFRESH_LEAF()
