@@ -49,6 +49,8 @@ INTEGER, SAVE :: BUILD_VER=0,LEAF_VER=-1   !< bumped at every level create/destr
 !> Global OBST and VENT lists (set once by the driver, fds_fine_set_lists): the per-level wall builder snaps them at the dx of each box (FDS rounding, as ObstMask.H).
 INTEGER, SAVE :: NOB=0,NVT=0,FVT=0   ! FVT: VENT of the last FACE_SURFACE call (0 none)
 LOGICAL, SAVE :: BED_RUN=.FALSE.   ! FDS_FINE_SET_BED
+REAL(EB), SAVE :: QENTH_V = 0._EB   !< FDS_SET_QENTH
+LOGICAL, SAVE :: QENTH_SET = .FALSE.
 REAL(EB), ALLOCATABLE, SAVE :: OBX(:,:),VTX(:,:)   ! XB(6,*); VENT XB, XYZ, SPREAD_RATE, INPUT_AREA (-1: no AREA_ADJUST) (11,*)
 INTEGER, SAVE :: G0(3)=0,NG(3)=0   ! global cell index (0-based) of cell (1,1,1) of the current box, number of cells of the domain at its level
 INTEGER, ALLOCATABLE, SAVE :: THD(:),THP(:),THT(:,:)   ! thin OBST (owner rule): direction (0 none), plane and transverse cell ranges at the current level
@@ -1555,11 +1557,19 @@ END SUBROUTINE FDS_FINE_WALLS_SUMS
 !> (SPATIAL_STATISTIC null, DV%WALL_INDEX>0) whose face point lies on a hidden level-1 wall of its level-0 wall gets that fine wall's value.
 !> Supported: RADIATIVE (1), CONVECTIVE (2), TOTAL (10) HEAT FLUX, WALL TEMPERATURE (5), HEAT TRANSFER COEFFICIENT (21), as SOLID_PHASE_OUTPUT.
 !> The fine B1 is the one FDS_FINE_WALLS_SUMS evaluated this step (the radiative part is the parent's: no fine radiation).
+!> Composite Q_ENTH (W) of this rank for the HRR file, applied by FINE_DEVC after UPDATE_HRR: the driver sums it in box order on rank 0 (0 elsewhere), so it
+!> replaces the level-0 per-rank sum of UPDATE_HRR, whose rank grouping carried round-off (rank-invariant HRR file).
+SUBROUTINE FDS_SET_QENTH(V) BIND(C,NAME='fds_set_qenth')
+REAL(C_DOUBLE), VALUE :: V
+QENTH_V = V ; QENTH_SET = .TRUE.
+END SUBROUTINE FDS_SET_QENTH
+
 SUBROUTINE FINE_DEVC(T)
 USE DEVICE_VARIABLES, ONLY: DEVICE,DEVICE_TYPE,SUBDEVICE_TYPE,N_DEVC
 USE TYPES, ONLY: WALL_TYPE,BOUNDARY_COORD_TYPE,BOUNDARY_PROP1_TYPE
 USE FDS_AMREX_HOOKS, ONLY: OUT_ICYC
 USE GLOBAL_CONSTANTS, ONLY: TMPM
+USE OUTPUT_DATA, ONLY: Q_DOT
 REAL(EB), INTENT(IN) :: T
 INTEGER :: N,IB,IW,Q,NM0,LEV
 REAL(EB) :: V,V0,H
@@ -1568,6 +1578,7 @@ TYPE(SUBDEVICE_TYPE), POINTER :: SDV
 TYPE(MESH_TYPE), POINTER :: WM,R
 TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
 TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
+IF (QENTH_SET) THEN ; Q_DOT(9) = QENTH_V ; QENTH_SET = .FALSE. ; ENDIF
 IF (.NOT.ALLOCATED(FWALL)) RETURN
 IF (SIZE(FWALL)<1) RETURN
 CALL REFRESH_LEAF()

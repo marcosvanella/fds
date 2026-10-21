@@ -103,7 +103,7 @@ void fds_p_msums(int nm, const int* mask, double* s);   // s(0:N_SPECIES+N_TRACK
 int fds_p_nmass();
 void fds_p_add_mass(double dt, const double* v);
 void fds_p_add_qdot(int n, double v);
-double fds_p_enthalpy_sum(int nm);
+void fds_set_qenth(double v);   // fds_fine_level.f90: Q_DOT(9) of this rank after UPDATE_HRR
 void fds_p_get_qr(int nm, double* buf, long ntot);
 int fds_p_pend(int nm, int mode, double* buf, long ntot);
 void fds_p_dens_pre(double t, double dt, int nm);
@@ -2790,14 +2790,7 @@ struct TimeLoop::Impl {
     {
         double e, e0;
         energy_sums(e, e0);
-        double es_old = 0.0;   // UPDATE_HRR's ENTHALPY_SUM_OLD (local level-0 meshes)
-        {   // global in box order on rank 0, as energy_sums
-            std::vector<double> eb(static_cast<std::size_t>(lc[0].nbox), 0.0);
-            for (amrex::MFIter mfi((*lc[0].F)["Q"]); mfi.isValid(); ++mfi) eb[mfi.index()] = fds_p_enthalpy_sum(lc[0].fds0 + mfi.index() + 1);
-            amrex::ParallelAllReduce::Sum(eb.data(), static_cast<int>(eb.size()), amrex::ParallelContext::CommunicatorSub());
-            if (amrex::ParallelDescriptor::MyProc() == 0) for (double v : eb) es_old += v;
-        }
-        if (L.m_icyc > 0 && have_e_old) fds_p_add_qdot(9, ((e - e_old) - (e0 - es_old)) / dt);
+        if (L.m_icyc > 0 && have_e_old) fds_set_qenth((e - e_old) / dt);   // rank 0: the whole Q_ENTH; other ranks 0 (leaf_sums)
         e_old = e; have_e_old = true;
         // Q_CONV, Q_COND, Q_DIFF (leaf-only, any number of levels): the level-0 walls under level 1 are removed (level 1 call, q[3..5]); every hidden wall whose gas cell is not covered by
         // the next level is added at its own level, each location at the finest level covering it
