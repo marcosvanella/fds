@@ -373,14 +373,19 @@ struct TimeLoop::Impl {
         fds_fine_walls_parent_xchg();   // collective: remote parent state of the new hidden walls
         record_vent_faces();   // the vent faces of the old box layout (box index, cell) mean nothing on the new one
         for (int k = 0; k < 2; ++k)   // a vent face of the old layout inside the new one keeps the velocity of the last stage's projection (the parent state may not be there yet, and the mirror would zero it: L1 div jump at the burner on every regrid)
-            if (lev < static_cast<int>(vent_keep[k].size()) && lev < static_cast<int>(vent_old[k].size()))
-                for (const VentFace& g : vent_old[k][lev]) {
+            if (lev < static_cast<int>(vent_keep[k].size()) && lev < static_cast<int>(vent_old[k].size())) {
+                // vent_old holds the faces of this rank's OLD boxes with OLD box indices: gather all of them (collective), then each face goes to the rank of the NEW box
+                // that holds its gas cell, with that box's index (fine_wall_fv matches faces by box index; the old index named an unrelated box, or a box of another rank)
+                const std::vector<VentFace> gl = gather_vent_faces(vent_old[k][lev]);
+                for (const VentFace& g0 : gl) {
                     bool in = false;
-                    for (VentFace& f : vent_keep[k][lev]) if (f.c == g.c && f.d == g.d) { f.v = g.v; in = true; }
+                    for (VentFace& f : vent_keep[k][lev]) if (f.c == g0.c && f.d == g0.d) { f.v = g0.v; in = true; }
                     if (in) continue;
-                    amrex::IntVect cc = g.c; if (cc[g.d] > L.m_reg->level(lev).geom.Domain().bigEnd(g.d)) cc[g.d] -= 1;   // the gas cell of the face
-                    if (Lv.ba.contains(cc)) vent_keep[k][lev].push_back(g);
+                    amrex::IntVect cc = g0.c; if (cc[g0.d] > L.m_reg->level(lev).geom.Domain().bigEnd(g0.d)) cc[g0.d] -= 1;   // the gas cell of the face
+                    for (int ib = 0; ib < static_cast<int>(Lv.ba.size()); ++ib)
+                        if (Lv.ba[ib].contains(cc)) { if (Lv.dm[ib] == amrex::ParallelDescriptor::MyProc()) { VentFace g = g0; g.box = ib; vent_keep[k][lev].push_back(g); } break; }
                 }
+            }
         fine_burner_state(false);   // burner face lists of the new box layout: the first stage after a (re)bind applies them in its flux override, a list kept from the old layout has faces outside the new boxes
         select(0);
 #endif
@@ -2007,6 +2012,25 @@ struct TimeLoop::Impl {
     struct VentFace { amrex::IntVect c; int box; int d; double v; };
     std::vector<std::vector<VentFace>> vent_keep[2];
     std::vector<std::vector<VentFace>> vent_old[2];   // vent_keep of the levels last unbound (rebind)
+    // every rank's faces, in a rank-count independent order (sorted by d, cell); box is not kept (-1)
+    static std::vector<VentFace> gather_vent_faces(const std::vector<VentFace>& loc)
+    {
+        std::vector<double> sb; for (const VentFace& f : loc) { sb.push_back(f.d); for (int d = 0; d < 3; ++d) sb.push_back(f.c[d]); sb.push_back(f.v); }
+        std::vector<double> rb = sb;
+#ifdef BL_USE_MPI
+        const MPI_Comm comm = amrex::ParallelContext::CommunicatorSub();
+        int np = 1; MPI_Comm_size(comm, &np);
+        int n = static_cast<int>(sb.size()); std::vector<int> cnt(np), dsp(np, 0);
+        MPI_Allgather(&n, 1, MPI_INT, cnt.data(), 1, MPI_INT, comm);
+        for (int r = 1; r < np; ++r) dsp[r] = dsp[r - 1] + cnt[r - 1];
+        rb.assign(dsp[np - 1] + cnt[np - 1], 0.0);
+        MPI_Allgatherv(sb.data(), n, MPI_DOUBLE, rb.data(), cnt.data(), dsp.data(), MPI_DOUBLE, comm);
+#endif
+        std::vector<VentFace> g;
+        for (std::size_t q = 0; q + 4 < rb.size() + 0; q += 5) g.push_back({amrex::IntVect(int(rb[q + 1]), int(rb[q + 2]), int(rb[q + 3])), -1, int(rb[q]), rb[q + 4]});
+        std::sort(g.begin(), g.end(), [](const VentFace& a, const VentFace& b) { if (a.d != b.d) return a.d < b.d; for (int d = 2; d >= 0; --d) if (a.c[d] != b.c[d]) return a.c[d] < b.c[d]; return false; });
+        return g;
+    }
     void restore_vent_faces(bool pred, int l)
     {
         const auto& vk = vent_keep[pred ? 1 : 0];
