@@ -487,6 +487,22 @@ RTE_BOX(:,NM) = (/RAD_Q_SUM,KFST4_SUM/) ; RAD_Q_SUM = 0._EB ; KFST4_SUM = 0._EB
 IF (N_REACTIONS>0 .OR. INIT_HRRPUV) CALL COMBUSTION_BC(NM)
 END SUBROUTINE FDS_K_RAD
 
+!> main.f90 ~599 (INITIAL_RADIATION_ITERATIONS before the time loop) on box NM made after the set-up: COMPUTE_RADIATION(T_BEGIN,NM,ITER) in the set-up phase. The box took
+!> RAD_CALL_COUNTER from level 0 after its initial iterations, so the count is kept, and the RTE factor sums are kept (FDS_K_RAD files them per box). Returns INITIAL_RADIATION_ITERATIONS (0 on a restart); ITER<1 only returns it.
+INTEGER(C_INT) FUNCTION FDS_K_RAD_INIT(NM,ITER) BIND(C,NAME='fds_k_rad_init')
+INTEGER(C_INT), VALUE :: NM,ITER
+INTEGER :: RCC
+REAL(EB) :: S(2)
+TYPE(MESH_TYPE), POINTER :: M
+FDS_K_RAD_INIT = 0 ; IF (RESTART) RETURN
+FDS_K_RAD_INIT = INITIAL_RADIATION_ITERATIONS ; IF (ITER<1) RETURN
+M => BOX_OBJ(NM) ; RCC = M%RAD_CALL_COUNTER ; S = (/RAD_Q_SUM,KFST4_SUM/)
+INITIALIZATION_PHASE = .TRUE.
+CALL COMPUTE_RADIATION(T_BEGIN,NM,ITER)
+INITIALIZATION_PHASE = .FALSE.
+M%RAD_CALL_COUNTER = RCC ; RAD_Q_SUM = S(1) ; KFST4_SUM = S(2)
+END FUNCTION FDS_K_RAD_INIT
+
 !> Radiation source average-down (radi.f90 RAD_SRC_FILL/SET): kappa and kappa*4 sigma T^4 of box NM into DAT(NPTS,2) (returns 0 when the model has no gray source), and back the averaged values.
 INTEGER(C_INT) FUNCTION FDS_K_RAD_SRC_FILL(NM,DAT) BIND(C,NAME='fds_k_rad_src_fill')
 INTEGER(C_INT), VALUE :: NM

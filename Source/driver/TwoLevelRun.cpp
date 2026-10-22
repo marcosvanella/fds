@@ -631,6 +631,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     loop.set_state(0.0, dt_start, 0);
     loop.prime_levels();
+    loop.rad_init_levels();
     probe("after second prime");
     if (std::getenv("FDSTL_TLDIAG")) {
         for (int l = 0; l < nl; ++l)
@@ -661,6 +662,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         if (po.enabled && pr.ran && !pr.accepted) { ++fails; amrex::Print() << tag << ": the initial projection was not accepted\n"; }
     }
 
+    if (std::getenv("FDSTL_T0RAD")) loop.rad_t0_report();
     // ---- the run
     const std::vector<double> m0 = composite_mass(reg, nl, ns);
     // Open-domain mass balance: inflow = the mass DENSITY moved through the level-0 wall faces (OPEN vents, MASS_FLUX/HRRPUA walls), summed over the steps.
