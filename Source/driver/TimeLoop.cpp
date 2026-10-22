@@ -61,6 +61,7 @@ void fds_k_drop_covered(int nm, const int* covered);
 long fds_k_part_stash(int nm, long nb, double* buf);   // W8 (PV-9): particle records of a box over a regrid
 void fds_k_part_place(int nm, int nr, const double* buf);
 void fds_k_part_deposit(int nm, double sgn);
+void fds_k_part_src(int nm, int ns, double* r);   // fds_kernels.f90: per-species particle gas source rate of box nm (last corrector)
 void fds_k_part_wall(int on);
 void fds_k_part_fvd(int nm, int dir, int mode, double* buf);   // fine box particle drag FVX_D/FVY_D/FVZ_D get (0) / set (1)
 int fds_k_part_list(int nm, int n, double* buf);   // W2: remove level-0 particles under a finer level   // fds_kernels.f90: main.f90 particle calls (level 0)
@@ -742,6 +743,15 @@ struct TimeLoop::Impl {
         amrex::ParallelDescriptor::ReduceRealSum(mass);
         if (n > 0 && !quiet) amrex::Print() << "particles at t=" << L.m_t << ": " << static_cast<long>(n) << ", total mass " << std::setprecision(17) << mass << " kg\n";
         return mass;
+    }
+    // per-species particle gas source rate (kg/s) over the bound levels, as deposited at the last corrector (collective)
+    std::vector<double> particle_src(int ns)
+    {
+        std::vector<double> r(std::max(ns, 1), 0.0);
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l) { select(l); each_local([&](int nm) { fds_k_part_src(nm, ns, r.data()); }); }
+        select(0);
+        amrex::ParallelDescriptor::ReduceRealSum(r.data(), static_cast<int>(r.size()));
+        return r;
     }
     // W2 (PV-2): stock particle insertion on the bed level lev at t=0, once; the level-0 particles under level 1 go (leaf rule)
     void insert_bed(int lev)
@@ -3347,6 +3357,7 @@ void TimeLoop::part_stash() { m->part_stash(); }
 void TimeLoop::part_place() { m->part_place(); }
 void TimeLoop::part_deposit() { m->part_deposit(); }
 double TimeLoop::particle_mass() { return m->particle_report(true); }
+std::vector<double> TimeLoop::particle_src(int ns) { return m->particle_src(ns); }
 bool TimeLoop::level_bound(int lev) const { return lev >= 0 && lev < static_cast<int>(m->lc.size()); }
 #define FDSTL_LEVEL_STAGE(lev, body) do { m->select(lev); body; m->select(0); } while (0)
 void TimeLoop::stage_viscosity(int lev, bool predictor) { FDSTL_LEVEL_STAGE(lev, m->s_visc_mfd(predictor)); }

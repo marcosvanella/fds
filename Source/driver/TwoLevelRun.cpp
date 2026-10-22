@@ -741,6 +741,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     for (int s = 1; s <= o.steps; ++s) {
         s_done = s;
         { const double pm = loop.particle_mass(); inflow[0] += pm_prev - pm; pm_prev = pm; }   // particle mass lost up to step s-1 (gas source of this step)
+        const std::vector<double> psrc = ns > 0 ? loop.particle_src(ns) : std::vector<double>();   // per-species particle source rates DENSITY of this step applies (species balance)
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         if (const char* fd = std::getenv("FDSTL_LEVEL_CSV")) {   // diagnostic: the finest level's fields after step s, one CSV per rank (name,comp,i,j,k,value), for cell-by-cell comparisons
             Fields& F = reg.fields(nl - 1);
@@ -758,6 +759,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
         fds_p_bnd_rate(ns, r.data());   // global (summed over the boxes in box order on every rank)
         for (int n = 0; n <= ns; ++n) inflow[n] += r[n] * loop.steps().back().dt;
+        for (int n = 0; n < ns; ++n) inflow[1 + n] += psrc[n] * loop.steps().back().dt;   // particle off-gas (incl. char-oxidation air uptake) per species
         through += r[1 + ns] * loop.steps().back().dt;
         if (have_rc) for (int n = 0; n < ns; ++n) reac[n] += rc[n] * hrr_prev * loop.steps().back().dt;
         // Mid-run adaptive regrid (Role 3 call shape): gate on AmrParams.regrid_interval; unbind top-down via finest_bound;

@@ -91,6 +91,7 @@ public:
     void bind_level(int lev);
     void unbind_level(int lev);
     void insert_bed(int lev);
+    std::vector<double> particle_src(int ns);   // per-species particle gas source rate (kg/s) of the last corrector, all levels (collective)
     double particle_mass();     // total particle mass over the bound levels (collective, no output)
     void particle_report();     // particle count and total mass over the bound levels (FDSTL_PART_DUMP: positions per rank)   // W2: particles of the bed level lev at t=0 (stock insertion), none under it on level 0
     void part_stash();          // W8 (PV-9): before the unbind of a regrid, every particle as a whole record (its last deposit taken back)
