@@ -178,12 +178,14 @@ void BcStep::inflow_ambient_ghosts(const std::string& n, bool predictor)
                 const amrex::Box vb = mfi.validbox();
                 if ((side == 0 ? vb.smallEnd(d) : vb.bigEnd(d)) != cell) continue;
                 const auto u = m_F[un[d]].const_array(mfi);
+                const amrex::Box ub = m_F[un[d]][mfi].box();   // the velocity has fewer ghost layers than the scalar: clamp the transverse index (a read past the FAB was heap data, run-to-run different)
                 auto a = mf.array(mfi);
                 for (int g = 1; g <= mf.nGrow(d); ++g) {
                     amrex::Box slab = mf[mfi].box();
                     slab.setRange(d, side == 0 ? cell - g : cell + g);
                     amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
                         int c[3] = {i, j, k}; c[d] = edge;
+                        for (int t = 0; t < 3; ++t) c[t] = std::min(std::max(c[t], ub.smallEnd(t)), ub.bigEnd(t));
                         const double vn = u(c[0], c[1], c[2]);
                         if (!(side == 0 ? vn > 0.0 : vn < 0.0)) return;
                         double rho, tmp, zz[16];
