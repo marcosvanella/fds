@@ -49,10 +49,14 @@ namespace fdsamr {
 
 namespace {
 
-// Composite sums over the uncovered cells of all levels: volume integral of RHO and of RHO*ZZ_n.
+// Composite sums over the uncovered cells of all levels: volume integral of RHO and of RHO*ZZ_n. Each box sums its own cells; the per-box sums of all ranks
+// (one owner per entry, so the reduction adds zeros only) are then added in (level, box) order: the same bits at any rank count (as 4048b2c87b, RTE factor).
 std::vector<double> composite_mass(LevelRegistry& reg, int nl, int ns)
 {
-    std::vector<double> m(1 + ns, 0.0);
+    const int nc = 1 + ns;
+    std::vector<int> off(nl + 1, 0);
+    for (int l = 0; l < nl; ++l) off[l + 1] = off[l] + static_cast<int>(reg.fields(l)["RHO"].size());
+    std::vector<double> pb(static_cast<std::size_t>(off[nl]) * nc, 0.0);
     for (int l = 0; l < nl; ++l) {
         const Level& lv = reg.level(l);
         Fields& F = reg.fields(l);
@@ -64,6 +68,7 @@ std::vector<double> composite_mass(LevelRegistry& reg, int nl, int ns)
             amrex::Array4<const int> cv, sd;
             if (cov) cv = cov->const_array(mfi);
             if (l > 0) sd = reg.side_data(l).mask().const_array(mfi);   // fine OBST cells hold the burner wall state (TimeLoop fine_burner_state), not gas
+            double* m = pb.data() + static_cast<std::size_t>(off[l] + mfi.index()) * nc;
             amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
                 if ((cov && cv(i, j, k) != 0) || (l > 0 && sd(i, j, k, 0) != 0)) return;
                 m[0] += r(i, j, k) * vol;
@@ -71,7 +76,9 @@ std::vector<double> composite_mass(LevelRegistry& reg, int nl, int ns)
             });
         }
     }
-    amrex::ParallelAllReduce::Sum(m.data(), static_cast<int>(m.size()), amrex::ParallelContext::CommunicatorSub());
+    amrex::ParallelAllReduce::Sum(pb.data(), static_cast<int>(pb.size()), amrex::ParallelContext::CommunicatorSub());
+    std::vector<double> m(nc, 0.0);
+    for (int b = 0; b < off[nl]; ++b) for (int c = 0; c < nc; ++c) m[c] += pb[static_cast<std::size_t>(b) * nc + c];
     return m;
 }
 
