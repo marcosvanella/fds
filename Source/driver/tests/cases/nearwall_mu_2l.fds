@@ -1,0 +1,83 @@
+! W3 cut-down derived from stock ce1f659 Validation/CSIRO_Grassland_Fires/FDS_Input_Files/Case_C064.fds
+! Changes: CHID, MESH/MULT, T_END, ignition VENT, road VENT, INIT and DEVC extents clipped; bed and ignition kept 5 m and 10 m inside the lateral OPEN boundaries (as stock keeps them 10 m and 35 m inside) because a bed reaching the boundary went unstable at t=29 s. Physics unchanged.
+&HEAD CHID='c', TITLE='Australian Grassland Fire Experiment, Case C064' /
+&AMR MAX_LEVEL=0, BLOCKING_FACTOR=2, MAX_GRID_SIZE=32 /
+
+&MESH IJK=20,20,20, XB=-10.0,10.0,-20.0,0.0,0.0,20.0, MULT_ID='mesh' /
+&MULT ID='mesh', DX=20., DY=20., DZ=20., I_LOWER=0, I_UPPER=1, J_LOWER=0, J_UPPER=1, K_UPPER=0 /
+
+&TIME T_END=2. /
+
+&MISC SIMULATION_MODE='SVLES', TMPA=32. /
+
+&WIND SPEED=4.6, Z_REF=2., DIRECTION=270., L=-500., Z_0=0.03 /
+
+&SURF ID='IGNITION', HRRPUA=1500., COLOR='RED', TMP_FRONT=100., RAMP_Q='ignitor' /
+&RAMP ID='ignitor', T= 0., F=0. /
+&RAMP ID='ignitor', T= 1., F=1. /
+&RAMP ID='ignitor', T= 5., F=1. /
+&RAMP ID='ignitor', T= 6., F=0. /
+
+&VENT XB=0.0,1.6,-10.,10.,0.,0., SURF_ID='IGNITION', XYZ=0,0,0, SPREAD_RATE=1. /
+
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='YMIN', SURF_ID='OPEN' /
+&VENT MB='YMAX', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+
+&SURF ID='ROAD'
+      COLOR='BEIGE'
+      MATL_ID='DIRT'
+      THICKNESS=0.2 /
+
+
+&VENT XB= -3,  0,-20, 20,0,0, SURF_ID='ROAD' /
+
+&MATL ID='DIRT'
+      CONDUCTIVITY = 0.25
+      SPECIFIC_HEAT = 2.
+      DENSITY = 1300. /
+
+&SURF ID='GROUND'
+      DEFAULT=T
+      MATL_ID='DIRT'
+      THICKNESS=0.2 /
+
+&SURF ID                        = 'wet vegetation'
+      MATL_ID(1,1:1)            = 'GENERIC VEGETATION'
+      MOISTURE_CONTENT         = 0.063
+      SURFACE_VOLUME_RATIO      = 9770.
+      LENGTH                    = 0.20
+      GEOMETRY                  = 'CYLINDRICAL' /
+
+&CATF OTHER_FILES='vegetation_model.txt' /
+
+&PART ID='blade of grass'
+      SAMPLING_FACTOR=5
+      SURF_ID='wet vegetation'
+      PROP_ID='grass image'
+      DRAG_COEFFICIENT=2.8
+      QUANTITIES='PARTICLE TEMPERATURE','PARTICLE MASS'
+      STATIC=T
+      COLOR='BROWN' /
+
+
+&PROP ID='grass image', SMOKEVIEW_ID='TUBE', SMOKEVIEW_PARAMETERS='L=0.20','D=0.0004','DIRZ=1' /
+
+&DUMP DT_HRR=0.1, DT_DEVC=0.1, MASS_FILE=T, DT_MASS=0.1, SIG_FIGS=15, SIG_FIGS_EXP=3 /
+
+
+
+
+&DEVC ID='x', QUANTITY='TEMPERATURE', SPATIAL_STATISTIC='MAXLOC X', XB=-10,30,-1,0,0,1 /
+&DEVC ID='D', QUANTITY='FIRE DEPTH', XB=-10,30,0,0,0.1,0.1 /
+&DEVC ID='T1', QUANTITY='TEMPERATURE', XYZ=2.0,0.,0.5 /
+&DEVC ID='T2', QUANTITY='TEMPERATURE', XYZ=5.0,0.,1.0 /
+&DEVC ID='U1', QUANTITY='U-VELOCITY', XYZ=5.0,0.,2.0 /
+&DEVC ID='W1', QUANTITY='W-VELOCITY', XYZ=2.0,0.,2.0 /
+
+&DEVC ID='MU1', QUANTITY='VISCOSITY', XYZ=0.75,0.25,0.25 /
+&DEVC ID='MU2', QUANTITY='VISCOSITY', XYZ=0.25,-0.75,0.25 /
+&DEVC ID='MU3', QUANTITY='VISCOSITY', XYZ=0.75,1.25,0.25 /
+&TAIL /

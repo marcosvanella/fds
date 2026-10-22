@@ -1272,9 +1272,9 @@ CALL GET_SPECIFIC_GAS_CONSTANT(Z0,RSUM)
 TMP = MESHES(LOWER_MESH_INDEX)%TMP_0(KK) ; RHO = MESHES(LOWER_MESH_INDEX)%PBAR(KK,0)/(RSUM*TMP) ; ZZ(1:NZ) = Z0(1:NZ)
 END SUBROUTINE FDS_AMBIENT_STATE
 
-!> Tangential ghost value G of a fine cell next to the ground: the wall model stress RHO*U_TAU**2 of the FDS ground wall (WALL_MODEL at the cell centre height DZ/2, roughness of the
-!> level-0 wall of the cell IC,JC under it) written as the gradient (U-G)/DZ times the cell's viscosity MUC (FDS gives the edge the stress directly and uses the ghost only for the
-!> gradient). G lies between -|U| (no slip) and |U|.
+!> Tangential ghost value G of a fine cell next to the ground, as VELOCITY_BC sets it for a WALL_MODEL_BC edge: G = SLIP_COEF*U with SLIP_COEF of WALL_MODEL at the cell centre height
+!> DZ/2 (roughness of the level-0 wall of column IC,JC). The ground stress is FINE_GROUND_STRESS's; the ghost feeds the gradients (WALE near-wall viscosity, advection). MUC is unused
+!> (a stress-matched ghost MUC*(U-G)/DZ = RHO*U_TAU**2 clipped to -|U| when MU was small, so the near-wall WALE MU stayed ~4x below stock over the burner).
 SUBROUTINE FDS_WALL_GHOST(U,RHO,TMP,MUC,DZ,IC,JC,G) BIND(C,NAME='fds_wall_ghost')
 USE TYPES, ONLY: SURFACE
 USE TURBULENCE, ONLY: WALL_MODEL
@@ -1282,16 +1282,14 @@ USE GLOBAL_CONSTANTS, ONLY: I_MAX_TEMP,MU_RSQMW_Z,RSQ_MW_Z
 REAL(C_DOUBLE), VALUE :: U,RHO,TMP,MUC,DZ
 INTEGER(C_INT), VALUE :: IC,JC
 REAL(C_DOUBLE), INTENT(OUT) :: G
-REAL(EB) :: SLIP,UTAU,YPLUS,NU,ROUGH,TAU,GM
+REAL(EB) :: SLIP,UTAU,YPLUS,NU,ROUGH
 INTEGER :: IW,I,J,ITMP
 ROUGH = 0._EB   ! roughness of the level-0 ground wall of global level-0 column IC,JC (any mesh, any rank: GROUND_ROUGH_INIT)
 IF (ALLOCATED(GROUGH)) THEN ; I = MAX(1,MIN(IC,SIZE(GROUGH,1))) ; J = MAX(1,MIN(JC,SIZE(GROUGH,2))) ; ROUGH = GROUGH(I,J) ; ENDIF
 ITMP = MIN(I_MAX_TEMP,NINT(TMP))
 NU = MU_RSQMW_Z(ITMP,1)/RSQ_MW_Z(1)/RHO
 CALL WALL_MODEL(SLIP,UTAU,YPLUS,NU,ROUGH,0.5_EB*DZ,ABS(U))
-TAU = RHO*UTAU**2
-GM = MAX(-ABS(U),MIN(ABS(U),ABS(U)-TAU*DZ/MAX(MUC,TINY(1._EB))))
-G = SIGN(1._EB,U)*GM
+G = SLIP*U   ! stock VELOCITY_BC (WALL_MODEL_BC, VEL_T = 0): VEL_GHOST = SLIP_COEF*VEL_GAS; the ground stress itself is FINE_GROUND_STRESS's
 END SUBROUTINE FDS_WALL_GHOST
 
 !> 1 if the case has a prevailing wind at the open boundaries (OPEN_WIND_BOUNDARY).
