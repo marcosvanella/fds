@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fine ground stress on a seam: the level-set ground case with one static level-1 patch run as several fine boxes (MAX_GRID_SIZE 8: seams across the
-# ground) and as one box (32), radiation off. A ground face shared by two boxes gets the same stress from both, computed from ghost-filled data, so
+# ground) and as one box (32), radiation and initial noise off. A ground face shared by two boxes gets the same stress from both, computed from ghost-filled data, so
 # the two layouts must agree: every device (c_devc.csv) within 1e-11 relative over STEPS steps. The case needs devices: pass the C064 case (vv-lsfine C064_1mesh.fds + &AMR); the default case has none and fails.
 # usage: run_ground_stress_seam_check.sh <fds_amr binary> [work-dir] [steps=6] [mpirun prefix, e.g. "mpirun -np 1"] [case=cases/levelset_tag_phi_ground.fds]
 set -u
@@ -8,6 +8,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); BIN=$(readlink -f "$1"); W=${2:-$PWD/ground
 rm -rf "$W"; mkdir -p "$W"
 for m in 8 32; do
   d=$W/m$m; mkdir -p $d; cp "$CASE" $d/c.fds; cp "$(dirname "$CASE")"/vegetation_model.txt $d/ 2>/dev/null
+  if grep -q '^&MISC' $d/c.fds; then grep -q 'NOISE' $d/c.fds || sed -i '0,/^&MISC/s//\&MISC NOISE=F,/' $d/c.fds; else echo "&MISC NOISE=F /" >> $d/c.fds; fi   # INITIAL_NOISE is drawn per fine box (e2c7779431): layout-dependent by design
   grep -q '^&RADI' $d/c.fds || echo "&RADI RADIATION=F /" >> $d/c.fds   # the radiation solve depends on the box layout by itself (Q_RADI)
   grep -q '^&AMR' $d/c.fds || sed -i '1a &AMR MAX_LEVEL=1, BLOCKING_FACTOR=2, MAX_GRID_SIZE=32 /' $d/c.fds
   (cd $d && $MPI "$BIN" c.fds --two-level-run --levels 2 --init-patch --patch 5 9 0 11 --blocking 2 --maxsize $m --regrid-every 1000000 --tag-phi --ls-fine --nofine 0 \
