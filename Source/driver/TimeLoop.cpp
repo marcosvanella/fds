@@ -2752,7 +2752,7 @@ struct TimeLoop::Impl {
         if (IP[9] > 0 || IP[25] > 0) for_levels([&](int) { each_local([&](int nm) { fds_k_comb(t, dt, nm); }); });   // main.f90 ~1096 (N_REACTIONS>0 .OR. INIT_HRRPUV): COMBUSTION_LOAD_BALANCED after VELOCITY_FLUX, before WALL_BC; every mesh of every level
         // WP1b / 7.13b: edge tables + vorticity/stress work arrays right after VELOCITY_FLUX (corrector); FDSTL_STAGES=<icyc>
         stage_scratch("c_vfluxE", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"DS", 3}, {"FVX", 3}, {"FVY", 3}, {"FVZ", 3}, {"ED_OMEGA", 2}, {"ED_TAU", 2}, {"CE_EDGE_INDEX", 4}});
-        if (IP[17] > 0) each_local([&](int nm) { fds_k_part(3, t, dt, nm); });
+        if (IP[17] > 0) for_levels([&](int) { each_local([&](int nm) { fds_k_part(3, t, dt, nm); }); });   // main.f90: corrector PARTICLE_MASS_ENERGY_TRANSFER, MOVE_PARTICLES on every mesh of every level
         if (IP[15]) { double d; fds_setup(7, "", &d); each_local([&](int nm) { fds_k_part(2, t, dt, nm); }); }
         if (IP[17] > 0) { double d; fds_setup(5, "", &d); }
         ++wall_counter;
