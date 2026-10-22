@@ -2604,6 +2604,24 @@ struct TimeLoop::Impl {
         ghost_report("pred_end");
         avg_down_vel(true);
         div_report("after predictor", true);
+        if (multi()) {   // predictor projection check of the fine levels (the gate's corrector check does not see a predictor-only error)
+            std::vector<fdsrt::ProjectionLevel> pv; std::vector<std::unique_ptr<amrex::iMultiFab>> sk(lc.size());
+            for (int l = 0; l < static_cast<int>(lc.size()); ++l) {
+                Fields& F = *lc[l].F; fdsrt::ProjectionLevel pl;
+                pl.geom = L.m_reg->level(l).geom;
+                pl.ref_ratio = l > 0 ? L.m_reg->level(l).ref_ratio_from_parent : amrex::IntVect(1);
+                pl.vel = {&F["US"], &F["VS"], &F["WS"]}; pl.D = &F["DS"];
+                const amrex::iMultiFab& sm = L.m_reg->side_data(l).mask(); const amrex::iMultiFab* cv = L.m_reg->covered_mask(l);
+                sk[l].reset(new amrex::iMultiFab(sm.boxArray(), sm.DistributionMap(), 1, 0));
+                for (amrex::MFIter mfi(*sk[l]); mfi.isValid(); ++mfi) {
+                    auto o = sk[l]->array(mfi); auto s0 = sm.const_array(mfi); amrex::Array4<const int> c; if (cv) c = cv->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { o(i, j, k) = (s0(i, j, k) != 0 || (cv && c(i, j, k) != 0)) ? 1 : 0; });
+                }
+                pl.covered = sk[l].get(); pv.push_back(pl);
+            }
+            std::vector<double> bl; fdsrt::composite_divergence_error(pv, &bl);
+            for (std::size_t l = 1; l < bl.size(); ++l) rec.pred_div_fine = std::max(rec.pred_div_fine, bl[l]);
+        }
         for_levels([&](int) { s_exchange(3, true); });
         for_levels([&](int) { s_after(3); });
         stage("pred_match", {"US", "WS"});
