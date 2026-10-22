@@ -185,6 +185,18 @@ SELECT_TURB: SELECT CASE (TURB_MODEL)
          IF (YF>YF_MAX-TWO_EPSILON_EB) THEN ; UP(:,JBP1,:)=0._EB ; VP(:,JBP1,:)=0._EB ; WP(:,JBP1,:)=0._EB ; ENDIF
          IF (ZS<ZS_MIN+TWO_EPSILON_EB) THEN ; UP(:,:,0)=0._EB ; VP(:,:,0)=0._EB ; WP(:,:,0)=0._EB ; ENDIF
          IF (ZF>ZF_MAX-TWO_EPSILON_EB) THEN ; UP(:,:,KBP1)=0._EB ; VP(:,:,KBP1)=0._EB ; WP(:,:,KBP1)=0._EB ; ENDIF
+         IF (ASSOCIATED(FINE_WALLS_PTR_PROC)) THEN   ! OPEN and MIRROR domain faces: the ghost cell takes the cell inside, as the wall loop above does on level 0
+            CALL FINE_WALLS_PTR_PROC(NM,1)
+            DO IW=1,N_INTERNAL_WALL_CELLS
+               WC=>WALL(IW)
+               IF (WC%BOUNDARY_TYPE/=OPEN_BOUNDARY .AND. WC%BOUNDARY_TYPE/=MIRROR_BOUNDARY) CYCLE
+               BC=>BOUNDARY_COORD(WC%BC_INDEX)
+               UP(BC%II,BC%JJ,BC%KK) = UP(BC%IIG,BC%JJG,BC%KKG)
+               VP(BC%II,BC%JJ,BC%KK) = VP(BC%IIG,BC%JJG,BC%KKG)
+               WP(BC%II,BC%JJ,BC%KK) = WP(BC%IIG,BC%JJG,BC%KKG)
+            ENDDO
+            CALL FINE_WALLS_PTR_PROC(NM,0)
+         ENDIF
       ENDIF
 #endif
 
