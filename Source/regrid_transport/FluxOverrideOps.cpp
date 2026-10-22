@@ -1,5 +1,6 @@
 // FluxOverrideOps.cpp: see FluxOverrideOps.H.
 #include "FluxOverrideOps.H"
+#include "../pressure_backend/FaceSync.H"
 
 #include <AMReX_MFIter.H>
 
@@ -51,6 +52,7 @@ std::vector<std::vector<FluxOverride>> build_flux_overrides(const amrex::BoxArra
         amrex::BoxArray cn_ba = amrex::convert(crse_ba, nodal);
         amrex::MultiFab cface(cn_ba, crse_dm, nscal, 0);
         cface.setVal(0.0);
+        pb::sync_faces_low_owner(aux, cg);   // a coarse face under a fine seam is in two aux boxes (copies equal only to round-off): one value before the copy
         cface.ParallelCopy(aux, 0, 0, nscal, 0, 0, cg.periodicity());
 
         auto covered = [&](amrex::IntVect p) {   // 1 covered, 0 not, -1 outside a non-periodic domain edge

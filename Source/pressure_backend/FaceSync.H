@@ -8,6 +8,8 @@ namespace pb {
 
 // The owned faces of a face MultiFab: a copy on its BoxArray with each box trimmed to the faces it owns (see below), so every face is in exactly one box.
 // An empty pointer for a cell-centred MultiFab. ParallelCopy from it is a single-source copy.
+// Every high face below the domain top is trimmed whether or not a neighbour box has it: as a copy SOURCE this needs mf to cover the domain (proper nesting;
+// level 0). sync_faces_low_owner below is safe on any level: a face no box owns keeps its value.
 inline std::unique_ptr<amrex::MultiFab> owned_faces(const amrex::MultiFab& mf, const amrex::Geometry& geom, bool high_owner = false)
 {
     const amrex::IntVect nod = mf.ixType().toIntVect();

@@ -52,14 +52,26 @@ void prolong_faces_level(const std::array<amrex::MultiFab*, 3>& fine, const std:
         amrex::BoxArray cb = amrex::convert(ccells, amrex::IntVect::TheDimensionVector(d));
         tmp[d].define(cb, fine[d]->DistributionMap(), 1, 0);
         tmp[d].setVal(0.0);
-        tmp[d].ParallelCopy(*pb::owned_faces(*crse[d], crse_geom), 0, 0, 1, 0, 0, crse_geom.periodicity());   // one source per coarse face (a seam or periodic face has a copy in each box)
+        // one source per coarse face (a seam or periodic face has a copy in each box). owned_faces trims every high face below the domain top, with or without a
+        // neighbour: it needs crse to cover the domain (the coarse level of a properly nested hierarchy; level 0 here), else such faces would be lost.
+        tmp[d].ParallelCopy(*pb::owned_faces(*crse[d], crse_geom), 0, 0, 1, 0, 0, crse_geom.periodicity());
     }
     for (amrex::MFIter mfi(*fine[0]); mfi.isValid(); ++mfi) {
         const amrex::Box cells = amrex::enclosedCells(mfi.validbox());
         prolong_faces_normal_linear({&tmp[0][mfi], &tmp[1][mfi], &tmp[2][mfi]}, {&(*fine[0])[mfi], &(*fine[1])[mfi], &(*fine[2])[mfi]}, cells, ratio);
     }
+    // old fine faces where the old level overlaps the new one: sync a copy first (each old seam or periodic face to its low-face owner's copy), so the copy has
+    // one value per face whichever old box it comes from. Not owned_faces here: the old level does not cover the domain, and a trimmed high face with no
+    // neighbour (the old coarse-fine boundary) would then be lost.
+    const amrex::Box fdom = amrex::refine(crse_geom.Domain(), ratio);
+    const amrex::Geometry fine_geom(fdom, crse_geom.ProbDomain(), crse_geom.Coord(), crse_geom.isPeriodic());
     for (int d = 0; d < 3; ++d)
-        if (old_fine[d]) fine[d]->ParallelCopy(*old_fine[d], 0, 0, 1, 0, 0, period);
+        if (old_fine[d]) {
+            amrex::MultiFab os(old_fine[d]->boxArray(), old_fine[d]->DistributionMap(), old_fine[d]->nComp(), 0);
+            amrex::MultiFab::Copy(os, *old_fine[d], 0, 0, old_fine[d]->nComp(), 0);
+            pb::sync_faces_low_owner(os, fine_geom);
+            fine[d]->ParallelCopy(os, 0, 0, 1, 0, 0, period);
+        }
 }
 
 void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const std::array<amrex::MultiFab*, 3>& crse, const amrex::IntVect& ratio, const amrex::Periodicity& period)
