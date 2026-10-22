@@ -92,6 +92,14 @@ void average_down_faces(const std::array<const amrex::MultiFab*, 3>& fine, const
             });
         }
         crse[d]->ParallelCopy(tmp, 0, 0, nc, 0, 0, period);   // period: also the other copy of a periodic domain face
+        // A face shared by two fine boxes is in both tmp boxes (two copies that can differ at round-off); ParallelCopy keeps the one copied last (local before received): rank
+        // dependent. Copy those faces again from the box that has them as its low face only (one source each); the domain's high end keeps its single copy.
+        const int top = crse[d]->boxArray().minimalBox().bigEnd(d);
+        amrex::BoxList bl;
+        for (int b = 0; b < static_cast<int>(cb.size()); ++b) { amrex::Box x = cb[b]; if (x.bigEnd(d) < top) x.growHi(d, -1); bl.push_back(x); }
+        amrex::MultiFab one(amrex::BoxArray(std::move(bl)), tmp.DistributionMap(), nc, 0);
+        for (amrex::MFIter mfi(one); mfi.isValid(); ++mfi) { auto o = one.array(mfi); const auto s = tmp.const_array(mfi); amrex::LoopOnCpu(mfi.validbox(), nc, [&](int i, int j, int k, int m) { o(i, j, k, m) = s(i, j, k, m); }); }
+        crse[d]->ParallelCopy(one, 0, 0, nc, 0, 0, period);
     }
 }
 
