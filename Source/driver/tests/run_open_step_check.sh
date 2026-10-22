@@ -4,7 +4,7 @@
 # Stock: the OPEN ghost cells take TMP_F/ZZ_F/RHO_F (wall.f90 INFLOW_OUTFLOW) and the velocity ghosts VELOCITY_BC of the open wall at every stage.
 # Pass: every gas DEVC (mass, mean T, velocity statistics, points near the open sides) of steps 1-10 within 1e-10 of the 1L one, relative to max(max|1L| over the run, 1e-12 x the
 # quantity's natural scale: 36.6 kg, 305 K, 1 m/s).
-# Known to FAIL until the fine OPEN velocity BC is the stock one (after the scalar ghosts: U near XMIN/top 1.7e-2 at step 1).
+# Known to FAIL: with the stock fine VELOCITY_BC (FWALL_EDGES) VMIN 1.4e-1 -> 6e-5; U1 near the upwind XMIN face stays 1.7e-2 at step 1 (OPEN wind inflow H, not the velocity BC).
 set -u
 BIN=$1; RUN=${2:-$PWD/open_step_run}; HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$RUN" && cd "$RUN" || exit 1
