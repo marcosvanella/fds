@@ -4651,12 +4651,19 @@ TYPE (MESH_TYPE), POINTER :: M2
 TYPE(WALL_TYPE), POINTER :: WC
 TYPE(EXTERNAL_WALL_TYPE), POINTER :: EWC
 TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+LOGICAL :: FINE_BOX
 
+#ifdef WITH_AMREX
+FINE_BOX = ASSOCIATED(MESH_OBJ)   ! FDS-AMReX: a fine box has no OMESH; its drag stays on its own gas (leaf rule)
+IF (FINE_BOX) THEN ; CALL POINT_TO_BOX(NM) ; ELSE ; CALL POINT_TO_MESH(NM) ; ENDIF
+#else
+FINE_BOX = .FALSE.
 CALL POINT_TO_MESH(NM)
+#endif
 
 ! Add area-weighted particle drag from neighboring meshes at interpolated boundaries.
 
-IF (NMESHES>1 .AND. CORRECTOR) THEN
+IF (NMESHES>1 .AND. CORRECTOR .AND. .NOT.FINE_BOX) THEN
 
    EXTERNAL_WALL_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS
 
@@ -4853,6 +4860,13 @@ PARTICLE_LOOP: DO IP=1,NLP
       IF (BC%X>XS .AND. BC%X<XF .AND. &
           BC%Y>YS .AND. BC%Y<YF .AND. &
           BC%Z>ZS .AND. BC%Z<ZF) CYCLE PARTICLE_LOOP
+
+#ifdef WITH_AMREX
+      IF (ASSOCIATED(MESH_OBJ)) THEN   ! FDS-AMReX: a fine box has no neighbor search; crossing a fine box face is not handled (backlog)
+         WRITE(LU_ERR,'(A,I0,A,3ES13.5)') 'fds_amr ERROR in REMOVE_PARTICLES: a particle left fine box ',NM,' at ',BC%X,BC%Y,BC%Z
+         ERROR STOP 1
+      ENDIF
+#endif
 
       ! Replace all other particles
 
