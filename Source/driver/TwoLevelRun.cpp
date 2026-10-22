@@ -744,7 +744,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
                     const auto a = mf.const_array(mfi);
                     for (int c = 0; c < mf.nComp(); ++c)
-                        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { std::fprintf(fp, "%s,%d,%d,%d,%d,%.17g\n", n, c, i, j, k, a(i, j, k, c)); });
+                        amrex::LoopOnCpu(std::getenv("FDSTL_LEVEL_CSV_GHOST") ? amrex::grow(mfi.validbox(), std::min(1, mf.nGrow())) & mfi.fabbox() : mfi.validbox(), [&](int i, int j, int k) { std::fprintf(fp, "%s,%d,%d,%d,%d,%.17g\n", n, c, i, j, k, a(i, j, k, c)); });
                 }
             }
             if (fp) std::fclose(fp);

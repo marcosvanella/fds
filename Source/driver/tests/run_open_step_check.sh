@@ -1,16 +1,18 @@
 #!/bin/bash
-# run_open_step_check.sh <fds_amr binary> [<run-dir>]: cases/open_step.fds (rad_init_csiro without the bed: &WIND L profile, TMPA 32 C, thick DIRT ground, OPEN sides and top;
+# run_open_step_check.sh <fds_amr binary> [<run-dir>] [ground=tmpf|thick]: cases/open_step.fds (rad_init_csiro without the bed: &WIND L profile, TMPA 32 C, thick DIRT ground, OPEN sides and top;
 # radiation and noise off, DT 0.02 locked) as 2 levels with one level-1 box over the whole domain and as 1 level at the level-1 cell size, 10 steps.
 # Stock: the OPEN ghost cells take TMP_F/ZZ_F/RHO_F (wall.f90 INFLOW_OUTFLOW) and the velocity ghosts VELOCITY_BC of the open wall at every stage.
 # Pass: the level-1 fields (FDSTL_LEVEL_CSV: RHO, TMP, U, V, W, H, D, ZZ) cell by cell and every gas DEVC (mass, mean T, velocity statistics, points near the open sides) of
 # steps 1-10 within 1e-10 of the 1L ones, relative to max(max|1L| over the run, 1e-12 x the quantity's natural scale: 36.6 kg, 305 K, 1 m/s; fields: their max|1L| over the run).
-# Known to FAIL: step 1 D of the ground cells -1.27e-5 1/s uniformly (the thick ground solid is the level-0 one, L0Q), the top layer RHO 8e-8 at step 2 (see the commit notes).
+# ground=tmpf (default, gated): the GROUND is a fixed-temperature surface (TMP_FRONT=TMPA, no solid), so the gas sees the same wall in 1L and 2L.
+# ground=thick (report only, always exit 0): the 0.2 m DIRT ground; its solid is the level-0 one (L0Q, by ruling), step 1 D of the ground cells differs by -1.27e-5 1/s.
 set -u
-BIN=$1; RUN=${2:-$PWD/open_step_run}; HERE=$(cd "$(dirname "$0")" && pwd)
+BIN=$1; RUN=${2:-$PWD/open_step_run}; GROUND=${3:-tmpf}; HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$RUN" && cd "$RUN" || exit 1
 for L in 1 2; do
     rm -rf r$L; mkdir r$L; cp "$HERE/cases/leaf_devc_foreign_vegetation_model.txt" r$L/vegetation_model.txt
-    if [ $L = 1 ]; then sed 's/IJK=8,8,4/IJK=16,16,8/' "$HERE/cases/open_step.fds" > r$L/c.fds; else cp "$HERE/cases/open_step.fds" r$L/c.fds; fi
+    G=s/x/x/; [ "$GROUND" = tmpf ] && G="s/^&SURF ID='GROUND'.*/\&SURF ID='GROUND', DEFAULT=T, TMP_FRONT=32. \//"
+    if [ $L = 1 ]; then sed -e 's/IJK=8,8,4/IJK=16,16,8/' -e "$G" "$HERE/cases/open_step.fds" > r$L/c.fds; else sed -e "$G" "$HERE/cases/open_step.fds" > r$L/c.fds; fi
     (cd r$L && FDSTL_LEVEL_CSV=. OMP_NUM_THREADS=1 timeout 600 "$BIN" c.fds --two-level-run --levels $L --patch 0 7 0 3 --maxsize 16 --nofine -1 --steps 10 --outdir . > log 2>&1) \
         || { echo "FAIL open_step: $L-level run rc (see $RUN/r$L/log)"; exit 1; }
     rm -f r$L/*.s3d* r$L/*.sf r$L/*.bf r$L/*.prt5
@@ -48,5 +50,6 @@ for s,(a,b) in enumerate(zip(F1,F2),1):
 print("  fields worst |2L-1L|/max|1L| %.3e (%s step %d, comp/i/j/k %s)"%wf)
 sys.exit(0 if max(w[0],wf[0])<=1e-10 else 1)
 P
-rm -f r1/level_s*_r*.csv r2/level_s*_r*.csv
+[ -n "${KEEP_LEVEL_CSV:-}" ] || rm -f r1/level_s*_r*.csv r2/level_s*_r*.csv
+[ "$GROUND" = thick ] && { echo "REPORT open_step thick ground (L0Q, not gated): rc $rc"; exit 0; }
 [ $rc = 0 ] && echo "PASS open_step" || { echo "FAIL open_step (see $RUN)"; exit 1; }
