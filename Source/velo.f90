@@ -1295,6 +1295,7 @@ DO D=1,2
                TAU = RW*DF*VH*HSF**2*VG*VT
             CASE DEFAULT ; CYCLE
          END SELECT
+         IF ((D==1 .AND. (I==0 .OR. I==IBAR)) .OR. (D==2 .AND. (J==0 .OR. J==JBAR))) CYCLE   ! box-boundary faces: set by the neighbour box or the coarse level (a stress here broke the composite mass balance)
          IF (D==1) THEN ; TXZ(I,J,0) = TAU + MUA*DWD ; ELSE ; TYZ(I,J,0) = TAU + MUA*DWD ; ENDIF
       ENDDO
    ENDDO
