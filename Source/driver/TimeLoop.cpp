@@ -3030,8 +3030,8 @@ struct TimeLoop::Impl {
             }
 #ifdef FDS_HAVE_FINE_LEVEL
         if (std::getenv("FDSTL_QCON") && multi()) {   // covered thick level-0 walls: fine energy committed to their solids vs energy the solids took (cumulative, J)
-            double e[2]; fds_l0q_sums(e); amrex::ParallelDescriptor::ReduceRealSum(e, 2);
-            amrex::Print() << std::setprecision(17) << "L0QCON step " << L.m_icyc << " fine " << e[0] << " solid " << e[1] << "\n";
+            double e[3]; fds_l0q_sums(e); amrex::ParallelDescriptor::ReduceRealSum(e, 3);
+            amrex::Print() << std::setprecision(17) << "L0QCON step " << L.m_icyc << " fine " << e[0] << " solid " << e[1] << " flushed " << e[2] << "\n";
         }
 #endif
         const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only

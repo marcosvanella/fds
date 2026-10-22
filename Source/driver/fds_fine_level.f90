@@ -46,6 +46,8 @@ TYPE FWALL_LEVEL_TYPE
 END TYPE
 TYPE(FWALL_LEVEL_TYPE), ALLOCATABLE, SAVE :: FWALL(:)
 INTEGER, ALLOCATABLE, SAVE :: LW_OFF(:),LW_LEV(:),LW_BOX(:),LW_W(:)   !< leaf walls grouped by level-0 owner mesh (CSR, built by REFRESH_LEAF): LEAF_WALL_COUNT/LEAF_WALL are O(1)
+REAL(EB), SAVE :: ORPHAN_E = 0._EB   !< ruling 2: Q_CON_F*AREA*DT of the leaf SOLID hidden walls without a level-0 wall (PNM = 0; no solid takes it), predictor stages
+INTEGER, SAVE :: ORPHAN_NMAX = 0     !< largest number of such walls of one box in one predictor stage (local)
 INTEGER, SAVE :: BUILD_VER=0,LEAF_VER=-1   !< bumped at every level create/destroy and wall build; LEAF is recomputed when they differ
 
 !> Global OBST and VENT lists (set once by the driver, fds_fine_set_lists): the per-level wall builder snaps them at the dx of each box (FDS rounding, as ObstMask.H).
@@ -677,7 +679,7 @@ DO P=1,2
    ENDDO
 ENDDO
 END BLOCK
-! covered level-0 SOLID walls (L0Q, conditions 1 and 2): gas cell under level 1; E is kept for walls still covered
+! covered level-0 SOLID walls (L0Q, conditions 1 and 2): gas cell under level 1; E is kept (an uncovered wall's next solid update takes it)
 BLOCK
 USE FDS_AMREX_HOOKS, ONLY: L0Q
 USE GLOBAL_CONSTANTS, ONLY: SOLID_BOUNDARY,MY_RANK,PROCESS
@@ -692,7 +694,6 @@ DO NM=1,NMESHES
       ASSOCIATE(BC=>M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX))
       L0Q(NM)%COV(IW) = M%WALL(IW)%BOUNDARY_TYPE==SOLID_BOUNDARY .AND. POINT_COVERED(1,M%XC(BC%IIG),M%YC(BC%JJG),M%ZC(BC%KKG))
       END ASSOCIATE
-      IF (.NOT.L0Q(NM)%COV(IW)) L0Q(NM)%E(IW) = 0._EB
    ENDDO
 ENDDO
 END BLOCK
@@ -724,12 +725,23 @@ DO LEV=1,SIZE(FWALL)
 ENDDO
 END SUBROUTINE FDS_FINE_L0Q_COMMIT
 
-!> Closure check (FDSTL_QCON): S(1) fine energy committed to the covered level-0 solids, S(2) energy the level-0 solids took (local; the caller sums over ranks)
+!> Closure check (FDSTL_QCON): S(1) fine energy committed to the covered level-0 solids, S(2) energy the level-0 solids took, S(3) the part of S(2) taken by walls a regrid uncovered (local; the caller sums over ranks)
 SUBROUTINE FDS_L0Q_SUMS(S) BIND(C,NAME='fds_l0q_sums')
-USE FDS_AMREX_HOOKS, ONLY: L0Q_GAS_CUM,L0Q_SOL_CUM
-REAL(C_DOUBLE), INTENT(OUT) :: S(2)
-S = (/L0Q_GAS_CUM,L0Q_SOL_CUM/)
+USE FDS_AMREX_HOOKS, ONLY: L0Q_GAS_CUM,L0Q_SOL_CUM,L0Q_FLUSH_CUM
+REAL(C_DOUBLE), INTENT(OUT) :: S(3)
+S = (/L0Q_GAS_CUM,L0Q_SOL_CUM,L0Q_FLUSH_CUM/)
 END SUBROUTINE FDS_L0Q_SUMS
+
+!> Ruling 2: fine SOLID faces without a level-0 wall: local largest per-box count in one predictor stage, and their energy (J). FDS_FINE_ORPHAN_OUT writes the reduced values to the .out.
+SUBROUTINE FDS_FINE_ORPHAN_SUMS(S) BIND(C,NAME='fds_fine_orphan_sums')
+REAL(C_DOUBLE), INTENT(OUT) :: S(2)
+S = (/REAL(ORPHAN_NMAX,EB),ORPHAN_E/)
+END SUBROUTINE FDS_FINE_ORPHAN_SUMS
+SUBROUTINE FDS_FINE_ORPHAN_OUT(S) BIND(C,NAME='fds_fine_orphan_out')
+USE GLOBAL_CONSTANTS, ONLY: LU_OUTPUT,MY_RANK
+REAL(C_DOUBLE), INTENT(IN) :: S(2)
+IF (MY_RANK==0) WRITE(LU_OUTPUT,'(/A,I0,A,ES24.16,A)') ' AMR fine walls without a level-0 wall: ',NINT(S(1)),' (largest per-box count in a predictor stage, summed over ranks), energy ',S(2),' J'
+END SUBROUTINE FDS_FINE_ORPHAN_OUT
 
 !> Env FDS_AMR_WALL_DIAG set: one WALLDIAG line per box at every wall build (wall counts per direction, for the tests).
 LOGICAL FUNCTION WALL_DIAG()
@@ -1637,11 +1649,11 @@ END SUBROUTINE FWALL_STATE
 !> STAGE 1 (predictor of a time step): a leaf wall over a covered thermally thick level-0 wall keeps Q_CON_F*AREA*DT in PQ (each pass overwrites it) for that solid.
 SUBROUTINE FDS_FINE_WALLS_QCON(NM,T,DT,STAGE) BIND(C,NAME='fds_fine_walls_qcon')
 USE FDS_AMREX_HOOKS, ONLY: L0Q_COVERED
-USE GLOBAL_CONSTANTS, ONLY: INITIALIZATION_PHASE,THERMALLY_THICK
+USE GLOBAL_CONSTANTS, ONLY: INITIALIZATION_PHASE,THERMALLY_THICK,SOLID_BOUNDARY
 USE TYPES, ONLY: SURFACE
 INTEGER(C_INT), VALUE :: NM,STAGE
 REAL(C_DOUBLE), VALUE :: T,DT
-INTEGER :: LEV,IB,IW
+INTEGER :: LEV,IB,IW,NORPH
 REAL(EB) :: RDN,AREA
 TYPE(MESH_TYPE), POINTER :: WM
 IF (.NOT.ALLOCATED(FWALL)) RETURN
@@ -1651,12 +1663,16 @@ DO LEV=1,SIZE(FWALL)
    IB = NM - FINE_LEVEL(LEV)%NM0
    IF (IB<1 .OR. IB>SIZE(FWALL(LEV)%B)) CYCLE
    IF (.NOT.ASSOCIATED(FWALL(LEV)%B(IB)%W)) RETURN
-   WM => FWALL(LEV)%B(IB)%W
+   WM => FWALL(LEV)%B(IB)%W ; NORPH = 0
    DO IW=1,FWALL(LEV)%B(IB)%NW
       IF (FWALL(LEV)%B(IB)%LEAF(IW)) THEN
          CALL FWALL_STATE(LEV,IB,IW,T)
          IF (STAGE==1 .AND. .NOT.INITIALIZATION_PHASE) THEN
             FWALL(LEV)%B(IB)%PQ(IW) = 0._EB
+            IF (FWALL(LEV)%B(IB)%PNM(IW)==0 .AND. WM%WALL(IW)%BOUNDARY_TYPE==SOLID_BOUNDARY) THEN   ! fine face without a level-0 wall (ruling 2: counted, not fixed)
+               CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),RDN,AREA)
+               ORPHAN_E = ORPHAN_E + WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%Q_CON_F*AREA*DT ; NORPH = NORPH+1
+            ENDIF
             IF (SURFACE(WM%WALL(IW)%SURF_INDEX)%THERMAL_BC_INDEX==THERMALLY_THICK .AND. L0Q_COVERED(FWALL(LEV)%B(IB)%PNM(IW),FWALL(LEV)%B(IB)%PIW(IW))) THEN
                CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),RDN,AREA)
                FWALL(LEV)%B(IB)%PQ(IW) = WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%Q_CON_F*AREA*DT
@@ -1666,6 +1682,7 @@ DO LEV=1,SIZE(FWALL)
          WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%Q_CON_F = 0._EB
       ENDIF
    ENDDO
+   ORPHAN_NMAX = MAX(ORPHAN_NMAX,NORPH)
    RETURN
 ENDDO
 END SUBROUTINE FDS_FINE_WALLS_QCON
