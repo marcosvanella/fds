@@ -754,7 +754,7 @@ USE GLOBAL_CONSTANTS, ONLY: LU_OUTPUT,MY_RANK
 REAL(C_DOUBLE), INTENT(IN) :: S(6)
 IF (MY_RANK/=0) RETURN
 WRITE(LU_OUTPUT,'(/A,I0,A,ES24.16,A)') ' AMR fine walls without a level-0 wall: ',NINT(S(1)),' (largest per-box count in a predictor stage, summed over ranks), energy ',S(2),' J'
-IF (S(3)>0._EB) WRITE(LU_OUTPUT,'(A,I0,A,ES24.16,A,ES24.16,A)') ' WARNING: AMR fine walls remapped to the nearest level-0 wall of the same surface: ',NINT(S(3)), &
+IF (S(3)>0._EB) WRITE(LU_OUTPUT,'(A,I0,A,ES24.16,A,ES24.16,A,ES24.16,A)') ' WARNING: AMR fine walls remapped to the nearest level-0 wall of the same surface: ',NINT(S(3)), &
    ' (largest per-box count in a predictor stage, summed over ranks), energy ',S(4),' J; level-0 ground convective energy ',S(5),' J (of |flux| ',S(6),' J)'
 END SUBROUTINE FDS_FINE_ORPHAN_OUT
 
