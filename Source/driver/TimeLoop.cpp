@@ -1335,7 +1335,7 @@ struct TimeLoop::Impl {
         int l = 1; for (; l < static_cast<int>(lc.size()); ++l) if (lc[l].lev == &lv) break;
         if (l >= static_cast<int>(lc.size())) return;
         Fields& F = *lc[l].F;
-        const char* un[3] = {"U", "V", "W"};
+        const char* un[3] = {bd_pred ? "U" : "US", bd_pred ? "V" : "VS", bd_pred ? "W" : "WS"};   // pres.f90: UU, HP => U, H (predictor), US, HS (corrector)
         const amrex::Box dom = lv.geom.Domain(); const int e = side ? dom.bigEnd(d) : dom.smallEnd(d);
         const amrex::IntVect sh = amrex::IntVect::TheDimensionVector(d);
         const bool wind = fds_open_wind() != 0 && !std::getenv("FDSTL_NOFINEWIND");
@@ -1343,15 +1343,14 @@ struct TimeLoop::Impl {
             amrex::Box slab = mfi.validbox();
             if (slab.smallEnd(d) > e || slab.bigEnd(d) < e) continue;
             slab.setSmall(d, e); slab.setBig(d, e);
-            auto a = v.array(mfi); const auto u = F[un[d]].const_array(mfi); const auto kr = F["KRES"].const_array(mfi); const auto h = F["H"].const_array(mfi);
+            auto a = v.array(mfi); const auto u = F[un[d]].const_array(mfi); const auto kr = F["KRES"].const_array(mfi); const auto h = F[bd_pred ? "H" : "HS"].const_array(mfi);
             amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
                 const double vn = side ? u(i + sh[0], j + sh[1], k + sh[2]) : u(i, j, k);
                 if (side ? vn > 0.0 : vn < 0.0) a(i, j, k) = kr(i, j, k);
-                else if (wind && d < 2) {   // inflow with a prevailing wind: pres.f90 H0 = H(inside) -+ 0.5/(dt RDXN) (U_WIND(z) - u) with the profile at the height of the fine cell (P_EXTERNAL = 0)
-                    const amrex::IntVect in = side ? amrex::IntVect(-sh[0], -sh[1], -sh[2]) : amrex::IntVect(0);
+                else if (wind && d < 2) {   // inflow with a prevailing wind: pres.f90 H0 = HP(boundary cell) -+ 0.5/(dt RDXN) (U_WIND(z) - u) with the profile at the height of the fine cell (P_EXTERNAL = 0)
                     double uw, vw, ww; fds_wind_at_height(L.m_t, (k + 0.5) * lv.geom.CellSize(2) + lv.geom.ProbLo(2), &uw, &vw, &ww);
                     const double sg = side ? -1.0 : 1.0;
-                    a(i, j, k) = h(i + in[0], j + in[1], k + in[2]) + sg * 0.5 / (L.m_dt * (1.0 / lv.geom.CellSize(d))) * ((d == 0 ? uw : vw) - vn);
+                    a(i, j, k) = h(i, j, k) + sg * 0.5 / (L.m_dt * (1.0 / lv.geom.CellSize(d))) * ((d == 0 ? uw : vw) - vn);
                 }
             });
         }
@@ -1462,6 +1461,7 @@ struct TimeLoop::Impl {
         if (fs != pb::Status::Ok) die(std::string("fold_boundary_data(composite): ") + pb::to_string(fs) + ": " + msg);
         bd_solved = std::move(owned);
     }
+    bool bd_pred = true;   // stage of the boundary data fine_outflow_dirichlet builds
     std::vector<std::array<std::unique_ptr<amrex::MultiFab>, 6>> bd_solved;   // per level: the boundary data of the last composite fold (the fine OPEN-face H ghosts use the same g)
 
     // PRHS of the level-0 boxes (as FDS computed it, fds_p_rhs) into `rhs`, and the check that the Poisson boundary data are homogeneous (every solve)
@@ -1708,6 +1708,7 @@ struct TimeLoop::Impl {
     // Composite pressure solve of the stage: PRHS of every level, one solve, H (pred) / HS (corrector) of every level, the face gradient at the interface into the fine ghost cells.
     void solve_composite(bool pred, double dt)
     {
+        bd_pred = pred;
         ensure_comp();
         LevelRegistry& reg = *L.m_reg;
         const int nl = static_cast<int>(lc.size());
