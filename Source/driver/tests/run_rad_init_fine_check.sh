@@ -4,7 +4,7 @@
 # size (IJK doubled). FDSTL_T0RAD prints sum, norm1, min, max of QR and D of the finest level at t=0, after the initial projection.
 # Pass: the 2-level QR line equals the 1-level one digit for digit, and the negative control (FDSTL_NO_RAD_INIT, no initial iterations on level 1) differs.
 # Black walls: a fine wall takes its radiative state from the level-0 wall (fds_fine_walls_rad_xchg), whose reflected part comes from the coarse solve; with reflecting
-# walls the 2-level QR is ~5e-6 off (relative), see NOTE_fine_init_rad.md. D is printed for information: the hot block lies on the floor and a fine box has no wall heat flux in DIVERGENCE_PART_1 (see run_t0_state_check.sh).
+# walls the 2-level QR is ~5e-6 off (relative), see NOTE_fine_init_rad.md. D is printed for information (checked by run_t0_state_check.sh).
 set -u
 BIN=$1; RUN=${2:-$PWD/rad_init_fine_run}; SRC=$(cd "$(dirname "$0")" && pwd)/cases/rad_init_fine.fds
 mkdir -p "$RUN" && cd "$RUN" || exit 1

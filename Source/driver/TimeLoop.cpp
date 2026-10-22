@@ -73,6 +73,8 @@ void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* 
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt, int nm);
 void fds_fine_t0_profile(int nm, double* p0);   // fds_fine_level.f90
+void fds_fine_walls_qcon(int nm, double t);     // fds_fine_level.f90
+void fds_walls_qcon_sums(int lev, double* s);   // fds_fine_level.f90: wall Q_CON energy check (FDSTL_QCON)
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
 void fds_k_vcorr(double t, double dt, int nm);
 void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);
@@ -2533,12 +2535,16 @@ struct TimeLoop::Impl {
         state(false, false);
         zone_save();
         fds_p_init_div();
-        for (int l = 1; l < static_cast<int>(lc.size()); ++l) { select(l); s_div1(); }
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) { select(l); each_local([&](int nm) { fds_fine_walls_qcon(nm, L.m_t); }); s_div1(); }   // the last initial WALL_BC: hidden-wall Q_CON_F
         select(0);
         zone_restore();
     }
     void rad_t0_report()
     {
+        for (int l = 0; l < static_cast<int>(lc.size()); ++l) {   // leaf wall Q_CON, solid side vs gas side (run_wall_qcon_check.sh)
+            double q[3]; fds_walls_qcon_sums(l, q); amrex::ParallelDescriptor::ReduceRealSum(q, 3);
+            amrex::Print() << std::setprecision(17) << "T0QCON L" << l << " solid " << q[0] << " gas " << q[1] << " nonleaf " << q[2] << "\n";
+        }
         LevelCtx& f = lc.back();
         amrex::MultiFab& q = (*f.F)["QR"];
         if (lc.size() > 1) for (amrex::MFIter mfi(q); mfi.isValid(); ++mfi) fds_p_get_qr(f.fds0 + mfi.index() + 1, q[mfi].dataPtr(), static_cast<long>(q[mfi].box().numPts()));
@@ -3012,6 +3018,11 @@ struct TimeLoop::Impl {
         e_old = e; have_e_old = true;
         // Q_CONV, Q_COND, Q_DIFF (leaf-only, any number of levels): the level-0 walls under level 1 are removed (level 1 call, q[3..5]); every hidden wall whose gas cell is not covered by
         // the next level is added at its own level, each location at the finest level covering it
+        if (std::getenv("FDSTL_QCON"))   // leaf wall Q_CON of the step's last WALL_BC, solid side vs gas side per level (run_wall_qcon_check.sh), before the HRR sums below recompute it
+            for (int l = 0; l < static_cast<int>(lc.size()); ++l) {
+                double q[3]; fds_walls_qcon_sums(l, q); amrex::ParallelDescriptor::ReduceRealSum(q, 3);
+                amrex::Print() << std::setprecision(17) << "QCON step " << L.m_icyc << " L" << l << " solid " << q[0] << " gas " << q[1] << " nonleaf " << q[2] << "\n";
+            }
         const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only
         qopen_adj = 0.0;
         for (int lev = 1; lev < static_cast<int>(lc.size()); ++lev) {

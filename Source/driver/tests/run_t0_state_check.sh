@@ -1,11 +1,10 @@
 #!/bin/bash
 # run_t0_state_check.sh <fds_amr binary> [<run-dir>]: t=0 divergence D of a fine level (TwoLevelRun t0_stock_rho_levels / t0_divergence_levels).
-# cases/t0_state.fds (hot &INIT block off the walls, open top) as 2 levels with level 1 over the whole domain, and as 1 level at the level-1 cell size (IJK doubled),
+# cases/t0_state.fds (hot &INIT block on the floor, open top) as 2 levels with level 1 over the whole domain, and as 1 level at the level-1 cell size (IJK doubled),
 # with radiation off and on. D needs the stock start state of the fine level: RHO from its own P_0 profile, U = U_WIND plus INITIAL_NOISE, US = U before the noise,
 # MU from COMPUTE_VISCOSITY before the time-step ghost rules, then the initial radiation and DIVERGENCE_PART_1(T_BEGIN) in corrector form.
 # Pass: sum, norm1, min, max of the level-1 D (FDSTL_T0RAD) within 1e-12 of max|D| of the 1-level ones (bitwise apart from summation order).
-# The hot block is kept off the walls: a fine box has no wall cells (hidden walls), so its DIVERGENCE_PART_1 has no wall heat flux term (Q_CON_F) and hot gas on a wall
-# gives a different D (block on the floor: -0.0122 in the floor cells under it).
+# The hot block lies on the floor: the floor cells under it need the gas-side wall flux of the hidden fine walls (FDS_FINE_WALLS_QCON; without it -0.0122 there).
 set -u
 BIN=$1; RUN=${2:-$PWD/t0_state_run}; SRC=$(cd "$(dirname "$0")" && pwd)/cases/t0_state.fds
 mkdir -p "$RUN" && cd "$RUN" || exit 1
