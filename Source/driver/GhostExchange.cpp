@@ -84,7 +84,13 @@ void mirror_domain_edges(const Level& lev, amrex::MultiFab& mf, int nodal_dir, c
                     slab.setSmall(d, side == 0 ? edge - g : edge + g); slab.setBig(d, slab.smallEnd(d));
                     amrex::IntVect sh(0, 0, 0);
                     sh[d] = side == 0 ? g : -g;
-                    amrex::LoopOnCpu(slab, nc, [&](int i, int j, int k, int n) { a(i, j, k, n) = s * a(i + sh[0], j + sh[1], k + sh[2], n); });
+                    // a face component on a domain face of its own direction (nodal_dir) is an edge value there: stock's wall loop sets no ghost of it, VELOCITY_BC's edge loop does
+                    // (and keeps it until its next call), so the mirror leaves it
+                    const bool edge_n = !normal && nodal_dir >= 0 && !lev.geom.isPeriodic(nodal_dir);
+                    amrex::LoopOnCpu(slab, nc, [&](int i, int j, int k, int n) {
+                        if (edge_n) { const int p = nodal_dir == 0 ? i : nodal_dir == 1 ? j : k; if (p == dom.smallEnd(nodal_dir) || p == dom.bigEnd(nodal_dir)) return; }
+                        a(i, j, k, n) = s * a(i + sh[0], j + sh[1], k + sh[2], n);
+                    });
                 }
             }
         }
