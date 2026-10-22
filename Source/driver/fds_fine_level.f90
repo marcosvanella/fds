@@ -1935,14 +1935,18 @@ B1X%U_NORMAL_S = P(1) ; B1X%U_NORMAL = P(2) ; B1X%RHO_F = P(4) ; B1X%TMP_F = P(5
 B1X%T_IGN = P(7+2*NZ) ; B1X%Q_RAD_IN = P(8+2*NZ) ; B1X%RHO_D_F(1:NZ) = P(9+2*NZ:8+3*NZ)
 END SUBROUTINE PS_TO_B1
 
-!> Near-wall gas state of a wall (NEAR_SURFACE_GAS_VARIABLES for a wall without VEL_T or TMP_GAS_FRONT), from the end-of-step fields of the box the pointers point to.
+!> Near-wall gas state of a wall (NEAR_SURFACE_GAS_VARIABLES for a wall without VEL_T or TMP_GAS_FRONT), from the fields of the stage (predictor: US, RHOS, ZZS) of the box the pointers point to.
 SUBROUTINE GAS_VARIABLES(BCX,B1X)
 USE TYPES, ONLY: BOUNDARY_COORD_TYPE,BOUNDARY_PROP1_TYPE
-USE MESH_POINTERS, ONLY: UP=>U,VP=>V,WP=>W,ZZM=>ZZ,TMPM=>TMP,RHOM=>RHO
+USE MESH_POINTERS, ONLY: U,V,W,US,VS,WS,ZZ,ZZS,TMPM=>TMP,RHO,RHOS
 TYPE(BOUNDARY_COORD_TYPE), INTENT(IN) :: BCX
 TYPE(BOUNDARY_PROP1_TYPE), INTENT(INOUT) :: B1X
 REAL(EB) :: UB,VB,WB
+REAL(EB), POINTER, DIMENSION(:,:,:) :: UP,VP,WP,RHOM
+REAL(EB), POINTER, DIMENSION(:,:,:,:) :: ZZM
 INTEGER :: I,J,K
+IF (FWALL_STAGE==1) THEN ; UP=>US ; VP=>VS ; WP=>WS ; RHOM=>RHOS ; ZZM=>ZZS   ! wall.f90 WALL_BC: the predictor's attribute (UU=>US, RHOP=>RHOS, ZZP=>ZZS)
+ELSE ; UP=>U ; VP=>V ; WP=>W ; RHOM=>RHO ; ZZM=>ZZ ; ENDIF
 I = BCX%IIG ; J = BCX%JJG ; K = BCX%KKG
 UB = 0.5_EB*(UP(I,J,K)+UP(I-1,J,K)) ; VB = 0.5_EB*(VP(I,J,K)+VP(I,J-1,K)) ; WB = 0.5_EB*(WP(I,J,K)+WP(I,J,K-1))
 SELECT CASE(ABS(BCX%IOR))
