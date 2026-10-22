@@ -1404,8 +1404,16 @@ struct TimeLoop::Impl {
     void dirichlet_fine_h_ghosts(const Level& lv, amrex::MultiFab& H)
     {
         std::array<std::unique_ptr<amrex::MultiFab>, 6> l0bd, own;
-        pack_l0_boundary_mfs(l0bd);
-        const pb::BoundaryData bd = make_bd_for_level(lv, l0bd, own);
+        int lk = 0; for (int l = 1; l < static_cast<int>(lc.size()); ++l) if (lc[l].lev == &lv) lk = l;
+        pb::BoundaryData bd;
+        bool same = lk > 0 && lk < static_cast<int>(bd_solved.size());
+        for (int f = 0; same && f < 6; ++f) if (static_cast<pb::BC>(bc_type[f]) == pb::BC::Dirichlet && (!bd_solved[lk][f] || bd_solved[lk][f]->boxArray() != H.boxArray() || bd_solved[lk][f]->DistributionMap() != H.DistributionMap())) same = false;
+        if (same) {   // the g the solve folded in: fine_outflow_dirichlet reads H, which the predictor solve has overwritten since
+            for (int f = 0; f < 6; ++f) bd.value[f] = bd_solved[lk][f].get();
+        } else {
+            pack_l0_boundary_mfs(l0bd);
+            bd = make_bd_for_level(lv, l0bd, own);
+        }
         const amrex::Box dom = lv.geom.Domain();
         for (int f = 0; f < 6; ++f) {
             if (static_cast<pb::BC>(bc_type[f]) != pb::BC::Dirichlet) continue;
@@ -1451,8 +1459,9 @@ struct TimeLoop::Impl {
         std::string msg;
         const pb::Status fs = pb::fold_boundary_data(p, bds, rhs_levels, &msg);
         if (fs != pb::Status::Ok) die(std::string("fold_boundary_data(composite): ") + pb::to_string(fs) + ": " + msg);
-        (void)owned;
+        bd_solved = std::move(owned);
     }
+    std::vector<std::array<std::unique_ptr<amrex::MultiFab>, 6>> bd_solved;   // per level: the boundary data of the last composite fold (the fine OPEN-face H ghosts use the same g)
 
     // PRHS of the level-0 boxes (as FDS computed it, fds_p_rhs) into `rhs`, and the check that the Poisson boundary data are homogeneous (every solve)
     void level0_rhs_and_check()
