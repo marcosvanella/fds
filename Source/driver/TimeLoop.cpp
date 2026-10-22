@@ -72,6 +72,7 @@ int fds_k_rad_init(int nm, int iter);   // main.f90 ~599 initial radiation itera
 void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* w_ijk, const int* w_nic, const int* s_nm, const int* s_ijk, const int* s_loc, double** ils, double** ilr, int* nra, int* nsb);   // fds_kernels.f90
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt, int nm);
+void fds_fine_t0_profile(int nm, double* p0);   // fds_fine_level.f90
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
 void fds_k_vcorr(double t, double dt, int nm);
 void fds_k_consts(double* tend, double* dtfill, double* dtmin, double* dt0, int* nzone);
@@ -2500,6 +2501,42 @@ struct TimeLoop::Impl {
             }
         select(0);
     }
+    // init.f90 on a level bound after the set-up: its own background profile and RHO = RHOS = P_0(K)/(TMP*RSUM) (TMP, ZZ as the level holds them), not the prolonged RHO
+    void t0_stock_rho_levels()
+    {
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+            Fields& F = *lc[l].F;
+            amrex::MultiFab& rho = F["RHO"]; amrex::MultiFab& rhos = F["RHOS"];
+            for (amrex::MFIter mfi(rho); mfi.isValid(); ++mfi) {
+                const amrex::Box vb = mfi.validbox();
+                std::vector<double> p0(vb.length(2) + 2);
+                fds_fine_t0_profile(lc[l].fds0 + mfi.index() + 1, p0.data());
+                auto r = rho.array(mfi); auto rs = rhos.array(mfi); const auto t = F["TMP"].const_array(mfi); const auto rsum = F["RSUM"].const_array(mfi);
+                amrex::LoopOnCpu(vb, [&](int i, int j, int k) { r(i, j, k) = p0[k - vb.smallEnd(2) + 1] / (t(i, j, k) * rsum(i, j, k)); rs(i, j, k) = r(i, j, k); });
+            }
+            F.fill_ghosts("RHO"); F.fill_ghosts("RHOS");
+        }
+        // main.f90 COMPUTE_VISCOSITY after INITIAL_NOISE and the mesh exchange, before any ghost rule of the time step: the domain-edge ghosts hold the init.f90 values
+        state(false, false);
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+            Fields& F = *lc[l].F;
+            for (const char* v : {"U", "V", "W"}) F[v].FillBoundary(lc[l].lev->geom.periodicity());
+            select(l); each_local([&](int nm) { fds_k_visc(nm, 0); });
+        }
+        select(0);
+    }
+    // main.f90 before MAIN_LOOP: COMPUTE_VISCOSITY, then (after the initial radiation iterations) INITIALIZE_DIVERGENCE_INTEGRALS and DIVERGENCE_PART_1(T_BEGIN) in corrector form:
+    // the t=0 D of every level made after the set-up, from its own initial state (level 0 had it in FDS_SETUP)
+    void t0_divergence_levels()
+    {
+        if (lc.size() < 2) return;
+        state(false, false);
+        zone_save();
+        fds_p_init_div();
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) { select(l); s_div1(); }
+        select(0);
+        zone_restore();
+    }
     void rad_t0_report()
     {
         LevelCtx& f = lc.back();
@@ -3278,6 +3315,8 @@ long TimeLoop::clip_cells(int n, int l) const
 }
 void TimeLoop::prime_levels() { m->prime_levels(); m->energy_snapshot(); }
 void TimeLoop::rad_init_levels() { m->rad_init_levels(); }
+void TimeLoop::t0_divergence_levels() { m->t0_divergence_levels(); }
+void TimeLoop::t0_stock_rho_levels() { m->t0_stock_rho_levels(); }
 void TimeLoop::rad_t0_report() { m->rad_t0_report(); }
 void TimeLoop::zero_closed_wall_normal() { m->zero_closed_wall_normal(); }
 const int* TimeLoop::pressure_bc() const { return m->bc_type; }

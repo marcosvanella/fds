@@ -141,6 +141,8 @@ public:
     const CompositeReport& composite_report() const;
     void pressure_csv_div(int step, const std::vector<double>& div_by_level);   // P2 CSV: the caller's max|div u - D| per level after the step
     void prime_levels();
+    void t0_stock_rho_levels();    // init.f90 background profile and RHO = P_0/(TMP*RSUM) on the levels bound after the set-up
+    void t0_divergence_levels();   // main.f90 DIVERGENCE_PART_1(T_BEGIN) on the levels bound after the set-up
     void rad_init_levels();   // main.f90 ~599 INITIAL_RADIATION_ITERATIONS on the levels bound after the set-up (level 0 had them in FDS_SETUP)
     void rad_t0_report();     // FDSTL_T0RAD: QR and D of the finest bound level (run_rad_init_fine_check.sh)
     // Zero normal velocity on Neumann (INERT/MIRROR) domain faces of every bound level. Call before the initial projection.

@@ -33,6 +33,7 @@ extern "C" void fds_fine_set_bed();
 extern "C" int fds_open_wind();
 extern "C" double fds_dt_default(double cs);
 extern "C" double fds_h_init();
+extern "C" int fds_noise_rn(int nseed, double cs, int n, double* buf);   // fds_fine_level.f90
 extern "C" void fds_wind_at_height(double t, double z, double* u, double* v, double* w);   // fds_fine_level.f90
 extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR and burning area over leaf walls, r[6] (diagnostic)
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
@@ -549,13 +550,14 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     core.set_force_tag_function(false);
     probe("after regrid_dynamic");
-    const bool stock_ic = fds_open_wind() != 0;   // every level's initial velocity is the stock one (set below), none interpolated
-    if (stock_ic) {   // init.f90: U(:,:,K) = U_WIND(K) at the cell height of each mesh; a fine level is set as stock sets its own mesh, not prolonged from level 0
+    const bool stock_ic = true;   // every level's initial velocity is the stock one (set below; init.f90 always takes U_WIND(K), U0 without a wind), none interpolated
+    {   // init.f90: U(:,:,K) = U_WIND(K) at the cell height of each mesh; a fine level is set as stock sets its own mesh, not prolonged from level 0
         for (int l = 1; l <= core.finestLevel(); ++l) {
             const amrex::Geometry& g = core.Geom(l);
-            const char* vn[3] = {"U", "V", "W"};
-            for (int d = 0; d < 3; ++d) {
-                amrex::MultiFab& mf = reg.fields(l)[vn[d]];
+            const char* vn[6] = {"U", "V", "W", "US", "VS", "WS"};   // init.f90 US = U before INITIAL_NOISE: the estimate keeps the noise-free profile
+            for (int n = 0; n < 6; ++n) {
+                const int d = n % 3;
+                amrex::MultiFab& mf = reg.fields(l)[vn[n]];
                 for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
                     auto a = mf.array(mfi);
                     amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
@@ -563,6 +565,25 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                         a(i, j, k) = w[d];
                     });
                 }
+            }
+            // main.f90 INITIAL_NOISE on every fine box as on a mesh of that number (its index in the level): same seed, wasted calls and loop order as init.f90
+            const amrex::Real* h = g.CellSize(); const double cs = std::cbrt(h[0] * h[1] * h[2]);
+            amrex::MultiFab& U = reg.fields(l)["U"]; amrex::MultiFab& V = reg.fields(l)["V"]; amrex::MultiFab& W = reg.fields(l)["W"];
+            for (amrex::MFIter mfi(reg.fields(l)["RHO"]); mfi.isValid(); ++mfi) {
+                const amrex::Box b = mfi.validbox(); const int i0 = b.smallEnd(0), j0 = b.smallEnd(1), k0 = b.smallEnd(2);
+                const int ib = b.length(0), jb = b.length(1), kb = b.length(2);
+                const int n = ib * (jb - 1) * (kb - 1) + (ib - 1) * jb * (kb - 1) + (ib - 1) * (jb - 1) * kb;
+                std::vector<double> rn(std::max(n, 1));
+                if (!fds_noise_rn(mfi.index() + 1, cs, n, rn.data())) continue;
+                auto u = U.array(mfi); auto v = V.array(mfi); auto w = W.array(mfi);
+                const double rdx = 1.0 / h[0], rdy = 1.0 / h[1], rdz = 1.0 / h[2];
+                int q = 0;   // FDS face index F -> F + lo, cell index C -> C - 1 + lo
+                for (int K = 1; K <= kb - 1; ++K) for (int J = 1; J <= jb - 1; ++J) for (int I = 1; I <= ib; ++I) { const double r = rn[q++];
+                    w(I - 1 + i0, J - 1 + j0, K + k0) -= r * rdy; w(I - 1 + i0, J + j0, K + k0) += r * rdy; v(I - 1 + i0, J + j0, K - 1 + k0) += r * rdz; v(I - 1 + i0, J + j0, K + k0) -= r * rdz; }
+                for (int K = 1; K <= kb - 1; ++K) for (int J = 1; J <= jb; ++J) for (int I = 1; I <= ib - 1; ++I) { const double r = rn[q++];
+                    w(I - 1 + i0, J - 1 + j0, K + k0) -= r * rdx; w(I + i0, J - 1 + j0, K + k0) += r * rdx; u(I + i0, J - 1 + j0, K - 1 + k0) += r * rdz; u(I + i0, J - 1 + j0, K + k0) -= r * rdz; }
+                for (int K = 1; K <= kb; ++K) for (int J = 1; J <= jb - 1; ++J) for (int I = 1; I <= ib - 1; ++I) { const double r = rn[q++];
+                    v(I - 1 + i0, J + j0, K - 1 + k0) -= r * rdx; v(I + i0, J + j0, K - 1 + k0) += r * rdx; u(I + i0, J - 1 + j0, K - 1 + k0) += r * rdy; u(I + i0, J + j0, K - 1 + k0) -= r * rdy; }
             }
         }
     }
@@ -632,8 +653,10 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         amrex::Print() << tag << ": starting dt " << dt_start << " (cell size " << cs << ")\n";
     }
     loop.set_state(0.0, dt_start, 0);
+    loop.t0_stock_rho_levels();
     loop.prime_levels();
     loop.rad_init_levels();
+    loop.t0_divergence_levels();   // the fine levels' t=0 D the stock way, after their initial radiation (not prolonged from level 0)
     probe("after second prime");
     if (std::getenv("FDSTL_TLDIAG")) {
         for (int l = 0; l < nl; ++l)
