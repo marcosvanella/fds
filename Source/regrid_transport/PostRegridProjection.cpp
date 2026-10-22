@@ -1,5 +1,6 @@
 // PostRegridProjection.cpp: see PostRegridProjection.H.
 #include "PostRegridProjection.H"
+#include "../pressure_backend/FaceSync.H"
 
 #include <AMReX_ParallelDescriptor.H>
 
@@ -52,8 +53,10 @@ double divergence_residual(const ProjectionLevel& L, amrex::MultiFab& out, doubl
 
 void average_down_velocity(const std::vector<ProjectionLevel>& levels)
 {
-    for (int l = static_cast<int>(levels.size()) - 1; l >= 1; --l)
+    for (int l = static_cast<int>(levels.size()) - 1; l >= 1; --l) {
+        for (int d = 0; d < 3; ++d) pb::sync_faces_low_owner(*levels[l].vel[d], levels[l].geom);   // one copy per shared fine face before the average-down
         average_down_faces({levels[l].vel[0], levels[l].vel[1], levels[l].vel[2]}, {levels[l - 1].vel[0], levels[l - 1].vel[1], levels[l - 1].vel[2]}, levels[l].ref_ratio, levels[l - 1].geom.periodicity());
+    }
 }
 
 double composite_divergence_error(const std::vector<ProjectionLevel>& levels, std::vector<double>* by_level)

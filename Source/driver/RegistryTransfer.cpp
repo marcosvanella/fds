@@ -1,4 +1,5 @@
 // RegistryTransfer.cpp: see RegistryTransfer.H.
+#include "../pressure_backend/FaceSync.H"
 #include "RegistryTransfer.H"
 
 #include <AMReX_MultiFabUtil.H>
@@ -171,8 +172,10 @@ void RegistryTransfer::hierarchy_done(bool initial)
             });
         }
         for (int d = 0; d < 3; ++d)
-            for (int s = 0; s < 2; ++s)
+            for (int s = 0; s < 2; ++s) {
+                pb::sync_faces_low_owner(Ff[kFace[d][s]], lf.geom);   // one copy per shared fine face
                 amrex::average_down_faces(Ff[kFace[d][s]], Fc[kFace[d][s]], lf.ref_ratio_from_parent, lc.geom);
+            }
     }
     for (int l = 0; l < m_reg.num_levels(); ++l) {
         if (!m_reg.has_level(l)) continue;

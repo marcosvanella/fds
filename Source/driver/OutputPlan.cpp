@@ -1,4 +1,5 @@
 // OutputPlan.cpp: see OutputPlan.H. Keep the fill path short: COPY from the matching compute level, average_down one finer when present, OverrideSync on faces.
+#include "../pressure_backend/FaceSync.H"
 #include "OutputPlan.H"
 
 #include <AMReX_MultiFabUtil.H>
@@ -147,7 +148,7 @@ void OutputPlan::fill(const LevelRegistry& reg)
             work.ParallelCopy(mf, 0, 0, 1, 0, 0);
             if (g.level == 0 && nl > 1 && reg.fields(1).has(m_o.face_names[d])) {
                 amrex::MultiFab& ff = const_cast<Fields&>(reg.fields(1))[m_o.face_names[d]];
-                ff.OverrideSync(reg.level(1).geom.periodicity());
+                pb::sync_faces_low_owner(ff, reg.level(1).geom);   // low-face owner, as before every average-down
                 amrex::average_down_faces(ff, work, reg.level(1).ref_ratio_from_parent, ls.geom);
             }
             g.face[d]->ParallelCopy(work, 0, 0, 1, 0, 0);

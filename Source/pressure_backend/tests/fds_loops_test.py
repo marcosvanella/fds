@@ -169,7 +169,7 @@ def main():
         exe = os.path.join(a.work, "ref_loops")
         # D-079: Intel ifx/ifort reject GNU-only -ffp-contract=off/-fno-fast-math; use -fp-model=precise there.
         fc_base = os.path.basename(a.fortran)
-        if "ifx" in fc_base or "ifort" in fc_base:
+        if fc_base in ("ifx", "ifort", "mpiifx", "mpiifort"):   # exact names: "mpifort" (a GNU wrapper) contains "ifort"
             fcflags = ["-O2", "-fp-model=precise"]
         else:
             fcflags = ["-O2", "-ffp-contract=off", "-fno-fast-math"]
