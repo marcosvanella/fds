@@ -549,7 +549,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     core.set_force_tag_function(false);
     probe("after regrid_dynamic");
-    if (fds_open_wind() != 0) {   // init.f90: U(:,:,K) = U_WIND(K) at the cell height of each mesh; a fine level is set as stock sets its own mesh, not prolonged from level 0
+    const bool stock_ic = fds_open_wind() != 0;   // every level's initial velocity is the stock one (set below), none interpolated
+    if (stock_ic) {   // init.f90: U(:,:,K) = U_WIND(K) at the cell height of each mesh; a fine level is set as stock sets its own mesh, not prolonged from level 0
         for (int l = 1; l <= core.finestLevel(); ++l) {
             const amrex::Geometry& g = core.Geom(l);
             const char* vn[3] = {"U", "V", "W"};
@@ -644,7 +645,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     {
         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl);
         fdsrt::ProjectionOptions po = pst.options;
-        po.enabled = (o.projection != "OFF");
+        po.enabled = o.projection == "ON" || (o.projection == "AUTO" && !stock_ic);   // AUTO: the start state is stock's, so project only when a level's initial velocity is interpolated
         loop.zero_closed_wall_normal();   // fine faces prolonged onto INERT/MIRROR, then the projection
         if (po.enabled) pst.before(lv);   // OFF: leave the level-0 IC as FDS set it (zeroing U alone, without a projection or US, breaks L0 mass)
         const fdsrt::ProjectionReport pr = fdsrt::project_after_regrid(lv, &solver, po);
