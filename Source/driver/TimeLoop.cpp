@@ -62,6 +62,7 @@ long fds_k_part_stash(int nm, long nb, double* buf);   // W8 (PV-9): particle re
 void fds_k_part_place(int nm, int nr, const double* buf);
 void fds_k_part_deposit(int nm, double sgn);
 void fds_k_part_wall(int on);
+void fds_k_part_fvd(int nm, int dir, int mode, double* buf);   // fine box particle drag FVX_D/FVY_D/FVZ_D get (0) / set (1)
 int fds_k_part_list(int nm, int n, double* buf);   // W2: remove level-0 particles under a finer level   // fds_kernels.f90: main.f90 particle calls (level 0)
 int fds_k_rad_src_fill(int nm, double* dat);                // radiation source average-down (radi.f90 RAD_SRC_FILL)
 void fds_k_rad_src_set(int nm, int ib, int jb, int kb, const double* dat);
@@ -2604,6 +2605,35 @@ struct TimeLoop::Impl {
     }
     void s_vcorr() { each_local([&](int nm) { fds_k_vcorr(L.m_t, L.m_dt, nm); }); }
 
+    // Corrector PARTICLE_MOMENTUM_TRANSFER on a fine level, as stock does at an interpolated mesh boundary: the face shared by two boxes of a level carries the drag of
+    // both (FV_D(IBAR) of the box below plus FV_D(0) of the box above, in both copies), so the boxes' FV, the composite solve and their velocities agree on that face.
+    // Normal faces only (as stock); a coarse-fine or domain face keeps the box's own drag.
+    void sum_fine_drag()
+    {
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+            const amrex::BoxArray& ba = lc[l].lev->ba; const amrex::DistributionMapping& dm = lc[l].lev->dm;
+            const amrex::Periodicity per = L.m_reg->level(l).geom.periodicity();
+            for (int d = 0; d < 3; ++d) {
+                amrex::MultiFab X(ba, dm, 1, 1), G(ba, dm, 1, 1), S(ba, dm, 1, 1);
+                for (amrex::MFIter mfi(X); mfi.isValid(); ++mfi) fds_k_part_fvd(lc[l].fds0 + mfi.index() + 1, d, 0, X[mfi].dataPtr());
+                G.setVal(0.0);   // the low ghost layer of direction d (FV_D(0) in d, the box's share of the face below it), transverse valid range only
+                for (amrex::MFIter mfi(G); mfi.isValid(); ++mfi) {
+                    amrex::Box gb = mfi.validbox(); gb.setBig(d, gb.smallEnd(d) - 1); gb.setSmall(d, gb.smallEnd(d) - 1);
+                    G[mfi].copy<amrex::RunOn::Host>(X[mfi], gb, 0, gb, 0, 1);
+                }
+                amrex::MultiFab::Copy(S, X, 0, 0, 1, 1);
+                S.ParallelAdd(G, 0, 0, 1, amrex::IntVect(1), amrex::IntVect(0), per);   // valid FV_D(IBAR) += the neighbour's FV_D(0)
+                S.FillBoundary(per);   // ghosts from the neighbours' sums (a ghost without a same-level neighbour keeps the box's own value)
+                for (amrex::MFIter mfi(S); mfi.isValid(); ++mfi) {   // write back the valid cells and the low face layer of direction d only
+                    auto x = X.array(mfi); auto sa = S.const_array(mfi);
+                    amrex::Box lb = mfi.validbox(); lb.setSmall(d, lb.smallEnd(d) - 1);
+                    amrex::LoopOnCpu(lb, [&](int i, int j, int k) { x(i, j, k) = sa(i, j, k); });
+                    fds_k_part_fvd(lc[l].fds0 + mfi.index() + 1, d, 1, X[mfi].dataPtr());
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------ one MAIN_LOOP iteration
     bool advance()
     {
@@ -2754,7 +2784,7 @@ struct TimeLoop::Impl {
         // WP1b / 7.13b: edge tables + vorticity/stress work arrays right after VELOCITY_FLUX (corrector); FDSTL_STAGES=<icyc>
         stage_scratch("c_vfluxE", {{"WORK1", 3}, {"WORK2", 3}, {"WORK3", 3}, {"WORK4", 3}, {"WORK5", 3}, {"WORK6", 3}, {"DS", 3}, {"FVX", 3}, {"FVY", 3}, {"FVZ", 3}, {"ED_OMEGA", 2}, {"ED_TAU", 2}, {"CE_EDGE_INDEX", 4}});
         if (IP[17] > 0) for_levels([&](int) { each_local([&](int nm) { fds_k_part(3, t, dt, nm); }); });   // main.f90: corrector PARTICLE_MASS_ENERGY_TRANSFER, MOVE_PARTICLES on every mesh of every level
-        if (IP[15]) { double d; fds_setup(7, "", &d); for_levels([&](int) { each_local([&](int nm) { fds_k_part(2, t, dt, nm); }); }); }
+        if (IP[15]) { double d; fds_setup(7, "", &d); sum_fine_drag(); for_levels([&](int) { each_local([&](int nm) { fds_k_part(2, t, dt, nm); }); }); }
         if (IP[17] > 0) { double d; fds_setup(5, "", &d); }
         ++wall_counter;
         fds_p_set_wall_counter(wall_counter);

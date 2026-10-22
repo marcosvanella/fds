@@ -237,6 +237,21 @@ SELECT CASE(MODE)
 END SELECT
 END SUBROUTINE FDS_K_PART
 
+!> Particle drag FVX_D/FVY_D/FVZ_D (DIR 0/1/2) of fine box NM, whole array (0:IBP1,0:JBP1,0:KBP1): MODE 0 copies it to BUF, 1 from BUF
+SUBROUTINE FDS_K_PART_FVD(NM,DIR,MODE,BUF) BIND(C,NAME='fds_k_part_fvd')
+INTEGER(C_INT), VALUE :: NM,DIR,MODE
+REAL(C_DOUBLE), INTENT(INOUT) :: BUF(*)
+TYPE(MESH_TYPE), POINTER :: M
+INTEGER :: N
+M => BOX_OBJ(NM)
+N = (M%IBAR+2)*(M%JBAR+2)*(M%KBAR+2)
+SELECT CASE(DIR)
+   CASE(0) ; IF (MODE==0) THEN ; BUF(1:N) = RESHAPE(M%FVX_D,[N]) ; ELSE ; M%FVX_D = RESHAPE(BUF(1:N),SHAPE(M%FVX_D)) ; ENDIF
+   CASE(1) ; IF (MODE==0) THEN ; BUF(1:N) = RESHAPE(M%FVY_D,[N]) ; ELSE ; M%FVY_D = RESHAPE(BUF(1:N),SHAPE(M%FVY_D)) ; ENDIF
+   CASE(2) ; IF (MODE==0) THEN ; BUF(1:N) = RESHAPE(M%FVZ_D,[N]) ; ELSE ; M%FVZ_D = RESHAPE(BUF(1:N),SHAPE(M%FVZ_D)) ; ENDIF
+END SELECT
+END SUBROUTINE FDS_K_PART_FVD
+
 !> W2: stock INSERT_ALL_PARTICLES on fine box NM of the particle bed level, once at t=0 (MESH_OBJ is the box). The per-mesh insertion
 !> clocks and flags (sized NMESHES by read.f90) are extended to NM with the read.f90 start values.
 SUBROUTINE FDS_K_BED_INSERT(T,NM) BIND(C,NAME='fds_k_bed_insert')
