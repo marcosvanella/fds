@@ -1,0 +1,9 @@
+&HEAD CHID='rad_init_fine', TITLE='Initial radiation on a full-coverage fine level: L1 QR at t=0 equals the 1-level QR at the same dx (run_rad_init_fine_check.sh)' /
+&MESH IJK=8,8,4, XB=0.,4.,0.,4.,0.,2. /
+&TIME T_END=0.1 /
+&DUMP DT_HRR=0.05, DT_DEVC=0.05 /
+&INIT XB=1.,2.5,1.,2.,0.,1., TEMPERATURE=900. /
+&SURF ID='BLACK', EMISSIVITY=1., DEFAULT=T /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+&AMR BLOCKING_FACTOR=2 /
+&TAIL /

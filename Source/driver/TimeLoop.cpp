@@ -68,6 +68,7 @@ void fds_k_rad_src_set(int nm, int ib, int jb, int kb, const double* dat);
 void fds_k_rad_src_wscale(int nm, int ib, int jb, int kb, double* dat, int ratio);
 void fds_k_rad(double t, int nm);   // COMPUTE_RADIATION (+ COMBUSTION_BC), any level
 void fds_k_rte_factor();
+int fds_k_rad_init(int nm, int iter);   // main.f90 ~599 initial radiation iteration on a box made after the set-up; returns INITIAL_RADIATION_ITERATIONS
 void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* w_ijk, const int* w_nic, const int* s_nm, const int* s_ijk, const int* s_loc, double** ils, double** ilr, int* nra, int* nsb);   // fds_kernels.f90
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt, int nm);
@@ -2484,6 +2485,31 @@ struct TimeLoop::Impl {
             rad_ghost_exchange();
         }
     }
+    void rad_init_levels()
+    {
+        if (!IP[10] || lc.size() < 2 || std::getenv("FDSTL_NO_RAD_INIT")) return;   // FDSTL_NO_RAD_INIT: negative control (run_rad_init_fine_check.sh)
+        rad_ghost_table();
+        for (int it = 1; it <= fds_k_rad_init(0, 0); ++it)
+            for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
+                select(l);
+#ifdef FDS_HAVE_FINE_LEVEL
+                fds_fine_walls_rad_xchg(l);
+#endif
+                each_local([&](int nm) { fds_k_rad_init(nm, it); });
+                rad_ghost_exchange();
+            }
+        select(0);
+    }
+    void rad_t0_report()
+    {
+        LevelCtx& f = lc.back();
+        amrex::MultiFab& q = (*f.F)["QR"];
+        if (lc.size() > 1) for (amrex::MFIter mfi(q); mfi.isValid(); ++mfi) fds_p_get_qr(f.fds0 + mfi.index() + 1, q[mfi].dataPtr(), static_cast<long>(q[mfi].box().numPts()));
+        for (const char* nm : {"QR", "D"}) {
+            const amrex::MultiFab& m = (*f.F)[nm];
+            amrex::Print() << std::setprecision(17) << "T0RAD L" << lc.size() - 1 << " " << nm << " sum " << m.sum(0) << " norm1 " << m.norm1(0) << " min " << m.min(0) << " max " << m.max(0) << "\n";
+        }
+    }
     void rad_ghost_exchange() { fdsrt::exchange_il_ghost(rg_t, rg_rank.data(), rg_nra, rg_nsb, rg_ils, rg_ilr); }
     void s_wall_bc(bool pred) { wseam_upload("WALL_BC"); c->bc->wall_bc(pred ? 1 : 0, L.m_t, L.m_dt); wseam_check("WALL_BC"); }
     void s_div1() { if (fluxchk && (fluxchk_kinds & 2)) { fluxchk_div1(); return; } div1_plain(); }
@@ -3251,6 +3277,8 @@ long TimeLoop::clip_cells(int n, int l) const
     return m->clip_cells_acc[idx];
 }
 void TimeLoop::prime_levels() { m->prime_levels(); m->energy_snapshot(); }
+void TimeLoop::rad_init_levels() { m->rad_init_levels(); }
+void TimeLoop::rad_t0_report() { m->rad_t0_report(); }
 void TimeLoop::zero_closed_wall_normal() { m->zero_closed_wall_normal(); }
 const int* TimeLoop::pressure_bc() const { return m->bc_type; }
 std::array<std::vector<int>, 6> TimeLoop::pressure_face_neumann() const
