@@ -895,7 +895,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     bool finite = std::isfinite(hrr_last) && std::isfinite(loop.time());
     for (double x : m1) finite = finite && std::isfinite(x);
     if (!finite) amrex::Print() << tag << " RESULT non-finite composite mass, HRR or time: FAIL\n";
-    const bool gate = finite && worst_fine <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok;
+    double worst_pred = 0.0; for (const StepRecord& r : loop.steps()) worst_pred = std::max(worst_pred, r.pred_div_fine);
+    amrex::Print() << tag << " RESULT worst fine-level predictor max|div US - DS| " << worst_pred << " (<= 1e-9)\n";
+    const bool gate = finite && worst_fine <= 1e-9 && worst_pred <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok;
     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked << " (info only)"
                    << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x (initial mass + through-flow), open" : "1e-10 x initial mass, closed") << ")\n";
     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel

@@ -1404,8 +1404,16 @@ struct TimeLoop::Impl {
     void dirichlet_fine_h_ghosts(const Level& lv, amrex::MultiFab& H)
     {
         std::array<std::unique_ptr<amrex::MultiFab>, 6> l0bd, own;
-        pack_l0_boundary_mfs(l0bd);
-        const pb::BoundaryData bd = make_bd_for_level(lv, l0bd, own);
+        int lk = 0; for (int l = 1; l < static_cast<int>(lc.size()); ++l) if (lc[l].lev == &lv) lk = l;
+        pb::BoundaryData bd;
+        bool same = lk > 0 && lk < static_cast<int>(bd_solved.size());
+        for (int f = 0; same && f < 6; ++f) if (static_cast<pb::BC>(bc_type[f]) == pb::BC::Dirichlet && (!bd_solved[lk][f] || bd_solved[lk][f]->boxArray() != H.boxArray() || bd_solved[lk][f]->DistributionMap() != H.DistributionMap())) same = false;
+        if (same) {   // the g the solve folded in: fine_outflow_dirichlet reads H, which the predictor solve has overwritten since
+            for (int f = 0; f < 6; ++f) bd.value[f] = bd_solved[lk][f].get();
+        } else {
+            pack_l0_boundary_mfs(l0bd);
+            bd = make_bd_for_level(lv, l0bd, own);
+        }
         const amrex::Box dom = lv.geom.Domain();
         for (int f = 0; f < 6; ++f) {
             if (static_cast<pb::BC>(bc_type[f]) != pb::BC::Dirichlet) continue;
@@ -1451,8 +1459,9 @@ struct TimeLoop::Impl {
         std::string msg;
         const pb::Status fs = pb::fold_boundary_data(p, bds, rhs_levels, &msg);
         if (fs != pb::Status::Ok) die(std::string("fold_boundary_data(composite): ") + pb::to_string(fs) + ": " + msg);
-        (void)owned;
+        bd_solved = std::move(owned);
     }
+    std::vector<std::array<std::unique_ptr<amrex::MultiFab>, 6>> bd_solved;   // per level: the boundary data of the last composite fold (the fine OPEN-face H ghosts use the same g)
 
     // PRHS of the level-0 boxes (as FDS computed it, fds_p_rhs) into `rhs`, and the check that the Poisson boundary data are homogeneous (every solve)
     void level0_rhs_and_check()
@@ -2595,6 +2604,24 @@ struct TimeLoop::Impl {
         ghost_report("pred_end");
         avg_down_vel(true);
         div_report("after predictor", true);
+        if (multi()) {   // predictor projection check of the fine levels (the gate's corrector check does not see a predictor-only error)
+            std::vector<fdsrt::ProjectionLevel> pv; std::vector<std::unique_ptr<amrex::iMultiFab>> sk(lc.size());
+            for (int l = 0; l < static_cast<int>(lc.size()); ++l) {
+                Fields& F = *lc[l].F; fdsrt::ProjectionLevel pl;
+                pl.geom = L.m_reg->level(l).geom;
+                pl.ref_ratio = l > 0 ? L.m_reg->level(l).ref_ratio_from_parent : amrex::IntVect(1);
+                pl.vel = {&F["US"], &F["VS"], &F["WS"]}; pl.D = &F["DS"];
+                const amrex::iMultiFab& sm = L.m_reg->side_data(l).mask(); const amrex::iMultiFab* cv = L.m_reg->covered_mask(l);
+                sk[l].reset(new amrex::iMultiFab(sm.boxArray(), sm.DistributionMap(), 1, 0));
+                for (amrex::MFIter mfi(*sk[l]); mfi.isValid(); ++mfi) {
+                    auto o = sk[l]->array(mfi); auto s0 = sm.const_array(mfi); amrex::Array4<const int> c; if (cv) c = cv->const_array(mfi);
+                    amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { o(i, j, k) = (s0(i, j, k) != 0 || (cv && c(i, j, k) != 0)) ? 1 : 0; });
+                }
+                pl.covered = sk[l].get(); pv.push_back(pl);
+            }
+            std::vector<double> bl; fdsrt::composite_divergence_error(pv, &bl);
+            for (std::size_t l = 1; l < bl.size(); ++l) rec.pred_div_fine = std::max(rec.pred_div_fine, bl[l]);
+        }
         for_levels([&](int) { s_exchange(3, true); });
         for_levels([&](int) { s_after(3); });
         stage("pred_match", {"US", "WS"});

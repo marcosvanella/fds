@@ -51,6 +51,7 @@ struct StepRecord {
     int passes = 0;                // passes of the CHANGE_TIME_STEP loop
     int it_pred = 0, it_corr = 0;  // pressure iterations of the last pass (predictor) and of the corrector
     double perr_pred = 0.0, verr_pred = 0.0, perr_corr = 0.0, verr_corr = 0.0;
+    double pred_div_fine = 0.0;    // max|div US - DS| over the uncovered gas cells of levels >= 1 after the predictor (two-level gate)
     double zone_rel = 0.0;         // max relative difference FDS accumulation vs exact fixed-point zone sums in this step (diagnostic; computed only with exact_zone_sums or FDSTL_ZONE_DIAG, else 0)
 };
 
