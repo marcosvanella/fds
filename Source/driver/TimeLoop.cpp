@@ -2503,7 +2503,7 @@ struct TimeLoop::Impl {
             }
         select(0);
     }
-    // init.f90 on a level bound after the set-up: its own background profile and RHO = RHOS = P_0(K)/(TMP*RSUM) (TMP, ZZ as the level holds them), not the prolonged RHO
+    // init.f90 on a level bound after the set-up: its own background profile, TMP = TMP_0(K) and the &INIT blocks at its own cell centres (FDS_FINE_T0_PROFILE), RHO = RHOS = P_0(K)/(TMP*RSUM)
     void t0_stock_rho_levels()
     {
         for (int l = 1; l < static_cast<int>(lc.size()); ++l) {
@@ -2516,7 +2516,7 @@ struct TimeLoop::Impl {
                 auto r = rho.array(mfi); auto rs = rhos.array(mfi); const auto t = F["TMP"].const_array(mfi); const auto rsum = F["RSUM"].const_array(mfi);
                 amrex::LoopOnCpu(vb, [&](int i, int j, int k) { r(i, j, k) = p0[k - vb.smallEnd(2) + 1] / (t(i, j, k) * rsum(i, j, k)); rs(i, j, k) = r(i, j, k); });
             }
-            F.fill_ghosts("RHO"); F.fill_ghosts("RHOS");
+            for (const char* fn : {"TMP", "ZZ", "ZZS", "RSUM", "RHO", "RHOS"}) if (F.has(fn)) F.fill_ghosts(fn);
         }
         // main.f90 COMPUTE_VISCOSITY after INITIAL_NOISE and the mesh exchange, before any ghost rule of the time step: the domain-edge ghosts hold the init.f90 values
         state(false, false);
