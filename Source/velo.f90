@@ -14,7 +14,8 @@ USE GLOBAL_CONSTANTS
 USE MESH_POINTERS
 USE COMP_FUNCTIONS, ONLY: CURRENT_TIME
 #ifdef WITH_AMREX
-USE FDS_AMREX_HOOKS, ONLY: EXTERNAL_GHOSTS_FILLED,FINE_WALLS_PTR_PROC,VERIFY_STOCK_EDGE_LAG,STOCK_EDGE_LAG_VT,STOCK_EDGE_LAG_UN
+USE FDS_AMREX_HOOKS, ONLY: EXTERNAL_GHOSTS_FILLED,FINE_WALLS_PTR_PROC,FACE_OWN, &
+                           VERIFY_STOCK_EDGE_LAG,STOCK_EDGE_LAG_VT,STOCK_EDGE_LAG_UN
 #endif
 
 IMPLICIT NONE (TYPE,EXTERNAL)
@@ -1256,10 +1257,13 @@ USE TURBULENCE, ONLY: WALL_MODEL
 INTEGER, INTENT(IN) :: NM
 REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW,RHOP,TXZ,TYZ,OMX,OMY
 INTEGER, ALLOCATABLE :: S(:,:)
-INTEGER :: IW,IWA,I,J,D,IA,JA,IB,JB,SI,ITMP,VBC
+INTEGER :: IW,I,J,D,IA,JA,IB,JB,SI,ITMP,VBC,SA,SB
+REAL(EB) :: RA,RB
+LOGICAL :: HAVE_OWN
 REAL(EB) :: VG,VT,MUA,RW,NUW,SLIP,UTAU,YP,VH,DF,HSF,RDN,TAU
 TYPE(SURFACE_TYPE), POINTER :: SF
 CALL FINE_WALLS_PTR_PROC(NM,1)
+HAVE_OWN = .FALSE. ; IF (ALLOCATED(FACE_OWN)) THEN ; IF (NM<=UBOUND(FACE_OWN,1)) HAVE_OWN = ALLOCATED(FACE_OWN(NM)%GSI) ; ENDIF
 ALLOCATE(S(0:IBP1,0:JBP1)) ; S = 0
 DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
    IF (WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
@@ -1271,11 +1275,26 @@ DO D=1,2
    DO J=2-D,JBAR
       DO I=D-1,IBAR
          IA = I ; JA = J ; IB = I+2-D ; JB = J+D-1   ! the gas cells on either side of the U (D=1) or V (D=2) face
-         IF (S(IA,JA)==0 .AND. S(IB,JB)==0) CYCLE
-         IWA = MAX(S(IA,JA),S(IB,JB)) ; IF (S(IA,JA)>0) IWA = S(IA,JA)   ! one side without a ground wall: the other side's
-         IW  = MAX(S(IA,JA),S(IB,JB)) ; IF (S(IB,JB)>0) IW  = S(IB,JB)
-         SI  = MAX(WALL(IWA)%SURF_INDEX,WALL(IW)%SURF_INDEX)
-         RDN = 0.5_EB*(BOUNDARY_PROP1(WALL(IWA)%B1_INDEX)%RDN+BOUNDARY_PROP1(WALL(IW)%B1_INDEX)%RDN)
+         SA = 0 ; SB = 0 ; RA = 0._EB ; RB = 0._EB   ! the ground walls on either side: SURF_INDEX (0: none), RDN
+         IF (S(IA,JA)>0) THEN ; SA = WALL(S(IA,JA))%SURF_INDEX ; RA = BOUNDARY_PROP1(WALL(S(IA,JA))%B1_INDEX)%RDN ; ENDIF
+         IF (S(IB,JB)>0) THEN ; SB = WALL(S(IB,JB))%SURF_INDEX ; RB = BOUNDARY_PROP1(WALL(S(IB,JB))%B1_INDEX)%RDN ; ENDIF
+         IF ((D==1 .AND. ((I==0 .AND. XS>XS_MIN+TWO_EPSILON_EB) .OR. (I==IBAR .AND. XF<XF_MAX-TWO_EPSILON_EB))) .OR. &
+             (D==2 .AND. ((J==0 .AND. YS>YS_MIN+TWO_EPSILON_EB) .OR. (J==JBAR .AND. YF<YF_MAX-TWO_EPSILON_EB)))) THEN
+            ! Interior box-boundary face. Coarse-fine: the coarse level's (a stress here broke the composite mass balance). Seam (shared by two fine
+            ! boxes): both boxes write it, each with both walls (the ghost side's from the ghost-filled FACE_OWN) and ghost-filled gas data, so the
+            ! two copies of FVX/FVY are equal and the face sync (high-face copy for FV) has nothing to pick.
+            IF (.NOT.HAVE_OWN) CYCLE
+            IF (I==0 .OR. J==0) THEN
+               IF (FACE_OWN(NM)%GSI(IA,JA)<0) CYCLE ; SA = FACE_OWN(NM)%GSI(IA,JA) ; RA = FACE_OWN(NM)%GRDN(IA,JA)
+            ELSE
+               IF (FACE_OWN(NM)%GSI(IB,JB)<0) CYCLE ; SB = FACE_OWN(NM)%GSI(IB,JB) ; RB = FACE_OWN(NM)%GRDN(IB,JB)
+            ENDIF
+         ENDIF
+         IF (SA==0 .AND. SB==0) CYCLE
+         IF (SA==0) THEN ; SA = SB ; RA = RB ; ENDIF   ! one side without a ground wall: the other side's
+         IF (SB==0) THEN ; SB = SA ; RB = RA ; ENDIF
+         SI  = MAX(SA,SB)
+         RDN = 0.5_EB*(RA+RB)
          SF => SURFACE(SI)
          VBC = SF%VELOCITY_BC_INDEX
          IF (SF%ROUGHNESS>2._EB/RDN) VBC = NO_SLIP_BC
@@ -1307,8 +1326,6 @@ DO D=1,2
                TAU = RW*DF*VH*HSF**2*VG*VT
             CASE DEFAULT ; CYCLE
          END SELECT
-         IF ((D==1 .AND. ((I==0 .AND. XS>XS_MIN+TWO_EPSILON_EB) .OR. (I==IBAR .AND. XF<XF_MAX-TWO_EPSILON_EB))) .OR. &
-             (D==2 .AND. ((J==0 .AND. YS>YS_MIN+TWO_EPSILON_EB) .OR. (J==JBAR .AND. YF<YF_MAX-TWO_EPSILON_EB)))) CYCLE   ! interior box-boundary faces: set by the neighbour box or the coarse level (a stress here broke the composite mass balance); faces on the domain boundary keep the edge stress
          IF (D==1) THEN
             TXZ(I,J,0) = TAU ; OMY(I,J,0) =  RDZN(0)*(UU(I,J,1)-UU(I,J,0))
          ELSE

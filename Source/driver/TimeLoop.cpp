@@ -168,7 +168,9 @@ int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, in
 int fds_n_tracked_species();
 int fds_open_wind();
 void fds_wind_at_height(double t, double z, double* u, double* v, double* w);
-int fds_fine_walls_un(int lev, int ib, int pred, int nmax, int* n, int* ijkd, double* uf);   // fds_fine_level.f90: OBST wall face velocity (burner)
+int fds_fine_walls_un(int lev, int ib, int pred, int nmax, int* n, int* ijkd, double* uf);
+void fds_fine_ground_walls(int lev, int ib, int ni, int nj, double* si, double* rdn);         // fds_fine_level.f90: a fine box's ground walls
+void fds_fine_ground_ghosts(int lev, int ib, int ni, int nj, const double* si, const double* rdn);  // ... and their ghost-filled copy, for FINE_GROUND_STRESS
 int fds_fine_walls_state(int lev, int ib, int pred, int nz, int nmax, int* n, int* ijkd, double* s);   // fds_fine_level.f90: parent wall state of fine burner faces
 int fds_fine_level_destroy(int lev);
 #endif
@@ -2460,6 +2462,30 @@ struct TimeLoop::Impl {
     void s_vflux(bool pred)
     {
         iface(true);
+#ifdef FDS_HAVE_FINE_LEVEL
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) {   // ground stress on a box-boundary face: both walls of a seam face, ghost-filled from the neighbour fine box
+            const amrex::MultiFab& U = L.m_reg->fields(l)["U"]; const amrex::Geometry& g = L.m_reg->level(l).geom; const int kd = g.Domain().smallEnd(2);
+            const amrex::BoxArray cba = amrex::convert(U.boxArray(), amrex::IntVect::TheCellVector());
+            amrex::BoxList bl; amrex::Vector<int> pm, ix;   // the boxes on the ground, as one-cell-thick slabs, on their owner ranks
+            for (int b = 0; b < static_cast<int>(cba.size()); ++b) if (cba[b].smallEnd(2) == kd) { amrex::Box x = cba[b]; x.setRange(2, kd); bl.push_back(x); pm.push_back(U.DistributionMap()[b]); ix.push_back(b); }
+            if (ix.empty()) continue;
+            amrex::MultiFab gw(amrex::BoxArray(std::move(bl)), amrex::DistributionMapping(pm), 2, amrex::IntVect(1, 1, 0));
+            gw.setVal(-1.0);   // ghosts that stay -1: not a fine cell
+            for (amrex::MFIter mfi(gw); mfi.isValid(); ++mfi) {
+                const amrex::Box vb = mfi.validbox(); const int ni = vb.length(0), nj = vb.length(1); std::vector<double> si(ni * nj), rd(ni * nj);
+                fds_fine_ground_walls(l, ix[mfi.index()] + 1, ni, nj, si.data(), rd.data());
+                auto a = gw.array(mfi);
+                amrex::LoopOnCpu(vb, [&](int i, int j, int k) { const int q = (i - vb.smallEnd(0)) + ni * (j - vb.smallEnd(1)); a(i, j, k, 0) = si[q]; a(i, j, k, 1) = rd[q]; });
+            }
+            gw.FillBoundary(g.periodicity());
+            for (amrex::MFIter mfi(gw); mfi.isValid(); ++mfi) {
+                const amrex::Box vb = mfi.validbox(), gb = amrex::grow(vb, amrex::IntVect(1, 1, 0)); const int ni = vb.length(0), nj = vb.length(1);
+                std::vector<double> si((ni + 2) * (nj + 2)), rd((ni + 2) * (nj + 2)); const auto a = gw.const_array(mfi);
+                amrex::LoopOnCpu(gb, [&](int i, int j, int k) { const int q = (i - gb.smallEnd(0)) + (ni + 2) * (j - gb.smallEnd(1)); si[q] = a(i, j, k, 0); rd[q] = a(i, j, k, 1); });
+                fds_fine_ground_ghosts(l, ix[mfi.index()] + 1, ni, nj, si.data(), rd.data());
+            }
+        }
+#endif
         each_local([&](int nm) { fds_p_clear_attached(nm); fds_k_vflux(L.m_t, L.m_dt, nm, pred ? 0 : 1); });
         iface(false);
     }

@@ -1430,6 +1430,44 @@ WI = M%CELL(M%CELL_INDEX(I,J,K))%WALL_INDEX(D)
 END FUNCTION WI
 END SUBROUTINE FWALL_EDGES
 
+!> Ground walls (IOR=3, gas cell K=1) of local box IB of level LEV: SI(I,J) = SURF_INDEX (0: none), RDN(I,J), I=1..NI, J=1..NJ. The driver
+!> ghost-fills them across the fine boxes (fds_fine_ground_ghosts) so FINE_GROUND_STRESS has both walls of a seam face.
+SUBROUTINE FDS_FINE_GROUND_WALLS(LEV,IB,NI,NJ,SI,RDN) BIND(C,NAME='fds_fine_ground_walls')
+USE GLOBAL_CONSTANTS, ONLY: SOLID_BOUNDARY
+INTEGER(C_INT), VALUE :: LEV,IB,NI,NJ
+REAL(C_DOUBLE), INTENT(OUT) :: SI(NI,NJ),RDN(NI,NJ)
+INTEGER :: IW
+TYPE(MESH_TYPE), POINTER :: WM
+SI = 0._EB ; RDN = 0._EB
+IF (.NOT.ALLOCATED(FWALL)) RETURN
+IF (SIZE(FWALL)<LEV) RETURN
+IF (.NOT.ALLOCATED(FWALL(LEV)%B)) RETURN
+WM => FWALL(LEV)%B(IB)%W
+IF (.NOT.ASSOCIATED(WM)) RETURN
+DO IW=1,WM%N_EXTERNAL_WALL_CELLS+WM%N_INTERNAL_WALL_CELLS   ! as FINE_GROUND_STRESS
+   IF (WM%WALL(IW)%BOUNDARY_TYPE/=SOLID_BOUNDARY) CYCLE
+   ASSOCIATE(BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
+   IF (BC%IOR/=3 .OR. BC%KKG/=1 .OR. BC%IIG<1 .OR. BC%IIG>NI .OR. BC%JJG<1 .OR. BC%JJG>NJ) CYCLE
+   SI(BC%IIG,BC%JJG) = REAL(WM%WALL(IW)%SURF_INDEX,EB) ; RDN(BC%IIG,BC%JJG) = WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%RDN
+   END ASSOCIATE
+ENDDO
+END SUBROUTINE FDS_FINE_GROUND_WALLS
+
+!> The ghost-filled ground walls of local box IB of level LEV, (0:NI+1,0:NJ+1); SI < 0 where the cell is not a fine cell.
+SUBROUTINE FDS_FINE_GROUND_GHOSTS(LEV,IB,NI,NJ,SI,RDN) BIND(C,NAME='fds_fine_ground_ghosts')
+USE FDS_AMREX_HOOKS, ONLY: FACE_OWN,FACE_OWN_TYPE
+INTEGER(C_INT), VALUE :: LEV,IB,NI,NJ
+REAL(C_DOUBLE), INTENT(IN) :: SI(0:NI+1,0:NJ+1),RDN(0:NI+1,0:NJ+1)
+INTEGER :: NM
+TYPE(FACE_OWN_TYPE), ALLOCATABLE :: T(:)
+NM = FINE_LEVEL(LEV)%NM0+IB
+IF (.NOT.ALLOCATED(FACE_OWN)) ALLOCATE(FACE_OWN(NM))
+IF (NM>UBOUND(FACE_OWN,1)) THEN ; ALLOCATE(T(2*NM)) ; T(1:UBOUND(FACE_OWN,1)) = FACE_OWN ; CALL MOVE_ALLOC(T,FACE_OWN) ; ENDIF
+IF (ALLOCATED(FACE_OWN(NM)%GSI)) DEALLOCATE(FACE_OWN(NM)%GSI,FACE_OWN(NM)%GRDN)
+ALLOCATE(FACE_OWN(NM)%GSI(0:NI+1,0:NJ+1),FACE_OWN(NM)%GRDN(0:NI+1,0:NJ+1))
+FACE_OWN(NM)%GSI = NINT(SI) ; FACE_OWN(NM)%GRDN = RDN
+END SUBROUTINE FDS_FINE_GROUND_GHOSTS
+
 !> Face velocity of the hidden OBST walls of local box IB of level LEV (e.g. a MASS_FLUX burner on the fine level): for each wall with a nonzero parent U_NORMAL_S (PRED=1)
 !> or U_NORMAL, the fine cell and wall direction IJKD(:,N) = I,J,K,D and UF(N) = -SIGN(IOR)*U_NORMAL of the level-0 parent wall (the normal velocity in +axis direction, as FDS sets
 !> it on a wall face). A domain-boundary SOLID wall (a vent) counts like an OBST wall; the driver re-applies its velocity after the vel_bc mirror. N <= NMAX.

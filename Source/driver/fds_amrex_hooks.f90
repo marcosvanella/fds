@@ -156,6 +156,13 @@ END INTERFACE
 PROCEDURE(RAD_WALLS_IF), POINTER, PUBLIC, SAVE :: RAD_WALLS_PROC => NULL()
 !> Fine box NM: ON=1 points the WALL/BOUNDARY_* mesh pointers and wall counts at its hidden walls (velo.f90 near-wall viscosity), ON=0 restores the box.
 PROCEDURE(RAD_WALLS_IF), POINTER, PUBLIC, SAVE :: FINE_WALLS_PTR_PROC => NULL()
+!> Ground walls of the ghost cells of fine box NM (fds_fine_ground_ghosts, filled from the neighbour fine box): GSI(I,J) = SURF_INDEX of the ground
+!> wall of cell (I,J) (0: a fine cell without one; -1: not a fine cell, i.e. coarse-fine or outside the domain), GRDN its RDN. Indices 0:IBP1, 0:JBP1.
+TYPE, PUBLIC :: FACE_OWN_TYPE
+   INTEGER, ALLOCATABLE :: GSI(:,:)
+   REAL(EB), ALLOCATABLE :: GRDN(:,:)
+END TYPE FACE_OWN_TYPE
+TYPE(FACE_OWN_TYPE), ALLOCATABLE, PUBLIC, SAVE :: FACE_OWN(:)
 
 !> Rank-invariant HRR file (driver runs, HRR_DET): the step terms of each level-0 mesh (UPDATE_HRR: HRR_QM, HRR_MM; leaf wall corrections: HRR_QW, HRR_MW) are
 !> tallied per mesh (HRR_QDM, HRR_MDM); rank-level terms that have no mesh (particles; composite Q_ENTH of rank 0) go to HRR_QDR, HRR_MDR. At an HRR dump the
