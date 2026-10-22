@@ -75,7 +75,7 @@ CONTAINS
    INTEGER, INTENT(IN) :: NB
    INTEGER, INTENT(OUT) :: I1,I2
    I1 = NINT(MAX(A1-AS,0._EB)*RD)+1 ; I2 = MIN(NB,NINT((A2-AS)*RD))
-   IF (I1>I2 .AND. I2>=1) I1 = I2   ! a zero-thickness device takes the layer below its plane, as at level 0
+   IF (I1>I2 .AND. I2>=1 .AND. A1>=A2) I1 = I2   ! a zero-thickness device takes the layer below its plane, as at level 0 (a box that only touches the extent adds nothing)
    END SUBROUTINE RANGE
 END FUNCTION LEAF_BOX
 

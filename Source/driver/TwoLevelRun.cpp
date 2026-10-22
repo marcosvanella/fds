@@ -735,6 +735,20 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         s_done = s;
         { const double pm = loop.particle_mass(); inflow[0] += pm_prev - pm; pm_prev = pm; }   // particle mass lost up to step s-1 (gas source of this step)
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
+        if (const char* fd = std::getenv("FDSTL_LEVEL_CSV")) {   // diagnostic: the finest level's fields after step s, one CSV per rank (name,comp,i,j,k,value), for cell-by-cell comparisons
+            Fields& F = reg.fields(nl - 1);
+            std::FILE* fp = std::fopen((std::string(fd) + "/level_s" + std::to_string(s) + "_r" + std::to_string(amrex::ParallelDescriptor::MyProc()) + ".csv").c_str(), "w");
+            for (const char* n : {"RHO", "TMP", "U", "V", "W", "H", "D", "ZZ"}) {
+                if (!fp || !F.has(n)) continue;
+                const amrex::MultiFab& mf = F[n];
+                for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                    const auto a = mf.const_array(mfi);
+                    for (int c = 0; c < mf.nComp(); ++c)
+                        amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) { std::fprintf(fp, "%s,%d,%d,%d,%d,%.17g\n", n, c, i, j, k, a(i, j, k, c)); });
+                }
+            }
+            if (fp) std::fclose(fp);
+        }
         fds_p_bnd_rate(ns, r.data());
         amrex::ParallelAllReduce::Sum(r.data(), 2 + ns, amrex::ParallelContext::CommunicatorSub());
         for (int n = 0; n <= ns; ++n) inflow[n] += r[n] * loop.steps().back().dt;

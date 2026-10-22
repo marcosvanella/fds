@@ -131,6 +131,41 @@ DO LEV=1,SIZE(FINE_LEVEL)
 ENDDO
 END FUNCTION LEAF_BOX_LOCAL
 
+!> Index of a point device on fine box NB, as read.f90 gives it on a level-0 mesh: GET_IJK (uniform box) and the CELL_POSITION rule of quantity IQ
+!> (cell centre: clipped to the box; cell face: the nearest face index in the face direction; cell edge: the nearest indices across the edge).
+SUBROUTINE LEAF_POINT_IJK(NB,X,Y,Z,IQ,I,J,K)
+INTEGER, INTENT(IN) :: NB,IQ
+REAL(EB), INTENT(IN) :: X,Y,Z
+INTEGER, INTENT(OUT) :: I,J,K
+INTEGER :: LEV
+REAL(EB) :: XI,YJ,ZK
+DO LEV=1,SIZE(FINE_LEVEL)
+   IF (NB<=FINE_LEVEL(LEV)%NM0 .OR. NB>FINE_LEVEL(LEV)%NM0+FINE_LEVEL(LEV)%N_BOXES) CYCLE
+   ASSOCIATE (R=>FINE_LEVEL(LEV)%BOX(NB-FINE_LEVEL(LEV)%NM0))
+   XI = MIN(REAL(R%IBAR,EB),MAX(0._EB,(X-R%XS)*R%RDXI))
+   YJ = MIN(REAL(R%JBAR,EB),MAX(0._EB,(Y-R%YS)*R%RDETA))
+   ZK = MIN(REAL(R%KBAR,EB),MAX(0._EB,(Z-R%ZS)*R%RDZETA))
+   I = FLOOR(XI+1._EB) ; J = FLOOR(YJ+1._EB) ; K = FLOOR(ZK+1._EB)
+   IF (OUTPUT_QUANTITY(IQ)%CELL_POSITION==CELL_CENTER) THEN
+      I = MAX(1,MIN(I,R%IBAR)) ; J = MAX(1,MIN(J,R%JBAR)) ; K = MAX(1,MIN(K,R%KBAR))
+   ELSEIF (OUTPUT_QUANTITY(IQ)%CELL_POSITION==CELL_FACE) THEN
+      SELECT CASE(OUTPUT_QUANTITY(IQ)%IOR)
+         CASE(1) ; I = NINT(XI)
+         CASE(2) ; J = NINT(YJ)
+         CASE(3) ; K = NINT(ZK)
+      END SELECT
+   ELSEIF (OUTPUT_QUANTITY(IQ)%CELL_POSITION==CELL_EDGE) THEN
+      SELECT CASE(OUTPUT_QUANTITY(IQ)%IOR)
+         CASE(1) ; J = NINT(YJ) ; K = NINT(ZK)
+         CASE(2) ; I = NINT(XI) ; K = NINT(ZK)
+         CASE(3) ; I = NINT(XI) ; J = NINT(YJ)
+      END SELECT
+   ENDIF
+   END ASSOCIATE
+   RETURN
+ENDDO
+END SUBROUTINE LEAF_POINT_IJK
+
 !> Line devices on leaf cells (D-084): FIRE DEPTH (164), TRANSMISSION / PATH OBSCURATION (154:155) and the layer devices LAYER HEIGHT, UPPER / LOWER TEMPERATURE
 !> (105:107) over level-0 mesh NM. The level-0 cells that no finer level covers count as in stock (owner pass only: the read.f90 path cells, or the layer column
 !> K1..K2). The line is also sampled as read.f90 does for the path (10000 scan points from (X1,Y1,Z1) to (X2,Y2,Z2), each of length SCAN, in the mesh
@@ -8249,9 +8284,10 @@ DEVICE_LOOP: DO N=1,N_DEVC
                ! Leaf cell: a point under a finer level reads the finest cell there (POINT_TO_BOX for the call). A finest box of another rank: that rank reads it (FOREIGN pass).
                ! An extent device (path, layer, fire depth) stays on its level-0 subdevice path.
                IF (ASSOCIATED(LEAF_COVERED_PROC) .AND. DV%X1<=-1.E5_EB) THEN
-                  IF (LEAF_COVERED_PROC(NM,XCC,YCC,ZCC)) NBX = LEAF_FINEST_PROC(DV%X,DV%Y,DV%Z,IL,JL,KL)
+                  IF (LEAF_COVERED_PROC(NM,DV%X,DV%Y,DV%Z)) NBX = LEAF_FINEST_PROC(DV%X,DV%Y,DV%Z,IL,JL,KL)   ! the leaf that contains the point
                   IF (NBX==0) NBX = NM
                   IF (NBX/=NM) THEN
+                     CALL LEAF_POINT_IJK(NBX,DV%X,DV%Y,DV%Z,DV%QUANTITY_INDEX(1),IL,JL,KL)   ! its cell, face or edge as read.f90 picks it at level 0
                      SKIPV = .NOT.LEAF_BOX_LOCAL(NBX)
                      IF (.NOT.SKIPV) THEN ; CALL POINT_TO_BOX(NBX) ; I = IL ; J = JL ; K = KL ; ENDIF
                   ENDIF

@@ -1350,14 +1350,20 @@ struct TimeLoop::Impl {
             if (slab.smallEnd(d) > e || slab.bigEnd(d) < e) continue;
             slab.setSmall(d, e); slab.setBig(d, e);
             auto a = v.array(mfi); const auto u = F[un[d]].const_array(mfi); const auto kr = F["KRES"].const_array(mfi); const auto h = F[bd_pred ? "H" : "HS"].const_array(mfi);
+            // the wind component normal to the face, once per k: U/V/W_WIND(K), K = BC%KK (the ghost cell for the z faces)
+            const int k0 = slab.smallEnd(2), nk = slab.bigEnd(2) - k0 + 1;
+            std::vector<double> wn(wind ? nk : 0);
+            for (int k = k0; wind && k < k0 + nk; ++k) {
+                const int kk = d == 2 ? k + (side ? 1 : -1) : k;
+                double w3[3]; fds_wind_at_height(L.m_t, (kk + 0.5) * lv.geom.CellSize(2) + lv.geom.ProbLo(2), &w3[0], &w3[1], &w3[2]);
+                wn[k - k0] = w3[d];
+            }
             amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
                 const double vn = side ? u(i + sh[0], j + sh[1], k + sh[2]) : u(i, j, k);
                 if (side ? vn > 0.0 : vn < 0.0) a(i, j, k) = kr(i, j, k);
-                else if (wind) {   // inflow with a prevailing wind: pres.f90 H0 = HP(boundary cell) -+ 0.5/(dt RDXN) (U/V/W_WIND(K) - u), K = BC%KK (the ghost cell for the z faces) (P_EXTERNAL = 0)
-                    const int kk = d == 2 ? k + (side ? 1 : -1) : k;
-                    double uw, vw, ww; fds_wind_at_height(L.m_t, (kk + 0.5) * lv.geom.CellSize(2) + lv.geom.ProbLo(2), &uw, &vw, &ww);
+                else if (wind) {   // inflow with a prevailing wind: pres.f90 H0 = HP(boundary cell) -+ 0.5/(dt RDXN) (U/V/W_WIND(K) - u) (P_EXTERNAL = 0)
                     const double sg = side ? -1.0 : 1.0;
-                    a(i, j, k) = h(i, j, k) + sg * 0.5 / (L.m_dt * (1.0 / lv.geom.CellSize(d))) * ((d == 0 ? uw : d == 1 ? vw : ww) - vn);
+                    a(i, j, k) = h(i, j, k) + sg * 0.5 / (L.m_dt * (1.0 / lv.geom.CellSize(d))) * (wn[k - k0] - vn);
                 }
             });
         }
