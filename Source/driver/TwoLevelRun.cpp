@@ -29,7 +29,9 @@
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
 extern "C" void fds_p_bnd_rate(int ns, double* r);
-extern "C" void fds_fine_set_bed();   // fds_fine_level.f90
+extern "C" void fds_fine_set_bed();
+extern "C" int fds_open_wind();
+extern "C" void fds_wind_at_height(double t, double z, double* u, double* v, double* w);   // fds_fine_level.f90
 extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR and burning area over leaf walls, r[6] (diagnostic)
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
 extern "C" int fds_p_reac_coef(int ns, double* c);   // fds_step.f90: species production per unit heat release (one reaction), else 0
@@ -545,6 +547,22 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     core.set_force_tag_function(false);
     probe("after regrid_dynamic");
+    if (fds_open_wind() != 0) {   // init.f90: U(:,:,K) = U_WIND(K) at the cell height of each mesh; a fine level is set as stock sets its own mesh, not prolonged from level 0
+        for (int l = 1; l <= core.finestLevel(); ++l) {
+            const amrex::Geometry& g = core.Geom(l);
+            const char* vn[3] = {"U", "V", "W"};
+            for (int d = 0; d < 3; ++d) {
+                amrex::MultiFab& mf = reg.fields(l)[vn[d]];
+                for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
+                    auto a = mf.array(mfi);
+                    amrex::LoopOnCpu(mfi.fabbox(), [&](int i, int j, int k) {
+                        double w[3]; fds_wind_at_height(0.0, (k + 0.5) * g.CellSize(2) + g.ProbLo(2), &w[0], &w[1], &w[2]);
+                        a(i, j, k) = w[d];
+                    });
+                }
+            }
+        }
+    }
     const int finest = core.finestLevel();
     if (finest != o.max_level) {
         amrex::Print() << tag << ": expected finest level " << o.max_level << ", got " << finest << " (tagging / blocking / region)\n";

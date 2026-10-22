@@ -3,8 +3,8 @@
 # cases/nearwall_mu_2l.fds (C064 cut-down c10, gas only, 1 m level 0, --bed over the whole domain: level 1 at 0.5 m everywhere) and cases/nearwall_mu_1l108.fds (the same case
 # on one level at 0.5 m with the 108-box layout and rank map of that level 1), T_END 2 s, 4 ranks. Burner first-cell VISCOSITY devices MU1..MU3 (z 0.25 m) and the HRR-file Q_DIFF.
 # Before the fix the fine ground ghost was the stress-matched value clipped to -U (no slip): WALE near-wall MU about 4x low, burner Q_DIFF -6.5 vs -24 kJ over [0,2] s.
-# EXPECTED FAILURE (open defect: fine ground momentum; with the stock ghost G = SLIP_COEF*U the near-ground U over the burner is ~3.5 m/s on level 1 vs ~2.8 m/s
-# in stock at the same dx, so the WALE MU overshoots, +87%). Thresholds are not to be relaxed; remove this mark only when it passes.
+# The ground-momentum defect behind the earlier expected failure: fine boxes took a uniform U_WIND = U0 (never the profile at their own ZC) and their t=0 velocity
+# was prolonged from level 0, so the near-ground U on level 1 was ~30% high. Fixed: profile at the box ZC (setup and every VELOCITY_FLUX) and the stock IC on the fine level.
 # Pass: both runs exit 0; time mean over [1,2] s of MU1+MU2+MU3 within 35% and Q_DIFF integral over [0,2] s within 25% (2L vs 1L).
 BLD=$1; RUN=${2:-$BLD/run/nearwall_mu}; HERE=$(cd "$(dirname "$0")" && pwd)
 rm -rf "$RUN"; mkdir -p "$RUN/2l" "$RUN/1l"
