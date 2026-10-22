@@ -610,7 +610,6 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (pst.calls > 0) amrex::Print() << " (max|div u - D| before " << pst.last.div_before << ", after " << pst.last.div_after << ", accepted " << pst.last.accepted << ")";
     amrex::Print() << "\n";
     for (int l = 1; l <= finest; ++l) loop.bind_level(l);   // mesh offset + derive of parent stage arrays already done by RegistryTransfer::derive at make_level
-    if (!pb::bed_list().empty() && finest >= 1) { loop.insert_bed(finest); loop.particle_report(); }   // W2: L_ins carries the bed particles (the &INIT beds; with --bed too)
     fdsrt::CfHookStats cfs;
     fdsrt::install_cf_ghost_hooks(loop, finest, fdsrt::ThermoProvider(), &cfs);
     loop.set_flux_overwrite(o.overwrite);
@@ -661,7 +660,12 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     loop.set_state(0.0, dt_start, 0);
     loop.t0_stock_rho_levels();
     loop.prime_levels();
+    // main.f90 inserts the particles (:634) after the initial radiation iterations (:597-622): the bed on L_ins after rad_init_levels (W2: the &INIT beds; with --bed too)
+    auto insert_bed = [&] { if (!pb::bed_list().empty() && finest >= 1) { loop.insert_bed(finest); loop.particle_report(); } };
+    const bool bed_first = std::getenv("FDSTL_BED_BEFORE_RAD_INIT") != nullptr;   // negative control (run_rad_init_csiro_check.sh)
+    if (bed_first) insert_bed();
     loop.rad_init_levels();
+    if (!bed_first) insert_bed();
     loop.t0_divergence_levels();   // the fine levels' t=0 D the stock way, after their initial radiation (not prolonged from level 0)
     probe("after second prime");
     if (std::getenv("FDSTL_TLDIAG")) {
