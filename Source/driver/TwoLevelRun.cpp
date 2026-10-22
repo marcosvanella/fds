@@ -586,6 +586,10 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                     v(I - 1 + i0, J + j0, K - 1 + k0) -= r * rdx; v(I + i0, J + j0, K - 1 + k0) += r * rdx; u(I + i0, J - 1 + j0, K - 1 + k0) += r * rdy; u(I + i0, J + j0, K - 1 + k0) -= r * rdy; }
             }
         }
+        // faces touching an OBST cell carry no velocity (as pst.before does for the projected IC): the noise is added after the regrid, and a noisy face inside a burner OBST
+        // left |div u - D| = 0.118 on its solid cells at step 1 (SEAM_burner_L2_m4r4)
+        composite_zero_solid_faces(reg, 1, core.finestLevel() + 1, {"U", "V", "W"}, 0);
+        composite_zero_solid_faces(reg, 1, core.finestLevel() + 1, {"US", "VS", "WS"}, 0);
     }
     const int finest = core.finestLevel();
     if (finest != o.max_level) {
