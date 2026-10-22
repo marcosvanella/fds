@@ -1,6 +1,7 @@
 // Composite (multi-level) pressure solve: amrex::MLMG over MLPoisson on the whole hierarchy (milestone M2, first
 // version). The common layer (mean removal, gauge, true residual, diagnostics) runs from outside on the
 // uncovered cells of all levels with one fixed-point scale (ExactSum.H). See frozen/composite-notes.md.
+#include "FaceSync.H"
 #include "CommonLayer.H"
 #include "Composite.H"
 #include "ExactSum.H"
@@ -2054,6 +2055,7 @@ PressureResult face_gradient_composite (PressureProblem const& p, std::vector<st
     }
     // D-032 (3): coarse faces covered by fine faces take the average of the fine gradients.
     for (int l = nlev - 1; l >= 1; --l) {
+        for (int d = 0; d < 3; ++d) { sync_faces_low_owner(*grad_out[l][d], W.geom[l]); }   // one copy per shared fine face
         Array<MultiFab const*,3> fine{grad_out[l][0], grad_out[l][1], grad_out[l][2]};
         Array<MultiFab*,3> crse{grad_out[l-1][0], grad_out[l-1][1], grad_out[l-1][2]};
         amrex::average_down_faces(fine, crse, W.ratio[l], 0);

@@ -1,4 +1,5 @@
 // CompositeOps.cpp: see CompositeOps.H.
+#include "../pressure_backend/FaceSync.H"
 #include "CompositeOps.H"
 
 #include <AMReX_BoxArray.H>
@@ -71,6 +72,7 @@ void composite_average_down_faces(LevelRegistry& reg, int nl, const std::array<c
         Fields& Ff = reg.fields(l);
         Fields& Fc = reg.fields(l - 1);
         const amrex::IntVect ratio = reg.level(l).ref_ratio_from_parent;
+        for (int d = 0; d < 3; ++d) pb::sync_faces_low_owner(Ff[names[d]], reg.level(l).geom);   // one copy per shared fine face before the average-down
         std::array<const amrex::MultiFab*, 3> fi{&Ff[names[0]], &Ff[names[1]], &Ff[names[2]]};
         std::array<amrex::MultiFab*, 3> co{&Fc[names[0]], &Fc[names[1]], &Fc[names[2]]};
         fdsrt::average_down_faces(fi, co, ratio, reg.level(l - 1).geom.periodicity());
@@ -105,6 +107,7 @@ void composite_average_down_flux(LevelRegistry& reg, int nl)
             }
             fi[d] = nf[d].get(); co[d] = nc[d].get();
         }
+        for (int d = 0; d < 3; ++d) pb::sync_faces_low_owner(*nf[d], reg.level(l).geom, true);   // the computed copy: FV(n) of the box below
         fdsrt::average_down_faces(fi, co, ratio, reg.level(l - 1).geom.periodicity());
         for (int d = 0; d < 3; ++d) {
             amrex::MultiFab& dc = Fc[nm[d]];
