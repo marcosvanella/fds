@@ -382,10 +382,10 @@ CONTAINS
       CASE(-3) ; FXN = PFZ(BCG%IIG,BCG%JJG,BCG%KKG,1:N_TRACKED_SPECIES)
    END SELECT
    NZ = N_TRACKED_SPECIES
-   CALL GROW(PEND,NPEND(ST),4+NZ,ST)
+   CALL GROW(PEND,NPEND(ST),5+NZ,ST)
    NPEND(ST) = NPEND(ST)+1
    PEND(1,NPEND(ST),ST) = WKEY(NMP,I,J,K,BCG%IOR) ; PEND(2,NPEND(ST),ST) = A*UIN ; PEND(3,NPEND(ST),ST) = A
-   PEND(4:3+NZ,NPEND(ST),ST) = A*(FXN*UIN) ; PEND(4+NZ,NPEND(ST),ST) = A*SUM(FXN)*ABS(UIN)
+   PEND(4:3+NZ,NPEND(ST),ST) = A*(FXN*UIN) ; PEND(4+NZ,NPEND(ST),ST) = A*SUM(FXN)*ABS(UIN) ; PEND(5+NZ,NPEND(ST),ST) = REAL(NM,EB)
    END SUBROUTINE PEND_WALL
 
    SUBROUTINE GROW(AR,N,NF,ST)
@@ -403,18 +403,31 @@ END SUBROUTINE BND_STAGE_RATE
 !> Leaf wall inflow rate of the last step (kg/s, rank-local): the mean of the predictor and corrector rates (DENSITY averages the two stages);
 !> R(0) total, R(N) tracked species N = 1..NS (0 beyond N_TRACKED_SPECIES), R(NS+1) through-flow (inflow plus outflow). The driver multiplies by DT.
 SUBROUTINE FDS_P_BND_RATE(NS,R) BIND(C,NAME='fds_p_bnd_rate')
+USE MPI_F08
 INTEGER(C_INT), VALUE :: NS
 REAL(C_DOUBLE), INTENT(OUT) :: R(0:NS+1)
-INTEGER :: NM
+INTEGER :: NM,NB,IERR
+REAL(EB), ALLOCATABLE :: RB_BOX(:,:)   ! the rate of each box (one owner per entry), summed in box order after the reduction: the same bits at any rank count
 R = 0._EB
-IF (.NOT.ALLOCATED(BND_RATE)) RETURN
-DO NM=LOWER_MESH_INDEX,SIZE(BND_RATE,2)   ! level-0 meshes of this rank, then the fine boxes called in this step (both stages)
-   IF (NM>UPPER_MESH_INDEX .AND. NM<=NMESHES) CYCLE
-   IF (NM>NMESHES .AND. ANY(BND_STAMP(NM,:)/=ICYC)) CYCLE
-   R(NS+1) = R(NS+1) + 0.5_EB*(BND_RATE(N_TRACKED_SPECIES+1,NM,1)+BND_RATE(N_TRACKED_SPECIES+1,NM,2))
-   R(0:MIN(NS,N_TRACKED_SPECIES)) = R(0:MIN(NS,N_TRACKED_SPECIES)) + 0.5_EB*(BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,1)+BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,2))
-ENDDO
-IF (N_MPI_PROCESSES>1) CALL REMOTE_PARENT_RATE()   ! collective: every rank calls FDS_P_BND_RATE once per step
+NB = 0 ; IF (ALLOCATED(BND_RATE)) NB = SIZE(BND_RATE,2)
+IF (N_MPI_PROCESSES>1) CALL MPI_ALLREDUCE(MPI_IN_PLACE,NB,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,IERR)
+IF (NB==0) RETURN
+ALLOCATE(RB_BOX(0:NS+1,NB)) ; RB_BOX = 0._EB
+IF (ALLOCATED(BND_RATE)) THEN
+   DO NM=LOWER_MESH_INDEX,SIZE(BND_RATE,2)   ! level-0 meshes of this rank, then the fine boxes called in this step (both stages)
+      IF (NM>UPPER_MESH_INDEX .AND. NM<=NMESHES) CYCLE
+      IF (NM>NMESHES .AND. ANY(BND_STAMP(NM,:)/=ICYC)) CYCLE
+      RB_BOX(NS+1,NM) = 0.5_EB*(BND_RATE(N_TRACKED_SPECIES+1,NM,1)+BND_RATE(N_TRACKED_SPECIES+1,NM,2))
+      RB_BOX(0:MIN(NS,N_TRACKED_SPECIES),NM) = 0.5_EB*(BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,1) + &
+                                                       BND_RATE(0:MIN(NS,N_TRACKED_SPECIES),NM,2))
+   ENDDO
+ENDIF
+IF (N_MPI_PROCESSES>1) THEN
+   CALL REMOTE_PARENT_RATE()   ! collective: every rank calls FDS_P_BND_RATE once per step; adds to the slot of the fine box that recorded the wall
+   CALL MPI_ALLREDUCE(MPI_IN_PLACE,RB_BOX,SIZE(RB_BOX),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+ENDIF
+DO NM=1,NB ; R = R + RB_BOX(:,NM) ; ENDDO   ! global (every rank): the driver does not reduce again
+DEALLOCATE(RB_BOX)
 
 CONTAINS
 
@@ -457,8 +470,9 @@ DO ST=1,2
             DO NQ=1,MIN(NS,N_TRACKED_SPECIES) ; RS(NQ) = RB(2,J)*RB(3+NQ,J)*UA - A*RB(3+N_TRACKED_SPECIES+NQ,J) ; ENDDO
             RS(NS+1) = RB(3,J)*RB(2,J)*ABS(UA)
             ENDIF
-            R(NS+1) = R(NS+1) + 0.5_EB*RS(NS+1)
-            R(0:MIN(NS,N_TRACKED_SPECIES)) = R(0:MIN(NS,N_TRACKED_SPECIES)) + 0.5_EB*RS(0:MIN(NS,N_TRACKED_SPECIES))
+            NM = NINT(PEND(5+N_TRACKED_SPECIES,I,ST))   ! the fine box that recorded the wall
+            RB_BOX(NS+1,NM) = RB_BOX(NS+1,NM) + 0.5_EB*RS(NS+1)
+            RB_BOX(0:MIN(NS,N_TRACKED_SPECIES),NM) = RB_BOX(0:MIN(NS,N_TRACKED_SPECIES),NM) + 0.5_EB*RS(0:MIN(NS,N_TRACKED_SPECIES))
             EXIT
          ENDDO
       ENDDO

@@ -756,8 +756,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             }
             if (fp) std::fclose(fp);
         }
-        fds_p_bnd_rate(ns, r.data());
-        amrex::ParallelAllReduce::Sum(r.data(), 2 + ns, amrex::ParallelContext::CommunicatorSub());
+        fds_p_bnd_rate(ns, r.data());   // global (summed over the boxes in box order on every rank)
         for (int n = 0; n <= ns; ++n) inflow[n] += r[n] * loop.steps().back().dt;
         through += r[1 + ns] * loop.steps().back().dt;
         if (have_rc) for (int n = 0; n < ns; ++n) reac[n] += rc[n] * hrr_prev * loop.steps().back().dt;
