@@ -1921,6 +1921,8 @@ END SUBROUTINE FDS_FINE_WALLS_SUMS
 SUBROUTINE FDS_SET_QENTH(V) BIND(C,NAME='fds_set_qenth')
 REAL(C_DOUBLE), VALUE :: V
 QENTH_V = V ; QENTH_SET = .TRUE.
+FINE_DEVC_PROC => FINE_DEVC   ! FINE_DEVC applies it: register it on every rank (FDS_FINE_WALLS_BUILD registers it only on a rank with fine boxes, so a rank without
+                              ! any kept its level-0 Q_ENTH in the HRR tally on top of rank 0's composite one)
 END SUBROUTINE FDS_SET_QENTH
 
 SUBROUTINE FINE_DEVC(T)
