@@ -1,10 +1,10 @@
 #!/bin/bash
 # Fine ground stress on a seam: the level-set ground case with one static level-1 patch run as several fine boxes (MAX_GRID_SIZE 8: seams across the
 # ground) and as one box (32), radiation and initial noise off. A ground face shared by two boxes gets the same stress from both, computed from ghost-filled data, so
-# the two layouts must agree: every device (c_devc.csv) within 1e-11 relative over STEPS steps. The case needs devices: pass the C064 case (vv-lsfine C064_1mesh.fds + &AMR); the default case has none and fails.
-# usage: run_ground_stress_seam_check.sh <fds_amr binary> [work-dir] [steps=6] [mpirun prefix, e.g. "mpirun -np 1"] [case=cases/levelset_tag_phi_ground.fds]
+# the two layouts must agree: every device (c_devc.csv) within 1e-11 relative over STEPS steps. The case needs devices; the default cases/ground_seam_c064.fds (trimmed C064, the gate's ref_L2_nf0 input) has them.
+# usage: run_ground_stress_seam_check.sh <fds_amr binary> [work-dir] [steps=6] [mpirun prefix, e.g. "mpirun -np 1"] [case=cases/ground_seam_c064.fds]
 set -u
-HERE=$(cd "$(dirname "$0")" && pwd); BIN=$(readlink -f "$1"); W=${2:-$PWD/ground_seam}; N=${3:-6}; MPI=${4:-}; CASE=$(readlink -f "${5:-$HERE/cases/levelset_tag_phi_ground.fds}")
+HERE=$(cd "$(dirname "$0")" && pwd); BIN=$(readlink -f "$1"); W=${2:-$PWD/ground_seam}; N=${3:-6}; MPI=${4:-}; CASE=$(readlink -f "${5:-$HERE/cases/ground_seam_c064.fds}")
 rm -rf "$W"; mkdir -p "$W"
 for m in 8 32; do
   d=$W/m$m; mkdir -p $d; cp "$CASE" $d/c.fds; cp "$(dirname "$CASE")"/vegetation_model.txt $d/ 2>/dev/null
