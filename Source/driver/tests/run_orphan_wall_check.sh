@@ -9,7 +9,7 @@ OMP_NUM_THREADS=1 FDSTL_NO_MESH_DUMPS=1 timeout 900 "$BIN" c.fds --two-level-run
     --steps 20 > run.log 2>&1 || { echo "FAIL orphan_wall: run rc (see $RUN/run.log)"; exit 1; }
 rm -f ./*.s3d ./*.s3d.sz ./*.sf ./*.bf ./*.prt5
 L=$(grep -a "RESULT fine walls without a level-0 wall" run.log); O=$(grep -a "AMR fine walls without a level-0 wall" ./*.out 2>/dev/null)
-echo "$L"; echo "out: $O"
+echo "$L"; echo "out: $O"; grep -a "RESULT WARNING fine walls remapped" run.log
 N=$(echo "$L" | sed 's/.*wall: \([^ ]*\) .*/\1/'); E=$(echo "$L" | sed 's/.*energy \([^ ]*\) J.*/\1/')
 [ -n "$O" ] || { echo "FAIL orphan_wall: no .out line"; exit 1; }
 python3 -c "import sys; sys.exit(0 if float('$N') == 0 and float('$E') == 0 else 1)" && echo "PASS orphan_wall" || { echo "FAIL orphan_wall: count $N energy $E J"; exit 1; }

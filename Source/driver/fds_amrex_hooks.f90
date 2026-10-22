@@ -176,6 +176,7 @@ TYPE L0Q_TYPE
 END TYPE
 TYPE(L0Q_TYPE), ALLOCATABLE, PUBLIC, SAVE :: L0Q(:)
 REAL(EB), PUBLIC, SAVE :: L0Q_GAS_CUM = 0._EB, L0Q_SOL_CUM = 0._EB, L0Q_FLUSH_CUM = 0._EB   !< FLUSH: the part taken by uncovered walls (ruling 1)
+REAL(EB), PUBLIC, SAVE :: L0Q_GND_CUM = 0._EB, L0Q_GND_ABS = 0._EB   !< convective energy into the level-0 thick ground (IOR 3) solids, Q_CON_F*AREA*DT_BC per update (ruling 2 remap ratio)
 PUBLIC :: L0Q_COVERED,L0Q_PENDING
 
 CONTAINS

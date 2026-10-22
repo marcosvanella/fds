@@ -35,7 +35,7 @@ extern "C" double fds_dt_default(double cs);
 extern "C" double fds_h_init();
 extern "C" int fds_noise_rn(int nseed, double cs, int n, double* buf);   // fds_fine_level.f90
 extern "C" void fds_fine_orphan_sums(double* s);   // fds_fine_level.f90 (ruling 2)
-extern "C" void fds_fine_orphan_out(const double* s);
+extern "C" void fds_fine_orphan_out(const double* s);   // s[6]: unmapped count, energy; remapped count, energy; level-0 ground convective energy, of |Q_CON_F|
 extern "C" void fds_wind_at_height(double t, double z, double* u, double* v, double* w);   // fds_fine_level.f90
 extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR and burning area over leaf walls, r[6] (diagnostic)
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
@@ -966,8 +966,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (!finite) amrex::Print() << tag << " RESULT non-finite composite mass, HRR or time: FAIL\n";
     double worst_pred = 0.0; for (const StepRecord& r : loop.steps()) worst_pred = std::max(worst_pred, r.pred_div_fine);
     {   // ruling 2: fine SOLID faces without a level-0 wall (no solid takes their flux): count and energy, to stdout and the .out
-        double orp[2]; fds_fine_orphan_sums(orp); amrex::ParallelDescriptor::ReduceRealSum(orp, 2);
+        double orp[6]; fds_fine_orphan_sums(orp); amrex::ParallelDescriptor::ReduceRealSum(orp, 6);
         amrex::Print() << tag << " RESULT fine walls without a level-0 wall: " << orp[0] << " (largest per-box stage count, summed over ranks), energy " << std::setprecision(17) << orp[1] << " J\n";
+        if (orp[2] > 0) amrex::Print() << tag << " RESULT WARNING fine walls remapped to the nearest level-0 wall of the same surface (interim): " << orp[2] << " (largest per-box stage count, summed over ranks), energy " << orp[3]
+                                       << " J, level-0 ground convective energy " << orp[4] << " J (of |flux| " << orp[5] << " J), |remapped| / |ground| " << (orp[4] != 0 ? std::abs(orp[3] / orp[4]) : 0.0)
+                                       << ", |remapped| / ground |flux| " << (orp[5] != 0 ? std::abs(orp[3]) / orp[5] : 0.0) << " (< 0.01)\n";
         fds_fine_orphan_out(orp);
     }
     amrex::Print() << tag << " RESULT worst fine-level predictor max|div US - DS| " << worst_pred << " (<= 1e-9)\n";

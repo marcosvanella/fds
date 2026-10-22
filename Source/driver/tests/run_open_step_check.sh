@@ -2,7 +2,8 @@
 # run_open_step_check.sh <fds_amr binary> [<run-dir>]: cases/open_step.fds (rad_init_csiro without the bed: &WIND L profile, TMPA 32 C, thick DIRT ground, OPEN sides and top;
 # radiation and noise off, DT 0.02 locked) as 2 levels with one level-1 box over the whole domain and as 1 level at the level-1 cell size, 10 steps.
 # Stock: the OPEN ghost cells take TMP_F/ZZ_F/RHO_F (wall.f90 INFLOW_OUTFLOW) and the velocity ghosts VELOCITY_BC of the open wall at every stage.
-# Pass: every gas DEVC (mass, mean T, velocity statistics, points near the open sides) of steps 1-10 within 1e-10 of the 1L one (relative to its max |value| over the run).
+# Pass: every gas DEVC (mass, mean T, velocity statistics, points near the open sides) of steps 1-10 within 1e-10 of the 1L one, relative to max(max|1L| over the run, 1e-12 x the
+# quantity's natural scale: 36.6 kg, 305 K, 1 m/s).
 # Known to FAIL until the fine OPEN velocity BC is the stock one (after the scalar ghosts: U near XMIN/top 1.7e-2 at step 1).
 set -u
 BIN=$1; RUN=${2:-$PWD/open_step_run}; HERE=$(cd "$(dirname "$0")" && pwd)
@@ -20,7 +21,8 @@ a=list(csv.reader(open('r1/open_step_cat_devc.csv')));b=list(csv.reader(open('r2
 h=[x.strip() for x in a[1]]
 A=[[float(v) for v in r] for r in a[3:]];B=[[float(v) for v in r] for r in b[3:]]   # steps 1..10 (the t=0 row of the 2-level run is level 0)
 if len(A)<10 or len(B)<10: print("  fewer than 10 steps"); sys.exit(1)
-sc=[max(abs(r[c]) for r in A) or 1. for c in range(len(h))]
+NAT={'M':36.6,'TM':305.,'T1':305.,'UM':1.,'UMAX':1.,'WMAX':1.,'VMIN':1.,'U1':1.,'U2':1.}   # natural scale of each quantity (kg, K, m/s)
+sc=[max(max(abs(r[c]) for r in A),1e-12*NAT.get(h[c],1.)) for c in range(len(h))]   # absolute floor: 1e-12 of the natural scale
 w=(0.,'',0.)
 for x,y in zip(A,B):
     for c in range(1,len(h)):

@@ -30,6 +30,7 @@ TYPE FWALL_BOX_TYPE
    TYPE(MESH_TYPE), POINTER :: W=>NULL()
    INTEGER :: NW=0
    INTEGER, ALLOCATABLE :: PNM(:),PIW(:)
+   INTEGER, ALLOCATABLE :: RNM(:),RIW(:)   !< ruling 2 interim remap of a SOLID wall without parent (PNM = 0): the nearest level-0 wall of the same surface, boundary type and IOR in the same face plane (0: none)
    INTEGER, ALLOCATABLE :: OWN(:)          !< level-0 mesh whose extent contains the gas cell of the wall (devices are visited per level-0 mesh)
    INTEGER, ALLOCATABLE :: LIDX(:)         !< indices of the leaf walls of the box (built by REFRESH_LEAF)
    LOGICAL, ALLOCATABLE :: LEAF(:)         !< the gas cell of the wall is not covered by the next level (leaf sums); refreshed by REFRESH_LEAF
@@ -48,6 +49,8 @@ TYPE(FWALL_LEVEL_TYPE), ALLOCATABLE, SAVE :: FWALL(:)
 INTEGER, ALLOCATABLE, SAVE :: LW_OFF(:),LW_LEV(:),LW_BOX(:),LW_W(:)   !< leaf walls grouped by level-0 owner mesh (CSR, built by REFRESH_LEAF): LEAF_WALL_COUNT/LEAF_WALL are O(1)
 REAL(EB), SAVE :: ORPHAN_E = 0._EB   !< ruling 2: Q_CON_F*AREA*DT of the leaf SOLID hidden walls without a level-0 wall (PNM = 0; no solid takes it), predictor stages
 INTEGER, SAVE :: ORPHAN_NMAX = 0     !< largest number of such walls of one box in one predictor stage (local)
+REAL(EB), SAVE :: REMAP_E = 0._EB    !< the part of them remapped (RNM/RIW) into a covered thick level-0 solid through L0Q (WARNING)
+INTEGER, SAVE :: REMAP_NMAX = 0
 INTEGER, SAVE :: BUILD_VER=0,LEAF_VER=-1   !< bumped at every level create/destroy and wall build; LEAF is recomputed when they differ
 
 !> Global OBST and VENT lists (set once by the driver, fds_fine_set_lists): the per-level wall builder snaps them at the dx of each box (FDS rounding, as ObstMask.H).
@@ -453,9 +456,9 @@ USE MEMORY_FUNCTIONS, ONLY: ALLOCATE_STORAGE
 USE TRAN, ONLY: GET_IJK
 USE GLOBAL_CONSTANTS, ONLY: MY_RANK,PROCESS
 INTEGER(C_INT), VALUE :: LEV,IB
-INTEGER :: I,J,K,D,NM0,I0,J0,K0,IW0,IW,N,NM,L,N_SKIP,SI,BT,NMP,NN,GK(3)
+INTEGER :: I,J,K,D,NM0,I0,J0,K0,IW0,IW,N,NM,L,N_SKIP,SI,BT,NMP,NN,GK(3),RNM0,RIW0
 LOGICAL :: LOCAL0,WALLQ
-INTEGER, ALLOCATABLE :: T(:,:)
+INTEGER, ALLOCATABLE :: T(:,:),RT(:,:)
 REAL(EB) :: XI,YJ,ZK,FF,F0,TOL,FA,DXY(3)
 TYPE(MESH_TYPE), POINTER :: R,WM,M0
 TYPE(WALL_TYPE), POINTER :: WC,WC0
@@ -482,7 +485,7 @@ NM = FINE_LEVEL(LEV)%NM0 + IB
 ! surface whose face contains this one (0 if none: new fine faces and faces whose surface differs; they have no parent state).
 CALL SNAP_SETUP(R,LEV)
 NTHIN = 0
-ALLOCATE(T(12,6*R%IBAR*R%JBAR*R%KBAR)) ; N = 0 ; N_SKIP = 0   ! I,J,K,D,NM0,IW0,SURF_INDEX,BOUNDARY_TYPE of each wall, global level-0 cell of a parent on another rank
+ALLOCATE(T(12,6*R%IBAR*R%JBAR*R%KBAR),RT(2,6*R%IBAR*R%JBAR*R%KBAR)) ; N = 0 ; N_SKIP = 0 ; RT = 0   ! I,J,K,D,NM0,IW0,SURF_INDEX,BOUNDARY_TYPE of each wall, global level-0 cell of a parent on another rank
 DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
    IF (R%CELL(R%CELL_INDEX(I,J,K))%SOLID) CYCLE
    NM0 = 0
@@ -506,7 +509,7 @@ DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
                          ' (levels above 0 support inert / fixed-temperature surfaces without VEL_T, TMP_GAS_FRONT or the log-law HTC model only)'
          ERROR STOP 1
       ENDIF
-      IW0 = 0 ; NMP = 0
+      IW0 = 0 ; NMP = 0 ; RNM0 = 0 ; RIW0 = 0
       IF (LOCAL0) THEN
          SELECT CASE(D)
             CASE(-1) ; FF=R%X(I-1) ; F0=M0%X(I0-1) ; TOL=R%DXI
@@ -522,12 +525,14 @@ DO K=1,R%KBAR ; DO J=1,R%JBAR ; DO I=1,R%IBAR
                IF (M0%WALL(IW0)%SURF_INDEX==SI .AND. M0%WALL(IW0)%BOUNDARY_TYPE==BT) NMP = NM0
             ENDIF
             IF (NMP==0) IW0 = 0
+            IF (NMP==0 .AND. BT==SOLID_BOUNDARY) CALL REMAP_TARGET(M0,I0,J0,K0,D,SI,BT,R%XC(I),R%YC(J),R%ZC(K),RNM0,RIW0)   ! ruling 2 interim
          ENDIF
       ENDIF
       GK = -1
       IF (.NOT.LOCAL0) CALL REMOTE_PARENT_CELL(R,I,J,K,D,NM0,GK)
       IF (.NOT.LOCAL0) N_SKIP = N_SKIP+1   ! a hidden wall over another rank's mesh (cells without walls there are allowed: test FDS_AMR_DEBUG_FOREIGN_BOXES)
       N = N+1 ; T(:,N) = (/I,J,K,D,NMP,IW0,SI,BT,GK,FVT/)
+      IF (RNM0>0) THEN ; RT(1,N) = NM0 ; RT(2,N) = RIW0 ; ENDIF
    ENDDO
 ENDDO ; ENDDO ; ENDDO
 
@@ -541,6 +546,8 @@ ALLOCATE(FB%W) ; WM => FB%W
 FB%NW = N
 IF (ALLOCATED(FB%PNM)) DEALLOCATE(FB%PNM,FB%PIW)
 ALLOCATE(FB%PNM(N),FB%PIW(N)) ; FB%PNM = T(5,1:N) ; FB%PIW = T(6,1:N)
+IF (ALLOCATED(FB%RNM)) DEALLOCATE(FB%RNM,FB%RIW)
+ALLOCATE(FB%RNM(N),FB%RIW(N)) ; FB%RNM = RT(1,1:N) ; FB%RIW = RT(2,1:N)
 IF (ALLOCATED(FB%OWN)) DEALLOCATE(FB%OWN,FB%LEAF)
 ALLOCATE(FB%OWN(N),FB%LEAF(N)) ; FB%OWN = 0 ; FB%LEAF = .FALSE.
 IF (ALLOCATED(FB%PV)) DEALLOCATE(FB%PV,FB%HAVEP)
@@ -603,7 +610,7 @@ ENDDO
 END ASSOCIATE
 IF (WALL_DIAG()) WRITE(0,'(A,I0,A,I0,A,3I6,A,3I5,A,I0,A,6I7,A,I0,A,I0)') 'WALLDIAG level ',LEV,' box ',IB,' g0',G0,' n',R%IBAR,R%JBAR,R%KBAR,' nwall ',N,' perD(-1,1,-2,2,-3,3)', &
    COUNT(T(4,1:N)==-1),COUNT(T(4,1:N)==1),COUNT(T(4,1:N)==-2),COUNT(T(4,1:N)==2),COUNT(T(4,1:N)==-3),COUNT(T(4,1:N)==3),' withparent ',COUNT(T(5,1:N)>0),' thin ',NTHIN
-DEALLOCATE(T)
+DEALLOCATE(T,RT)
 END SUBROUTINE FDS_FINE_WALLS_BUILD
 
 !> True if the point lies inside a box of fine level LEV (extents of the boxes of all ranks; half-open, see FINE_OWNER_BOX).
@@ -706,7 +713,7 @@ END SUBROUTINE REFRESH_LEAF
 !> each fine face once; L0Q_GAS_CUM counts them (gas side of the closure check).
 SUBROUTINE FDS_FINE_L0Q_COMMIT() BIND(C,NAME='fds_fine_l0q_commit')
 USE FDS_AMREX_HOOKS, ONLY: L0Q,L0Q_COVERED,L0Q_GAS_CUM
-INTEGER :: LEV,IB,IW,NM0
+INTEGER :: LEV,IB,IW,NM0,IW0
 IF (.NOT.ALLOCATED(FWALL)) RETURN
 CALL REFRESH_LEAF()
 DO LEV=1,SIZE(FWALL)
@@ -716,9 +723,10 @@ DO LEV=1,SIZE(FWALL)
       ASSOCIATE(FB=>FWALL(LEV)%B(IB))
       DO IW=1,FB%NW
          IF (FB%PQ(IW)==0._EB) CYCLE
-         NM0 = FB%PNM(IW)
-         IF (FB%LEAF(IW) .AND. L0Q_COVERED(NM0,FB%PIW(IW))) THEN
-            L0Q(NM0)%E(FB%PIW(IW)) = L0Q(NM0)%E(FB%PIW(IW)) + FB%PQ(IW) ; L0Q_GAS_CUM = L0Q_GAS_CUM + FB%PQ(IW)
+         NM0 = FB%PNM(IW) ; IW0 = FB%PIW(IW)
+         IF (NM0==0) THEN ; NM0 = FB%RNM(IW) ; IW0 = FB%RIW(IW) ; ENDIF   ! ruling 2 interim remap
+         IF (FB%LEAF(IW) .AND. L0Q_COVERED(NM0,IW0)) THEN
+            L0Q(NM0)%E(IW0) = L0Q(NM0)%E(IW0) + FB%PQ(IW) ; L0Q_GAS_CUM = L0Q_GAS_CUM + FB%PQ(IW)
          ENDIF
          FB%PQ(IW) = 0._EB
       ENDDO
@@ -735,15 +743,50 @@ S = (/L0Q_GAS_CUM,L0Q_SOL_CUM,L0Q_FLUSH_CUM/)
 END SUBROUTINE FDS_L0Q_SUMS
 
 !> Ruling 2: fine SOLID faces without a level-0 wall: local largest per-box count in one predictor stage, and their energy (J). FDS_FINE_ORPHAN_OUT writes the reduced values to the .out.
+!> S(3:4) the remapped ones (interim, WARNING), S(5) the convective energy into the level-0 thick ground solids (L0Q_GND_CUM), S(6) the same of |Q_CON_F|.
 SUBROUTINE FDS_FINE_ORPHAN_SUMS(S) BIND(C,NAME='fds_fine_orphan_sums')
-REAL(C_DOUBLE), INTENT(OUT) :: S(2)
-S = (/REAL(ORPHAN_NMAX,EB),ORPHAN_E/)
+USE FDS_AMREX_HOOKS, ONLY: L0Q_GND_CUM,L0Q_GND_ABS
+REAL(C_DOUBLE), INTENT(OUT) :: S(6)
+S = (/REAL(ORPHAN_NMAX,EB),ORPHAN_E,REAL(REMAP_NMAX,EB),REMAP_E,L0Q_GND_CUM,L0Q_GND_ABS/)
 END SUBROUTINE FDS_FINE_ORPHAN_SUMS
 SUBROUTINE FDS_FINE_ORPHAN_OUT(S) BIND(C,NAME='fds_fine_orphan_out')
 USE GLOBAL_CONSTANTS, ONLY: LU_OUTPUT,MY_RANK
-REAL(C_DOUBLE), INTENT(IN) :: S(2)
-IF (MY_RANK==0) WRITE(LU_OUTPUT,'(/A,I0,A,ES24.16,A)') ' AMR fine walls without a level-0 wall: ',NINT(S(1)),' (largest per-box count in a predictor stage, summed over ranks), energy ',S(2),' J'
+REAL(C_DOUBLE), INTENT(IN) :: S(6)
+IF (MY_RANK/=0) RETURN
+WRITE(LU_OUTPUT,'(/A,I0,A,ES24.16,A)') ' AMR fine walls without a level-0 wall: ',NINT(S(1)),' (largest per-box count in a predictor stage, summed over ranks), energy ',S(2),' J'
+IF (S(3)>0._EB) WRITE(LU_OUTPUT,'(A,I0,A,ES24.16,A,ES24.16,A)') ' WARNING: AMR fine walls remapped to the nearest level-0 wall of the same surface: ',NINT(S(3)), &
+   ' (largest per-box count in a predictor stage, summed over ranks), energy ',S(4),' J; level-0 ground convective energy ',S(5),' J (of |flux| ',S(6),' J)'
 END SUBROUTINE FDS_FINE_ORPHAN_OUT
+
+!> Ruling 2 interim: the nearest level-0 wall of mesh M0 with surface SI, boundary type BT and IOR -D (WALL_INDEX(D)) in the face plane of cell (I0,J0,K0), within 3 cells tangentially,
+!> nearest to the fine cell centre (X,Y,Z); RIW = 0 if none.
+SUBROUTINE REMAP_TARGET(M0,I0,J0,K0,D,SI,BT,X,Y,Z,RNM,RIW)
+TYPE(MESH_TYPE), POINTER :: M0
+INTEGER, INTENT(IN) :: I0,J0,K0,D,SI,BT
+REAL(EB), INTENT(IN) :: X,Y,Z
+INTEGER, INTENT(OUT) :: RNM,RIW
+INTEGER :: A,B,I,J,K,IW,R
+REAL(EB) :: DIST,BEST
+RNM = 0 ; RIW = 0 ; BEST = HUGE(1._EB)
+DO R=1,3
+   DO A=-R,R ; DO B=-R,R
+      IF (MAX(ABS(A),ABS(B))/=R) CYCLE
+      SELECT CASE(ABS(D))
+         CASE(1) ; I=I0 ; J=J0+A ; K=K0+B
+         CASE(2) ; I=I0+A ; J=J0 ; K=K0+B
+         CASE DEFAULT ; I=I0+A ; J=J0+B ; K=K0
+      END SELECT
+      IF (I<1 .OR. I>M0%IBAR .OR. J<1 .OR. J>M0%JBAR .OR. K<1 .OR. K>M0%KBAR) CYCLE
+      IF (M0%CELL(M0%CELL_INDEX(I,J,K))%SOLID) CYCLE
+      IW = M0%CELL(M0%CELL_INDEX(I,J,K))%WALL_INDEX(D)
+      IF (IW<=0) CYCLE
+      IF (M0%WALL(IW)%SURF_INDEX/=SI .OR. M0%WALL(IW)%BOUNDARY_TYPE/=BT) CYCLE
+      DIST = (M0%XC(I)-X)**2+(M0%YC(J)-Y)**2+(M0%ZC(K)-Z)**2
+      IF (DIST<BEST) THEN ; BEST = DIST ; RIW = IW ; RNM = 1 ; ENDIF
+   ENDDO ; ENDDO
+   IF (RIW>0) RETURN
+ENDDO
+END SUBROUTINE REMAP_TARGET
 
 !> Env FDS_AMR_WALL_DIAG set: one WALLDIAG line per box at every wall build (wall counts per direction, for the tests).
 LOGICAL FUNCTION WALL_DIAG()
@@ -1664,7 +1707,7 @@ USE GLOBAL_CONSTANTS, ONLY: INITIALIZATION_PHASE,THERMALLY_THICK,SOLID_BOUNDARY
 USE TYPES, ONLY: SURFACE
 INTEGER(C_INT), VALUE :: NM,STAGE
 REAL(C_DOUBLE), VALUE :: T,DT
-INTEGER :: LEV,IB,IW,NORPH
+INTEGER :: LEV,IB,IW,NORPH,NREMAP
 REAL(EB) :: RDN,AREA
 TYPE(MESH_TYPE), POINTER :: WM
 IF (.NOT.ALLOCATED(FWALL)) RETURN
@@ -1676,15 +1719,20 @@ DO LEV=1,SIZE(FWALL)
    IB = NM - FINE_LEVEL(LEV)%NM0
    IF (IB<1 .OR. IB>SIZE(FWALL(LEV)%B)) CYCLE
    IF (.NOT.ASSOCIATED(FWALL(LEV)%B(IB)%W)) RETURN
-   WM => FWALL(LEV)%B(IB)%W ; NORPH = 0
+   WM => FWALL(LEV)%B(IB)%W ; NORPH = 0 ; NREMAP = 0
    DO IW=1,FWALL(LEV)%B(IB)%NW
       IF (FWALL(LEV)%B(IB)%LEAF(IW)) THEN
          CALL FWALL_STATE(LEV,IB,IW,T)
          IF (STAGE==1 .AND. .NOT.INITIALIZATION_PHASE) THEN
             FWALL(LEV)%B(IB)%PQ(IW) = 0._EB
-            IF (FWALL(LEV)%B(IB)%PNM(IW)==0 .AND. WM%WALL(IW)%BOUNDARY_TYPE==SOLID_BOUNDARY) THEN   ! fine face without a level-0 wall (ruling 2: counted, not fixed)
+            IF (FWALL(LEV)%B(IB)%PNM(IW)==0 .AND. WM%WALL(IW)%BOUNDARY_TYPE==SOLID_BOUNDARY) THEN   ! fine face without a level-0 wall (ruling 2)
                CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),RDN,AREA)
-               ORPHAN_E = ORPHAN_E + WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%Q_CON_F*AREA*DT ; NORPH = NORPH+1
+               IF (SURFACE(WM%WALL(IW)%SURF_INDEX)%THERMAL_BC_INDEX==THERMALLY_THICK .AND. L0Q_COVERED(FWALL(LEV)%B(IB)%RNM(IW),FWALL(LEV)%B(IB)%RIW(IW))) THEN   ! interim remap
+                  FWALL(LEV)%B(IB)%PQ(IW) = WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%Q_CON_F*AREA*DT
+                  REMAP_E = REMAP_E + FWALL(LEV)%B(IB)%PQ(IW) ; NREMAP = NREMAP+1
+               ELSE
+                  ORPHAN_E = ORPHAN_E + WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%Q_CON_F*AREA*DT ; NORPH = NORPH+1
+               ENDIF
             ENDIF
             IF (SURFACE(WM%WALL(IW)%SURF_INDEX)%THERMAL_BC_INDEX==THERMALLY_THICK .AND. L0Q_COVERED(FWALL(LEV)%B(IB)%PNM(IW),FWALL(LEV)%B(IB)%PIW(IW))) THEN
                CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX),RDN,AREA)
@@ -1695,7 +1743,7 @@ DO LEV=1,SIZE(FWALL)
          WM%BOUNDARY_PROP1(WM%WALL(IW)%B1_INDEX)%Q_CON_F = 0._EB
       ENDIF
    ENDDO
-   ORPHAN_NMAX = MAX(ORPHAN_NMAX,NORPH)
+   ORPHAN_NMAX = MAX(ORPHAN_NMAX,NORPH) ; REMAP_NMAX = MAX(REMAP_NMAX,NREMAP)
    EXIT
 ENDDO
 FWALL_T0 = .FALSE. ; FWALL_STAGE = -1
