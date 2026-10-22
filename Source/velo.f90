@@ -206,6 +206,9 @@ SELECT_TURB: SELECT CASE (TURB_MODEL)
       CALL FILL_EDGES(UP)
       CALL FILL_EDGES(VP)
       CALL FILL_EDGES(WP)
+#ifdef WITH_AMREX
+      IF (NM>NMESHES) THEN ; CALL SEAM_EDGES(UP,UU,1) ; CALL SEAM_EDGES(VP,VV,2) ; CALL SEAM_EDGES(WP,WW,3) ; ENDIF
+#endif
 
       UP_HAT => WORK4
       VP_HAT => WORK5
@@ -524,6 +527,54 @@ WALL_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
 ENDDO WALL_LOOP
 
 END SUBROUTINE COMPUTE_STRAIN_RATE
+
+#ifdef WITH_AMREX
+!> Fine box: ghost cells across a box-box seam that are also outside the domain (where a seam meets a domain face). FILL_EDGES extrapolates them as
+!> box edges/corners, but in one box covering both they are domain-face ghosts (or domain edges) of the cell across the seam. Take the boundary rule of
+!> the box's own ghost next to it (H: seam indices moved into the box): a copy of the cell inside (OPEN/MIRROR) is copied, a zero stays zero, otherwise its
+!> jump is added. GI/HI: G/H with the outside-domain indices moved inside.
+!> First, edge/corner ghosts inside the domain (only across seams) get back the value of the neighbouring box (from its faces F, as the ghost ring), which FILL_EDGES
+!> had replaced by an extrapolation.
+SUBROUTINE SEAM_EDGES(A,F,DF)
+REAL(EB), INTENT(INOUT) :: A(0:IBP1,0:JBP1,0:KBP1)
+REAL(EB), POINTER, INTENT(IN) :: F(:,:,:)
+INTEGER, INTENT(IN) :: DF
+INTEGER :: I,J,K,D,G(3),H(3),GI(3),HI(3),N(3),NS,M3(3)
+LOGICAL :: LO_DOM(3),HI_DOM(3),SEAM,OUTS
+N = (/IBAR,JBAR,KBAR/)
+LO_DOM = (/XS<XS_MIN+TWO_EPSILON_EB,YS<YS_MIN+TWO_EPSILON_EB,ZS<ZS_MIN+TWO_EPSILON_EB/)
+HI_DOM = (/XF>XF_MAX-TWO_EPSILON_EB,YF>YF_MAX-TWO_EPSILON_EB,ZF>ZF_MAX-TWO_EPSILON_EB/)
+M3 = 0 ; M3(DF) = 1
+DO K=0,KBP1 ; DO J=0,JBP1 ; DO I=0,IBP1
+   G = (/I,J,K/) ; NS = 0 ; OUTS = .FALSE.
+   DO D=1,3
+      IF (G(D)==0) THEN ; IF (LO_DOM(D)) THEN ; OUTS = .TRUE. ; ELSE ; NS = NS+1 ; ENDIF ; ENDIF
+      IF (G(D)==N(D)+1) THEN ; IF (HI_DOM(D)) THEN ; OUTS = .TRUE. ; ELSE ; NS = NS+1 ; ENDIF ; ENDIF
+   ENDDO
+   IF (OUTS .OR. NS<2) CYCLE
+   A(I,J,K) = 0.5_EB*(F(I,J,K)+F(I-M3(1),J-M3(2),K-M3(3)))
+ENDDO ; ENDDO ; ENDDO
+DO K=0,KBP1 ; DO J=0,JBP1 ; DO I=0,IBP1
+   G = (/I,J,K/) ; H = G ; GI = G ; SEAM = .FALSE. ; OUTS = .FALSE.
+   DO D=1,3
+      IF (G(D)==0) THEN
+         IF (LO_DOM(D)) THEN ; OUTS = .TRUE. ; GI(D) = 1 ; ELSE ; SEAM = .TRUE. ; H(D) = 1 ; ENDIF
+      ELSEIF (G(D)==N(D)+1) THEN
+         IF (HI_DOM(D)) THEN ; OUTS = .TRUE. ; GI(D) = N(D) ; ELSE ; SEAM = .TRUE. ; H(D) = N(D) ; ENDIF
+      ENDIF
+   ENDDO
+   IF (.NOT.(SEAM .AND. OUTS)) CYCLE
+   HI = H ; DO D=1,3 ; IF (GI(D)/=G(D)) HI(D) = GI(D) ; ENDDO
+   IF (A(H(1),H(2),H(3))==A(HI(1),HI(2),HI(3))) THEN
+      A(I,J,K) = A(GI(1),GI(2),GI(3))
+   ELSEIF (A(H(1),H(2),H(3))==0._EB) THEN
+      A(I,J,K) = 0._EB
+   ELSE
+      A(I,J,K) = A(GI(1),GI(2),GI(3)) + (A(H(1),H(2),H(3))-A(HI(1),HI(2),HI(3)))
+   ENDIF
+ENDDO ; ENDDO ; ENDDO
+END SUBROUTINE SEAM_EDGES
+#endif
 
 END SUBROUTINE COMPUTE_VISCOSITY
 
