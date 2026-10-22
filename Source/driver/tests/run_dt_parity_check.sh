@@ -2,8 +2,9 @@
 # run_dt_parity_check.sh <build-dir> [<run-dir>]: time step of the whole-domain two-level run vs one level at the same dx, steps 1-10 within 1e-8 (relative).
 # Cases: cases/nearwall_mu_2l.fds (level 1 at 0.5 m over the whole domain) and cases/nearwall_mu_1l108.fds (one level at 0.5 m, 108 meshes), T_END cut to 0.6 s, 4 ranks.
 # Starting DT: read.f90 takes CFL_MAX*CHARACTERISTIC_CELL_SIZE/VEL_CHAR with the smallest cell of all meshes, so the two-level run starts from the finest level's (both 0.1087 s).
-# EXPECTED FAILURE (open defect: OPEN/OPEN domain edge). The step-1 CFL is set by the cell at the top/lateral domain edge (y 19.75, z 19.75): after the first predictor stock has
-# V -3.0 m/s on the lateral OPEN face and W +3.0 m/s on the top face there (H 17.5), level 1 has ~0 (H 24.4), CFL 1.78 vs 1.52, dt 0.0549 vs 0.0644 s.
+# EXPECTED FAILURE (open: fine-level initial radiation state). With the stock start state (H reset, no t=0 projection) level 1 reproduces stock's OPEN/OPEN edge
+# flow (V -3.006, W +3.006 m/s at y 19.75, z 19.75); the remaining 1.6e-3 in dt comes from stock's nonzero D (~2.4e-6) and x-varying U at t=0, from the initial
+# radiation iterations that the fine boxes do not get (QR = 0 on level 1 at the start).
 # The tolerance is not to be relaxed; remove this mark only when it passes.
 BLD=$1; RUN=${2:-$BLD/run/dt_parity}; HERE=$(cd "$(dirname "$0")" && pwd)
 rm -rf "$RUN"; mkdir -p "$RUN/2l" "$RUN/1l"
