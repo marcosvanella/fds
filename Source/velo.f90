@@ -683,7 +683,7 @@ ENDDO
 !$OMP END PARALLEL DO
 #ifdef WITH_AMREX
 IF (NM>NMESHES .AND. ZS<ZS_MIN+TWO_EPSILON_EB .AND. ASSOCIATED(FINE_WALLS_PTR_PROC)) &
-   CALL FINE_GROUND_STRESS(NM,UU,VV,WW,RHOP,TXZ,TYZ)
+   CALL FINE_GROUND_STRESS(NM,UU,VV,WW,RHOP,TXZ,TYZ,OMX,OMY)
 #endif
 
 ! Compute gravity components
@@ -1250,14 +1250,14 @@ END SUBROUTINE VELOCITY_FLUX
 
 #ifdef WITH_AMREX
 !> Fine box NM on the ground (it has no EDGE): the ground-edge stresses TXZ, TYZ (K=0) of VELOCITY_BC (wall model, no slip, free slip, boundary fuel drag),
-!> from the box's hidden ground walls; the cross term is MUA*DW/DX, DW/DY as in VELOCITY_FLUX.
-SUBROUTINE FINE_GROUND_STRESS(NM,UU,VV,WW,RHOP,TXZ,TYZ)
+!> from the box's hidden ground walls, and the edge vorticity OMY = DU/DZ, OMX = -DV/DZ: stock WALL_MODEL_BC edges carry no MU*DW/DX in TAU and no -DW/DX in OMEGA.
+SUBROUTINE FINE_GROUND_STRESS(NM,UU,VV,WW,RHOP,TXZ,TYZ,OMX,OMY)
 USE TURBULENCE, ONLY: WALL_MODEL
 INTEGER, INTENT(IN) :: NM
-REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW,RHOP,TXZ,TYZ
+REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW,RHOP,TXZ,TYZ,OMX,OMY
 INTEGER, ALLOCATABLE :: S(:,:)
 INTEGER :: IW,IWA,I,J,D,IA,JA,IB,JB,SI,ITMP,VBC
-REAL(EB) :: VG,VT,MUA,RW,NUW,SLIP,UTAU,YP,VH,DF,HSF,RDN,TAU,DWD
+REAL(EB) :: VG,VT,MUA,RW,NUW,SLIP,UTAU,YP,VH,DF,HSF,RDN,TAU
 TYPE(SURFACE_TYPE), POINTER :: SF
 CALL FINE_WALLS_PTR_PROC(NM,1)
 ALLOCATE(S(0:IBP1,0:JBP1)) ; S = 0
@@ -1280,9 +1280,9 @@ DO D=1,2
          VBC = SF%VELOCITY_BC_INDEX
          IF (SF%ROUGHNESS>2._EB/RDN) VBC = NO_SLIP_BC
          IF (D==1) THEN
-            VG = UU(I,J,1) ; DWD = RDXN(I)*(WW(I+1,J,0)-WW(I,J,0))
+            VG = UU(I,J,1)
          ELSE
-            VG = VV(I,J,1) ; DWD = RDYN(J)*(WW(I,J+1,0)-WW(I,J,0))
+            VG = VV(I,J,1)
          ENDIF
          MUA = 0.5_EB*(MU(IA,JA,1)+MU(IB,JB,1))
          RW = 0.5_EB*(RHOP(IA,JA,1)+RHOP(IB,JB,1))
@@ -1309,7 +1309,11 @@ DO D=1,2
          END SELECT
          IF ((D==1 .AND. ((I==0 .AND. XS>XS_MIN+TWO_EPSILON_EB) .OR. (I==IBAR .AND. XF<XF_MAX-TWO_EPSILON_EB))) .OR. &
              (D==2 .AND. ((J==0 .AND. YS>YS_MIN+TWO_EPSILON_EB) .OR. (J==JBAR .AND. YF<YF_MAX-TWO_EPSILON_EB)))) CYCLE   ! interior box-boundary faces: set by the neighbour box or the coarse level (a stress here broke the composite mass balance); faces on the domain boundary keep the edge stress
-         IF (D==1) THEN ; TXZ(I,J,0) = TAU + MUA*DWD ; ELSE ; TYZ(I,J,0) = TAU + MUA*DWD ; ENDIF
+         IF (D==1) THEN
+            TXZ(I,J,0) = TAU ; OMY(I,J,0) =  RDZN(0)*(UU(I,J,1)-UU(I,J,0))
+         ELSE
+            TYZ(I,J,0) = TAU ; OMX(I,J,0) = -RDZN(0)*(VV(I,J,1)-VV(I,J,0))
+         ENDIF
       ENDDO
    ENDDO
 ENDDO
