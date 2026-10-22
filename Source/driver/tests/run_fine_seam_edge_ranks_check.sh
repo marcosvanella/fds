@@ -2,8 +2,9 @@
 # run_fine_seam_edge_ranks_check.sh <fds_amr binary> [<run-dir>]: fine-level boxes on 1 rank vs 2 ranks must give bit-identical results.
 # cases/fine_seam_edge_ranks.fds: CSIRO C064 level-set crude as 4 L0 meshes (2x2; MPI_PROCESS 0,0,1,1 at 2 ranks), 2 levels, --ls-fine --nofine 0, regrid every 2 steps,
 # 30 s (the lsfine_multirank_gate L2_nf0_m4 rows). The fine boxes have hidden OPEN domain walls; the seams between boxes cross the domain faces.
-# Guards 971686fdd1: d403d294cf defined stock domain edges (FWALL_EDGES, NOM=0) also on box-box seam faces, the two boxes then wrote different tangential ghosts on their
-# shared face and the regrid copy of the old level kept a rank-order-dependent one (1 rank diverged from 2 ranks at step 59, the first layout change).
+# Guards 2c12ae8401: a regrid handed the old layout's vent faces (vent_old) to the new layout rank-locally and with the OLD box index, so fine_wall_fv drove the
+# face of an unrelated box (or none, when that index was on another rank): the composite RHS of the first step after a layout change (step 59) depended on the
+# rank count. Also covers the domain edges of hidden OPEN walls at box seams (b1a806cfdc, Integration's rule: edges on any domain face).
 # Pass: same level-1 layout at every regrid (TWO-LEVEL mid-regrid lines) and c_hrr.csv, c_devc.csv, c_multi_level.csv identical byte for byte, except the multi_level
 # columns mass, mass_rel_change, inflow (rank-partial sums: rank tolerance, lsfine_multirank_gate).
 set -u
