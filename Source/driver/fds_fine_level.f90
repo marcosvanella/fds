@@ -1538,20 +1538,6 @@ INTEGER(C_INT) FUNCTION FDS_N_TRACKED_SPECIES() BIND(C,NAME='fds_n_tracked_speci
 FDS_N_TRACKED_SPECIES = N_TRACKED_SPECIES
 END FUNCTION FDS_N_TRACKED_SPECIES
 
-!> Ambient gas state of level-0 cell layer K (clamped to the mesh): RHO, TMP and the NZ tracked mass fractions, as an inflow face of FDS sets them (TMP_0, PBAR, ZZ0).
-SUBROUTINE FDS_AMBIENT_STATE(K,NZ,RHO,TMP,ZZ) BIND(C,NAME='fds_ambient_state')
-USE PHYSICAL_FUNCTIONS, ONLY: GET_SPECIFIC_GAS_CONSTANT
-USE TYPES, ONLY: SPECIES_MIXTURE
-INTEGER(C_INT), VALUE :: K,NZ
-REAL(C_DOUBLE), INTENT(OUT) :: RHO,TMP,ZZ(*)
-REAL(EB) :: RSUM,Z0(1:N_TRACKED_SPECIES)
-INTEGER :: KK
-KK = MAX(1,MIN(K,MESHES(LOWER_MESH_INDEX)%KBAR))   ! a level-0 mesh of this rank (one level-0 mesh in z: TMP_0, PBAR depend on z only)
-Z0 = SPECIES_MIXTURE(1:N_TRACKED_SPECIES)%ZZ0
-CALL GET_SPECIFIC_GAS_CONSTANT(Z0,RSUM)
-TMP = MESHES(LOWER_MESH_INDEX)%TMP_0(KK) ; RHO = MESHES(LOWER_MESH_INDEX)%PBAR(KK,0)/(RSUM*TMP) ; ZZ(1:NZ) = Z0(1:NZ)
-END SUBROUTINE FDS_AMBIENT_STATE
-
 !> Tangential ghost value G of a fine cell next to the ground, as VELOCITY_BC sets it for a WALL_MODEL_BC edge: G = SLIP_COEF*U with SLIP_COEF of WALL_MODEL at the cell centre height
 !> DZ/2 (roughness of the level-0 wall of column IC,JC). The ground stress is FINE_GROUND_STRESS's; the ghost feeds the gradients (WALE near-wall viscosity, advection). MUC is unused
 !> (a stress-matched ghost MUC*(U-G)/DZ = RHO*U_TAU**2 clipped to -|U| when MU was small, so the near-wall WALE MU stayed ~4x below stock over the burner).

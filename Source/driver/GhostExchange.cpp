@@ -24,7 +24,6 @@ void fds_g_viscosity_bc(int nm, int est);
 void fds_g_mu_edges(int nm);
 void fds_g_mu_edges_dom(int nm, int mask, int which);
 void fds_wall_ghost(double u, double rho, double tmp, double muc, double dz, int ic, int jc, double* g);
-void fds_ambient_state(int k, int nz, double* rho, double* tmp, double* zz);
 int fds_n_tracked_species();
 }
 
@@ -151,53 +150,8 @@ void BcStep::exchange(int code, bool predictor)
             if (n == "H" || n == "HS") continue;   // the pressure solve's domain-face ghosts (pres.f90: HP(0) = 2 BXS - HP(1) on OPEN faces) are kept; MESH_EXCHANGE does not touch them
             const bool vel = n == "U" || n == "V" || n == "W" || n == "US" || n == "VS" || n == "WS";
             mirror_domain_edges(m_l0, m_F[n], nd, vel ? vel_bc : FaceBc{});
-            if (!vel) inflow_ambient_ghosts(n, predictor);
             if (vel && (n == "U" || n == "V" || n == "US" || n == "VS")) ground_wall_ghosts(n);
             if (vel && nd >= 0) zero_mixed_wall(m_F[n], nd, false);
-        }
-    }
-}
-
-// An OPEN domain face of a fine box where the gas flows in: the scalar ghost layers hold the ambient state (as the level-0 inflow wall does), not the mirror of the cell inside (fire gas
-// there would re-enter through the face and the fuel in it would be counted as inflow).
-void BcStep::inflow_ambient_ghosts(const std::string& n, bool predictor)
-{
-    const bool s = n == "RHOS" || n == "ZZS";
-    if (!(s || n == "RHO" || n == "ZZ" || n == "TMP")) return;
-    const int nz = fds_n_tracked_species();
-    amrex::MultiFab& mf = m_F[n];
-    const amrex::Box dom = m_l0.geom.Domain();
-    const char* un[3] = {s ? "US" : "U", s ? "VS" : "V", s ? "WS" : "W"};
-    (void)predictor;
-    for (int d = 0; d < 3; ++d) {
-        if (m_l0.geom.isPeriodic(d)) continue;
-        for (int side = 0; side < 2; ++side) {
-            const int f = vel_bc[2 * d + side];
-            if (f == kFaceInert || f == kFaceMirror) continue;
-            const int edge = side == 0 ? dom.smallEnd(d) : dom.bigEnd(d) + 1;   // the wall face of the nodal velocity
-            const int cell = side == 0 ? dom.smallEnd(d) : dom.bigEnd(d);
-            for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
-                const amrex::Box vb = mfi.validbox();
-                if ((side == 0 ? vb.smallEnd(d) : vb.bigEnd(d)) != cell) continue;
-                const auto u = m_F[un[d]].const_array(mfi);
-                const amrex::Box ub = m_F[un[d]][mfi].box();   // the velocity has fewer ghost layers than the scalar: clamp the transverse index (a read past the FAB was heap data, run-to-run different)
-                auto a = mf.array(mfi);
-                for (int g = 1; g <= mf.nGrow(d); ++g) {
-                    amrex::Box slab = mf[mfi].box();
-                    slab.setRange(d, side == 0 ? cell - g : cell + g);
-                    amrex::LoopOnCpu(slab, [&](int i, int j, int k) {
-                        int c[3] = {i, j, k}; c[d] = edge;
-                        for (int t = 0; t < 3; ++t) c[t] = std::min(std::max(c[t], ub.smallEnd(t)), ub.bigEnd(t));
-                        const double vn = u(c[0], c[1], c[2]);
-                        if (!(side == 0 ? vn > 0.0 : vn < 0.0)) return;
-                        double rho, tmp, zz[16];
-                        fds_ambient_state(amrex::coarsen(k, m_l0.geom.Domain().length(2) / l0_len[2]) + 1, nz, &rho, &tmp, zz);
-                        if (n == "RHO" || n == "RHOS") a(i, j, k) = rho;
-                        else if (n == "TMP") a(i, j, k) = tmp;
-                        else for (int q = 0; q < nz; ++q) a(i, j, k, q) = zz[q];
-                    });
-                }
-            }
         }
     }
 }
