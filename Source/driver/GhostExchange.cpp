@@ -148,6 +148,7 @@ void BcStep::exchange(int code, bool predictor)
             const FieldSpec& sp = m_F.spec(n);
             int nd = -1;
             for (int d = 0; d < 3; ++d) if (sp.nodal(d)) nd = d;
+            if (n == "H" || n == "HS") continue;   // the pressure solve's domain-face ghosts (pres.f90: HP(0) = 2 BXS - HP(1) on OPEN faces) are kept; MESH_EXCHANGE does not touch them
             const bool vel = n == "U" || n == "V" || n == "W" || n == "US" || n == "VS" || n == "WS";
             mirror_domain_edges(m_l0, m_F[n], nd, vel ? vel_bc : FaceBc{});
             if (!vel) inflow_ambient_ghosts(n, predictor);
