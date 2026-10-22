@@ -5,6 +5,9 @@
 # MU from COMPUTE_VISCOSITY before the time-step ghost rules, then the initial radiation and DIVERGENCE_PART_1(T_BEGIN) in corrector form.
 # Pass: sum, norm1, min, max of the level-1 D (FDSTL_T0RAD) within 1e-12 of max|D| of the 1-level ones (bitwise apart from summation order).
 # The hot block lies on the floor: the floor cells under it need the gas-side wall flux of the hidden fine walls (FDS_FINE_WALLS_QCON; without it -0.0122 there).
+# Third case: cases/rad_init_csiro.fds without the bed (&WIND L profile, TMPA 32 C, thick DIRT ground, OPEN sides and top), radiation on. Its t=0 D needs the stock initial WALL_BC
+# on the hidden walls (FDS_FINE_WALLS_QCON stage 0): thick ground HTC = Q_CON_F = 0 (no solid update yet; the fine HTC gave D sum 2.3e-3 vs -1.04e-4) and the OPEN ghost cell
+# TMP/ZZ/RSUM/RHO = the INFLOW_OUTFLOW TMP_F, ZZ_F, RHO_F (the prolonged level-0 profile there gave D sum 1.81e-4 at the low x, y sides).
 set -u
 BIN=$1; RUN=${2:-$PWD/t0_state_run}; SRC=$(cd "$(dirname "$0")" && pwd)/cases/t0_state.fds
 mkdir -p "$RUN" && cd "$RUN" || exit 1
@@ -28,5 +31,23 @@ s = max(abs(x[2]), abs(x[3])); e = max(abs(p - q) for p, q in zip(x, y)) / s
 print("  max diff / max|D| %.3e" % e); sys.exit(0 if e <= 1e-12 else 1)
 P
 done
+HERE=$(dirname "$SRC")
+cp "$HERE/leaf_devc_foreign_vegetation_model.txt" vegetation_model.txt
+grep -v "^&INIT PART_ID" "$HERE/rad_init_csiro.fds" > c2.fds; sed 's/IJK=8,8,4/IJK=16,16,8/' c2.fds > c1.fds
+for L in 1 2; do
+    FDSTL_T0RAD=1 OMP_NUM_THREADS=1 timeout 600 "$BIN" c$L.fds --two-level-run --levels $L --patch 0 7 0 3 --maxsize 16 --nofine -1 --steps 1 --outdir . --chid c$L > c${L}_csiro.log 2>&1 \
+        || { echo "FAIL t0_state: csiro, $L-level run rc (see $RUN/c${L}_csiro.log)"; exit 1; }
+done
+rm -f ./*.s3d ./*.smv ./*.sf ./*.bf ./*.prt5 ./*.csv
+a=$(grep -a "^T0RAD L0 D " c1_csiro.log); b=$(grep -a "^T0RAD L1 D " c2_csiro.log)
+echo "csiro (wind profile, thick ground, open) 1L: ${a#T0RAD L0 D }"; echo "csiro (wind profile, thick ground, open) 2L: ${b#T0RAD L1 D }"
+python3 - "$a" "$b" <<'P2' || fail=1
+import sys
+a, b = sys.argv[1].split(), sys.argv[2].split()
+if len(a) < 11 or len(b) < 11: print("  missing T0RAD line"); sys.exit(1)
+x = [float(a[i]) for i in (4, 6, 8, 10)]; y = [float(b[i]) for i in (4, 6, 8, 10)]
+s = max(abs(x[2]), abs(x[3])); e = max(abs(p - q) for p, q in zip(x, y)) / s
+print("  max diff / max|D| %.3e" % e); sys.exit(0 if e <= 1e-12 else 1)
+P2
 [ $fail -eq 0 ] && echo "PASS t0_state" || echo "FAIL t0_state (see $RUN)"
 exit $fail
