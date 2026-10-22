@@ -73,7 +73,9 @@ void fds_rad_ghost_set(int nicr, int nw, int nmmax, const int* w_nm, const int* 
 void fds_k_div2(double dt, int nm);
 void fds_k_comb(double t, double dt, int nm);
 void fds_fine_t0_profile(int nm, double* p0);   // fds_fine_level.f90
-void fds_fine_walls_qcon(int nm, double t);     // fds_fine_level.f90
+void fds_fine_walls_qcon(int nm, double t, double dt, int stage);     // fds_fine_level.f90
+void fds_fine_l0q_commit();   // fds_fine_level.f90: predictor fluxes of the leaf walls over covered thick level-0 walls -> their solids
+void fds_l0q_sums(double* s);   // fds_fine_level.f90: committed fine energy, energy taken by the covered level-0 solids (FDSTL_QCON)
 void fds_walls_qcon_sums(int lev, double* s);   // fds_fine_level.f90: wall Q_CON energy check (FDSTL_QCON)
 void fds_k_vpred(double t, double dt, int nm, double* dtnew, int* ichg, double* cfl, double* vn);
 void fds_k_vcorr(double t, double dt, int nm);
@@ -2535,7 +2537,7 @@ struct TimeLoop::Impl {
         state(false, false);
         zone_save();
         fds_p_init_div();
-        for (int l = 1; l < static_cast<int>(lc.size()); ++l) { select(l); each_local([&](int nm) { fds_fine_walls_qcon(nm, L.m_t); }); s_div1(); }   // the last initial WALL_BC: hidden-wall Q_CON_F
+        for (int l = 1; l < static_cast<int>(lc.size()); ++l) { select(l); each_local([&](int nm) { fds_fine_walls_qcon(nm, L.m_t, 0.0, 0); }); s_div1(); }   // the last initial WALL_BC: hidden-wall Q_CON_F
         select(0);
         zone_restore();
     }
@@ -2698,6 +2700,9 @@ struct TimeLoop::Impl {
         stage("pred_match", {"US", "WS"});
 
         // ---------------- corrector
+#ifdef FDS_HAVE_FINE_LEVEL
+        if (multi()) fds_fine_l0q_commit();   // the last predictor pass's leaf fine fluxes over covered thick level-0 walls, before the corrector WALL_BC (their solid update)
+#endif
         t = time_advance(t, dt);
         fds_p_zero_dot();   // MAIN_LOOP: Q_DOT = 0, M_DOT = 0 after T = T + DT
         state(false, first_pass);
@@ -3023,6 +3028,12 @@ struct TimeLoop::Impl {
                 double q[3]; fds_walls_qcon_sums(l, q); amrex::ParallelDescriptor::ReduceRealSum(q, 3);
                 amrex::Print() << std::setprecision(17) << "QCON step " << L.m_icyc << " L" << l << " solid " << q[0] << " gas " << q[1] << " nonleaf " << q[2] << "\n";
             }
+#ifdef FDS_HAVE_FINE_LEVEL
+        if (std::getenv("FDSTL_QCON") && multi()) {   // covered thick level-0 walls: fine energy committed to their solids vs energy the solids took (cumulative, J)
+            double e[2]; fds_l0q_sums(e); amrex::ParallelDescriptor::ReduceRealSum(e, 2);
+            amrex::Print() << std::setprecision(17) << "L0QCON step " << L.m_icyc << " fine " << e[0] << " solid " << e[1] << "\n";
+        }
+#endif
         const bool prt = L.m_icyc % 50 == 0;   // the identity check and the area diagnostic run on print steps only
         qopen_adj = 0.0;
         for (int lev = 1; lev < static_cast<int>(lc.size()); ++lev) {

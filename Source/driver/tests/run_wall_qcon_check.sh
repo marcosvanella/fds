@@ -4,6 +4,8 @@
 # gas side sum(AREA_ADJUST*Q_CON_F*RDN*V) (what DIVERGENCE_PART_1 adds), and sum|Q_CON_F*AREA| of the non-leaf walls.
 # 1. Leaf-only energy at t=0: level 1 over the whole domain vs 1 level at the level-1 dx: the level-1 leaf sum equals the 1-level sum (1e-12), the level-0 leaf sum is 0.
 # 2. Closure, level 1 over half the domain, steps 1-6: on every level gas side = solid side (1e-12 relative), and the non-leaf hidden walls carry no flux (a face counts once).
+# 3. Thermally thick floor (cases/qcon_thick.fds, level 1 over half the domain, 8 steps, WALL_INCREMENT 2): the covered level-0 solids take the area-weighted leaf fine
+#    Q_CON_F (L0QCON: fine energy committed vs energy the solids took, cumulative); at every solid update they agree to 1e-12 relative, and the solids took heat.
 set -u
 BIN=$1; RUN=${2:-$PWD/wall_qcon_run}; SRC=$(cd "$(dirname "$0")" && pwd)/cases/t0_state.fds
 mkdir -p "$RUN" && cd "$RUN" || exit 1
@@ -13,8 +15,11 @@ run() { local L=$1 log=$2; shift 2; env FDSTL_T0RAD=1 FDSTL_QCON=1 OMP_NUM_THREA
 run 1 r1.log --patch 0 7 0 3 --steps 1
 run 2 r2.log --patch 0 7 0 3 --steps 1
 run 2 r2p.log --patch 0 3 0 3 --steps 6
+cp "$(dirname "$SRC")/qcon_thick.fds" r3.fds
+env FDSTL_QCON=1 OMP_NUM_THREADS=1 timeout 600 "$BIN" r3.fds --two-level-run --levels 2 --maxsize 16 --nofine -1 --outdir . --chid r3 --patch 0 3 0 3 --steps 8 > r3.log 2>&1 \
+    || { echo "FAIL wall_qcon: thick run rc (see $RUN/r3.log)"; exit 1; }
 rm -f ./*.s3d ./*.smv ./*.sf ./*.bf ./*.prt5 ./*.csv
-grep -a "^T0QCON" r1.log r2.log; grep -a "^QCON" r2p.log
+grep -a "^T0QCON" r1.log r2.log; grep -a "^QCON" r2p.log; grep -a "^L0QCON" r3.log
 python3 - <<'P'
 import sys
 def rd(f, tag):
@@ -34,5 +39,10 @@ for r in rows:
     if r[3] != 'L0' and n != 0: print('  non-leaf hidden walls carry flux:', ' '.join(r)); fail = 1
 print('closure worst |gas - solid|/|solid| %.2e over %d level-steps' % (w, len(rows)))
 if w > 1e-12: fail = 1
+th = [(int(r[2]), float(r[4]), float(r[6])) for r in rd('r3.log', 'L0QCON ')]
+upd = [(n, f, s) for (n, f, s) in th if n % 2 == 0]
+wt = max([abs(f - s) / max(abs(f), 1e-300) for (n, f, s) in upd] or [1.0])
+print('thick floor: %d solid updates, fine %.17g J vs solid %.17g J at the last, worst rel %.2e' % (len(upd), upd[-1][1] if upd else 0, upd[-1][2] if upd else 0, wt))
+if len(upd) < 4 or wt > 1e-12 or upd[-1][2] <= 0: print('  thick closure failed'); fail = 1
 print('PASS wall_qcon' if fail == 0 else 'FAIL wall_qcon'); sys.exit(fail)
 P

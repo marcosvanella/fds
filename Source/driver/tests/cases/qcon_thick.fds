@@ -1,0 +1,10 @@
+&HEAD CHID='qcon_thick', TITLE='hot gas block on a thermally thick floor, level 1 over half the domain (run_wall_qcon_check.sh, conditions 1 and 2)' /
+&MESH IJK=8,8,4, XB=0.,4.,0.,4.,0.,2. /
+&TIME T_END=2. /
+&DUMP DT_HRR=0.05, DT_DEVC=0.05 /
+&INIT XB=1.,2.5,1.,2.,0.,1., TEMPERATURE=900. /
+&MATL ID='SLAB', CONDUCTIVITY=0.5, SPECIFIC_HEAT=1.0, DENSITY=500. /
+&SURF ID='THICK', MATL_ID='SLAB', THICKNESS=0.02, EMISSIVITY=1., DEFAULT=T /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+&AMR BLOCKING_FACTOR=2 /
+&TAIL /

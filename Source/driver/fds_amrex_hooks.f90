@@ -166,7 +166,30 @@ REAL(EB), PUBLIC, SAVE :: HRR_QENTH = 0._EB
 REAL(EB), ALLOCATABLE, PUBLIC, SAVE :: HRR_QM(:,:),HRR_MM(:,:),HRR_QW(:,:),HRR_MW(:,:),HRR_QDM(:,:),HRR_MDM(:,:),HRR_QDR(:),HRR_MDR(:),HRR_QADD(:),HRR_MADD(:)
 PUBLIC :: HRR_DET_ALLOC
 
+!> Covered level-0 walls (Solid Phase Lead conditions 1, 2): per level-0 mesh NM and wall IW, COV = a SOLID wall whose gas cell lies under level 1 (REFRESH_LEAF).
+!> Its 1-D solid (SOLID_HEAT_TRANSFER) is driven by the leaf fine faces over it: E = sum Q_CON_F*AREA*DT of their predictor stages (last pass), committed at the start
+!> of each corrector (FDS_FINE_L0Q_COMMIT), taken and zeroed by the next solid update. The level-0 wall term of the covered gas cell is left out of
+!> DIVERGENCE_PART_1 (the fine level carries it). GAS_CUM / SOL_CUM: committed fine energy and energy taken by the level-0 solids (local, run_wall_qcon_check.sh).
+TYPE L0Q_TYPE
+   LOGICAL, ALLOCATABLE :: COV(:)
+   REAL(EB), ALLOCATABLE :: E(:)
+END TYPE
+TYPE(L0Q_TYPE), ALLOCATABLE, PUBLIC, SAVE :: L0Q(:)
+REAL(EB), PUBLIC, SAVE :: L0Q_GAS_CUM = 0._EB, L0Q_SOL_CUM = 0._EB
+PUBLIC :: L0Q_COVERED
+
 CONTAINS
+
+!> Level-0 wall IW of mesh NM is covered by level 1 (L0Q table; .FALSE. without fine levels)
+LOGICAL FUNCTION L0Q_COVERED(NM,IW)
+INTEGER, INTENT(IN) :: NM,IW
+L0Q_COVERED = .FALSE.
+IF (.NOT.ALLOCATED(L0Q)) RETURN
+IF (NM<1 .OR. NM>SIZE(L0Q)) RETURN
+IF (.NOT.ALLOCATED(L0Q(NM)%COV)) RETURN
+IF (IW<1 .OR. IW>SIZE(L0Q(NM)%COV)) RETURN
+L0Q_COVERED = L0Q(NM)%COV(IW)
+END FUNCTION L0Q_COVERED
 
 !> Allocate (once) the HRR_DET arrays: NQ terms, NS tracked species, NM level-0 meshes.
 SUBROUTINE HRR_DET_ALLOC(NQ,NS,NM)
