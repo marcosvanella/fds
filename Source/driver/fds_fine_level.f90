@@ -1293,19 +1293,20 @@ INTEGER, INTENT(IN) :: NM,ON
 INTEGER :: LEV,IB
 TYPE(MESH_TYPE), POINTER :: WM
 IF (ON==0) THEN ; CALL POINT_TO_BOX(NM) ; RETURN ; ENDIF
-IF (ON==3) THEN ; CALL FWALL_EDGES(NM,.FALSE.) ; CALL POINT_TO_BOX(NM) ; RETURN ; ENDIF
-IF (.NOT.ALLOCATED(FWALL) .OR. .NOT.ALLOCATED(FINE_LEVEL)) RETURN
+IF (.NOT.ALLOCATED(FWALL) .OR. .NOT.ALLOCATED(FINE_LEVEL)) THEN ; IF (ON==3) CALL POINT_TO_BOX(NM) ; RETURN ; ENDIF
 DO LEV=1,MIN(SIZE(FWALL),SIZE(FINE_LEVEL))
    IB = NM-FINE_LEVEL(LEV)%NM0
    IF (IB<1 .OR. IB>FINE_LEVEL(LEV)%N_BOXES) CYCLE
-   IF (.NOT.ALLOCATED(FWALL(LEV)%B)) RETURN
+   IF (.NOT.ALLOCATED(FWALL(LEV)%B)) EXIT
    WM => FWALL(LEV)%B(IB)%W
-   IF (.NOT.ASSOCIATED(WM)) RETURN
+   IF (.NOT.ASSOCIATED(WM)) EXIT
+   IF (ON==3) THEN ; CALL FWALL_EDGES(NM,.FALSE.,WM) ; CALL POINT_TO_BOX(NM) ; RETURN ; ENDIF   ! undo what ON=2 set (only that)
    WALL=>WM%WALL ; BOUNDARY_COORD=>WM%BOUNDARY_COORD ; BOUNDARY_PROP1=>WM%BOUNDARY_PROP1 ; BOUNDARY_PROP2=>WM%BOUNDARY_PROP2
    N_WALL_CELLS=>WM%N_WALL_CELLS ; N_INTERNAL_WALL_CELLS=>WM%N_INTERNAL_WALL_CELLS ; N_EXTERNAL_WALL_CELLS=>WM%N_EXTERNAL_WALL_CELLS
    IF (ON==2) CALL FWALL_EDGES(NM,.TRUE.,WM)
    RETURN
 ENDDO
+IF (ON==3) CALL POINT_TO_BOX(NM)
 END SUBROUTINE FWALL_POINTERS
 
 !> FINE_WALLS_PTR_PROC(NM,2) / (NM,3) around stock VELOCITY_BC of fine box NM: the hidden OPEN walls of the physical domain become the box's wall cells (CELL%WALL_INDEX,
@@ -1318,21 +1319,43 @@ USE FDS_BOX_OBJ, ONLY: BOX_OBJ
 USE MESH_POINTERS, ONLY: EDGE,VENTS
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: SET
-TYPE(MESH_TYPE), POINTER, OPTIONAL :: WM
+TYPE(MESH_TYPE), POINTER :: WM
 TYPE(MESH_TYPE), POINTER :: M
-INTEGER :: IW,IC,I,J,K,NC,NE,NV
+INTEGER :: IW,IC,I,J,K,NE,NV
+LOGICAL :: DLO(3),DHI(3)
+REAL(EB) :: TOL3(3)
 M => BOX_OBJ(NM)
-NC = UBOUND(M%CELL,1)
-DO IC=1,NC
-   M%CELL(IC)%WALL_INDEX = 0 ; M%CELL(IC)%EDGE_INDEX = 0
+TOL3 = 1.E-3_EB*(/M%DX(1),M%DY(1),M%DZ(1)/)
+DLO(1) = M%XS<=MINVAL(MESHES(1:NMESHES)%XS)+TOL3(1) ; DHI(1) = M%XF>=MAXVAL(MESHES(1:NMESHES)%XF)-TOL3(1)
+DLO(2) = M%YS<=MINVAL(MESHES(1:NMESHES)%YS)+TOL3(2) ; DHI(2) = M%YF>=MAXVAL(MESHES(1:NMESHES)%YF)-TOL3(2)
+DLO(3) = M%ZS<=MINVAL(MESHES(1:NMESHES)%ZS)+TOL3(3) ; DHI(3) = M%ZF>=MAXVAL(MESHES(1:NMESHES)%ZF)-TOL3(3)
+! Clear only what SET wrote (the WALL_INDEX of the hidden OPEN walls, the EDGE_INDEX of the edges of this box); any other index of the box is left alone.
+DO IW=1,WM%N_WALL_CELLS
+   IF (WM%WALL(IW)%BOUNDARY_TYPE/=OPEN_BOUNDARY) CYCLE
+   ASSOCIATE (BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
+   IC = M%CELL_INDEX(BC%IIG,BC%JJG,BC%KKG)
+   IF (IC>0) THEN ; IF (M%CELL(IC)%WALL_INDEX(-BC%IOR)==IW) M%CELL(IC)%WALL_INDEX(-BC%IOR) = 0 ; ENDIF
+   CALL SEAM_GHOST_WALLS(BC%IIG,BC%JJG,BC%KKG,BC%IOR,IW,.FALSE.)
+   END ASSOCIATE
 ENDDO
+IF (ALLOCATED(M%EDGE)) THEN
+   DO NE=1,MIN(EDGE_COUNT(NM),UBOUND(M%EDGE,1))
+      CALL CLEAR_EDGE(M%EDGE(NE)%CELL_INDEX_MM,NE) ; CALL CLEAR_EDGE(M%EDGE(NE)%CELL_INDEX_PM,NE)
+      CALL CLEAR_EDGE(M%EDGE(NE)%CELL_INDEX_MP,NE) ; CALL CLEAR_EDGE(M%EDGE(NE)%CELL_INDEX_PP,NE)
+   ENDDO
+ENDIF
 EDGE_COUNT(NM) = 0
 IF (.NOT.SET) RETURN
+! DLO/DHI: box faces on the physical domain boundary. An edge of a domain face that lies on a box-box seam line is shared by the two boxes; with the ghost cell
+! across the seam lacking the wall, each box saw a different wall pattern (and EXTERNAL), wrote a different tangential ghost on the shared face, and the regrid
+! copy of the old level kept whichever box was copied last, an order that depends on the rank distribution (lsfine_multirank_gate L2_nf0 m4 r1 vs r2/r4).
+! Now the across-seam ghost cell carries the wall of its own side (SEAM_GHOST_WALLS) and EXTERNAL marks domain corners only: both boxes write the same values.
 DO IW=1,WM%N_WALL_CELLS   ! the hidden walls are all stored as internal ones
    IF (WM%WALL(IW)%BOUNDARY_TYPE/=OPEN_BOUNDARY) CYCLE
    ASSOCIATE (BC=>WM%BOUNDARY_COORD(WM%WALL(IW)%BC_INDEX))
    IC = M%CELL_INDEX(BC%IIG,BC%JJG,BC%KKG)
    IF (IC>0) M%CELL(IC)%WALL_INDEX(-BC%IOR) = IW
+   CALL SEAM_GHOST_WALLS(BC%IIG,BC%JJG,BC%KKG,BC%IOR,IW,.TRUE.)
    END ASSOCIATE
 ENDDO
 NE = 4*((M%IBAR+1)*(M%JBAR+1)+(M%IBAR+1)*(M%KBAR+1)+(M%JBAR+1)*(M%KBAR+1))   ! bound on the domain edges of the box
@@ -1373,9 +1396,17 @@ CONTAINS
 !> Stock DEFINE_EDGE (init.f90) for OBST_INDEX=0 and no neighbour mesh (NOM=0): a fine box has no EXTERNAL_WALL neighbour data.
 SUBROUTINE DEFINE_EDGE(II,JJ,KK,IOR,IEC)
 INTEGER, INTENT(IN) :: II,JJ,KK,IOR,IEC
-INTEGER :: ICMM,ICMP,ICPM,ICPP,IE,IW1,IW2
+INTEGER :: ICMM,ICMP,ICPM,ICPP,IE,IW1,IW2,NDF
 TYPE(EDGE_TYPE), POINTER :: ED
 IW1 = -1 ; IW2 = -1
+! NDF: number of domain faces the edge lies on (its two coordinates normal to the axis). None: a seam-only edge, stock (one mesh) has none. Two: a domain corner
+! (stock EXTERNAL). One: an edge of a domain face, also where a box-box seam meets that face; the cell across the seam has the wall of its own side (SET), so
+! both boxes see the stock wall pattern there and write the same ghost values.
+NDF = 0
+IF (IEC/=1) THEN ; IF ((II==0 .AND. DLO(1)) .OR. (II==M%IBAR .AND. DHI(1))) NDF = NDF+1 ; ENDIF
+IF (IEC/=2) THEN ; IF ((JJ==0 .AND. DLO(2)) .OR. (JJ==M%JBAR .AND. DHI(2))) NDF = NDF+1 ; ENDIF
+IF (IEC/=3) THEN ; IF ((KK==0 .AND. DLO(3)) .OR. (KK==M%KBAR .AND. DHI(3))) NDF = NDF+1 ; ENDIF
+IF (NDF==0) RETURN
 SELECT CASE(IEC)
    CASE(1)
       SELECT CASE(IOR)
@@ -1411,9 +1442,7 @@ IF (IE==0) THEN
    IE = EDGE_COUNT(NM)
 ENDIF
 ED => M%EDGE(IE)
-IF ( (II==0      .AND. KK==0     ) .OR. (II==0      .AND. KK==M%KBAR) .OR. (II==M%IBAR .AND. KK==0     ) .OR. (II==M%IBAR .AND. KK==M%KBAR) .OR. &
-     (II==0      .AND. JJ==0     ) .OR. (II==0      .AND. JJ==M%JBAR) .OR. (II==M%IBAR .AND. JJ==0     ) .OR. (II==M%IBAR .AND. JJ==M%JBAR) .OR. &
-     (JJ==0      .AND. KK==0     ) .OR. (JJ==0      .AND. KK==M%KBAR) .OR. (JJ==M%JBAR .AND. KK==0     ) .OR. (JJ==M%JBAR .AND. KK==M%KBAR) ) ED%EXTERNAL=.TRUE.
+IF (NDF==2) ED%EXTERNAL=.TRUE.   ! a corner of the physical domain (stock: of the mesh, which is the domain there)
 ED%I = II ; ED%J = JJ ; ED%K = KK ; ED%AXIS = IEC
 SELECT CASE(IEC)
    CASE(1)
@@ -1428,6 +1457,33 @@ SELECT CASE(IEC)
 END SELECT
 ED%CELL_INDEX_MM = ICMM ; ED%CELL_INDEX_PM = ICPM ; ED%CELL_INDEX_MP = ICMP ; ED%CELL_INDEX_PP = ICPP
 END SUBROUTINE DEFINE_EDGE
+!> The gas cell next to a box-box seam: the ghost cell across the seam (same domain face) takes the wall IW of this side (SET), or loses it again (undo).
+SUBROUTINE SEAM_GHOST_WALLS(I,J,K,IOR,IW,ON)
+INTEGER, INTENT(IN) :: I,J,K,IOR,IW
+LOGICAL, INTENT(IN) :: ON
+INTEGER :: A,S,IC,IJK(3),N(3),G(3)
+IJK = (/I,J,K/) ; N = (/M%IBAR,M%JBAR,M%KBAR/)
+DO A=1,3
+   IF (A==ABS(IOR)) CYCLE
+   DO S=0,1
+      G = IJK
+      IF (S==0) THEN ; IF (IJK(A)/=1    .OR. DLO(A)) CYCLE ; G(A) = 0      ; ENDIF
+      IF (S==1) THEN ; IF (IJK(A)/=N(A) .OR. DHI(A)) CYCLE ; G(A) = N(A)+1 ; ENDIF
+      IC = M%CELL_INDEX(G(1),G(2),G(3)) ; IF (IC<=0) CYCLE
+      IF (ON) THEN
+         IF (M%CELL(IC)%WALL_INDEX(-IOR)==0) M%CELL(IC)%WALL_INDEX(-IOR) = IW
+      ELSE
+         IF (M%CELL(IC)%WALL_INDEX(-IOR)==IW) M%CELL(IC)%WALL_INDEX(-IOR) = 0
+      ENDIF
+   ENDDO
+ENDDO
+END SUBROUTINE SEAM_GHOST_WALLS
+SUBROUTINE CLEAR_EDGE(IC,IE)
+INTEGER, INTENT(IN) :: IC,IE
+INTEGER :: L
+IF (IC<=0) RETURN
+DO L=1,12 ; IF (M%CELL(IC)%EDGE_INDEX(L)==IE) M%CELL(IC)%EDGE_INDEX(L) = 0 ; ENDDO
+END SUBROUTINE CLEAR_EDGE
 INTEGER FUNCTION WI(I,J,K,D)
 INTEGER, INTENT(IN) :: I,J,K,D
 WI = M%CELL(M%CELL_INDEX(I,J,K))%WALL_INDEX(D)

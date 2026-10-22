@@ -13,7 +13,7 @@ for L in 1 2; do
     rm -rf r$L; mkdir r$L; cp "$HERE/cases/leaf_devc_foreign_vegetation_model.txt" r$L/vegetation_model.txt
     G=s/x/x/; [ "$GROUND" = tmpf ] && G="s/^&SURF ID='GROUND'.*/\&SURF ID='GROUND', DEFAULT=T, TMP_FRONT=32. \//"
     if [ $L = 1 ]; then sed -e 's/IJK=8,8,4/IJK=16,16,8/' -e "$G" "$HERE/cases/open_step.fds" > r$L/c.fds; else sed -e "$G" "$HERE/cases/open_step.fds" > r$L/c.fds; fi
-    (cd r$L && FDSTL_LEVEL_CSV=. OMP_NUM_THREADS=1 timeout 600 "$BIN" c.fds --two-level-run --levels $L --patch 0 7 0 3 --maxsize 16 --nofine -1 --steps 10 --outdir . > log 2>&1) \
+    (cd r$L && FDSTL_LEVEL_CSV=. OMP_NUM_THREADS=1 timeout 600 "$BIN" c.fds --two-level-run --levels $L --patch 0 7 0 3 --maxsize ${MAXSIZE:-16} --nofine -1 --steps 10 --outdir . > log 2>&1) \
         || { echo "FAIL open_step: $L-level run rc (see $RUN/r$L/log)"; exit 1; }
     rm -f r$L/*.s3d* r$L/*.sf r$L/*.bf r$L/*.prt5
 done
