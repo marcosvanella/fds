@@ -31,6 +31,7 @@ extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
 extern "C" void fds_p_bnd_rate(int ns, double* r);
 extern "C" void fds_fine_set_bed();
 extern "C" int fds_open_wind();
+extern "C" double fds_dt_default(double cs);
 extern "C" void fds_wind_at_height(double t, double z, double* u, double* v, double* w);   // fds_fine_level.f90
 extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR and burning area over leaf walls, r[6] (diagnostic)
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
@@ -620,7 +621,15 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
 
     // ---- the fine level's own D, KRES, MU, ... by one corrector-form pass, then the post-regrid projection of the two-level velocity with that D (the body of the hook, Role 3 PostRegridProjection)
-    loop.set_state(0.0, dt_setup, 0);
+    double dt_start = dt_setup;   // read.f90: default DT = CFL_MAX * CHARACTERISTIC_CELL_SIZE / VEL_CHAR, the cell size being the smallest of all meshes, so the finest level's
+    {                             // (FDS set it from level 0 alone); a DT or time ramp from the input stays
+        double cs = 1.0e30;
+        for (int l = 0; l <= core.finestLevel(); ++l) { const amrex::Real* h = core.Geom(l).CellSize(); cs = std::min(cs, std::cbrt(h[0] * h[1] * h[2])); }
+        const double d = fds_dt_default(cs);
+        if (d > 0.0) dt_start = d;
+        amrex::Print() << tag << ": starting dt " << dt_start << " (cell size " << cs << ")\n";
+    }
+    loop.set_state(0.0, dt_start, 0);
     loop.prime_levels();
     probe("after second prime");
     if (std::getenv("FDSTL_TLDIAG")) {

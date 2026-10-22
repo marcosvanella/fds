@@ -592,6 +592,7 @@ LOGICAL  :: UPDATE_DEVICES_AGAIN=.FALSE.
 
 ! Miscellaneous mesh dimensions
 
+REAL(EB) :: DT_DEFAULT_VEL_CHAR=-1._EB          !< VEL_CHAR of the default starting time step (read.f90), -1 if DT or a time ramp was given
 REAL(EB) :: CHARACTERISTIC_CELL_SIZE=1.E6_EB  !< \f$ \min \left( \delta \xi \, \delta \eta \, \delta \zeta \right)^{1/3} \f$
 REAL(EB) :: MESH_SEPARATION_DISTANCE          !< Meshes separated if gap greater than min(0.001,0.05*CHARACTERISTIC_CELL_SIZE) (m)
 REAL(EB) :: NEIGHBOR_SEPARATION_DISTANCE=-1.  !< No message passing beyond 5*CHARACTERISTIC_CELL_SIZE (m)
