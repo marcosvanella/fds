@@ -32,6 +32,7 @@ extern "C" void fds_p_bnd_rate(int ns, double* r);
 extern "C" void fds_fine_set_bed();
 extern "C" int fds_open_wind();
 extern "C" double fds_dt_default(double cs);
+extern "C" double fds_h_init();
 extern "C" void fds_wind_at_height(double t, double z, double* u, double* v, double* w);   // fds_fine_level.f90
 extern "C" void fds_fine_fuel_mdot(int lev, double* r);   // fds_fine_level.f90: fuel MLR and burning area over leaf walls, r[6] (diagnostic)
 extern "C" void fds_p_pbar(int nm, int nmax, double* out, int* nout);
@@ -661,6 +662,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         if (po.enabled && pr.ran && !pr.accepted) { ++fails; amrex::Print() << tag << ": the initial projection was not accepted\n"; }
     }
 
+    {   // init.f90: H = HS = 0.5 (U0^2+V0^2+W0^2) at the first step (stock solves no pressure before it); the set-up passes above left the solve's H on every level,
+        // and pres.f90 takes the start-of-step H (HP) as the wind inflow value of the OPEN faces
+        const double h0 = fds_h_init();
+        for (int l = 0; l < nl; ++l) for (const char* n : {"H", "HS"}) { reg.fields(l)[n].setVal(h0); }
+    }
     // ---- the run
     const std::vector<double> m0 = composite_mass(reg, nl, ns);
     // Open-domain mass balance: inflow = the mass DENSITY moved through the level-0 wall faces (OPEN vents, MASS_FLUX/HRRPUA walls), summed over the steps.
