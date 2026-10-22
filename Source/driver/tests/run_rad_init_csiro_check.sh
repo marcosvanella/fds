@@ -3,8 +3,9 @@
 # 2 levels with level 1 over the whole domain vs 1 level at the level-1 cell size. FDSTL_T0RAD prints QR and D of the finest level at t=0.
 # Variant bed: reflecting DIRT ground and a static grass bed in 0..0.25 m on level 1 (--bed). Stock runs the initial radiation iterations (main.f90:597-622) before it
 #   inserts the particles (:634). Control FDSTL_BED_BEFORE_RAD_INIT: the bed inserted before rad_init_levels.
-# Variant fixtmp: fixed-temperature ground (TMP_FRONT=32), no bed, NOISE off. Its TMP_F is TMP_0 at the face's own first-cell height (wall.f90 SPECIFIED_TEMPERATURE), so the
-#   fine wall must not take the level-0 parent's (fds_fine_level.f90 FRAD_WALLS). Control FDSTL_FINE_TMPF_PULL: the parent's TMP_F, EMISSIVITY, Q_RAD_OUT.
+# Variants fixtmp / netflux / convflux: ground TMP_FRONT=32 / NET_HEAT_FLUX=0 / CONVECTIVE_HEAT_FLUX=0.5 (0 would leave it specified-temperature, read.f90:9078), no bed, NOISE off. The BC sets the wall's own TMP_F (e.g. TMP_0 at its
+#   own first-cell height, wall.f90 SPECIFIED_TEMPERATURE), so the fine wall keeps its own state; only a wall whose solid lives on level 0 (thick) takes the level-0 parent's
+#   (fds_fine_level.f90 FRAD_WALLS). Control FDSTL_FINE_TMPF_PULL: every fine wall with a parent takes the parent's TMP_F, EMISSIVITY, Q_RAD_OUT.
 # Pass per variant: the 2-level QR line equals the 1-level one digit for digit, and the control differs. D is printed for information (level-1 t=0 D: Integration).
 set -u
 BIN=$1; RUN=${2:-$PWD/rad_init_csiro_run}; HERE=$(cd "$(dirname "$0")" && pwd)
@@ -27,7 +28,10 @@ variant() {   # name control-env bed-args sed-expr
 variant bed FDSTL_BED_BEFORE_RAD_INIT "--bed 0.5 3.5 0.5 3.5 0 0.25" "s/^//"
 grep -aq "particles at t=0: [1-9]" bed2.log || { echo "  [bed] no bed particles on level 1"; fail=1; }
 variant fixtmp FDSTL_FINE_TMPF_PULL "" "/&INIT PART/d;s/MATL_ID='DIRT', THICKNESS=0.2 \//TMP_FRONT=32. \//;s/TMPA=32\./TMPA=32., NOISE=.FALSE./"
-grep -aq "TMP_FRONT=32" fixtmp2.fds || { echo "  [fixtmp] variant edit failed"; fail=1; }
+for g in "netflux NET_HEAT_FLUX=0." "convflux CONVECTIVE_HEAT_FLUX=0.5"; do set -- $g
+  variant $1 FDSTL_FINE_TMPF_PULL "" "/&INIT PART/d;s/MATL_ID='DIRT', THICKNESS=0.2 \//$2 \//;s/TMPA=32\./TMPA=32., NOISE=.FALSE./"
+done
+for v in "fixtmp TMP_FRONT=32" "netflux NET_HEAT_FLUX" "convflux CONVECTIVE_HEAT_FLUX"; do set -- $v; grep -aq "$2" ${1}2.fds || { echo "  [$1] variant edit failed"; fail=1; }; done
 rm -f ./*.s3d ./*.smv ./*.sf ./*.bf ./*.prt5
 [ $fail -eq 0 ] && echo "PASS rad_init_csiro" || echo "FAIL rad_init_csiro (see $RUN)"
 exit $fail

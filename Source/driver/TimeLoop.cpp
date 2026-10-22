@@ -2534,6 +2534,7 @@ struct TimeLoop::Impl {
                 fds_fine_walls_rad_xchg(l);
 #endif
                 each_local([&](int nm) { fds_k_rad_init(nm, it); });
+                each_local([&](int nm) { fds_fine_walls_qcon(nm, L.m_t, 0.0, 0); });   // main.f90:614 WALL_BC after each initial radiation solve (t=0 form: FWALL_STATE, thick walls keep the parent HTC)
                 rad_ghost_exchange();
             }
         select(0);

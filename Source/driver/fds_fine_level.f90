@@ -68,6 +68,7 @@ INTEGER, ALLOCATABLE, SAVE :: OBI(:,:),VTS(:,:)   ! OBST and VENT XB snapped at 
 INTEGER, ALLOCATABLE, SAVE :: OBS(:,:),VTI(:,:)    ! OBST SURF_INDEX(-3:3) (7,*); VENT IOR,SURF_INDEX,BOUNDARY_TYPE (3,*)
 
 LOGICAL :: FWALL_T0 = .FALSE.   ! FDS_FINE_WALLS_QCON STAGE 0: FWALL_STATE keeps a thick wall's initial (parent) HTC and Q_CON_F
+INTEGER :: PULL_ALL = -1   ! FDSTL_FINE_TMPF_PULL set (status 0): every fine wall takes the level-0 parent's thermal/radiative state (negative control, run_rad_init_csiro_check.sh)
 INTEGER :: FWALL_STAGE = -1   ! FDS_FINE_WALLS_QCON STAGE (0 t=0, 1 predictor, 2 corrector) while it runs: FWALL_STATE writes the OPEN ghost cells; -1 otherwise (diagnostic callers)
 CONTAINS
 
@@ -1251,10 +1252,9 @@ END SUBROUTINE GROUND_ROUGH_INIT
 SUBROUTINE FRAD_WALLS(NM,ON)
 USE MESH_POINTERS, ONLY: WALL,BOUNDARY_COORD,BOUNDARY_PROP1,BOUNDARY_RADIA,WALL_WORK1,WALL_WORK2,N_WALL_CELLS,N_INTERNAL_WALL_CELLS,N_EXTERNAL_WALL_CELLS,POINT_TO_BOX
 USE TYPES, ONLY: SURFACE
-USE GLOBAL_CONSTANTS, ONLY: SPECIFIED_TEMPERATURE
+USE GLOBAL_CONSTANTS, ONLY: THERMALLY_THICK
 INTEGER, INTENT(IN) :: NM,ON
 INTEGER :: LEV,IB,IW
-INTEGER, SAVE :: PULL_ALL=-1   ! FDSTL_FINE_TMPF_PULL set: specified-temperature walls take the parent state too (negative control, run_rad_init_csiro_check.sh)
 REAL(EB) :: RDN,AREA
 TYPE(MESH_TYPE), POINTER :: WM
 IF (ON==0) THEN ; CALL POINT_TO_BOX(NM) ; RETURN ; ENDIF
@@ -1271,8 +1271,8 @@ DO LEV=1,MIN(SIZE(FWALL),SIZE(FINE_LEVEL))
       CALL FWALL_GEOM(FINE_LEVEL(LEV)%BOX(IB),BC,RDN,AREA)
       B1%AREA = AREA
       IF (OWN_BURNER(WM%WALL(IW)%SURF_INDEX)) THEN   ! exempt burner: its own stock state
-      ELSEIF (SF%THERMAL_BC_INDEX==SPECIFIED_TEMPERATURE .AND. PULL_ALL/=0) THEN   ! its own state (FWALL_STATE, init.f90): TMP_F = TMP_0 at the face's own first-cell height, not the parent's
-      ELSEIF (FWALL(LEV)%B(IB)%HAVEP(IW)) THEN   ! the wall of level LEV-1 on the same face (one-way pull, FDS_FINE_WALLS_RAD_XCHG)
+      ELSEIF (SF%THERMAL_BC_INDEX/=THERMALLY_THICK .AND. PULL_ALL/=0) THEN   ! the BC sets its own TMP_F (FWALL_STATE, init.f90; e.g. TMP_0 at the face's own height): its own state
+      ELSEIF (FWALL(LEV)%B(IB)%HAVEP(IW)) THEN   ! solid on level 0 (thick): the wall of level LEV-1 on the same face (one-way pull, FDS_FINE_WALLS_RAD_XCHG)
          B1%TMP_F = FWALL(LEV)%B(IB)%PV(1,IW) ; B1%EMISSIVITY = FWALL(LEV)%B(IB)%PV(2,IW) ; B1%Q_RAD_OUT = FWALL(LEV)%B(IB)%PV(3,IW) ; B1%T_IGN = FWALL(LEV)%B(IB)%PV(4,IW)
       ELSE   ! no parent wall (new fine face, OBST unresolved above): surface values
          B1%TMP_F = SF%TMP_FRONT ; B1%EMISSIVITY = SF%EMISSIVITY ; B1%Q_RAD_OUT = 0._EB
@@ -1795,7 +1795,8 @@ USE GLOBAL_CONSTANTS, ONLY: SOLID_BOUNDARY,OPEN_BOUNDARY
 INTEGER, INTENT(IN) :: LEV,IB,IW
 REAL(EB), INTENT(IN) :: T
 INTEGER :: NM,NM0
-REAL(EB) :: RDN,AREA,UN,RSUM_F,RAT
+REAL(EB) :: RDN,AREA,UN,RSUM_F,RAT,OWN(4)
+LOGICAL :: KEEP
 TYPE(MESH_TYPE), POINTER :: R,WM,M0
 TYPE(WALL_TYPE), POINTER :: WC,WC0
 TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
@@ -1804,6 +1805,9 @@ TYPE(SURFACE_TYPE), POINTER :: SF
 WM => FWALL(LEV)%B(IB)%W ; R => FINE_LEVEL(LEV)%BOX(IB) ; NM = FINE_LEVEL(LEV)%NM0 + IB
 WC => WM%WALL(IW) ; BC => WM%BOUNDARY_COORD(WC%BC_INDEX) ; B1 => WM%BOUNDARY_PROP1(WC%B1_INDEX)
 NM0 = FWALL(LEV)%B(IB)%PNM(IW) ; SF => SURFACE(WC%SURF_INDEX)
+IF (PULL_ALL<0) CALL GET_ENVIRONMENT_VARIABLE('FDSTL_FINE_TMPF_PULL',STATUS=PULL_ALL)
+KEEP = SF%THERMAL_BC_INDEX/=THERMALLY_THICK .AND. .NOT.OWN_BURNER(WC%SURF_INDEX) .AND. PULL_ALL/=0   ! the BC sets this wall's own TMP_F: keep its own surface state (only a solid on level 0 takes the parent's)
+OWN = (/B1%TMP_F,B1%Q_RAD_IN,B1%Q_RAD_OUT,B1%EMISSIVITY/)
 CALL FWALL_GEOM(R,BC,RDN,AREA)
 CALL POINT_TO_BOX(NM)
 IF (NM0>0) THEN   ! local parent: its wall data
@@ -1813,6 +1817,7 @@ IF (NM0>0) THEN   ! local parent: its wall data
 ELSE   ! gathered state (parent on another rank, or the nearest level-0 wall of the same surface and IOR), else the surface input the fine wall was made with
    IF (.NOT.OWN_BURNER(WC%SURF_INDEX) .AND. FWALL(LEV)%B(IB)%HAVES(IW)) CALL PS_TO_B1(FWALL(LEV)%B(IB)%PS(:,IW),B1)
 ENDIF
+IF (KEEP) THEN ; B1%TMP_F = OWN(1) ; B1%Q_RAD_IN = OWN(2) ; B1%Q_RAD_OUT = OWN(3) ; B1%EMISSIVITY = OWN(4) ; ENDIF
 MESH_OBJ => WM
 RAT = 1._EB
 IF (.NOT.OWN_BURNER(WC%SURF_INDEX)) RAT = LS_FLUX_SCALE(R,BC,SUM(B1%M_DOT_G_PP_ADJUST(1:N_TRACKED_SPECIES)),WC%SURF_INDEX)
