@@ -215,6 +215,16 @@ CALL BND_STAGE_RATE(NM)
 CALL FDS_HOOK_SHADOW(1,10,NM,0._EB,0._EB,0,0._EB,0)
 END SUBROUTINE FDS_P_MFD
 
+!> Flush every open Fortran unit (CHID_devc.csv, _hrr.csv, .out, ...) so the outputs are on disk when the driver aborts after a failed end-of-run gate.
+SUBROUTINE FDS_P_FLUSH_ALL() BIND(C,NAME='fds_p_flush_all')
+INTEGER :: LU
+LOGICAL :: OP
+DO LU=1,9999
+   INQUIRE(UNIT=LU,OPENED=OP)
+   IF (OP) FLUSH(LU)
+ENDDO
+END SUBROUTINE FDS_P_FLUSH_ALL
+
 !> Mass rate (kg/s) that DENSITY moves through the leaf wall faces in this stage, kept per box and stage (a repeated call overwrites): level-0 mesh NM (<=NMESHES) the walls without hidden fine
 !> children, fine box NM its hidden fine walls (the face velocity and area of the box, the state RHO_F, ZZ_F, RHO_D_DZDN_F of the parent wall). Per wall: advective RHO_F*ZZ_F*u_in (the FX
 !> override of MASS_FINITE_DIFFERENCES, UU = U or US) and diffusive -RHO_D_DZDN_F, times the face area.
