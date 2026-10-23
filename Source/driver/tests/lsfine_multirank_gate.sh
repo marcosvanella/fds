@@ -4,7 +4,7 @@
 # 1 level (--run) and 2 levels (--nofine 0 and --nofine 1), and compares every configuration with 1 mesh / 1 rank of the same flags
 # (lsfine_compare.py: every output csv, front x, leaf-cell PHI, run gates). Prints PASS/FAIL per row; exit 1 on any FAIL.
 #
-# Env (portable; pop-os or box):
+# Env (portable; any machine):
 #   FDS_AMR      binary (default /workspace/fds-amr/scratch/b611/fds_amr)
 #   MPIRUN       launcher (default "mpirun"; add e.g. "mpirun --allow-run-as-root --oversubscribe")
 #   OMP_NUM_THREADS (default 1)

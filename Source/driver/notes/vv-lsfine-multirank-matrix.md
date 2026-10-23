@@ -2,7 +2,7 @@
 
 Owner: V&V Lead (matrix and gate). Implementation: Role 1. Written 2026-10-19 under the owner's top-priority directive. No solver code changes.
 Gate script: `/workspace/fds-amr/scratch/mr-ls/vv/lsfine_multirank_gate.sh` with comparator `lsfine_compare.py` in the same dir. Role 1 will move both into `Source/driver/tests`.
-Base code: `e821a0884c`. Current dry run: `scratch/b611/fds_amr` built 09:49 from `src` `b549eeb2c6` (sha256 `39792e76…`, `dry_gate3.binary.sha256`).
+Base code: `e821a0884c`. Current dry run: `scratch/b611/fds_amr` built from `src` `b549eeb2c6` (sha256 `39792e76…`, `dry_gate3.binary.sha256`).
 
 ## Case and flags
 
@@ -32,9 +32,9 @@ Base code: `e821a0884c`. Current dry run: `scratch/b611/fds_amr` built 09:49 fro
 - The multi-rank Allreduce path (LS-grid assembly, wind gather) is coded but untested. The 2- and 4-rank bit-identity rows are the first test of it.
 - **Leaf cells only** (owner ruling): the integrals are the driver's leaf sums; PHI is compared with each finest-grid cell holding its leaf cell value.
 
-## Matrix (T_END 30 s; dry run 2026-10-19 ~09:55 on `scratch/b611/fds_amr` built 09:49, src `b549eeb2c6`, sha256 `39792e76…`; 1 rank, 1 thread)
+## Matrix (T_END 30 s; dry run 2026-10-19 on `scratch/b611/fds_amr`, src `b549eeb2c6`, sha256 `39792e76…`; 1 rank, 1 thread)
 
-Status key: PASS = dry run on the box; NOT RUN = needs more cores (pop-os); DEFERRED = later.
+Status key: PASS = dry run on the box; NOT RUN = needs more cores (the run machine); DEFERRED = later.
 
 | id | meshes / ranks | levels / nofine | compared against | mode | status |
 |---|---|---|---|---|---|
@@ -45,9 +45,9 @@ Status key: PASS = dry run on the box; NOT RUN = needs more cores (pop-os); DEFE
 | M2R1-N0 | 2 / 1 | nf0 | R-N0 | crossmesh | **PASS**: front x identical (5/5/15 m), gate PASS (div 9.2e-13), mean HRR 3.1e-3; PHI leaf rel 1.2e-2 (INFO) |
 | M4R1-N0 | 4 / 1 | nf0 | R-N0 | crossmesh | **PASS**: gate PASS (div 8.9e-13), mean HRR 9.0e-4; PHI 1.4e-2 (INFO) |
 | M2R1-N1 | 2 / 1 | nf1 | R-N1 | crossmesh | **PASS**: gate PASS (div 7.3e-13), mean HRR 4.8e-4; PHI 8.2e-3 (INFO) |
-| M4R1-N1 | 4 / 1 | nf1 | R-N1 | crossmesh | **PASS**: gate PASS (div 7.3e-13), mean HRR 8.3e-4; PHI 2.9e-3 (INFO), no garbage in this build. The L0 PHI garbage (up to 7e271, top two j rows of meshes 3 and 4) seen on the 09:26 build is **confirmed as Role 1's; fix pending in the multi-mesh commit**. It was not reproduced on the 09:49 build; keep the row watched |
-| M2R2-* | 2 / 2 | 1 lvl, nf0, nf1 | M2R1-* (bitid) and R-* (crossmesh) | both | NOT RUN (pop-os) |
-| M4R2-*, M4R4-* | 4 / 2, 4 / 4 | same | M4R1-* (bitid) and R-* (crossmesh) | both | NOT RUN (pop-os) |
+| M4R1-N1 | 4 / 1 | nf1 | R-N1 | crossmesh | **PASS**: gate PASS (div 7.3e-13), mean HRR 8.3e-4; PHI 2.9e-3 (INFO), no garbage in this build. The L0 PHI garbage (up to 7e271, top two j rows of meshes 3 and 4) seen on the earlier build is **confirmed as Role 1's; fix pending in the multi-mesh commit**. It was not reproduced on the later build; keep the row watched |
+| M2R2-* | 2 / 2 | 1 lvl, nf0, nf1 | M2R1-* (bitid) and R-* (crossmesh) | both | NOT RUN (run machine) |
+| M4R2-*, M4R4-* | 4 / 2, 4 / 4 | same | M4R1-* (bitid) and R-* (crossmesh) | both | NOT RUN (run machine) |
 | M1R2, M1R4 | 1 / 2, 1 / 4 | — | — | — | N/A: FDS refuses ranks > meshes |
 | LONG | 1 / 1, 120 s | nf0 | gate only; multi-config at 120 s via `T_END=120 TIMES=40,80,120` | — | **PASS** (gate PASS) |
 | L3-* | all of the above | 3 levels | 1/1 3-level | both | DEFERRED |
@@ -58,7 +58,7 @@ Plain (non-ls-fine) LEVEL_SET_MODE with more than one mesh aborts by design ("PH
 
 ## Existing gates (must stay green; `RUN_EXISTING=1` runs them)
 
-| gate | b611 (09:26), 1 thread |
+| gate | b611, 1 thread |
 |---|---|
 | `Source/driver/tests/run_ls_fine_drive_check.sh` | **PASS**: one level mean HRR 20-60 s orig 9.611e4 vs drive 9.62e4 kW (0.09%); two levels gate PASS (div 1.4e-12); 20 s |
 | `run_levelset_tag_phi_check.sh` | **PASS**: nf1 6 plotfiles / nf0 7 plotfiles, 0 violations; 20 s |
@@ -68,14 +68,14 @@ Plain (non-ls-fine) LEVEL_SET_MODE with more than one mesh aborts by design ("PH
 ## Execution
 
 - **Box, 1 core:** `OMP_NUM_THREADS=1 MPIRUN="mpirun --allow-run-as-root" RANKS=1 ./lsfine_multirank_gate.sh`
-- **pop-os:** `FDS_AMR=<bin> MPIRUN=mpirun OMP_NUM_THREADS=1 RANKS="1 2 4" MESHES="1 2 4" MULTIMESH_EXPECT=pass PERTURB=1 RUN_EXISTING=1 ./lsfine_multirank_gate.sh`
+- **run machine:** `FDS_AMR=<bin> MPIRUN=mpirun OMP_NUM_THREADS=1 RANKS="1 2 4" MESHES="1 2 4" MULTIMESH_EXPECT=pass PERTURB=1 RUN_EXISTING=1 ./lsfine_multirank_gate.sh`
 - **Long option:** `T_END=120 TIMES=40,80,120`.
 - Exit code 0 only if every non-XFAIL row passes.
-- Dry run logs: `scratch/mr-ls/vv/dry_gate3.log` (agreed tolerance, current). Superseded: `dry_gate.log` and `dry_gate2.log` (provisional 1e-8 tolerance, 09:26 build).
+- Dry run logs: `scratch/mr-ls/vv/dry_gate3.log` (agreed tolerance, current). Superseded: `dry_gate.log` and `dry_gate2.log` (provisional 1e-8 tolerance, earlier build).
 
-## Full gate on ls-mr5b `f910dd53f3` (2026-10-20, pop-os, all rows)
+## Full gate on ls-mr5b `f910dd53f3` (2026-10-20, run machine, all rows)
 
-Source: `f910dd53f3` (contains `df9f8474cc`). pop-os binary `GROK/lsmr5/b-f910dd53f3/fds_amr`, GCC 13.3 / Open MPI 5.0.1, sha256 `2129aea1…`. Its source tree was verified identical to `git archive f910dd53f3`.
+Source: `f910dd53f3` (contains `df9f8474cc`). run-machine binary `GROK/lsmr5/b-f910dd53f3/fds_amr`, GCC 13.3 / Open MPI 5.0.1, sha256 `2129aea1…`. Its source tree was verified identical to `git archive f910dd53f3`.
 Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full table, harness changes, HIER review and radiation table: `scratch/mr-ls/vv/RESULTS.md`.
 **Harness changes:** 4m/2r uses `C064_4mesh_np2.fds` (MPI_PROCESS); generated inputs use SIG_FIGS=15 so csv bit-identity is meaningful; CFL_VELOCITY_NORM=3 guard (not present in any input); the L0 bitcheck case is `C064_1mesh.fds` (BLOCKING_FACTOR 2, MAX_GRID_SIZE 12, which divides the 12-cell L0); the comparator prints the first differing row and column. Role 1's HIER box/cell-count check was reviewed and kept: sound, fails properly, masks nothing (BITID stays separate).
 
@@ -98,7 +98,7 @@ Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full tabl
 - For same-mesh runs compared across rank counts, the c_hrr.csv columns `Q_*` (and `HRR`; including HRR is our interpretation, to be confirmed, set by env `HRR_Q_RANK_EXTRA`) may differ by up to **1e-11 relative** (round-off). Encoded as `HRR_Q_RANK_TOL=1e-11` in lsfine_compare.py and lsfine_multirank_gate.sh. Any other differing column in c_hrr.csv (e.g. `MLR_*`) is still a strict FAIL.
 - Devc, front x and gate verdicts, and all other csvs, stay STRICT. The cross-mesh tolerance is unchanged: front x and verdict identical, mean HRR within 2%. KNOWN Integration items stay FAIL KNOWN.
 - New verdict, NEEDS-RULING (comparator exit 3; not counted as FAIL, but it blocks push): (a) a leaf PHI difference > 0 (~1.3-1.6e-15); (b) a c_multi_level.csv diff confined to `mass`/`mass_rel_change`.
-- Sanity run on 63a11fd048 (b-63a11fd048, sha256 d9b89f0a…, OMP_NUM_THREADS=1, pop-os, 2026-10-20 19:22-19:33 EDT): GATE FAIL (4; needs-ruling 2).
+- Sanity run on 63a11fd048 (b-63a11fd048, sha256 d9b89f0a…, OMP_NUM_THREADS=1, run machine, 2026-10-20): GATE FAIL (4; needs-ruling 2).
   - L1 2m/2r, 4m/2r, 4m/4r BITID: now PASS under the ruling (Q_TOTAL 6.7e-12). CHANGED vs f910 (was FAIL).
   - L2 nf0 2m/2r and nf1 2m/2r: hrr PASS under the ruling (1.2e-12, 8.4e-13). multi_level: mass-only diffs, so NEEDS-RULING.
   - L2 nf0/nf1 4m/2r and 4m/4r: FAIL KNOWN. Q_ENTH is down to 6e-13 to 1.6e-12 (was 3e-10 to 5.2e-10), but `MLR_FUEL VAPOR` differs (4e-15) and multi_level differs beyond mass. Leaf PHI 1.3-1.6e-15 is NEEDS-RULING.
@@ -108,7 +108,7 @@ Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full tabl
 ## Ruling 2026-10-20, extended (approved, relayed by Role 1)
 
 - For same-mesh runs compared across rank counts, EVERY summary column in c_hrr.csv and c_multi_level.csv, plus leaf PHI, passes at <= 1e-11 relative (relative to the reference column max; leaf PHI relative to max|PHI|). Devc, front x and gate verdicts stay STRICT. HRR_Q_RANK_EXTRA=HRR stays on.
-- Encoded as the toggle `RANK_SUMMARY_TOL_ALL` (default 1 = ON) with `RANK_SUMMARY_TOL=1e-11`, in lsfine_compare.py and lsfine_multirank_gate.sh (scratch/mr-ls/vv/ and pop-os GROK/vv-lsfine/pkg63x/). With `RANK_SUMMARY_TOL_ALL=0` the earlier behaviour is restored (Q-only rule, NEEDS-RULING category).
+- Encoded as the toggle `RANK_SUMMARY_TOL_ALL` (default 1 = ON) with `RANK_SUMMARY_TOL=1e-11`, in lsfine_compare.py and lsfine_multirank_gate.sh (scratch/mr-ls/vv/ and the run machine's GROK/vv-lsfine/pkg63x/). With `RANK_SUMMARY_TOL_ALL=0` the earlier behaviour is restored (Q-only rule, NEEDS-RULING category).
 - Re-evaluation of the existing 63a11fd048 outputs (no reruns), toggle ON:
   - L1 2m/2r, 4m/2r, 4m/4r: PASS (c_hrr max 6.75e-12).
   - L2 nf0/nf1 2m/2r: c_hrr PASS (<= 1.24e-12). c_multi_level FAIL: `mass` 4-6e-14 passes, but `mass_rel_change` differs at 1.0-1.1 relative to its column max (6.6e-14, itself round-off).
@@ -126,7 +126,7 @@ Run with `OMP_NUM_THREADS=2`, `mpirun --bind-to none --oversubscribe`. Full tabl
   - Max diff in the floor columns: mass_rel_change 4.9e-14 to 7.5e-14; divmax 2.5e-16 to 2.6e-16; div_l0 2.5e-16 to 2.6e-16; div_l1 4.9e-16 to 5.6e-16. `mass` is 4.3e-14 to 7.0e-14 relative.
   - Note: mass_rel_change reaches 75% of the floor (7.5e-14 at L2 nf0 4m/4r).
 
-## FINAL gate, ls-mr5b tip 3caed8b4de (2026-10-20, pop-os, OMP_NUM_THREADS=2, Open MPI 5, pkg63x defaults)
+## FINAL gate, ls-mr5b tip 3caed8b4de (2026-10-20, run machine, OMP_NUM_THREADS=2, Open MPI 5, pkg63x defaults)
 
 - Tip 3caed8b4de contains df9f8474cc. It contains d02b4bf134 as a cherry-pick: 3caed8b4de itself has the same stable patch-id (448a4534…). It also contains 9ec5e8bc5f (plotfile fields).
 - Binary b-3caed8b4de/fds_amr: sha256 2a7c98262b89a7a60f45cf5ab1ac31c7824395b77843866920bbe134fa5b952b. Its src-3caed8b4de tree matches git archive (Source md5-of-md5s d708f0f6…).
