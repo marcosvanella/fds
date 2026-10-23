@@ -16092,10 +16092,13 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                ! Clip passive scalars:
                IF (N_PASSIVE_SCALARS>0) FV%CV%ZZS(ZETA_INDEX,IG) = MAX(0._EB,MIN(1._EB,FV%CV%ZZS(ZETA_INDEX,IG)))
-               ! One thermo state per CV: owner row matches the piece row after conversion.
+               ! A cut owner is converted when its own piece is visited. Copying this
+               ! piece's mass fractions onto it first makes the later sum equal 1.
                IF (ICV>0 .AND. ICV/=IG) THEN
-                  FV%CV%RHOS(ICV) = FV%CV%RHOS(IG)
-                  FV%CV%ZZS(1:N_TOTAL_SCALARS,ICV) = FV%CV%ZZS(1:N_TOTAL_SCALARS,IG)
+                  IF (FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) THEN
+                     FV%CV%RHOS(ICV) = FV%CV%RHOS(IG)
+                     FV%CV%ZZS(1:N_TOTAL_SCALARS,ICV) = FV%CV%ZZS(1:N_TOTAL_SCALARS,IG)
+                  ENDIF
                ENDIF
             ENDIF
          ENDDO
@@ -16170,10 +16173,13 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                ! Clip passive scalars:
                IF (N_PASSIVE_SCALARS>0) FV%CV%ZZ(ZETA_INDEX,IG) = MAX(0._EB,MIN(1._EB,FV%CV%ZZ(ZETA_INDEX,IG)))
-               ! One thermo state per CV: owner row matches the piece row after conversion.
+               ! A cut owner is converted when its own piece is visited. Copying this
+               ! piece's mass fractions onto it first makes the later sum equal 1.
                IF (ICV>0 .AND. ICV/=IG) THEN
-                  FV%CV%RHO(ICV) = FV%CV%RHO(IG)
-                  FV%CV%ZZ(1:N_TOTAL_SCALARS,ICV) = FV%CV%ZZ(1:N_TOTAL_SCALARS,IG)
+                  IF (FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) THEN
+                     FV%CV%RHO(ICV) = FV%CV%RHO(IG)
+                     FV%CV%ZZ(1:N_TOTAL_SCALARS,ICV) = FV%CV%ZZ(1:N_TOTAL_SCALARS,IG)
+                  ENDIF
                ENDIF
             ENDIF
          ENDDO
