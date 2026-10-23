@@ -108,6 +108,8 @@ export OMP_PLACES=${OMP_PLACES:-cores}
 (e.g. the PARDISO/cluster-sparse solver) and do not use the AMReX FFT solver.
 
 ### 2.3 Intel oneAPI (icx/ifx) + Intel MPI (not verified here)
+One-command cluster build (Intel oneAPI + Intel MPI): `FIREMODELS=<dir> tools/build_fds_amrex_cluster.sh [--smoke]` clones and builds HYPRE 63331f19, SUNDIALS 7.5.0, FFTW 3.3.10 (if missing) and AMReX 99ddfda6 (same HYPRE) at the `$FIREMODELS` level, then builds `fds_amr` with `-O2 -fp-model=precise`; see the header of the script.
+
 Same line with the Intel wrappers. Build HYPRE and AMReX with the same wrappers:
 ```bash
 source <oneAPI>/setvars.sh
