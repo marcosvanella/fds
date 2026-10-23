@@ -61,7 +61,7 @@ Pressure per step is the measured quantity; step savings assume the baseline spl
 Order of value: (1) interior-skip, (2) label cache, (3) workspace reuse, then solver tuning. After (1)+(2)+(3) the expected solve in the later regime is about 0.065 s MLMG + 0.02 s other per solve, i.e. pressure about 25% of the step (estimate), where tolerance and cycle count then matter. Items (1)-(3) do not change the solution; tolerance does.
 
 ## 6. Not measured / caveats
-- 1 rank only (no MPI reduction, no distribution effects); CPU only (GPU laptop not used for this run).
+- 1 rank only (no MPI reduction, no distribution effects); CPU only (the GPU machine was not used for this run).
 - 60-step windows; the 1,872-box phase lasts 5 steps and then the hierarchy stays small, so full-run fractions depend on window length (60 steps 73%, 150 steps 68%, 4,572 steps 50%).
 - The runs with `pressure.warm_start`, tolerances, and the 1e-8 / 1e-6 / 1e-4 rows were launched with the study flags, which add a true-residual check per solve; the timers report solver and phase times only. The tolerance rows 1e-8 and looser end with the run's own divergence-gate failure (exit code 6) after all steps completed.
 - Bottom solver, V(1,1), blocking and box-size experiments were queued but not run.
@@ -187,7 +187,7 @@ A fixed relative tolerance is too tight for B (margin 2800) and just right for S
 Sum of upstream-patch items 1-3: about 3-4% t_loop.
 
 ### 8.7 GPU path
-Measured with the existing single-level study harness (mms, Dirichlet, MLMG with BoomerAMG bottom, managed memory, 1 rank, 100 re-solves, 3 repeats; GPU is the 8 GB RTX 4070 laptop part, CPU is 1 thread on one performance core):
+Measured with the existing single-level study harness (mms, Dirichlet, MLMG with BoomerAMG bottom, managed memory, 1 rank, 100 re-solves, 3 repeats; GPU is the 8 GB RTX 4070 part, CPU is 1 thread on one performance core):
 | Cells | Boxes | CPU resolve | GPU resolve | Speedup |
 |---|---|---|---|---|
 | 32^3 (33k) | 1 | 22.1 ms (24 cycles) | 22.5 ms | 1.0x |
