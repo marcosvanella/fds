@@ -472,6 +472,7 @@ TYPE(SURFACE_TYPE), POINTER :: SFP
 
 IF (LS_ACTIVE) RETURN
 IF (LEVEL_SET_MODE==2 .OR. LEVEL_SET_MODE==5) CALL ABORT_INIT('the LS grid supports LEVEL_SET_MODE 1, 3 and 4 only')
+IF (LEVEL_SET_MODE==0) CALL ABORT_INIT('the LS grid (--ls-fine, --ls-fine-shadow) needs a level set case: set LEVEL_SET_MODE on &MISC (Z_LS, K_LS and the ground LS cell data exist only then)')
 IF (NMESHES>1 .AND. .NOT.LS_DRIVE) CALL ABORT_INIT('the LS shadow test supports one level-0 mesh only')
 ! the ground meshes (lowest ZS) tile the LS grid; uniform level-0 cells of one size in all of them
 ZB = MINVAL(MESHES(1:NMESHES)%ZS)
