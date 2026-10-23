@@ -29,6 +29,8 @@ REAL(EB) :: LS_X0=0._EB,LS_Y0=0._EB      !< lower corner of the LS grid
 INTEGER, ALLOCATABLE :: LS_MI0(:),LS_MJ0(:)   !< level-0 cell offset of mesh NM in the LS grid (level-0 cells)
 LOGICAL, ALLOCATABLE :: LS_MGROUND(:)        !< mesh NM sits on the ground (lowest ZS) and owns LS cells
 REAL(EB), ALLOCATABLE :: LS_FLUX(:,:)    !< fuel mass flux of every LS cell at the current stage, kg/m2/s (LS_APPLY_L0)
+REAL(EB) :: LS_FLUX_T = -HUGE(1._EB)      !< stage time (T+DT predictor, T corrector) of LS_FLUX
+LOGICAL :: LS_FLUX_PRED = .FALSE.
 INTEGER :: LS_SHADOW_MODE=0           !< --ls-fine-shadow: run beside the original LEVEL_SET_FIRESPREAD and compare (level-0 equal grid)
 INTEGER :: LS_NX=0,LS_NY=0,LIMITER_LS=1
 REAL(EB), ALLOCATABLE :: LS_DX(:),LS_DY(:),RDXL(:),RDYL(:)
@@ -462,7 +464,7 @@ INTEGER, INTENT(IN) :: R
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: I,J,IC,JC,IG,JG,IW,NX,NY,NM,NXC,NYC,IERR
 REAL(EB) :: ZB,X0,X1,Y0,Y1,DX0,DY0
-REAL(EB), ALLOCATABLE :: DXF(:),DYF(:),T0(:,:),B0(:,:),A0(:,:),TA0(:,:),SFR(:,:),CV(:,:)
+REAL(EB), ALLOCATABLE :: DXY(:),G(:,:,:)   ! DXY: LS spacings in x then y; G(:,:,1:6): T_IGN, BURN_DURATION, AREA_ADJUST, TAU_LS, surface index, coverage count
 INTEGER, ALLOCATABLE :: SF0(:,:)
 LOGICAL, ALLOCATABLE :: SEEN(:)
 REAL(EB) :: E_ROTH,BETA_OP_ROTH
@@ -489,8 +491,8 @@ DO NM=1,NMESHES
    LS_MI0(NM) = NINT((MESHES(NM)%XS-X0)/DX0) ; LS_MJ0(NM) = NINT((MESHES(NM)%YS-Y0)/DY0)
 ENDDO
 NX = NXC*R ; NY = NYC*R
-ALLOCATE(DXF(NX),DYF(NY),T0(NX,NY),B0(NX,NY),A0(NX,NY),TA0(NX,NY),SFR(NX,NY),CV(NX,NY),SF0(NX,NY))
-DXF = -HUGE(1._EB) ; DYF = -HUGE(1._EB) ; T0 = 0._EB ; B0 = 0._EB ; A0 = 0._EB ; TA0 = 0._EB ; SFR = 0._EB ; CV = 0._EB
+ALLOCATE(DXY(NX+NY),G(NX,NY,6),SF0(NX,NY))
+DXY = -HUGE(1._EB) ; G = 0._EB
 ! every rank fills the LS cells of its ground meshes; one exact reduction makes the map global (each cell has one owner: SUM of one value and zeros, MAX for the spacings)
 DO NM=1,NMESHES
    IF (.NOT.LS_MGROUND(NM) .OR. PROCESS(NM)/=MY_RANK) CYCLE
@@ -500,44 +502,34 @@ DO NM=1,NMESHES
       CALL ABORT_INIT('the LS grid needs uniform level-0 cells (no stretched meshes)')
    DO I=1,M%IBAR*R
       IG = LS_MI0(NM)*R+I
-      DXF(IG) = M%DX((I-1)/R+1)/REAL(R,EB)
-      IF (R==1) DXF(IG) = M%DX(I)
+      DXY(IG) = M%DX((I-1)/R+1)/REAL(R,EB)
+      IF (R==1) DXY(IG) = M%DX(I)
    ENDDO
    DO J=1,M%JBAR*R
       JG = LS_MJ0(NM)*R+J
-      DYF(JG) = M%DY((J-1)/R+1)/REAL(R,EB)
-      IF (R==1) DYF(JG) = M%DY(J)
+      DXY(NX+JG) = M%DY((J-1)/R+1)/REAL(R,EB)
+      IF (R==1) DXY(NX+JG) = M%DY(J)
    ENDDO
    DO J=1,M%JBAR*R
       DO I=1,M%IBAR*R
          IC = (I-1)/R+1 ; JC = (J-1)/R+1 ; IG = LS_MI0(NM)*R+I ; JG = LS_MJ0(NM)*R+J
          IF (ABS(M%Z_LS(IC,JC))>0._EB .OR. M%K_LS(IC,JC)/=1) CALL ABORT_INIT('the LS grid supports flat terrain only')
-         SFR(IG,JG) = REAL(M%LS_SURF_INDEX(IC,JC),EB)
+         G(IG,JG,5) = REAL(M%LS_SURF_INDEX(IC,JC),EB)
          IW = M%CELL(M%CELL_INDEX(IC,JC,M%K_LS(IC,JC)))%WALL_INDEX(-3)
-         T0(IG,JG) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%T_IGN
-         B0(IG,JG) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%BURN_DURATION
-         A0(IG,JG) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%AREA_ADJUST
-         TA0(IG,JG) = M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX)%TAU_LS
-         CV(IG,JG) = CV(IG,JG) + 1._EB
+         G(IG,JG,1) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%T_IGN
+         G(IG,JG,2) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%BURN_DURATION
+         G(IG,JG,3) = M%BOUNDARY_PROP1(M%WALL(IW)%B1_INDEX)%AREA_ADJUST
+         G(IG,JG,4) = M%BOUNDARY_PROP2(M%WALL(IW)%B2_INDEX)%TAU_LS
+         G(IG,JG,6) = G(IG,JG,6) + 1._EB
       ENDDO
    ENDDO
 ENDDO
 IF (N_MPI_PROCESSES>1) THEN
-   CALL MPI_ALLREDUCE(MPI_IN_PLACE,DXF,NX,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
-   CALL MPI_ALLREDUCE(MPI_IN_PLACE,DYF,NY,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
-   DO I=1,6
-      SELECT CASE(I)
-         CASE(1) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,T0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-         CASE(2) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,B0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-         CASE(3) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,A0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-         CASE(4) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,TA0,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-         CASE(5) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,SFR,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-         CASE(6) ; CALL MPI_ALLREDUCE(MPI_IN_PLACE,CV,NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-      END SELECT
-   ENDDO
+   CALL MPI_ALLREDUCE(MPI_IN_PLACE,DXY,NX+NY,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,IERR)
+   CALL MPI_ALLREDUCE(MPI_IN_PLACE,G,6*NX*NY,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
 ENDIF
-IF (ANY(CV/=1._EB)) CALL ABORT_INIT('the level-0 ground meshes do not tile the LS grid (gap or overlap)')
-SF0 = NINT(SFR)
+IF (ANY(G(:,:,6)/=1._EB)) CALL ABORT_INIT('the level-0 ground meshes do not tile the LS grid (gap or overlap)')
+SF0 = NINT(G(:,:,5))
 ! surface constants that INITIALIZE_LEVEL_SET_FIRESPREAD_2 (vege.f90) sets only for the surfaces of the rank's own meshes: set them for every spreading surface of the
 ! global map, same formulas (identical values where the rank had them already)
 ALLOCATE(SEEN(0:N_SURF)) ; SEEN = .FALSE.
@@ -557,7 +549,7 @@ DO I=0,N_SURF
    BETA_OP_ROTH = 0.20395_EB * (SFP%VEG_LSET_SIGMA**(-0.8189_EB))
    SFP%BETA_ROTH = (SFP%VEG_LSET_BETA/BETA_OP_ROTH)**(-E_ROTH)
 ENDDO
-CALL LS_INIT(NX,NY,DXF,DYF,SF0,T0,B0,A0,TA0)
+CALL LS_INIT(NX,NY,DXY(1:NX),DXY(NX+1:NX+NY),SF0,G(:,:,1),G(:,:,2),G(:,:,3),G(:,:,4))
 LS_RATIO = R
 LS_X0 = X0 ; LS_Y0 = Y0
 ALLOCATE(LS_FLUX(NX,NY)) ; LS_FLUX = 0._EB
@@ -617,6 +609,7 @@ IF (.NOT.LS_WIND_SET) THEN
 ENDIF
 LS_WIND_SET = .FALSE.
 CALL LS_STEP(T,DT)
+LS_FLUX_T = -HUGE(1._EB)   ! the LS state changed: LS_APPLY_L0 recomputes LS_FLUX
 END SUBROUTINE FDS_LS_DRIVE_STEP
 
 
@@ -662,10 +655,9 @@ REAL(EB) :: SM,SP,SA,MF0,TOT,AA,FR,TEFF,RR
 IF (.NOT.LS_DRIVE .OR. .NOT.LS_ACTIVE) RETURN
 IF (.NOT.ALLOCATED(LS_MGROUND)) RETURN   ! .OR. does not short-circuit: SIZE of an unallocated array
 IF (NM>SIZE(LS_MGROUND)) RETURN
-IF (.NOT.LS_MGROUND(NM)) RETURN
-M => MESHES(NM) ; R = LS_RATIO ; RR = REAL(R*R,EB)
 TEFF = MERGE(T+DT,T,PREDICTOR)
-IF (LEVEL_SET_COUPLED_FIRE) THEN
+IF (LEVEL_SET_COUPLED_FIRE .AND. (TEFF/=LS_FLUX_T .OR. (PREDICTOR.NEQV.LS_FLUX_PRED))) THEN   ! once per stage on every rank (the replicated grid; fine walls read it)
+   LS_FLUX_T = TEFF ; LS_FLUX_PRED = PREDICTOR
    DO J=1,LS_NY
       DO I=1,LS_NX
          SF => SURFACE(LS_SURF(I,J))
@@ -675,6 +667,8 @@ IF (LEVEL_SET_COUPLED_FIRE) THEN
       ENDDO
    ENDDO
 ENDIF
+IF (.NOT.LS_MGROUND(NM)) RETURN
+M => MESHES(NM) ; R = LS_RATIO ; RR = REAL(R*R,EB)
 DO J=1,M%JBAR
    DO I=1,M%IBAR
       IW = M%CELL(M%CELL_INDEX(I,J,1))%WALL_INDEX(-3)
