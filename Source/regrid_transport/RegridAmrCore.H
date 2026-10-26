@@ -92,6 +92,7 @@ public:
     // Between full steps: re-tag all levels, rebuild the grids of levels 1.. and fill the data (begin_regrid, make/remake/clear, end_regrid, hierarchy_done).
     // Returns true if the grids of some level changed. Does nothing (false) when MAX_LEVEL = 0.
     bool regrid_dynamic(amrex::Real time);
+    void restart_levels(const std::vector<amrex::BoxArray>& ba, amrex::Real time);   // restart: levels 1.. on the saved grids (new levels, data read afterwards)
 
     // Post-regrid hook (D-063): called at the end of regrid_dynamic, after hierarchy_done(false) and before control returns to the time loop (so before the next dt),
     // when POST_REGRID_PROJECTION asks for it: AUTO (default) and ON whenever the grids changed, OFF never. The driver installs

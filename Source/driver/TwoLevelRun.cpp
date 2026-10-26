@@ -37,7 +37,8 @@ extern "C" int fds_open_wind();
 extern "C" double fds_dt_default(double cs);
 extern "C" double fds_h_init();
 extern "C" int fds_noise_rn(int nseed, double cs, int n, double* buf);   // fds_fine_level.f90
-extern "C" long fds_fine_wall_state(long nb, double* buf);   // fds_fine_level.f90 (restart M1 per-wall state)
+extern "C" long fds_fine_wall_state(long nb, double* buf);
+extern "C" void fds_fine_wall_state_set(long nb, const double* buf);   // fds_fine_level.f90 (restart M1 per-wall state)
 extern "C" void fds_drag_check(double* r);   // fds_fine_level.f90 (PV-4 test 5)
 extern "C" void fds_fine_orphan_sums(double* s);   // fds_fine_level.f90 (ruling 2)
 extern "C" void fds_fine_orphan_out(const double* s);   // s[6]: unmapped count, energy; remapped count, energy; level-0 ground convective energy, of |Q_CON_F|
@@ -231,7 +232,28 @@ std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl
 
 // Restart M1 checkpoint (Role 1 design): Header (t, dt, step, ICYC, regrid interval, levels; per level BoxArray and rank map), every registry MultiFab per level
 // (VisMF, with ghosts), per rank part_r<rank> (TimeLoop::checkpoint words), stock level-0 restart files (CHID_<mesh>.restart, cwd).
-// Per rank walls_r<rank>: the per-wall driver state (fds_fine_wall_state words; owner ruling Option A) followed by the W6 sums W6 (8 words).
+// Per rank walls_r<rank>: the per-wall driver state (fds_fine_wall_state words; owner ruling Option A) (its word count first) followed by the run totals of the step loop (restored on restart).
+// Restart: the Header of write_checkpoint
+struct RestartInfo { std::string dir; double t = 0, dt = 0; int s = 0, icyc = 0, ri = 0, nl = 0; std::vector<amrex::BoxArray> ba; };
+std::unique_ptr<RestartInfo> read_restart_header(const std::string& dir)
+{
+    if (dir.empty()) return nullptr;
+    std::unique_ptr<RestartInfo> r(new RestartInfo); r->dir = dir;
+    std::ifstream h(dir + "/Header"); std::string line; std::getline(h, line);
+    h >> r->t >> r->dt >> r->s >> r->icyc >> r->ri >> r->nl;
+    r->ba.resize(r->nl);
+    for (int l = 0; l < r->nl; ++l) { r->ba[l].readFrom(h); for (long i = 0, p; i < r->ba[l].size(); ++i) h >> p; }
+    if (!h) amrex::Abort("restart: cannot read " + dir + "/Header");
+    return r;
+}
+std::vector<double> read_rank_file(const std::string& f)
+{
+    std::ifstream p(f, std::ios::binary); std::size_t n = 0; p.read(reinterpret_cast<char*>(&n), sizeof n);
+    std::vector<double> v(n); p.read(reinterpret_cast<char*>(v.data()), n * sizeof(double));
+    if (!p) amrex::Abort("restart: cannot read " + f);
+    return v;
+}
+
 void write_checkpoint(const std::string& dir, LevelRegistry& reg, TimeLoop& loop, int nl, int s, int ri, const std::vector<double>& w6)
 {
     amrex::UtilCreateCleanDirectory(dir, true);
@@ -244,7 +266,7 @@ void write_checkpoint(const std::string& dir, LevelRegistry& reg, TimeLoop& loop
     std::vector<double> v; loop.checkpoint(v);
     std::ofstream p(dir + "/part_r" + std::to_string(amrex::ParallelDescriptor::MyProc()), std::ios::binary);
     const std::size_t n = v.size(); p.write(reinterpret_cast<const char*>(&n), sizeof n); p.write(reinterpret_cast<const char*>(v.data()), n * sizeof(double));
-    std::vector<double> ws(fds_fine_wall_state(0, nullptr)); fds_fine_wall_state(static_cast<long>(ws.size()), ws.data()); ws.insert(ws.end(), w6.begin(), w6.end());
+    std::vector<double> ws(1 + fds_fine_wall_state(0, nullptr)); ws[0] = ws.size() - 1; fds_fine_wall_state(static_cast<long>(ws[0]), ws.data() + 1); ws.insert(ws.end(), w6.begin(), w6.end());
     std::ofstream wf(dir + "/walls_r" + std::to_string(amrex::ParallelDescriptor::MyProc()), std::ios::binary);
     const std::size_t nw = ws.size(); wf.write(reinterpret_cast<const char*>(&nw), sizeof nw); wf.write(reinterpret_cast<const char*>(ws.data()), nw * sizeof(double));
     amrex::Print() << "CHECKPOINT wrote " << dir << " after step " << s << " t " << std::setprecision(17) << loop.time() << " (" << nl << " level(s))\n";
@@ -590,11 +612,12 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     };
     core.init_static(reg, false, owner_dm, &l0.dm);
     probe("after init_static");
+    const std::unique_ptr<RestartInfo> rs = read_restart_header(o.restart_from);   // --restart-from: no IC passes, levels on the saved grids, state read after the bind
 
     // ---- level 0 alone: one corrector-form pass for the D of the initial state (projection target and parent value of new levels' D)
     loop.set_state(0.0, dt_setup, 0);
     probe("before first prime");
-    loop.prime_levels();
+    if (!rs) loop.prime_levels();
     probe("after first prime");
     fdsrt::PressureBackendSolver solver;
     std::copy(loop.pressure_bc(), loop.pressure_bc() + 6, solver.face_bc.begin());   // OPEN faces Dirichlet as in the time-step solve
@@ -608,7 +631,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     loop.zero_closed_wall_normal();   // IC: Neumann faces carry no net volume flux into the first projection
     // One AmrCore::regrid grows at most one new fine level; repeat until max_level (or stuck).
     core.set_force_tag_function((o.init_patch || o.patch_set) && o.regrid_every > 0);   // --init-patch or an explicit --patch/--patch2: patch/patch2 forced at step 0 only (adaptive runs would otherwise ignore them)
-    for (int pass = 0; pass < o.max_level; ++pass) {
+    if (rs) {   // level 0 from the checkpoint first (the new levels are prolonged from it, then read too)
+        for (const std::string& n : reg.fields(0).names()) amrex::VisMF::Read(reg.fields(0)[n], rs->dir + "/L0_" + n);
+        core.restart_levels(rs->ba, rs->t);
+    }
+    for (int pass = 0; pass < (rs ? 0 : o.max_level); ++pass) {
         if (use_tag_vort) fill_undivided_vorticity(reg, reg.num_levels());
         if (use_tag_phi) fill_phi(reg, reg.num_levels());
         core.regrid_dynamic(0.0);
@@ -618,7 +645,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     core.set_force_tag_function(false);
     probe("after regrid_dynamic");
     const bool stock_ic = true;   // every level's initial velocity is the stock one (set below; init.f90 always takes U_WIND(K), U0 without a wind), none interpolated
-    {   // init.f90: U(:,:,K) = U_WIND(K) at the cell height of each mesh; a fine level is set as stock sets its own mesh, not prolonged from level 0
+    if (!rs) {   // init.f90: U(:,:,K) = U_WIND(K) at the cell height of each mesh; a fine level is set as stock sets its own mesh, not prolonged from level 0
         for (int l = 1; l <= core.finestLevel(); ++l) {
             const amrex::Geometry& g = core.Geom(l);
             const char* vn[6] = {"U", "V", "W", "US", "VS", "WS"};   // init.f90 US = U before INITIAL_NOISE: the estimate keeps the noise-free profile
@@ -722,6 +749,15 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         if (d > 0.0) dt_start = d;
         amrex::Print() << tag << ": starting dt " << dt_start << " (cell size " << cs << ")\n";
     }
+    if (rs) {   // restart: stock restart files of the fine boxes (level 0: fds_setup(0)), every registry field, the per-wall record, the TimeLoop state
+        loop.set_state(rs->t, rs->dt, rs->icyc);
+        const std::string me = std::to_string(amrex::ParallelDescriptor::MyProc());
+        loop.restart(read_rank_file(rs->dir + "/part_r" + me));
+        for (int l = 1; l < nl; ++l) for (const std::string& n : reg.fields(l).names()) amrex::VisMF::Read(reg.fields(l)[n], rs->dir + "/L" + std::to_string(l) + "_" + n);
+        const std::vector<double> w = read_rank_file(rs->dir + "/walls_r" + me);
+        fds_fine_wall_state_set(static_cast<long>(w[0]), w.data() + 1);
+        amrex::Print() << tag << " RESTART from " << rs->dir << " after step " << rs->s << " t " << std::setprecision(17) << rs->t << "\n";
+    } else {
     loop.set_state(0.0, dt_start, 0);
     loop.t0_stock_rho_levels();
     loop.prime_levels();
@@ -767,9 +803,10 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         const double h0 = fds_h_init();
         for (int l = 0; l < nl; ++l) for (const char* n : {"H", "HS"}) { reg.fields(l)[n].setVal(h0); }
     }
+    }
     if (std::getenv("FDSTL_T0RAD")) loop.rad_t0_report();
     // ---- the run
-    const std::vector<double> m0 = composite_mass(reg, nl, ns);
+    std::vector<double> m0 = composite_mass(reg, nl, ns);
     double zrange_min = 0.0, zrange_max = 0.0;   // species check 7: leaf 0 <= Z <= 1 (within 1e-10) after every step
     // Open-domain mass balance: inflow = the mass DENSITY moved through the level-0 wall faces (OPEN vents, MASS_FLUX/HRRPUA walls), summed over the steps.
     // Gate (CEO ruling): open case (through-flow > 1e-10 of the initial mass) |change - inflow| <= 1e-6 x cumulative through-flow; closed case <= 1e-10 x initial mass.
@@ -778,7 +815,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     std::vector<double> inflow(1 + ns, 0.0), r(2 + ns), reac(ns, 0.0), rc(std::max(ns, 1), 0.0);
     double through = 0.0;
     // particle mass (W6 report): the total-mass inflow takes the deposited particle source instead (below, with the species)
-    const double pm0 = loop.particle_mass();
+    double pm0 = loop.particle_mass();   // restored on a restart (run totals)
     double pm_prev = pm0;
     // W6 (owner ruling: cumulative totals at wall-update boundaries): the particle gas source the gas received (sum of the per-species rates DENSITY applied, times DT) against
     // the particle mass loss of each solid update spread at its own rate (loss / DT_BC) over the steps that apply it (stock: the rate of the last corrector is deposited every step).
@@ -789,8 +826,18 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     double t_end = 0.0, dtfill = 0.0, dtmin = 0.0, dt0 = 0.0; int nzone = 0;
     fds_k_consts(&t_end, &dtfill, &dtmin, &dt0, &nzone);
     std::string logname = o.outdir + "/" + o.chid + "_multi_level.csv";
-    std::FILE* lf = amrex::ParallelDescriptor::IOProcessor() ? std::fopen(logname.c_str(), "w") : nullptr;
-    if (lf) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel,inflow%s\n", nl >= 2 ? ",mlr_l0,mlr_leaf" : ""); }
+    // run totals carried over a restart (walls_r tail, write_checkpoint), in this order
+    auto totals = [&](std::vector<double>* in) {
+        std::vector<double*> d{&through, &pm0, &pm_prev, &w6_src, &w6_exp, &w6_rate, &w6_dtbc, &w6_worst, &hrr_prev, &hrr_sum, &hrr_last, &zrange_min, &zrange_max};
+        for (auto* v : {&m0, &inflow, &reac}) for (double& x : *v) d.push_back(&x);
+        std::vector<double> out; out.push_back(w6_n);
+        for (double* x : d) out.push_back(*x);
+        if (in) { w6_n = static_cast<int>((*in)[0]); for (std::size_t i = 0; i < d.size(); ++i) *d[i] = (*in)[i + 1]; }
+        return out;
+    };
+    if (rs) { const std::vector<double> w = read_rank_file(rs->dir + "/walls_r" + std::to_string(amrex::ParallelDescriptor::MyProc())); std::vector<double> t(w.begin() + 1 + static_cast<long>(w[0]), w.end()); totals(&t); }
+    std::FILE* lf = amrex::ParallelDescriptor::IOProcessor() ? std::fopen(logname.c_str(), rs ? "a" : "w") : nullptr;
+    if (lf && !rs) { std::fprintf(lf, "step,t,dt,mass,mass_rel_change,divmax"); for (int l = 0; l < nl; ++l) std::fprintf(lf, ",div_l%d", l); std::fprintf(lf, ",removed_rel,inflow%s\n", nl >= 2 ? ",mlr_l0,mlr_leaf" : ""); }
     double worst_mass = 0.0, worst_mass_ratio = 0.0, worst_div = 0.0, worst_fine = 0.0;   // worst_fine: max|div u - D| over levels >= 1
     int untracked = 0;                                               // steps with fine div > max(2*L0, 1e-10)
     std::vector<double> bylev;
@@ -800,7 +847,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     double deref_worst = 0.0, deref_div = 0.0; int deref_n = 0;   // ISO-DR gate: worst relative change of T/Z/p0 over derefining regrids, worst div u - D after them
     const int ldiag = std::getenv("FDSTL_LEAFDIAG") ? std::max(1, std::atoi(std::getenv("FDSTL_LEAFDIAG"))) : 0;
     int s_done = 0; bool t_end_hit = false;
-    for (int s = 1; s <= o.steps; ++s) {
+    for (int s = rs ? rs->s + 1 : 1; s <= o.steps; ++s) {
         s_done = s;
         { const double pm = loop.particle_mass();
           if (pm != pm_prev) {   // W6: a particle solid update (WALL_BC corrector with CALL_HT_1D) happened in step s-1: compare the cumulative totals at this boundary, then take its rate
@@ -949,7 +996,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
             write_rho_vel_plotfile(plt, reg, loop, nl_now);
         }
-        if (s == o.checkpoint_at) write_checkpoint("chk_" + o.chid + "_s" + std::to_string(s), reg, loop, nl_now, s, core.amr_params().regrid_interval, {w6_src, w6_exp, w6_rate, w6_dtbc, w6_worst, double(w6_n), pm_prev, pm0});
+        if (s == o.checkpoint_at) write_checkpoint("chk_" + o.chid + "_s" + std::to_string(s), reg, loop, nl_now, s, core.amr_params().regrid_interval, totals(nullptr));
         // coarse-fine flux matching on the first steps after a regrid (prime + 2 steps): per kind and scalar the coarse-minus-fine-sum mismatch the override removed,
         // and read-out arrays / runner grids not of the current hierarchy (stale flux registers; gate: 0)
         {

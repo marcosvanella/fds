@@ -107,6 +107,10 @@ void RegridAmrCore::MakeNewLevelFromScratch(int lev, amrex::Real, const amrex::B
     if (listener_) listener_->make_level(layout(lev));
     if (transfer_ && lev > 0) transfer_->fill_initial_level(layout(lev));
 }
+void RegridAmrCore::restart_levels(const std::vector<amrex::BoxArray>& ba, amrex::Real time)
+{
+    for (int lev = 1; lev < static_cast<int>(ba.size()); ++lev) { MakeNewLevelFromCoarse(lev, time, ba[lev], MakeDistributionMap(lev, ba[lev])); finest_level = lev; }
+}
 void RegridAmrCore::MakeNewLevelFromCoarse(int lev, amrex::Real, const amrex::BoxArray& ba, const amrex::DistributionMapping& dm)
 {
     SetBoxArray(lev, ba);

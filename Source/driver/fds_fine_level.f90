@@ -22,7 +22,7 @@ USE FDS_KERNELS, ONLY: FDS_K_RESERVE_BOXES
 
 IMPLICIT NONE (TYPE,EXTERNAL)
 PRIVATE
-PUBLIC :: FDS_DRAG_CHECK,FDS_FINE_WALL_STATE,FDS_FINE_WALLS_PARENT_XCHG,FDS_FINE_SET_LISTS,BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_RAD_XCHG,FDS_FINE_WALLS_SUMS,FDS_FINE_FUEL_MDOT
+PUBLIC :: FDS_DRAG_CHECK,FDS_FINE_WALL_STATE,FDS_FINE_WALL_STATE_SET,FDS_FINE_WALLS_PARENT_XCHG,FDS_FINE_SET_LISTS,BUILD_FINE_BOX,FDS_FINE_LEVEL_CREATE,FDS_FINE_LEVEL_DESTROY,FDS_FINE_SET_SOLID,FDS_FINE_WALLS_BUILD,FDS_FINE_WALLS_RAD_XCHG,FDS_FINE_WALLS_SUMS,FDS_FINE_FUEL_MDOT
 
 !> Hidden fine-level wall cells (patch 0026): per local box a separate mesh object W holding only WALL/BOUNDARY_COORD/BOUNDARY_PROP1/2 (the box itself keeps WALL(0:0), so the
 !> kernels never see them), and per wall the level-0 parent wall (mesh PNM, wall PIW) whose face contains it. Used for the composite HRR-file wall terms only.
@@ -705,6 +705,30 @@ IF (NB>=Q+2+SIZE(A)) BUF(Q+1:Q+2+SIZE(A)) = [TAG,REAL(SIZE(A),EB),A]
 Q = Q+2+SIZE(A)
 END SUBROUTINE PUT
 END FUNCTION FDS_FINE_WALL_STATE
+
+!> Restart: put back the FDS_FINE_WALL_STATE words of this rank (same layout; L0Q and the fine walls already built by the bind)
+SUBROUTINE FDS_FINE_WALL_STATE_SET(NB,BUF) BIND(C,NAME='fds_fine_wall_state_set')
+USE FDS_AMREX_HOOKS, ONLY: L0Q,L0Q_GAS_CUM,L0Q_SOL_CUM,L0Q_FLUSH_CUM,L0Q_GND_CUM,L0Q_GND_ABS
+INTEGER(C_LONG), VALUE :: NB
+REAL(C_DOUBLE), INTENT(IN) :: BUF(NB)
+INTEGER(C_LONG) :: Q
+INTEGER :: N
+Q = 0
+DO WHILE (Q<NB)
+   N = NINT(BUF(Q+2))
+   IF (BUF(Q+1)>0._EB) THEN   ! the L0Q table is built at the first refresh of the run: allocate it as there (COV is set by that refresh)
+      IF (.NOT.ALLOCATED(L0Q)) ALLOCATE(L0Q(NMESHES))
+      ASSOCIATE(LQ=>L0Q(NINT(BUF(Q+1))))
+      IF (.NOT.ALLOCATED(LQ%E)) ALLOCATE(LQ%COV(N),LQ%E(N))
+      LQ%E = BUF(Q+3:Q+2+N)
+      END ASSOCIATE
+   ELSEIF (BUF(Q+1)<0._EB) THEN ; FWALL(NINT(-BUF(Q+1)))%B(NINT(BUF(Q+3)))%PQ = BUF(Q+4:Q+2+N)
+   ELSE
+      L0Q_GAS_CUM = BUF(Q+3) ; L0Q_SOL_CUM = BUF(Q+4) ; L0Q_FLUSH_CUM = BUF(Q+5) ; L0Q_GND_CUM = BUF(Q+6) ; L0Q_GND_ABS = BUF(Q+7) ; ORPHAN_E = BUF(Q+8) ; REMAP_E = BUF(Q+9)
+   ENDIF
+   Q = Q+2+N
+ENDDO
+END SUBROUTINE FDS_FINE_WALL_STATE_SET
 
 !> Test 5 sums of DRAG_KEEP: particles checked, largest |deposited / drag - 1|, weights dropped on fine boxes (seam, ghost) and on level 0 (coarse/fine), particles left without a kept face
 SUBROUTINE FDS_DRAG_CHECK(R) BIND(C,NAME='fds_drag_check')

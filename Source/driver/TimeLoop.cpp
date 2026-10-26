@@ -58,7 +58,8 @@ void fds_k_div1(double t, double dt, int nm);
 void fds_k_part(int mode, double t, double dt, int nm);
 void fds_k_bed_insert(double t, int nm);          // W2: stock insertion on a fine box
 void fds_k_drop_covered(int nm, const int* covered);
-void fds_k_checkpoint(double t, double dt, int nm, double* r);   // restart M1: [BC_CLOCK, WALL_COUNTER], stock DUMP_RESTART on level 0
+void fds_k_checkpoint(double t, double dt, int nm, double* r);
+void fds_k_restart_box(int nm);   // restart: stock READ_RESTART of a box (fine boxes)
 long fds_k_part_stash(int nm, long nb, double* buf);   // W8 (PV-9): particle records of a box over a regrid
 void fds_k_part_place(int nm, int nr, const double* buf);
 void fds_k_part_deposit(int nm, double sgn);
@@ -794,6 +795,23 @@ struct TimeLoop::Impl {
         pack_all(v, false, true);
         v.push_back(-1.0);
         for_levels([&](int l) { each_local([&](int nm) { double r[2]; fds_k_checkpoint(L.m_t, L.m_dt, nm, r); v.insert(v.end(), {double(l), double(bi(nm)), r[0], r[1]}); }); });
+        v.insert(v.end(), {-2.0, double(wall_counter), e_old, double(have_e_old), double(it_last_pred), double(it_last_corr), perr, verr, qopen_adj, double(dt_new.size())});
+        v.insert(v.end(), dt_new.begin(), dt_new.end()); for (int c : chg) v.push_back(c);
+    }
+    // Restart: the TimeLoop state after the -2 marker of checkpoint(), the stock restart files of the fine boxes (fds_k_restart_box: fields, clocks, radiation), then the particles (W8 part_place)
+    void restart(const std::vector<double>& v)
+    {
+        std::size_t q = 0;
+        while (v[q] != -1.0) q += 3 + static_cast<std::size_t>(v[q + 2]);
+        pstash.assign(v.begin(), v.begin() + q);
+        while (v[q] != -2.0) q += (q == 0 || v[q] == -1.0) ? 1 : 4;
+        wall_counter = static_cast<int>(v[q + 1]); e_old = v[q + 2]; have_e_old = v[q + 3] != 0; it_last_pred = static_cast<int>(v[q + 4]); it_last_corr = static_cast<int>(v[q + 5]);
+        perr = v[q + 6]; verr = v[q + 7]; qopen_adj = v[q + 8];
+        const std::size_t n = static_cast<std::size_t>(v[q + 9]); q += 10;
+        dt_new.assign(v.begin() + q, v.begin() + q + n); chg.assign(v.begin() + q + n, v.begin() + q + 2 * n);
+        fds_p_set_wall_counter(wall_counter);
+        for_levels([&](int l) { if (l > 0) each_local([&](int nm) { fds_k_restart_box(nm); }); });
+        part_place();   // the particles of all levels from this rank's records (W8)
     }
     // FDSTL_W8_CHECK: count and order-free sum of record hashes over all ranks, without the words the new box sets (real 17 RVC; integers 4 WALL_INDEX, 8 CFACE_INDEX,
     // 10-18 the cell indices of BOUNDARY_COORD)
@@ -3363,6 +3381,7 @@ void TimeLoop::insert_bed(int lev) { m->insert_bed(lev); }
 void TimeLoop::particle_report() { m->particle_report(); }
 void TimeLoop::part_stash() { m->part_stash(); }
 void TimeLoop::checkpoint(std::vector<double>& v) { m->checkpoint(v); }
+void TimeLoop::restart(const std::vector<double>& v) { m->restart(v); }
 void TimeLoop::part_place() { m->part_place(); }
 void TimeLoop::part_deposit() { m->part_deposit(); }
 double TimeLoop::particle_mass() { return m->particle_report(true); }

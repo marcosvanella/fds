@@ -95,6 +95,7 @@ public:
     double particle_mass();     // total particle mass over the bound levels (collective, no output)
     void particle_report();     // particle count and total mass over the bound levels (FDSTL_PART_DUMP: positions per rank)   // W2: particles of the bed level lev at t=0 (stock insertion), none under it on level 0
     void checkpoint(std::vector<double>& v);   // restart M1: this rank's particle records and mesh clocks (state unchanged), stock restart files of level 0
+    void restart(const std::vector<double>& v);   // restart: the TimeLoop state written by checkpoint()
     void part_stash();          // W8 (PV-9): before the unbind of a regrid, every particle as a whole record (its last deposit taken back)
     void part_place();          // W8: after the bind, each record on its new leaf box / level / rank in a fixed order
     void part_deposit();        // W8: deposit-only step (stored rates into D_SOURCE/M_DOT_PPP), once after part_place
