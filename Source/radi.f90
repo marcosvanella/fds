@@ -4265,6 +4265,20 @@ BAND_LOOP: DO IBND = 1,NUMBER_SPECTRAL_BANDS
                IF (UII(I,J,K)>0._EB) KAPPA_GAS(I,J,K) = RAD_SRC(NM)%D(I,J,K,1)/UII(I,J,K)   ! the cell absorbs what its leaf cells did: kappa*UII averaged down, over its own UII of the previous update
                KFST4_GAS(I,J,K) = RAD_SRC(NM)%D(I,J,K,2)
             ENDDO ; ENDDO ; ENDDO
+            ! P0 W11 test: covered cells hold no direct particle term (KAPPA_PART, KFST4_PART) and get the averaged-down emission
+            IF (RAD_LEAF_ON()) THEN
+               BLOCK
+               INTEGER :: NCOV
+               REAL(EB) :: SKP,SKF,SKG
+               NCOV = 0 ; SKP = 0._EB ; SKF = 0._EB ; SKG = 0._EB
+               DO K=1,KBAR ; DO J=1,JBAR ; DO I=1,IBAR
+                  IF (.NOT.RAD_COVERED(NM,I,J,K)) CYCLE
+                  NCOV = NCOV+1 ; SKP = SKP+ABS(KAPPA_PART(I,J,K)) ; SKF = SKF+ABS(KFST4_PART(I,J,K))
+                  SKG = SKG+RAD_SRC(NM)%D(I,J,K,2)
+               ENDDO ; ENDDO ; ENDDO
+               WRITE(0,'(A,ES13.6,2I8,3ES15.7)') 'RADW11 ',T,NM,NCOV,SKP,SKF,SKG
+               END BLOCK
+            ENDIF
          ENDIF
       ENDIF
    ENDIF
