@@ -82,6 +82,30 @@ std::vector<double> composite_mass(LevelRegistry& reg, int nl, int ns)
     return m;
 }
 
+// Species check 7 (P0 W12): min and max of every tracked mass fraction over the uncovered gas cells of all levels (fine OBST cells masked, as composite_mass).
+std::pair<double, double> leaf_z_range(LevelRegistry& reg, int nl, int ns)
+{
+    double zmin = 0.0, zmax = 0.0;
+    if (ns > 0) { zmin = 1e300; zmax = -1e300; }
+    for (int l = 0; l < nl && ns > 0; ++l) {
+        Fields& F = reg.fields(l);
+        const amrex::iMultiFab* cov = reg.covered_mask(l);
+        for (amrex::MFIter mfi(F["ZZ"]); mfi.isValid(); ++mfi) {
+            auto z = F["ZZ"].const_array(mfi);
+            amrex::Array4<const int> cv, sd;
+            if (cov) cv = cov->const_array(mfi);
+            if (l > 0) sd = reg.side_data(l).mask().const_array(mfi);
+            amrex::LoopOnCpu(mfi.validbox(), [&](int i, int j, int k) {
+                if ((cov && cv(i, j, k) != 0) || (l > 0 && sd(i, j, k, 0) != 0)) return;
+                for (int n = 0; n < ns; ++n) { zmin = std::min(zmin, z(i, j, k, n)); zmax = std::max(zmax, z(i, j, k, n)); }
+            });
+        }
+    }
+    amrex::ParallelAllReduce::Min(zmin, amrex::ParallelContext::CommunicatorSub());
+    amrex::ParallelAllReduce::Max(zmax, amrex::ParallelContext::CommunicatorSub());
+    return {zmin, zmax};
+}
+
 // Composite heat release rate (W): Q*vol over the uncovered level-0 cells and every finer gas cell (each point of the domain counted once; fine OBST cells masked).
 double composite_hrr(LevelRegistry& reg, int nl)
 {
@@ -720,6 +744,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     if (std::getenv("FDSTL_T0RAD")) loop.rad_t0_report();
     // ---- the run
     const std::vector<double> m0 = composite_mass(reg, nl, ns);
+    double zrange_min = 0.0, zrange_max = 0.0;   // species check 7: leaf 0 <= Z <= 1 (within 1e-10) after every step
     // Open-domain mass balance: inflow = the mass DENSITY moved through the level-0 wall faces (OPEN vents, MASS_FLUX/HRRPUA walls), summed over the steps.
     // Gate (CEO ruling): open case (through-flow > 1e-10 of the initial mass) |change - inflow| <= 1e-6 x cumulative through-flow; closed case <= 1e-10 x initial mass.
     // Open case: limit 1e-6 x (initial mass + cumulative through-flow), the mass that has been in the domain (1e-6 x through-flow alone was ~1e5 times tighter than intended early on).
@@ -911,6 +936,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             }
         }
         const std::vector<double> m = composite_mass(reg, nl_now, ns);
+        { const auto zr = leaf_z_range(reg, nl_now, ns); zrange_min = std::min(zrange_min, zr.first); zrange_max = std::max(zrange_max, zr.second); }
         const double dm = (m[0] - m0[0] - inflow[0]) / m0[0];   // mass balance residual: change minus boundary inflow
         std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, nl_now);
         // Solid cells are left out of the check: a burner face gives its solid cell div u = U_wall/dz, not a gas cell's D (and a level-0 OBST cell that no fine level covers is not solved: masked).
@@ -1004,7 +1030,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         fds_fine_orphan_out(orp);
     }
     amrex::Print() << tag << " RESULT worst fine-level predictor max|div US - DS| " << worst_pred << " (<= 1e-9)\n";
-    const bool gate = finite && worst_fine <= 1e-9 && worst_pred <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok;
+    const bool zok = zrange_min >= -1e-10 && zrange_max <= 1.0 + 1e-10;
+    amrex::Print() << tag << " RESULT species check 7 (leaf 0 <= Z <= 1 within 1e-10, every step): min " << zrange_min << " max " << zrange_max << (zok ? " PASS" : " FAIL") << "\n";
+    const bool gate = finite && worst_fine <= 1e-9 && worst_pred <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok && zok;
     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked << " (info only)"
                    << ", worst |mass balance| / limit " << worst_mass_ratio << ", final |species balance| / limit " << worst_species << " (<= 1; limit " << (through > 1e-10 * m0[0] ? "1e-6 x (initial mass + through-flow), open" : "1e-10 x initial mass, closed") << ")\n";
     amrex::Print() << tag << " RESULT composite pressure: " << cr.solves << " solves, backend " << cr.backend << ", removed mean (largest) " << cr.removed_mean << ", relative to rms " << cr.removed_rel
