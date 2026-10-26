@@ -398,8 +398,9 @@ ENDDO
 M%NLP = 0
 END FUNCTION FDS_K_PART_STASH
 
-!> Restart M1 checkpoint of mesh or box NM: R = [BC_CLOCK, WALL_COUNTER]; a level-0 mesh also writes its stock restart file (dump.f90 DUMP_RESTART, FN_CORE(NM))
+!> Restart checkpoint of mesh or box NM: R = [BC_CLOCK, WALL_COUNTER]; stock restart file (dump.f90 DUMP_RESTART: FN_CORE(NM), a fine box CHID_b<NM>.restart)
 SUBROUTINE FDS_K_CHECKPOINT(T,DT,NM,R) BIND(C,NAME='fds_k_checkpoint')
+USE MESH_VARIABLES, ONLY: MESH_OBJ
 USE DUMP, ONLY: DUMP_RESTART
 USE GLOBAL_CONSTANTS, ONLY: WALL_COUNTER
 REAL(C_DOUBLE), VALUE :: T,DT
@@ -408,8 +409,21 @@ REAL(C_DOUBLE), INTENT(OUT) :: R(2)
 TYPE(MESH_TYPE), POINTER :: M
 M => BOX_OBJ(NM)
 R = [M%BC_CLOCK,REAL(WALL_COUNTER,EB)]
-IF (NM<=NMESHES) CALL DUMP_RESTART(T,DT,NM)
+IF (NM>NMESHES) MESH_OBJ => M
+CALL DUMP_RESTART(T,DT,NM)
+MESH_OBJ => NULL()
 END SUBROUTINE FDS_K_CHECKPOINT
+
+!> Restart read of fine box NM (dump.f90 READ_RESTART, RESTART_CHID_b<NM>.restart); level 0 is read by fds_setup(0) (RESTART=T)
+SUBROUTINE FDS_K_RESTART_BOX(NM) BIND(C,NAME='fds_k_restart_box')
+USE MESH_VARIABLES, ONLY: MESH_OBJ
+USE DUMP, ONLY: READ_RESTART
+INTEGER(C_INT), VALUE :: NM
+REAL(EB) :: T,DT
+MESH_OBJ => BOX_OBJ(NM)
+CALL READ_RESTART(T,DT,NM)
+MESH_OBJ => NULL()
+END SUBROUTINE FDS_K_RESTART_BOX
 
 !> W8: append the NR records of BUF (layout of FDS_K_PART_STASH) to box NM as main.f90 receives particles (code 11): storage, stock unpack, unstick, then the
 !> cell and RVC of the new box (the packed cell indices and RVC belong to the old box; DX/DY/DZ are kept).
