@@ -85,6 +85,17 @@ ABSTRACT INTERFACE
 END INTERFACE
 PROCEDURE(FINE_DEVC_IF), POINTER, PUBLIC, SAVE :: FINE_DEVC_PROC => NULL()
 
+!> PV-4 drag stencil clip (part.f90 MOVE_IN_GAS, registered with the fine level): zero the weights W of the faces of mesh NM's 2x2x2 drag stencil (low corner IL,JL,KL, normal AXIS, face volumes V) it does not own
+ABSTRACT INTERFACE
+   SUBROUTINE DRAG_KEEP_IF(NM,AXIS,IL,JL,KL,V,W)
+      IMPORT :: EB
+      INTEGER, INTENT(IN) :: NM,AXIS,IL,JL,KL
+      REAL(EB), INTENT(IN) :: V(0:1,0:1,0:1)
+      REAL(EB), INTENT(INOUT) :: W(0:1,0:1,0:1)
+   END SUBROUTINE DRAG_KEEP_IF
+END INTERFACE
+PROCEDURE(DRAG_KEEP_IF), POINTER, PUBLIC, SAVE :: DRAG_KEEP_PROC => NULL()
+
 !> Leaf-cell hooks of the gas devices (UPDATE_DEVICES_1, registered by fds_leaf_devc.f90 when a fine level exists): LEAF_COVERED(NM,X,Y,Z) is true for a point of box NM inside a finer box;
 !> LEAF_BOX(IB,X1,X2,Y1,Y2,Z1,Z2,IR) is the IB-th fine box number (0 after the last) with the cell range IR(6) of the extent in it; LEAF_FINEST(X,Y,Z,I,J,K) the finest fine box at a point (0 if none).
 ABSTRACT INTERFACE

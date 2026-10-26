@@ -34,6 +34,7 @@ extern "C" int fds_open_wind();
 extern "C" double fds_dt_default(double cs);
 extern "C" double fds_h_init();
 extern "C" int fds_noise_rn(int nseed, double cs, int n, double* buf);   // fds_fine_level.f90
+extern "C" void fds_drag_check(double* r);   // fds_fine_level.f90 (PV-4 test 5)
 extern "C" void fds_fine_orphan_sums(double* s);   // fds_fine_level.f90 (ruling 2)
 extern "C" void fds_fine_orphan_out(const double* s);   // s[6]: unmapped count, energy; remapped count, energy; level-0 ground convective energy, of |Q_CON_F|
 extern "C" void fds_wind_at_height(double t, double z, double* u, double* v, double* w);   // fds_fine_level.f90
@@ -1038,6 +1039,11 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                                        << " J, level-0 ground convective energy " << orp[4] << " J (of |flux| " << orp[5] << " J), |remapped| / |ground| " << (orp[4] != 0 ? std::abs(orp[3] / orp[4]) : 0.0)
                                        << ", |remapped| / ground |flux| " << (orp[5] != 0 ? std::abs(orp[3]) / orp[5] : 0.0) << " (< 0.01)\n";
         fds_fine_orphan_out(orp);
+    }
+    if (std::getenv("FDSTL_DRAG_CHECK")) {   // test 5 (PV-4): per particle deposited momentum / drag, weights dropped on non-owned faces
+        double r[5]; fds_drag_check(r); double m = r[1]; amrex::ParallelDescriptor::ReduceRealMax(m); r[1] = 0; amrex::ParallelDescriptor::ReduceRealSum(r, 5); r[1] = m;
+        amrex::Print() << tag << " RESULT drag check 5: " << r[0] << " particle drags, max |deposited / drag - 1| " << r[1] << ", weights dropped fine (seam, ghost) " << r[2] << " level 0 (coarse/fine) " << r[3]
+                       << ", without a kept face " << r[4] << ((r[1] <= 1e-15 && r[4] == 0) ? " PASS" : " FAIL") << "\n";
     }
     amrex::Print() << tag << " RESULT worst fine-level predictor max|div US - DS| " << worst_pred << " (<= 1e-9)\n";
     const bool zok = zrange_min >= -1e-10 && zrange_max <= 1.0 + 1e-10;
