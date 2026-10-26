@@ -754,6 +754,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // particle mass that became gas: DENSITY of step s takes the particle sources of step s-1, so the gas change of step s matches the particle loss up to step s-1
     const double pm0 = loop.particle_mass();
     double pm_prev = pm0;
+    // W6 (owner ruling: cumulative totals at wall-update boundaries): the particle gas source the gas received (sum of the per-species rates DENSITY applied, times DT) against
+    // the particle mass loss of each solid update spread at its own rate (loss / DT_BC) over the steps that apply it (stock: the rate of the last corrector is deposited every step).
+    double w6_src = 0.0, w6_exp = 0.0, w6_rate = 0.0, w6_dtbc = 0.0, w6_worst = 0.0; int w6_n = 0;
     auto mass_limit = [&] { return through > 1e-10 * m0[0] ? 1e-6 * (m0[0] + through) : 1e-10 * m0[0]; };
     const bool have_rc = ns > 0 && fds_p_reac_coef(ns, rc.data()) != 0;
     double hrr_prev = composite_hrr(reg, nl), hrr_sum = 0.0, hrr_last = 0.0;
@@ -773,7 +776,12 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     int s_done = 0; bool t_end_hit = false;
     for (int s = 1; s <= o.steps; ++s) {
         s_done = s;
-        { const double pm = loop.particle_mass(); inflow[0] += pm_prev - pm; pm_prev = pm; }   // particle mass lost up to step s-1 (gas source of this step)
+        { const double pm = loop.particle_mass();
+          if (pm != pm_prev) {   // W6: a particle solid update (WALL_BC corrector with CALL_HT_1D) happened in step s-1: compare the cumulative totals at this boundary, then take its rate
+              w6_worst = std::max(w6_worst, std::abs(w6_src - w6_exp) / std::max(pm0 - pm, 1e-300));
+              w6_rate = (pm_prev - pm) / w6_dtbc; w6_dtbc = 0.0; ++w6_n;
+          }
+          inflow[0] += pm_prev - pm; pm_prev = pm; }
         const std::vector<double> psrc = ns > 0 ? loop.particle_src(ns) : std::vector<double>();   // per-species particle source rates DENSITY of this step applies (species balance)
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         if (const char* fd = std::getenv("FDSTL_LEVEL_CSV")) {   // diagnostic: the finest level's fields after step s, one CSV per rank (name,comp,i,j,k,value), for cell-by-cell comparisons
@@ -792,7 +800,9 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         }
         fds_p_bnd_rate(ns, r.data());   // global (summed over the boxes in box order on every rank)
         for (int n = 0; n <= ns; ++n) inflow[n] += r[n] * loop.steps().back().dt;
-        for (int n = 0; n < ns; ++n) inflow[1 + n] += psrc[n] * loop.steps().back().dt;   // particle off-gas (incl. char-oxidation air uptake) per species
+        for (int n = 0; n < ns; ++n) inflow[1 + n] += psrc[n] * loop.steps().back().dt;
+        for (int n = 0; n < ns; ++n) w6_src += psrc[n] * loop.steps().back().dt;
+        w6_exp += w6_rate * loop.steps().back().dt; w6_dtbc += loop.steps().back().dt;   // particle off-gas (incl. char-oxidation air uptake) per species
         through += r[1 + ns] * loop.steps().back().dt;
         if (have_rc) for (int n = 0; n < ns; ++n) reac[n] += rc[n] * hrr_prev * loop.steps().back().dt;
         // Mid-run adaptive regrid (Role 3 call shape): gate on AmrParams.regrid_interval; unbind top-down via finest_bound;
@@ -1031,6 +1041,8 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     }
     amrex::Print() << tag << " RESULT worst fine-level predictor max|div US - DS| " << worst_pred << " (<= 1e-9)\n";
     const bool zok = zrange_min >= -1e-10 && zrange_max <= 1.0 + 1e-10;
+    const bool w6ok = w6_worst <= 1e-9;   // not in the gate yet: from the start of pyrolysis the deposited rate exceeds the solid's own loss (P0 W6 note, PROGRESS.md)
+    amrex::Print() << tag << " RESULT W6 particle gas source vs particle mass loss, cumulative at " << w6_n << " solid-update boundaries: worst |source - loss at its rate| / cumulative loss " << w6_worst << " (INFO; 1e-9 would be PASS: " << (w6ok ? "yes" : "no") << ")" << ", end: source " << w6_src << " kg, loss " << pm0 - pm_prev << " kg\n";
     amrex::Print() << tag << " RESULT species check 7 (leaf 0 <= Z <= 1 within 1e-10, every step): min " << zrange_min << " max " << zrange_max << (zok ? " PASS" : " FAIL") << "\n";
     const bool gate = finite && worst_fine <= 1e-9 && worst_pred <= 1e-9 && worst_mass_ratio <= 1.0 && worst_species <= 1.0 && stale_regs == 0 && deref_ok && zok;
     amrex::Print() << tag << " RESULT gate " << (gate ? "PASS" : "FAIL") << ": worst fine-level div " << worst_fine << " (<= 1e-9), steps with fine div > max(2*L0, 1e-10) " << untracked << " (info only)"
