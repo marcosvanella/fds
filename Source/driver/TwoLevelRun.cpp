@@ -752,7 +752,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
     // Species: the reaction source sum_n C(n) * Q is added to the inflow (COMBUSTION's M_DOT_PPP of step s enters RHO*Z in DENSITY of step s+1 with that step's DT).
     std::vector<double> inflow(1 + ns, 0.0), r(2 + ns), reac(ns, 0.0), rc(std::max(ns, 1), 0.0);
     double through = 0.0;
-    // particle mass that became gas: DENSITY of step s takes the particle sources of step s-1, so the gas change of step s matches the particle loss up to step s-1
+    // particle mass (W6 report): the total-mass inflow takes the deposited particle source instead (below, with the species)
     const double pm0 = loop.particle_mass();
     double pm_prev = pm0;
     // W6 (owner ruling: cumulative totals at wall-update boundaries): the particle gas source the gas received (sum of the per-species rates DENSITY applied, times DT) against
@@ -782,7 +782,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
               w6_worst = std::max(w6_worst, std::abs(w6_src - w6_exp) / std::max(pm0 - pm, 1e-300));
               w6_rate = (pm_prev - pm) / w6_dtbc; w6_dtbc = 0.0; ++w6_n;
           }
-          inflow[0] += pm_prev - pm; pm_prev = pm; }
+          pm_prev = pm; }
         const std::vector<double> psrc = ns > 0 ? loop.particle_src(ns) : std::vector<double>();   // per-species particle source rates DENSITY of this step applies (species balance)
         if (!loop.advance()) { amrex::Print() << tag << ": STOP at step " << s << " (instability or non-finite DT)\n"; ++fails; break; }
         if (const char* fd = std::getenv("FDSTL_LEVEL_CSV")) {   // diagnostic: the finest level's fields after step s, one CSV per rank (name,comp,i,j,k,value), for cell-by-cell comparisons
@@ -802,6 +802,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
         fds_p_bnd_rate(ns, r.data());   // global (summed over the boxes in box order on every rank)
         for (int n = 0; n <= ns; ++n) inflow[n] += r[n] * loop.steps().back().dt;
         for (int n = 0; n < ns; ++n) inflow[1 + n] += psrc[n] * loop.steps().back().dt;
+        for (int n = 0; n < ns; ++n) inflow[0] += psrc[n] * loop.steps().back().dt;   // total mass: the deposited particle source (owner ruling, as the species; not the particle-mass loss, W6)
         for (int n = 0; n < ns; ++n) w6_src += psrc[n] * loop.steps().back().dt;
         w6_exp += w6_rate * loop.steps().back().dt; w6_dtbc += loop.steps().back().dt;   // particle off-gas (incl. char-oxidation air uptake) per species
         through += r[1 + ns] * loop.steps().back().dt;
