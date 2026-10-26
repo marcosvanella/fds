@@ -58,6 +58,7 @@ void fds_k_div1(double t, double dt, int nm);
 void fds_k_part(int mode, double t, double dt, int nm);
 void fds_k_bed_insert(double t, int nm);          // W2: stock insertion on a fine box
 void fds_k_drop_covered(int nm, const int* covered);
+void fds_k_checkpoint(double t, double dt, int nm, double* r);   // restart M1: [BC_CLOCK, WALL_COUNTER], stock DUMP_RESTART on level 0
 long fds_k_part_stash(int nm, long nb, double* buf);   // W8 (PV-9): particle records of a box over a regrid
 void fds_k_part_place(int nm, int nr, const double* buf);
 void fds_k_part_deposit(int nm, double sgn);
@@ -775,7 +776,7 @@ struct TimeLoop::Impl {
     std::vector<double> pstash;
     bool pdep = false;
     void part_stash() { pdep = false; pack_all(pstash, true); }
-    void pack_all(std::vector<double>& v, bool dep)
+    void pack_all(std::vector<double>& v, bool dep, bool keep = false)
     {
         v.clear();
         for_levels([&](int l) { each_local([&](int nm) {
@@ -784,8 +785,15 @@ struct TimeLoop::Impl {
             const std::size_t q = v.size();
             v.resize(q + 3 + n);
             v[q] = l; v[q + 1] = bi(nm); v[q + 2] = static_cast<double>(n);
-            fds_k_part_stash(nm, n, v.data() + q + 3);
+            fds_k_part_stash(nm, keep ? -n : n, v.data() + q + 3);
         }); });
+    }
+    // Restart M1: this rank's particle records (pack_all chunks, boxes kept), then per local mesh/box [level, box, BC_CLOCK, WALL_COUNTER]; level 0 writes stock restart files
+    void checkpoint(std::vector<double>& v)
+    {
+        pack_all(v, false, true);
+        v.push_back(-1.0);
+        for_levels([&](int l) { each_local([&](int nm) { double r[2]; fds_k_checkpoint(L.m_t, L.m_dt, nm, r); v.insert(v.end(), {double(l), double(bi(nm)), r[0], r[1]}); }); });
     }
     // FDSTL_W8_CHECK: count and order-free sum of record hashes over all ranks, without the words the new box sets (real 17 RVC; integers 4 WALL_INDEX, 8 CFACE_INDEX,
     // 10-18 the cell indices of BOUNDARY_COORD)
@@ -3354,6 +3362,7 @@ void TimeLoop::unbind_level(int lev) { m->unbind_level(lev); }
 void TimeLoop::insert_bed(int lev) { m->insert_bed(lev); }
 void TimeLoop::particle_report() { m->particle_report(); }
 void TimeLoop::part_stash() { m->part_stash(); }
+void TimeLoop::checkpoint(std::vector<double>& v) { m->checkpoint(v); }
 void TimeLoop::part_place() { m->part_place(); }
 void TimeLoop::part_deposit() { m->part_deposit(); }
 double TimeLoop::particle_mass() { return m->particle_report(true); }

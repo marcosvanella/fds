@@ -351,7 +351,7 @@ END SUBROUTINE CELLS
 
 !> W8 (PV-9) regrid migration: the whole records of the particles of box NM (any level) in index order, packed by stock PACK_PARTICLE as main.f90 sends them
 !> (code 11). Returns the number of doubles; when NB covers it, BUF gets per particle [length, class, X, Y, Z, NR, NI, NL, reals, integers, logicals] and the box
-!> is emptied (a fine box is destroyed by the unbind that follows, so only level-0 storage is released).
+!> is emptied (a fine box is destroyed by the unbind that follows, so only level-0 storage is released). NB<0: BUF of -NB doubles is filled, the box is kept (checkpoint).
 INTEGER(C_LONG) FUNCTION FDS_K_PART_STASH(NM,NB,BUF) BIND(C,NAME='fds_k_part_stash')
 USE MESH_VARIABLES, ONLY: MESH_OBJ
 USE MEMORY_FUNCTIONS, ONLY: PACK_PARTICLE,NULLIFY_PARTICLE
@@ -373,7 +373,7 @@ DO IP=1,M%NLP
    LP => M%LAGRANGIAN_PARTICLE(IP)
    RC=0 ; IC=0 ; LC=0
    CALL PACK_PARTICLE(NM,OS,LP,LP%CLASS_INDEX,RC,IC,LC,UNPACK_IT=.FALSE.,COUNT_ONLY=.TRUE.,CHECK_BOUNDS=.FALSE.)
-   IF (NB>=Q+8+RC+IC+LC) THEN
+   IF (ABS(NB)>=Q+8+RC+IC+LC) THEN
       ALLOCATE(OS%REALS(RC),OS%INTEGERS(IC),OS%LOGICALS(LC))
       RC=0 ; IC=0 ; LC=0
       CALL PACK_PARTICLE(NM,OS,LP,LP%CLASS_INDEX,RC,IC,LC,UNPACK_IT=.FALSE.,COUNT_ONLY=.FALSE.,CHECK_BOUNDS=.FALSE.)
@@ -397,6 +397,19 @@ DO IP=1,M%NLP
 ENDDO
 M%NLP = 0
 END FUNCTION FDS_K_PART_STASH
+
+!> Restart M1 checkpoint of mesh or box NM: R = [BC_CLOCK, WALL_COUNTER]; a level-0 mesh also writes its stock restart file (dump.f90 DUMP_RESTART, FN_CORE(NM))
+SUBROUTINE FDS_K_CHECKPOINT(T,DT,NM,R) BIND(C,NAME='fds_k_checkpoint')
+USE DUMP, ONLY: DUMP_RESTART
+USE GLOBAL_CONSTANTS, ONLY: WALL_COUNTER
+REAL(C_DOUBLE), VALUE :: T,DT
+INTEGER(C_INT), VALUE :: NM
+REAL(C_DOUBLE), INTENT(OUT) :: R(2)
+TYPE(MESH_TYPE), POINTER :: M
+M => BOX_OBJ(NM)
+R = [M%BC_CLOCK,REAL(WALL_COUNTER,EB)]
+IF (NM<=NMESHES) CALL DUMP_RESTART(T,DT,NM)
+END SUBROUTINE FDS_K_CHECKPOINT
 
 !> W8: append the NR records of BUF (layout of FDS_K_PART_STASH) to box NM as main.f90 receives particles (code 11): storage, stock unpack, unstick, then the
 !> cell and RVC of the new box (the packed cell indices and RVC belong to the old box; DX/DY/DZ are kept).

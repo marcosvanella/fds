@@ -245,6 +245,7 @@ int main(int argc, char** argv)
                         else to.plotfile = to.outdir;   // --plotfile alone: write under --outdir
                     }
                     else if (std::strcmp(argv[i], "--plot-every") == 0 && i + 1 < argc) to.plot_every = std::atoi(argv[++i]);
+                    else if (std::strcmp(argv[i], "--checkpoint-at") == 0 && i + 1 < argc) to.checkpoint_at = std::atoi(argv[++i]);
                     else if (std::strcmp(argv[i], "--tag-vort") == 0 && i + 1 < argc) {
                         ++i;
                         if (std::strcmp(argv[i], "auto") == 0) to.tag_vort_auto = true;

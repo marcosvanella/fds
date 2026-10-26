@@ -38,6 +38,7 @@ struct TwoLevelOptions {
     bool bind_only = false;          // true: build hierarchy, bind all levels, report layout, skip advance (registry/bind gate when a full step is not wanted)
     int regrid_every = 0;            // CLI --regrid-every N -> AmrParams.regrid_interval (0 = static after setup; >0 mid-run gate)
     std::string plotfile;            // non-empty: WriteMultiLevelPlotfile here after the run (RHO + cell-centred U,V,W); CLI --plotfile [DIR]
+    int checkpoint_at = 0;           // CLI --checkpoint-at S: after step S write the restart M1 checkpoint chk_<chid>_s<S> (0: none)
     int plot_every = 0;              // CLI --plot-every N: when N>0 and plotfile set, after step s with s%N==0 write plt_<chid>_s<s> (keeps the final dump; mid-regrid dump only when N<=0)
     // TAG_VORT path (vortex-ring owner-show). NaN = keep blob TAG_SPEC_* emit when regrid_every>0.
     // tag_vort_auto: thr = 0.45 * max|VORT| on level 0, recomputed at every regrid (VORT rescaled; AmrParams thr is the t=0 value); TAG_KEEP=0.85 (tight core).

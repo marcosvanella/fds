@@ -25,6 +25,9 @@
 #include "RegridAmrCore.H"
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_PlotFileUtil.H>
+#include <AMReX_Utility.H>
+#include <AMReX_VisMF.H>
+#include <fstream>
 #include "TimeLoopWiring.H"
 
 extern "C" void fds_p_set_legacy_save_guard(int on);   // fds_step.f90
@@ -34,6 +37,7 @@ extern "C" int fds_open_wind();
 extern "C" double fds_dt_default(double cs);
 extern "C" double fds_h_init();
 extern "C" int fds_noise_rn(int nseed, double cs, int n, double* buf);   // fds_fine_level.f90
+extern "C" long fds_fine_wall_state(long nb, double* buf);   // fds_fine_level.f90 (restart M1 per-wall state)
 extern "C" void fds_drag_check(double* r);   // fds_fine_level.f90 (PV-4 test 5)
 extern "C" void fds_fine_orphan_sums(double* s);   // fds_fine_level.f90 (ruling 2)
 extern "C" void fds_fine_orphan_out(const double* s);   // s[6]: unmapped count, energy; remapped count, energy; level-0 ground convective energy, of |Q_CON_F|
@@ -223,6 +227,27 @@ std::vector<fdsrt::ProjectionLevel> projection_levels(LevelRegistry& reg, int nl
         lv.push_back(pl);
     }
     return lv;
+}
+
+// Restart M1 checkpoint (Role 1 design): Header (t, dt, step, ICYC, regrid interval, levels; per level BoxArray and rank map), every registry MultiFab per level
+// (VisMF, with ghosts), per rank part_r<rank> (TimeLoop::checkpoint words), stock level-0 restart files (CHID_<mesh>.restart, cwd).
+// Per rank walls_r<rank>: the per-wall driver state (fds_fine_wall_state words; owner ruling Option A) followed by the W6 sums W6 (8 words).
+void write_checkpoint(const std::string& dir, LevelRegistry& reg, TimeLoop& loop, int nl, int s, int ri, const std::vector<double>& w6)
+{
+    amrex::UtilCreateCleanDirectory(dir, true);
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        std::ofstream h(dir + "/Header");
+        h << std::setprecision(17) << "FDS-AMReX checkpoint M1\n" << loop.time() << " " << loop.dt() << " " << s << " " << loop.icyc() << " " << ri << " " << nl << "\n";
+        for (int l = 0; l < nl; ++l) { reg.level(l).ba.writeOn(h); h << "\n"; for (int p : reg.level(l).dm.ProcessorMap()) h << p << " "; h << "\n"; }
+    }
+    for (int l = 0; l < nl; ++l) for (const std::string& n : reg.fields(l).names()) amrex::VisMF::Write(reg.fields(l)[n], dir + "/L" + std::to_string(l) + "_" + n);
+    std::vector<double> v; loop.checkpoint(v);
+    std::ofstream p(dir + "/part_r" + std::to_string(amrex::ParallelDescriptor::MyProc()), std::ios::binary);
+    const std::size_t n = v.size(); p.write(reinterpret_cast<const char*>(&n), sizeof n); p.write(reinterpret_cast<const char*>(v.data()), n * sizeof(double));
+    std::vector<double> ws(fds_fine_wall_state(0, nullptr)); fds_fine_wall_state(static_cast<long>(ws.size()), ws.data()); ws.insert(ws.end(), w6.begin(), w6.end());
+    std::ofstream wf(dir + "/walls_r" + std::to_string(amrex::ParallelDescriptor::MyProc()), std::ios::binary);
+    const std::size_t nw = ws.size(); wf.write(reinterpret_cast<const char*>(&nw), sizeof nw); wf.write(reinterpret_cast<const char*>(ws.data()), nw * sizeof(double));
+    amrex::Print() << "CHECKPOINT wrote " << dir << " after step " << s << " t " << std::setprecision(17) << loop.time() << " (" << nl << " level(s))\n";
 }
 
 }  // namespace
@@ -924,6 +949,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
             const std::string plt = o.plotfile + "/plt_" + o.chid + "_s" + std::to_string(s);
             write_rho_vel_plotfile(plt, reg, loop, nl_now);
         }
+        if (s == o.checkpoint_at) write_checkpoint("chk_" + o.chid + "_s" + std::to_string(s), reg, loop, nl_now, s, core.amr_params().regrid_interval, {w6_src, w6_exp, w6_rate, w6_dtbc, w6_worst, double(w6_n), pm_prev, pm0});
         // coarse-fine flux matching on the first steps after a regrid (prime + 2 steps): per kind and scalar the coarse-minus-fine-sum mismatch the override removed,
         // and read-out arrays / runner grids not of the current hierarchy (stale flux registers; gate: 0)
         {
