@@ -593,6 +593,7 @@ DO IW=1,N
       CASE(-3) ; BC%Z = R%Z(K-1)
       CASE( 3) ; BC%Z = R%Z(K)
    END SELECT
+   CALL FWALL_GEOM(R,BC,WM%BOUNDARY_PROP1(WC%B1_INDEX)%RDN,WM%BOUNDARY_PROP1(WC%B1_INDEX)%AREA)   ! every hidden wall (covered ones skip FWALL_STATE)
    IF (OWN_BURNER(WC%SURF_INDEX)) THEN   ! D-010-exempt burner: own area and stock ignition time (init.f90: T_BEGIN + distance from XYZ / SPREAD_RATE) at this face
       CALL FWALL_GEOM(R,BC,FF,WM%BOUNDARY_PROP1(WC%B1_INDEX)%AREA)
       IF (T(12,IW)>0) THEN ; IF (VTX(10,T(12,IW))>0._EB) WM%BOUNDARY_PROP1(WC%B1_INDEX)%T_IGN = T_BEGIN + NORM2((/BC%X,BC%Y,BC%Z/)-VTX(7:9,T(12,IW)))/VTX(10,T(12,IW)) ; ENDIF
