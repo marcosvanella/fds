@@ -23,7 +23,7 @@ void fds_g_velocity_bc(double t, int nm, int est);
 void fds_g_viscosity_bc(int nm, int est);
 void fds_g_mu_edges(int nm);
 void fds_g_mu_edges_dom(int nm, int mask, int which);
-void fds_wall_ghost(double u, double rho, double tmp, double muc, double dz, int ic, int jc, double* g);
+void fds_wall_ghost(double u, double v, double rho, double tmp, double muc, double dz, int ic, int jc, double* g);
 int fds_n_tracked_species();
 }
 
@@ -182,6 +182,7 @@ void BcStep::ground_wall_ghosts(const std::string& n)
         const auto rho = m_F[s ? "RHOS" : "RHO"].const_array(mfi);
         const auto tmp = m_F["TMP"].const_array(mfi);
         const auto mu = m_F["MU"].const_array(mfi);
+        const auto vo = m_F[std::string(n.front() == 'U' ? "V" : "U") + (s ? "S" : "")].const_array(mfi);   // the other tangential component (stock VEL_T)
         amrex::Box slab = mf[mfi].box();
         slab.setRange(2, dom.smallEnd(2) - 1);
         const amrex::Box cells = mfi.validbox();
@@ -192,7 +193,7 @@ void BcStep::ground_wall_ghosts(const std::string& n)
             if (u == 0.0) return;
             const int ic = std::max(i, cells.smallEnd(0)), jc = std::max(j, cells.smallEnd(1));
             double g;
-            fds_wall_ghost(u, rho(ic, jc, k + 1), tmp(ic, jc, k + 1), mu(ic, jc, k + 1), dz, amrex::coarsen(ic, rx) + 1, amrex::coarsen(jc, ry) + 1, &g);
+            fds_wall_ghost(u, vo(i, j, k + 1), rho(ic, jc, k + 1), tmp(ic, jc, k + 1), mu(ic, jc, k + 1), dz, amrex::coarsen(ic, rx) + 1, amrex::coarsen(jc, ry) + 1, &g);
             a(i, j, k) = g;
         });
     }
