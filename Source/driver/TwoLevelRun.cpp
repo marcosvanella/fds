@@ -935,7 +935,7 @@ int two_level_run(TimeLoop& loop, const Level0& l0, double dt_setup, const TwoLe
                 loop.part_place();
                 loop.part_deposit();   // before the prime: the projection must see the particle divergence
                 if (changed || rebound) loop.prime_levels();
-                if (finest > fb0) {   // a new level: the hook projected onto the D it inherited from its parent; its own D comes from the prime, so project again and prime (as the initial setup does)
+                if (finest > fb0 || (changed && finest >= 1)) {   // a new level or new fine cells: the hook projected onto the D they inherited from the parent; their own D (e.g. burning ground faces) comes from the prime, so project again and prime (as the initial setup does)
                     std::vector<fdsrt::ProjectionLevel> lv = projection_levels(reg, finest + 1);
                     pst.before(lv);
                     const fdsrt::ProjectionReport pr = fdsrt::project_after_regrid(lv, &solver, pst.options);
