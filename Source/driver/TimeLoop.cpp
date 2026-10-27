@@ -2968,18 +2968,19 @@ struct TimeLoop::Impl {
     }
 
 
-    // Diagnostic (FDSTL_STAGEG=<icyc>): raw FABs (valid + ghost cells, FDS/AMReX index of the box) of the named fields, one file per box, for ghost-layer comparisons across decompositions
+    // Diagnostic (FDSTL_STAGEG=<icyc>): raw FABs of every bound level (valid + ghost cells, FDS/AMReX index of the box) of the named fields, one file per box, for ghost-layer comparisons across decompositions
     void stage_raw(const char* tag, std::initializer_list<const char*> fl)
     {
         const char* e = std::getenv("FDSTL_STAGEG");
         if (!e || std::atoi(e) != L.m_icyc) return;
-        Fields& F = *L.m_F;
+        for (std::size_t l = 0; l < lc.size(); ++l)   // level l > 0: raw_L<l>_<tag>_...
         for (const char* f : fl) {
-            const amrex::MultiFab& mf = F[f];
+            if (!lc[l].F->has(f)) continue;
+            const amrex::MultiFab& mf = (*lc[l].F)[f];
             for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) {
                 const amrex::FArrayBox& fab = mf[mfi];
                 const amrex::Box b = fab.box();
-                std::FILE* fp = std::fopen((dir + "/raw_" + tag + "_" + f + "_b" + std::to_string(mfi.index()) + ".bin").c_str(), "wb");
+                std::FILE* fp = std::fopen((dir + "/raw_" + (l ? "L" + std::to_string(l) + "_" : std::string()) + tag + "_" + f + "_b" + std::to_string(mfi.index()) + ".bin").c_str(), "wb");
                 if (!fp) continue;
                 const amrex::Box v = mfi.validbox();
                 int hdr[16] = {b.smallEnd(0), b.smallEnd(1), b.smallEnd(2), b.bigEnd(0), b.bigEnd(1), b.bigEnd(2), fab.nComp(), 0, v.smallEnd(0), v.smallEnd(1), v.smallEnd(2), v.bigEnd(0), v.bigEnd(1), v.bigEnd(2), 0, 0};
