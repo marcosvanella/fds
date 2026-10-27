@@ -95,6 +95,8 @@ ABSTRACT INTERFACE
    END SUBROUTINE DRAG_KEEP_IF
 END INTERFACE
 PROCEDURE(DRAG_KEEP_IF), POINTER, PUBLIC, SAVE :: DRAG_KEEP_PROC => NULL()
+LOGICAL, PUBLIC, SAVE :: DRAG_DEP_ON = .FALSE.   !< FDSTL_DRAG_CHECK: MOVE_IN_GAS sums the deposited drag force per axis in DRAG_DEP (W10 test)
+REAL(EB), PUBLIC, SAVE :: DRAG_DEP(3) = 0._EB
 
 !> Leaf-cell hooks of the gas devices (UPDATE_DEVICES_1, registered by fds_leaf_devc.f90 when a fine level exists): LEAF_COVERED(NM,X,Y,Z) is true for a point of box NM inside a finer box;
 !> LEAF_BOX(IB,X1,X2,Y1,Y2,Z1,Z2,IR) is the IB-th fine box number (0 after the last) with the cell range IR(6) of the extent in it; LEAF_FINEST(X,Y,Z,I,J,K) the finest fine box at a point (0 if none).

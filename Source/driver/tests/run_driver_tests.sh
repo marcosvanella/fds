@@ -10,6 +10,7 @@
 #   6. run_exchange_code_check.sh (FireX: code 6 = U/V/W/H only; 66/67 never through the driver fill)
 #   6b. run_obst_burner_check.sh (L0-only OBST with a MASS_FLUX burner, two levels: div <= 1e-10, no L0 clipping)
 #   6c. run_open_vent_check.sh (OPEN face + burner on L0, two levels, regrid every 5: div and L1 <= 1e-9)
+#   6d. run_drag_total_check.sh np 1 and 2 (W10: total deposited particle drag with the bed across box seams and the coarse/fine face vs one box, 1e-3)
 #   7. run_three_level_check.sh when DRIVER_THREE_LEVEL_CHECK=1 (D-053 bind + short advance)
 #   5. (optional, DRIVER_DENSITY_CHECK=1; about 25 min on one shared core) run_two_level_density_check.sh: variable-density two-level run, flux overwrite ON vs OFF, 1 and 4 ranks
 # FDS ends the set-up run with STOP (exit 0), so the FDS-linked checks are judged from their PASS/FAIL lines.
@@ -40,6 +41,7 @@ bash "$HERE/run_exchange_code_check.sh" "$(cd "$HERE/.." && pwd)" || rc=1
 bash "$HERE/run_obst_burner_check.sh" "$BLD" "$BLD/run/obstburner" || rc=1   # L0-only OBST + MASS_FLUX burner, two levels: div and no L0 clipping
 bash "$HERE/run_open_vent_check.sh" "$BLD" "$BLD/run/openvent" || rc=1   # OPEN face (Dirichlet) two levels: fine H ghost, post-regrid projection BC
 bash "$HERE/run_fine_burner_check.sh" "$BLD" "$BLD/run/fineburner" || rc=1   # burner OBST on the fine level + OPEN door: masked MLMG, mixed face, wall velocity
+for np in 1 2; do bash "$HERE/run_drag_total_check.sh" "$BLD/fds_amr" "$BLD/run/dragtotal$np" $np || rc=1; done   # W10: drag deposited across box seams and the coarse/fine face vs one box
 if [ "${DRIVER_THREE_LEVEL_CHECK:-0}" = 1 ]; then bash "$HERE/run_three_level_check.sh" "$BLD" "$BLD/run/threelevel" 10 || rc=1; fi
 if [ "${DRIVER_DENSITY_CHECK:-0}" = 1 ]; then bash "$HERE/run_two_level_density_check.sh" "$BLD" "$BLD/run/density" || rc=1; fi
 [ $rc = 0 ] && echo "ALL DRIVER TESTS PASS" || echo "DRIVER TESTS FAILED"

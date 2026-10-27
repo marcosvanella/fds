@@ -1,0 +1,59 @@
+! drag_total: bed_div_seam.fds made quiescent-uniform for run_drag_total_check.sh (W10): uniform U0, free-slip ground, no wind profile, no ignition, no road, the MULT as 4 MESH lines with MPI_PROCESS (2 ranks; the check sets 0 for 1 rank),
+! so the gas at the grass is the same on every level and the total particle drag is grid independent in the first steps.
+! W3 cut-down derived from stock ce1f659 Validation/CSIRO_Grassland_Fires/FDS_Input_Files/Case_C064.fds
+! Changes: CHID, MESH/MULT, T_END, ignition VENT, road VENT, INIT and DEVC extents clipped; bed and ignition kept 5 m and 10 m inside the lateral OPEN boundaries (as stock keeps them 10 m and 35 m inside) because a bed reaching the boundary went unstable at t=29 s. Physics unchanged.
+&HEAD CHID='c', TITLE='Australian Grassland Fire Experiment, Case C064' /
+&AMR MAX_LEVEL=0, BLOCKING_FACTOR=2, MAX_GRID_SIZE=32 /
+
+&MESH IJK=8,8,8, XB=-10.0,10.0,-20.0,0.0,0.0,20.0, MPI_PROCESS=0 /
+&MESH IJK=8,8,8, XB=-10.0,10.0,0.0,20.0,0.0,20.0, MPI_PROCESS=0 /
+&MESH IJK=8,8,8, XB=10.0,30.0,-20.0,0.0,0.0,20.0, MPI_PROCESS=1 /
+&MESH IJK=8,8,8, XB=10.0,30.0,0.0,20.0,0.0,20.0, MPI_PROCESS=1 /
+
+&TIME T_END=0.6 /
+
+&MISC SIMULATION_MODE='SVLES', TMPA=32. /
+&WIND U0=2. /
+
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='YMIN', SURF_ID='OPEN' /
+&VENT MB='YMAX', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+
+&MATL ID='DIRT'
+      CONDUCTIVITY = 0.25
+      SPECIFIC_HEAT = 2.
+      DENSITY = 1300. /
+
+&SURF ID='GROUND'
+      DEFAULT=T
+      FREE_SLIP=T
+      MATL_ID='DIRT'
+      THICKNESS=0.2 /
+
+&SURF ID                        = 'wet vegetation'
+      MATL_ID(1,1:1)            = 'GENERIC VEGETATION'
+      MOISTURE_CONTENT         = 0.063
+      SURFACE_VOLUME_RATIO      = 9770.
+      LENGTH                    = 0.20
+      GEOMETRY                  = 'CYLINDRICAL' /
+
+&CATF OTHER_FILES='vegetation_model.txt' /
+
+&PART ID='blade of grass'
+      SAMPLING_FACTOR=5
+      SURF_ID='wet vegetation'
+      PROP_ID='grass image'
+      DRAG_COEFFICIENT=2.8
+      QUANTITIES='PARTICLE TEMPERATURE','PARTICLE MASS'
+      STATIC=T
+      COLOR='BROWN' /
+
+&INIT PART_ID='blade of grass', XB=0.,25.,-15.,15.,0.00,0.21, N_PARTICLES_PER_CELL=1, CELL_CENTERED=T, MASS_PER_VOLUME=1.33, DRY=T /
+
+&PROP ID='grass image', SMOKEVIEW_ID='TUBE', SMOKEVIEW_PARAMETERS='L=0.20','D=0.0004','DIRZ=1' /
+
+&DUMP DT_HRR=0.1, DT_DEVC=0.1, MASS_FILE=T, DT_MASS=0.1, SIG_FIGS=15, SIG_FIGS_EXP=3 /
+
+&TAIL /
