@@ -4246,6 +4246,10 @@ OTHER_MESH_LOOP: DO NOM=1,NMESHES
    IF (.NOT.ALLOCATED(MO%OMESH)) EXIT OTHER_MESH_LOOP
 #endif
    M2=>MO%OMESH(NOM)
+#ifdef WITH_AMREX
+   IF (ALLOCATED(M2%IL_S)) WRITE(LU) M2%IL_S   ! radiation exchange: MESH_EXCHANGE(2) moves only the current angle subset, later updates read the others
+   IF (ALLOCATED(M2%IL_R)) WRITE(LU) M2%IL_R
+#endif
    IF (M2%NIC_R==0) CYCLE OTHER_MESH_LOOP
    WRITE(LU) M2%RHO,M2%RHOS,M2%U,M2%V,M2%W,M2%H
    WRITE(LU) M2%ZZ,M2%ZZS
@@ -4509,6 +4513,10 @@ OTHER_MESH_LOOP: DO NOM=1,NMESHES
    IF (.NOT.ALLOCATED(MO%OMESH)) EXIT OTHER_MESH_LOOP
 #endif
    M2=>MO%OMESH(NOM)
+#ifdef WITH_AMREX
+   IF (ALLOCATED(M2%IL_S)) READ(LU) M2%IL_S   ! radiation exchange: MESH_EXCHANGE(2) moves only the current angle subset, later updates read the others
+   IF (ALLOCATED(M2%IL_R)) READ(LU) M2%IL_R
+#endif
    IF (M2%NIC_R==0) CYCLE OTHER_MESH_LOOP
    READ(LU) M2%RHO,M2%RHOS,M2%U,M2%V,M2%W,M2%H
    READ(LU) M2%ZZ,M2%ZZS
