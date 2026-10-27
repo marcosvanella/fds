@@ -2818,7 +2818,7 @@ TYPE RAD_SRC_TYPE   !< averaged down from the finer levels (covered cells of a b
 END TYPE RAD_SRC_TYPE
 INTEGER, PARAMETER :: RAD_SRC_NC=14
 TYPE(RAD_SRC_TYPE), ALLOCATABLE, SAVE :: RAD_SRC(:)
-PUBLIC RAD_SRC_FILL,RAD_SRC_SET,RAD_SRC_WSCALE,RAD_SRC_COV
+PUBLIC RAD_SRC_FILL,RAD_SRC_SET,RAD_SRC_WSCALE,RAD_SRC_COV,RAD_SRC_WQ_IO
 #endif
 #endif
 
@@ -5553,6 +5553,21 @@ BC => BOUNDARY_COORD(WALL(IW)%BC_INDEX) ; B1 => BOUNDARY_PROP1(WALL(IW)%B1_INDEX
 IF (B1%EMISSIVITY>0._EB .AND. BC%IOR/=0) &
    RAD_SRC(NM)%WQ(BC%IIG,BC%JJG,BC%KKG,2*ABS(BC%IOR)-MERGE(0,1,BC%IOR>0)) = B1%Q_RAD_IN/B1%EMISSIVITY
 END SUBROUTINE RAD_SRC_WQ
+
+!> Restart: write (WRITE_IT) or read the saved wall flux WQ of mesh/box NM on unit LU (lagged: read by the average-down of the next radiation update).
+SUBROUTINE RAD_SRC_WQ_IO(NM,LU,WRITE_IT)
+INTEGER, INTENT(IN) :: NM,LU
+LOGICAL, INTENT(IN) :: WRITE_IT
+LOGICAL :: HAS
+CALL RAD_SRC_ENSURE(NM)
+IF (WRITE_IT) THEN
+   HAS = ALLOCATED(RAD_SRC(NM)%WQ) ; WRITE(LU) HAS
+   IF (HAS) WRITE(LU) RAD_SRC(NM)%WK,RAD_SRC(NM)%WQ
+ELSE
+   READ(LU) HAS
+   IF (HAS) THEN ; ALLOCATE(RAD_SRC(NM)%WQ(IBAR,JBAR,KBAR,6)) ; READ(LU) RAD_SRC(NM)%WK,RAD_SRC(NM)%WQ ; ENDIF
+ENDIF
+END SUBROUTINE RAD_SRC_WQ_IO
 
 !> Key of the box layout of the level of box NM (the same on every rank; 0 for level 0). The saved wall flux WQ of box NM is used only under the
 !> layout it was written in: after a regrid, box number NM is another box (possibly of another rank), and a stale WQ made the result rank dependent.
