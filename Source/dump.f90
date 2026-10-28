@@ -4103,9 +4103,9 @@ TYPE(LAGRANGIAN_PARTICLE_TYPE), POINTER :: LP
 TYPE(MESH_TYPE), POINTER :: MO
 INTEGER :: LU
 REAL(EB) :: ESUM
-CHARACTER(FN_LENGTH) :: FNB
 
 #ifdef WITH_AMREX
+CHARACTER(FN_LENGTH) :: FNB
 IF (ASSOCIATED(MESH_OBJ)) THEN   ! FDS-AMReX restart: fine box NM (MESH_OBJ), file CHID_b<NM>.restart
    MO => MESH_OBJ ; CALL POINT_TO_BOX(NM) ; ESUM = 0._EB
    WRITE(FNB,'(A,A,I0,A)') TRIM(RESULTS_DIR)//TRIM(CHID),'_b',NM,'.restart'
@@ -4324,9 +4324,9 @@ TYPE(LAGRANGIAN_PARTICLE_TYPE), POINTER :: LP
 TYPE(MESH_TYPE), POINTER :: MO
 INTEGER :: LU
 REAL(EB) :: ESUM
-CHARACTER(FN_LENGTH) :: FNB
 
 #ifdef WITH_AMREX
+CHARACTER(FN_LENGTH) :: FNB
 IF (ASSOCIATED(MESH_OBJ)) THEN   ! FDS-AMReX restart: fine box NM (MESH_OBJ), file RESTART_CHID_b<NM>.restart
    MO => MESH_OBJ ; CALL POINT_TO_BOX(NM)
    WRITE(FNB,'(A,A,I0,A)') TRIM(RESULTS_DIR)//TRIM(RESTART_CHID),'_b',NM,'.restart'
@@ -8062,6 +8062,7 @@ INTEGER, INTENT(IN) :: NM
 REAL(EB) :: VALUE,VOL,AREA,CFACE_AREA,XI,YJ,ZK,X_CENTER,Y_CENTER,Z_CENTER,WGT,EPS_X1,EPS_X2,EPS_Y1,EPS_Y2,EPS_Z1,EPS_Z2,&
             WALL_VALUE,WALL_WGT
 INTEGER :: N,I,J,K,IW,ICC,ICF,SURF_INDEX,LP_INDEX,IP,AXIS,IR(6),NBX,IBX,NW0,NFW
+LOGICAL :: DO_VALUE_2   ! second quantity; set in each #ifdef branch (no '&' continuation across a directive: CMake's Fortran dependency scanner loses the #else/#endif)
 #ifdef WITH_AMREX
 !< leaf devices: only the cells of the local fine boxes over level-0 mesh NM of another rank, into LEAF_FSDV
 LOGICAL, INTENT(IN), OPTIONAL :: FOREIGN
@@ -8375,7 +8376,7 @@ DEVICE_LOOP: DO N=1,N_DEVC
                                               DEVC_INDEX=N)
                IF (NBX/=NM) CALL POINT_TO_MESH(NMR)
                ENDIF
-               IF (DV%N_QUANTITY>1 .AND. .NOT.FRN) &
+               DO_VALUE_2 = DV%N_QUANTITY>1 .AND. .NOT.FRN
 #else
                I = MIN( IBP1, MAX(0, DV%I(1)) )
                J = MIN( JBP1, MAX(0, DV%J(1)) )
@@ -8397,8 +8398,9 @@ DEVICE_LOOP: DO N=1,N_DEVC
                IF (NBX/=NM) CALL POINT_TO_MESH(NM)
 #endif
 
-               IF (DV%N_QUANTITY>1) &
+               DO_VALUE_2 = DV%N_QUANTITY>1
 #endif
+               IF (DO_VALUE_2) &
                   SDV%VALUE_2 = GAS_PHASE_OUTPUT(T,DT,NM,DV%I(2),DV%J(2),DV%K(2),DV%QUANTITY_INDEX(2),Y_INDEX=DV%Y_INDEX,&
                                                  Z_INDEX=DV%Z_INDEX,ELEM_INDX=DV%ELEM_INDEX,PART_INDEX=DV%PART_CLASS_INDEX,&
                                                  VELO_INDEX=DV%VELO_INDEX,PIPE_INDEX=DV%PIPE_INDEX,PROP_INDEX=DV%PROP_INDEX,&

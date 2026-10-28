@@ -325,8 +325,8 @@ Selection select_composite (PressureProblem const& p, BackendKind requested)
         s.message = "composite with a mixed domain face (face_neumann) is built on MLMG only (Robin BC unmasked, beta = 0 boundary faces masked); HYPRE is not built"; return s;
     }
 #if !defined(PB_WITH_HYPRE) || !defined(AMREX_USE_HYPRE)
-    if (masked && requested == BackendKind::MLMG) {
-        s.message = "composite with masked cells on MLMG needs the HYPRE bottom solver (pressure/13 ruling 6): built without HYPRE"; return s;
+    if (masked && (requested == BackendKind::MLMG || has_face_neumann(p) || has_thin_face(p))) {   // Auto with these faces picks masked MLMG
+        s.message = "composite with masked cells (Solid/Known cells or thin walls) on MLMG needs the AMReX HYPRE bottom solver (pressure/13 ruling 6): built without AMReX HYPRE; rebuild with HYPRE or remove the obstruction from the refined run"; return s;
     }
 #endif
     if (masked && requested == BackendKind::FFT) {
@@ -1172,8 +1172,14 @@ PressureResult solve_composite_masked (PressureProblem const& p, PressureOptions
 
     // Label (D4); Q2 Known-on-C/F → InvalidInput.
     // The labels are cached on the workspace (one struct, dropped with the Impl at a layout change) under the mask stamp; a different stamp relabels everything.
+#if defined(PB_WITH_HYPRE) && defined(AMREX_USE_HYPRE)
     const std::uint64_t mstamp = composite_class_hash(p);
     const bool lab_hit = W.lab_valid && W.lab_stamp == mstamp;
+#else
+    // composite_class_hash needs HYPRE; without it the cache is disabled and every solve relabels.
+    const std::uint64_t mstamp = 0;
+    const bool lab_hit = false;
+#endif
     if (!lab_hit) {
         W.lab_valid = false;
         std::string lab_err = label_components_composite_masked(p, W.unc, W.geom, W.ratio, W.lab);
@@ -1634,6 +1640,7 @@ PressureResult solve_composite (PressureProblem const& p, PressureOptions const&
     PressureResult R;
     const bool masked = composite_is_masked(p);
     Selection const sel0 = select_composite(p, o.backend);
+    if (!sel0.ok) { R.status = Status::NotBuilt; R.message = sel0.message; R.backend = ""; return R; }
     const bool use_hypre = (sel0.kind == BackendKind::HYPRE) || (o.backend == BackendKind::HYPRE);
     R.backend = use_hypre ? "HYPRE" : "MLMG";
     PressureWorkspace local;
