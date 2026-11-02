@@ -28643,7 +28643,7 @@ END SUBROUTINE NUMBER_FV_SCALAR_CVS_SAME_MESH
 SUBROUTINE GET_LINKED_FACE_INDEXES_F
 
 INTEGER :: NM,I,J,K,X1AXIS,X2AXIS,X3AXIS,ICF,JCF,LO_UNKZ,HI_UNKZ,IEC,IEDGE,LOHI,II,JJ,KK,IIO,JJO,KKO,IERC,&
-           OFACE(3),OLO_UNKZ,OHI_UNKZ,OICF,OJCF,IECE,JECE,ILINK,ICC,JCC,ICV,IW,COUNT,IF_,IL,N_NOROW,ICF2
+           OFACE(3),OLO_UNKZ,OHI_UNKZ,OICF,OJCF,IECE,JECE,ILINK,ICC,JCC,IW,COUNT,IF_,IL,N_NOROW,ICF2
 REAL(EB):: ACRT,CCVOL_THRES
 LOGICAL :: ALL_FLG,CC_LINKED
 TYPE(MESH_TYPE), POINTER :: M
@@ -28710,32 +28710,14 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       DO JCF=1,CF%NFACE
          ! Test if any of surrounding cut-cells are linked. If any link attempt to link cut-face.
          CC_LINKED = .FALSE.
-         IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
-            ! FACE role is the direct topology decision: intra-CV faces and external faces incident
-            ! on an aggregate participate in the existing staggered velocity-link machinery.
-            CC_LINKED=FV_FACE_REQUIRES_STAGGERED_LINK(ICF,JCF)
-            ! Keep a membership fallback for legacy/guard faces that do not have local FV provenance.
-            IF (.NOT.CC_LINKED) THEN
-               DO LOHI=LOW_IND,HIGH_IND
-                  ICC = CF%CELL_LIST(2,LOHI,JCF); JCC = CF%CELL_LIST(3,LOHI,JCF)
-                  CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
-                  IF (ICV<1 .OR. ICV>FV%CV%N) CYCLE
-                  IF (FV%CV%N_MEMBER(ICV)>1) THEN
-                     CC_LINKED=.TRUE.
-                     EXIT
-                  ENDIF
-               ENDDO
+         DO LOHI=LOW_IND,HIGH_IND
+            ICC = CF%CELL_LIST(2,LOHI,JCF); JCC = CF%CELL_LIST(3,LOHI,JCF); CC => M%CUT_CELL(ICC)
+            CCVOL_THRES = CCVOL_LINK * (M%DX(CC%IJK(IAXIS))*M%DY(CC%IJK(JAXIS))*M%DZ(CC%IJK(KAXIS)))
+            IF (CC%VOLUME(JCC)<=CCVOL_THRES) THEN
+               CC_LINKED=.TRUE.
+               EXIT
             ENDIF
-         ELSE
-            DO LOHI=LOW_IND,HIGH_IND
-               ICC = CF%CELL_LIST(2,LOHI,JCF); JCC = CF%CELL_LIST(3,LOHI,JCF); CC => M%CUT_CELL(ICC)
-               CCVOL_THRES = CCVOL_LINK * (M%DX(CC%IJK(IAXIS))*M%DY(CC%IJK(JAXIS))*M%DZ(CC%IJK(KAXIS)))
-               IF (CC%VOLUME(JCC)<=CCVOL_THRES) THEN
-                  CC_LINKED=.TRUE.
-                  EXIT
-               ENDIF
-            ENDDO
-         ENDIF
+         ENDDO
          ! If surrounding cut-cells not linked, face UNKF not numbered and Area over threshold, add to NUNK_F:
          IF(CC_FV_UNKF_CF(NM,ICF,JCF)<1 .AND. CF%AREA(JCF)>CCVOL_LINK*ACRT .AND. .NOT.CC_LINKED) THEN
             M%NUNK_F = M%NUNK_F + 1
@@ -28964,40 +28946,6 @@ ENDDO
 
 RETURN
 CONTAINS
-
-LOGICAL FUNCTION FV_FACE_REQUIRES_STAGGERED_LINK(ICF,JCF)
-
-! Use the normalized FV face row as the topology source while preserving the legacy UNKF storage.
-INTEGER, INTENT(IN) :: ICF,JCF
-INTEGER :: IF_,ICV_LOC
-
-FV_FACE_REQUIRES_STAGGERED_LINK=.FALSE.
-! Caller supplies a valid gasphase (ICF,JCF); FC must already exist from face build.
-IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JCF); IF (IF_<1) RETURN
-IF (FV%FACE%ROLE(IF_)==CC_FACE_ROLE_INTERNAL) THEN
-   FV_FACE_REQUIRES_STAGGERED_LINK=.TRUE.
-   RETURN
-ENDIF
-IF (FV%FACE%OWNER_CV_NM(IF_)==NM) THEN
-   ICV_LOC=FV%FACE%OWNER_CV(IF_)
-   IF (ICV_LOC>0) THEN
-      IF (FV%CV%N_MEMBER(ICV_LOC)>1) THEN
-         FV_FACE_REQUIRES_STAGGERED_LINK=.TRUE.
-         RETURN
-      ENDIF
-   ENDIF
-ENDIF
-IF (FV%FACE%NBR_CV_NM(IF_)==NM) THEN
-   ICV_LOC=FV%FACE%NBR_CV(IF_)
-   IF (ICV_LOC>0) THEN
-      IF (FV%CV%N_MEMBER(ICV_LOC)>1) THEN
-         FV_FACE_REQUIRES_STAGGERED_LINK=.TRUE.
-         RETURN
-      ENDIF
-   ENDIF
-ENDIF
-
-END FUNCTION FV_FACE_REQUIRES_STAGGERED_LINK
 
 SUBROUTINE LINK_FACES_TO_NEIGHBORS(ALL_FLG)
 
