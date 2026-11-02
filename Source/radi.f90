@@ -5005,11 +5005,11 @@ DO N=1,N_INIT
                   ICC=CCVAR(I,J,K,CC_IDCC)
                   DO JCC=1,CUT_CELL(ICC)%NCELL
                      ICV=0
-                     IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
+                     IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
                         CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
                      IF (ICV>0) THEN
                         CV%Q(ICV)=CV%Q(ICV)+TIME_RAMP_FACTOR*IN%HRRPUV
-                     ELSEIF (.NOT.(CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY)) THEN
+                     ELSEIF (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_IDENTITY) THEN
                         CV%Q(CUT_CELL(ICC)%IG(JCC))=CV%Q(CUT_CELL(ICC)%IG(JCC))+TIME_RAMP_FACTOR*IN%HRRPUV
                      ENDIF
                   ENDDO

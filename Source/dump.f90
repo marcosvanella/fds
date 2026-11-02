@@ -10773,7 +10773,7 @@ DO K=1,KBAR
                NCELL=CUT_CELL(ICC)%NCELL
                DO JCC=1,NCELL
                   ICV=0
-                  IF (CC_CV_USE_IN_SOLVER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
+                  IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
                      CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
                   IG = CUT_CELL(ICC)%IG(JCC)
                   IF (ICV>0) THEN
