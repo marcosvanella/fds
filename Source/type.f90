@@ -1321,7 +1321,6 @@ TYPE CC_CUTFACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   ::  CFACE_INDEX !< In boundary cut-faces only, index in CFACE(:).
    INTEGER,  ALLOCATABLE, DIMENSION(:)   ::   SURF_INDEX !< In boundary cut-faces only.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CFACE_ORIGIN !< In boundary face origin (built, blocked small cell, blocked split cell).
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) ::     NVEC_RAD !< In boundary cut-faces only, unit normal for the cut-cell radiation sweep.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) ::       NOMICF !< For external boundary boundary cutfaces, NOM and cut-face list.
 
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) ::         UNKH !< Low and high side cut-cell H unknown number. (LOW:HIGH,1:NFACE)
@@ -1524,6 +1523,7 @@ TYPE CC_FACE_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: AREA        !< (1:N) face area.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: FLUX_AREA   !< (1:N) legacy-exact area used by identity-scope flux operators.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NVEC        !< (IAXIS:KAXIS,1:N) outward unit normal (owner -> neighbor).
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NVEC_RAD    !< (IAXIS:KAXIS,1:N) cut-cell radiation normal; in-boundary rows only.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: XYZCEN      !< (IAXIS:KAXIS,1:N) face centroid.
    ! --- precomputed stencil coefficients (filled after topology is frozen) ---
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: REF_KIND    !< (1:N) owner-side support kind CC_FACE_REF_* .
