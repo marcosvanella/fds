@@ -20420,7 +20420,6 @@ END SUBROUTINE CC_GRID_APPEND_REGFACE_TAIL
 
 SUBROUTINE CC_GRID_APPEND_SEAM_RCFACE(NM)
 ! One row per unclaimed RC face, IRC order, between the cut and regular tails. Geometry from its guard cut cell.
-! NBR_GCELL stays 0: GET_FV_PROJ_H_DELTA then keeps the face's own Cartesian H difference.
 INTEGER, INTENT(IN) :: NM
 INTEGER :: IRC,I,J,K,X1AXIS,NADD,NOLD,IFACE,ICC,IFACE_CC,SIDE
 REAL(EB) :: SPAN,AREA,FACE_XYZ(IAXIS:KAXIS),FACE_NV(IAXIS:KAXIS),FACE_NBR(IAXIS:KAXIS)
