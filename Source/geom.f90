@@ -20655,7 +20655,13 @@ ELSE  ! Regular GCELL: six full Cartesian faces.
          F_IWC(NF) = CC_GRID_GET_CARTESIAN_FACE_WALL(NM,I,J,K,X1AXIS,SIDE)
 
          IF (IN<1 .OR. IN>M%IBAR .OR. JN<1 .OR. JN>M%JBAR .OR. KN<1 .OR. KN>M%KBAR) THEN
+            ! Domain edge stays EXTERNAL. An interpolated wall is the other mesh's Cartesian cell,
+            ! owned by the legacy wall operator: GAS, no FV neighbor. A later reconcile promotes
+            ! it to REMOTE when that mesh has a gas row at the same place.
             F_KIND(NF) = CC_FACE_KIND_EXTERNAL; F_NBR_TYPE(NF) = 0
+            IF (F_IWC(NF)>0) THEN
+               IF (M%WALL(F_IWC(NF))%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) F_KIND(NF)=CC_FACE_KIND_GAS
+            ENDIF
             CYCLE
          ENDIF
          SELECT CASE(M%CCVAR(IN,JN,KN,CC_CGSC))
