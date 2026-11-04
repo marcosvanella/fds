@@ -1442,7 +1442,7 @@ SUBROUTINE GET_ULMAT_ACTIVE_ROWS(NM,IPZ,ACTIVE_ROW,GAUGE_ROW)
 INTEGER, INTENT(IN) :: NM,IPZ
 LOGICAL, ALLOCATABLE, INTENT(OUT) :: ACTIVE_ROW(:)
 INTEGER, INTENT(OUT) :: GAUGE_ROW
-INTEGER :: I,J,K,ICC,JCC,ICV,IROW,NUNKH
+INTEGER :: I,J,K,ICC,JCC,IROW,NUNKH
 TYPE(MESH_TYPE), POINTER :: M
 
 M=>MESHES(NM)
@@ -1464,24 +1464,14 @@ DO K=1,M%KBAR
       ENDDO
    ENDDO
 ENDDO
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY .AND. ALLOCATED(M%FV%CV%UNKH)) THEN
-   DO ICV=1,M%FV%CV%N
-      IF (M%FV%CV%N_MEMBER(ICV)<1 .OR. M%FV%CV%ICC(ICV)<1) CYCLE
-      I=M%FV%CV%IJK(IAXIS,ICV); J=M%FV%CV%IJK(JAXIS,ICV); K=M%FV%CV%IJK(KAXIS,ICV)
-      IF (M%ZONE_MESH(M%PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-      IROW=M%FV%CV%UNKH(ICV)
+DO ICC=1,M%N_CUTCELL_MESH
+   I=M%CUT_CELL(ICC)%IJK(IAXIS); J=M%CUT_CELL(ICC)%IJK(JAXIS); K=M%CUT_CELL(ICC)%IJK(KAXIS)
+   IF (M%ZONE_MESH(M%PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
+   DO JCC=1,M%CUT_CELL(ICC)%NCELL
+      IROW=M%CUT_CELL(ICC)%UNKH(JCC)
       IF (IROW>=1 .AND. IROW<=NUNKH) ACTIVE_ROW(IROW)=.TRUE.
    ENDDO
-ELSE
-   DO ICC=1,M%N_CUTCELL_MESH
-      I=M%CUT_CELL(ICC)%IJK(IAXIS); J=M%CUT_CELL(ICC)%IJK(JAXIS); K=M%CUT_CELL(ICC)%IJK(KAXIS)
-      IF (M%ZONE_MESH(M%PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-      DO JCC=1,M%CUT_CELL(ICC)%NCELL
-         IROW=M%CUT_CELL(ICC)%UNKH(JCC)
-         IF (IROW>=1 .AND. IROW<=NUNKH) ACTIVE_ROW(IROW)=.TRUE.
-      ENDDO
-   ENDDO
-ENDIF
+ENDDO
 DO IROW=1,NUNKH
    IF (ACTIVE_ROW(IROW)) GAUGE_ROW=IROW
 ENDDO
@@ -1493,7 +1483,7 @@ END SUBROUTINE GET_ULMAT_ACTIVE_ROWS
 SUBROUTINE ULMAT_SOLVE_ZONE(NM,IPZ)
 
 USE COMPLEX_GEOMETRY, ONLY : CC_IDCC,CC_IDRC
-USE CC_SCALARS, ONLY : GET_FN_DIVERGENCE_CUTCELL,GET_H_GUARD_CUTCELL,GET_FV_HP,GET_FV_CV_DDDTVOL,GET_CUTCELL_RHOP
+USE CC_SCALARS, ONLY : GET_FN_DIVERGENCE_CUTCELL,GET_H_GUARD_CUTCELL,GET_FV_CV_DDDTVOL,GET_CUTCELL_RHOP
 USE TYPES, ONLY: CC_FV_TYPE
 #ifdef WITH_HYPRE
 USE HYPRE_INTERFACE
@@ -1781,46 +1771,29 @@ IF (ZM%MTYPE==SYMM_INDEFINITE) THEN
          ENDDO
       ENDDO
    ENDDO
-   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-      DO ICV=1,FV%CV%N
-         IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%ICC(ICV)<1) CYCLE
-         I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-         IROW=FV%CV%UNKH(ICV)
-         IF (IROW<=0 .OR. ZONE_MESH(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-         IF (PREDICTOR) THEN
-            RHO_CC=FV%CV%RHO(ICV)
-         ELSE
-            RHO_CC=FV%CV%RHOS(ICV)
-         ENDIF
-         VOL=FV%CV%VOLUME(ICV); KRES_CC=FV%CV%KRES(ICV)
-         SUM_GAUGE(1)=SUM_GAUGE(1)+VOL*RHO_CC*(KRES_CC+ZM%X_H(IROW))
-         SUM_GAUGE(2)=SUM_GAUGE(2)+VOL*RHO_CC
-      ENDDO
-   ELSE
-      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-         I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
-         IF (CUT_CELL(ICC)%UNKH(1)<=0 .OR. ZONE_MESH(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-         IF(ONE_UNKH_PER_CUTCELL) THEN
-            DO JCC=1,CUT_CELL(ICC)%NCELL
-               RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
-               VOL = CUT_CELL(ICC)%VOLUME(JCC)
-               ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
-               IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
-               SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZM%X_H(CUT_CELL(ICC)%UNKH(JCC)))
-               SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
-            ENDDO
-         ELSE
-            DO JCC=1,CUT_CELL(ICC)%NCELL
-               RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
-               VOL = CUT_CELL(ICC)%VOLUME(JCC)
-               ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
-               IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
-               SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZM%X_H(CUT_CELL(ICC)%UNKH(1)))
-               SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
-            ENDDO
-         ENDIF
-      ENDDO
-   ENDIF
+   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+      I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
+      IF (CUT_CELL(ICC)%UNKH(1)<=0 .OR. ZONE_MESH(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
+      IF(ONE_UNKH_PER_CUTCELL) THEN
+         DO JCC=1,CUT_CELL(ICC)%NCELL
+            RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
+            VOL = CUT_CELL(ICC)%VOLUME(JCC)
+            ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+            IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
+            SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZM%X_H(CUT_CELL(ICC)%UNKH(JCC)))
+            SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
+         ENDDO
+      ELSE
+         DO JCC=1,CUT_CELL(ICC)%NCELL
+            RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
+            VOL = CUT_CELL(ICC)%VOLUME(JCC)
+            ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+            IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
+            SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZM%X_H(CUT_CELL(ICC)%UNKH(1)))
+            SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
+         ENDDO
+      ENDIF
+   ENDDO
    SHIFT_H = SUM_GAUGE(1)/(SUM_GAUGE(2)+TWENTY_EPSILON_EB)
    WHERE(ACTIVE_ROW) ZM%X_H=ZM%X_H-SHIFT_H
 ENDIF
@@ -1839,9 +1812,7 @@ DO IROW=1,ZM%NUNKH_CART ! Regular Cartesian cells.
    I=ZM%MESH_IJK(IAXIS,IROW); J=ZM%MESH_IJK(JAXIS,IROW); K=ZM%MESH_IJK(KAXIS,IROW)
    HP(I,J,K) = -ZM%X_H(MUNKH(I,J,K))
 ENDDO
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   CALL GET_FV_HP(NM,IPZ,HP,X_H_IN=ZM%X_H,ROW_OFFSET=0,USE_ZONE_MESH=.TRUE.)
-ELSEIF (PREDICTOR) THEN
+IF (PREDICTOR) THEN
    DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
       I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
       IF (CUT_CELL(ICC)%UNKH(1)<=0 .OR. ZONE_MESH(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
@@ -2105,7 +2076,7 @@ END SUBROUTINE ULMAT_GET_H_REGFACES
 SUBROUTINE ULMAT_MATRIXGRAPH_H(NM,IPZ)
 
 USE COMPLEX_GEOMETRY, ONLY : CC_GASPHASE,CC_IDCC
-USE CC_SCALARS, ONLY : GET_CC_MATRIXGRAPH_H,SYNC_FV_PRESSURE_UNKNOWNS
+USE CC_SCALARS, ONLY : GET_CC_MATRIXGRAPH_H
 
 INTEGER, INTENT(IN) :: NM,IPZ
 
@@ -2122,7 +2093,6 @@ TYPE(ZONE_MESH_TYPE), POINTER :: ZM
 
 ZM    =>ZONE_MESH(IPZ)
 NUNKH = ZM%NUNKH
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) CALL SYNC_FV_PRESSURE_UNKNOWNS(NM)
 
 ! Allocate NNZ_H_MAT, JD_H_MAT:
 IF (ALLOCATED(NNZ_H_MAT)) DEALLOCATE(NNZ_H_MAT)
@@ -2224,60 +2194,56 @@ ENDDO WALL_LOOP_1
 
 ! Finally Add nonzeros corresponding to RC_FACE, CUT_FACE
 CC_IF_1 : IF (CC_IBM) THEN
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   CALL ULMAT_FV_MATRIXGRAPH_H(NM,IPZ,.TRUE.)
-ELSE
-   ! Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
-   RCFACE_LOOP_1 : DO IFACE=1,MESHES(NM)%CC_NRCFACE_H
-      RCF => RC_FACE(MESHES(NM)%RCF_H(IFACE)); IF(RCF%PRES_ZONE/=IPZ) CYCLE RCFACE_LOOP_1
-      I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
-      ! Unknowns on related cells:
-      IND(LOW_IND)  = RCF%UNKH(LOW_IND)
-      IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND
-      LOCROW_2 = HIGH_IND
-      SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(JAXIS)
-            IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(KAXIS)
-            IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-      ENDSELECT
-      CALL ADD_INPLACE_NNZ_H(LOCROW_1,LOCROW_2,IND) ! Add to matrix arrays.
-   ENDDO RCFACE_LOOP_1
+! Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
+RCFACE_LOOP_1 : DO IFACE=1,MESHES(NM)%CC_NRCFACE_H
+   RCF => RC_FACE(MESHES(NM)%RCF_H(IFACE)); IF(RCF%PRES_ZONE/=IPZ) CYCLE RCFACE_LOOP_1
+   I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
+   ! Unknowns on related cells:
+   IND(LOW_IND)  = RCF%UNKH(LOW_IND)
+   IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
+   ! Row ind(1),ind(2):
+   LOCROW_1 = LOW_IND
+   LOCROW_2 = HIGH_IND
+   SELECT CASE(X1AXIS)
+      CASE(IAXIS)
+         IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(JAXIS)
+         IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(KAXIS)
+         IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+   ENDSELECT
+   CALL ADD_INPLACE_NNZ_H(LOCROW_1,LOCROW_2,IND) ! Add to matrix arrays.
+ENDDO RCFACE_LOOP_1
 
-   CF_LOOP_1 : DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
-      IF ( CUT_FACE(ICF)%STATUS/=CC_GASPHASE .OR. CUT_FACE(ICF)%IWC>0) CYCLE CF_LOOP_1
-      IF ( CUT_FACE(ICF)%PRES_ZONE/=IPZ) CYCLE CF_LOOP_1
-      I = CUT_FACE(ICF)%IJK(IAXIS)
-      J = CUT_FACE(ICF)%IJK(JAXIS)
-      K = CUT_FACE(ICF)%IJK(KAXIS)
-      X1AXIS = CUT_FACE(ICF)%IJK(KAXIS+1)
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
-      SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(JAXIS)
-            IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(KAXIS)
-            IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-      ENDSELECT
-      DO IFACE=1,CUT_FACE(ICF)%NFACE
-         IND(LOW_IND)  = CUT_FACE(ICF)%UNKH(LOW_IND,IFACE)
-         IND(HIGH_IND) = CUT_FACE(ICF)%UNKH(HIGH_IND,IFACE)
-         CALL ADD_INPLACE_NNZ_H(LOCROW_1,LOCROW_2,IND)
-      ENDDO
-   ENDDO CF_LOOP_1
-ENDIF
+CF_LOOP_1 : DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
+   IF ( CUT_FACE(ICF)%STATUS/=CC_GASPHASE .OR. CUT_FACE(ICF)%IWC>0) CYCLE CF_LOOP_1
+   IF ( CUT_FACE(ICF)%PRES_ZONE/=IPZ) CYCLE CF_LOOP_1
+   I = CUT_FACE(ICF)%IJK(IAXIS)
+   J = CUT_FACE(ICF)%IJK(JAXIS)
+   K = CUT_FACE(ICF)%IJK(KAXIS)
+   X1AXIS = CUT_FACE(ICF)%IJK(KAXIS+1)
+   ! Row ind(1),ind(2):
+   LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
+   SELECT CASE(X1AXIS)
+      CASE(IAXIS)
+         IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(JAXIS)
+         IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(KAXIS)
+         IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+   ENDSELECT
+   DO IFACE=1,CUT_FACE(ICF)%NFACE
+      IND(LOW_IND)  = CUT_FACE(ICF)%UNKH(LOW_IND,IFACE)
+      IND(HIGH_IND) = CUT_FACE(ICF)%UNKH(HIGH_IND,IFACE)
+      CALL ADD_INPLACE_NNZ_H(LOCROW_1,LOCROW_2,IND)
+   ENDDO
+ENDDO CF_LOOP_1
 ENDIF CC_IF_1
 
 
@@ -2364,84 +2330,80 @@ ENDDO WALL_LOOP_2
 
 
 CC_IF_2 : IF (CC_IBM) THEN
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   CALL ULMAT_FV_MATRIXGRAPH_H(NM,IPZ,.FALSE.)
-ELSE
-   ! Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
-   RCFACE_LOOP_2 : DO IFACE=1,MESHES(NM)%CC_NRCFACE_H
-      RCF => RC_FACE(MESHES(NM)%RCF_H(IFACE)); IF(RCF%PRES_ZONE/=IPZ) CYCLE RCFACE_LOOP_2
-      I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
-      ! Unknowns on related cells:
-      IND(LOW_IND)  = RCF%UNKH(LOW_IND)
-      IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND
-      LOCROW_2 = HIGH_IND
-      SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(JAXIS)
-            IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(KAXIS)
-            IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-      ENDSELECT
-      RCF%JDH(1:2,1:2) = 0
+! Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
+RCFACE_LOOP_2 : DO IFACE=1,MESHES(NM)%CC_NRCFACE_H
+   RCF => RC_FACE(MESHES(NM)%RCF_H(IFACE)); IF(RCF%PRES_ZONE/=IPZ) CYCLE RCFACE_LOOP_2
+   I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
+   ! Unknowns on related cells:
+   IND(LOW_IND)  = RCF%UNKH(LOW_IND)
+   IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
+   ! Row ind(1),ind(2):
+   LOCROW_1 = LOW_IND
+   LOCROW_2 = HIGH_IND
+   SELECT CASE(X1AXIS)
+      CASE(IAXIS)
+         IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(JAXIS)
+         IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(KAXIS)
+         IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+   ENDSELECT
+   RCF%JDH(1:2,1:2) = 0
+   ! Add to global matrix arrays:
+   DO LOCROW=LOCROW_1,LOCROW_2
+      DO IIND=LOW_IND,HIGH_IND
+         NII = NNZ_H_MAT(IND(LOCROW))
+         DO ILOC=1,NII
+            IF ( IND(IIND) == JD_H_MAT(ILOC,IND(LOCROW)) ) THEN
+                RCF%JDH(LOCROW,IIND) = ILOC
+                EXIT
+            ENDIF
+         ENDDO
+      ENDDO
+   ENDDO
+ENDDO RCFACE_LOOP_2
+
+CF_LOOP_3 : DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
+   IF ( CUT_FACE(ICF)%STATUS/=CC_GASPHASE .OR. CUT_FACE(ICF)%IWC>0) CYCLE CF_LOOP_3
+   IF ( CUT_FACE(ICF)%PRES_ZONE/=IPZ) CYCLE CF_LOOP_3
+   I = CUT_FACE(ICF)%IJK(IAXIS)
+   J = CUT_FACE(ICF)%IJK(JAXIS)
+   K = CUT_FACE(ICF)%IJK(KAXIS)
+   X1AXIS = CUT_FACE(ICF)%IJK(KAXIS+1)
+   ! Row ind(1),ind(2):
+   LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
+   SELECT CASE(X1AXIS)
+      CASE(IAXIS)
+         IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(JAXIS)
+         IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(KAXIS)
+         IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+   ENDSELECT
+   CUT_FACE(ICF)%JDH(:,:,:) = 0
+   DO IFACE=1,CUT_FACE(ICF)%NFACE
+      IND(LOW_IND)  = CUT_FACE(ICF)%UNKH(LOW_IND,IFACE)
+      IND(HIGH_IND) = CUT_FACE(ICF)%UNKH(HIGH_IND,IFACE)
       ! Add to global matrix arrays:
       DO LOCROW=LOCROW_1,LOCROW_2
          DO IIND=LOW_IND,HIGH_IND
             NII = NNZ_H_MAT(IND(LOCROW))
             DO ILOC=1,NII
                IF ( IND(IIND) == JD_H_MAT(ILOC,IND(LOCROW)) ) THEN
-                   RCF%JDH(LOCROW,IIND) = ILOC
-                   EXIT
+                     CUT_FACE(ICF)%JDH(LOCROW,IIND,IFACE) = ILOC
+                     EXIT
                ENDIF
             ENDDO
          ENDDO
       ENDDO
-   ENDDO RCFACE_LOOP_2
-
-   CF_LOOP_3 : DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
-      IF ( CUT_FACE(ICF)%STATUS/=CC_GASPHASE .OR. CUT_FACE(ICF)%IWC>0) CYCLE CF_LOOP_3
-      IF ( CUT_FACE(ICF)%PRES_ZONE/=IPZ) CYCLE CF_LOOP_3
-      I = CUT_FACE(ICF)%IJK(IAXIS)
-      J = CUT_FACE(ICF)%IJK(JAXIS)
-      K = CUT_FACE(ICF)%IJK(KAXIS)
-      X1AXIS = CUT_FACE(ICF)%IJK(KAXIS+1)
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
-      SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(JAXIS)
-            IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(KAXIS)
-            IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-      ENDSELECT
-      CUT_FACE(ICF)%JDH(:,:,:) = 0
-      DO IFACE=1,CUT_FACE(ICF)%NFACE
-         IND(LOW_IND)  = CUT_FACE(ICF)%UNKH(LOW_IND,IFACE)
-         IND(HIGH_IND) = CUT_FACE(ICF)%UNKH(HIGH_IND,IFACE)
-         ! Add to global matrix arrays:
-         DO LOCROW=LOCROW_1,LOCROW_2
-            DO IIND=LOW_IND,HIGH_IND
-               NII = NNZ_H_MAT(IND(LOCROW))
-               DO ILOC=1,NII
-                  IF ( IND(IIND) == JD_H_MAT(ILOC,IND(LOCROW)) ) THEN
-                        CUT_FACE(ICF)%JDH(LOCROW,IIND,IFACE) = ILOC
-                        EXIT
-                  ENDIF
-               ENDDO
-            ENDDO
-         ENDDO
-      ENDDO
-   ENDDO CF_LOOP_3
-ENDIF
+   ENDDO
+ENDDO CF_LOOP_3
 ENDIF CC_IF_2
 
 RETURN
@@ -2486,134 +2448,6 @@ ENDDO LOCROW_LOOP
 
 RETURN
 END SUBROUTINE ADD_INPLACE_NNZ_H
-
-SUBROUTINE ULMAT_FV_MATRIXGRAPH_H(NM,IPZ,BUILD_GRAPH)
-
-USE COMPLEX_GEOMETRY, ONLY: CC_FTYPE_RGGAS
-USE CC_SCALARS, ONLY: SYNC_FV_PRESSURE_UNKNOWNS,GET_FV_GCELL_UNKH,FV_PRESSURE_NBR_IS_REMOTE
-USE TYPES, ONLY: CC_FV_TYPE
-INTEGER, INTENT(IN) :: NM,IPZ
-LOGICAL, INTENT(IN) :: BUILD_GRAPH
-INTEGER :: IF_,ICV,IG,IND(LOW_IND:HIGH_IND),LOCROW,IIND,ILOC,NII,I,J,K
-LOGICAL :: H_PER_MEMBER
-TYPE(MESH_TYPE), POINTER :: MFV
-TYPE(CC_FV_TYPE), POINTER :: FV
-
-MFV => MESHES(NM)
-FV => MFV%FV
-H_PER_MEMBER = CC_CV_H_PER_MEMBER
-IF (BUILD_GRAPH) CALL SYNC_FV_PRESSURE_UNKNOWNS(NM)
-DO IF_=1,FV%FACE%N_INT
-   IF (FV%FACE%FTYPE(IF_) == CC_FTYPE_RGGAS) CYCLE
-   IF (H_PER_MEMBER) THEN
-      IG = FV%FACE%OWNER_GCELL(IF_)
-      IF (IG < 1 .OR. IG > FV%GCELL%N_INT) CYCLE
-      ! A mesh-interface face is a boundary here. The per-mesh matrix takes the neighbour H
-      ! from the guard, the same way L0 does, and does not use the CV role.
-      IF (FV_PRESSURE_NBR_IS_REMOTE(NM,IF_,.TRUE.)) CYCLE
-      I = FV%GCELL%IJK(IAXIS,IG); J = FV%GCELL%IJK(JAXIS,IG); K = FV%GCELL%IJK(KAXIS,IG)
-   ELSE
-      IF (FV%FACE%ROLE(IF_) /= CC_FACE_ROLE_EXTERNAL) CYCLE
-      IF (FV%FACE%OWNER_CV_NM(IF_) /= NM) CYCLE
-      ICV = FV%FACE%OWNER_CV(IF_)
-      I = FV%CV%IJK(IAXIS,ICV); J = FV%CV%IJK(JAXIS,ICV); K = FV%CV%IJK(KAXIS,ICV)
-   ENDIF
-   IF (ZONE_MESH(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT /= IPZ) CYCLE
-   IF (H_PER_MEMBER) THEN
-      CALL GET_FV_GCELL_UNKH(NM,FV%FACE%OWNER_GCELL(IF_),IND(LOW_IND))
-      CALL GET_FV_GCELL_UNKH(NM,FV%FACE%NBR_GCELL(IF_),IND(HIGH_IND))
-   ELSE
-      IND(LOW_IND) = FV%CV%UNKH(ICV)
-      IF (FV%FACE%NBR_CV_NM(IF_) /= NM) THEN
-         IF (FV%FACE%NBR_GCELL(IF_)<1) CYCLE
-         CALL GET_FV_GCELL_UNKH(NM,FV%FACE%NBR_GCELL(IF_),IND(HIGH_IND))
-      ELSE
-         IND(HIGH_IND) = FV%CV%UNKH(FV%FACE%NBR_CV(IF_))
-      ENDIF
-   ENDIF
-   IF (MINVAL(IND) < 1 .OR. IND(LOW_IND)==IND(HIGH_IND)) CYCLE
-   IF (BUILD_GRAPH) THEN
-      CALL ADD_INPLACE_NNZ_H(LOW_IND,HIGH_IND,IND)
-   ELSE
-      FV%FACE%JDH(LOW_IND:HIGH_IND,LOW_IND:HIGH_IND,IF_) = 0
-      DO LOCROW=LOW_IND,HIGH_IND
-         IF (IND(LOCROW)<1 .OR. IND(LOCROW)>SIZE(NNZ_H_MAT)) CYCLE
-         NII = NNZ_H_MAT(IND(LOCROW))
-         DO IIND=LOW_IND,HIGH_IND
-            DO ILOC=1,NII
-               IF (IND(IIND) == JD_H_MAT(ILOC,IND(LOCROW))) THEN
-                  FV%FACE%JDH(LOCROW,IIND,IF_) = ILOC
-                  EXIT
-               ENDIF
-            ENDDO
-         ENDDO
-      ENDDO
-   ENDIF
-ENDDO
-
-END SUBROUTINE ULMAT_FV_MATRIXGRAPH_H
-
-
-SUBROUTINE ULMAT_FV_H_MATRIX(NM,IPZ)
-
-USE COMPLEX_GEOMETRY, ONLY: CC_FTYPE_RGGAS
-USE CC_SCALARS, ONLY: GET_FV_FACE_PRESSURE_BIJ,GET_FV_GCELL_UNKH,FV_PRESSURE_NBR_IS_REMOTE
-USE TYPES, ONLY: CC_FV_TYPE
-INTEGER, INTENT(IN) :: NM,IPZ
-INTEGER :: IF_,ICV,IG,IND(LOW_IND:HIGH_IND),ILOC,JLOC,IROW,JCOL,I,J,K
-LOGICAL :: H_PER_MEMBER
-REAL(EB) :: BIJ,KFACE(LOW_IND:HIGH_IND,LOW_IND:HIGH_IND)
-TYPE(MESH_TYPE), POINTER :: MFV
-TYPE(CC_FV_TYPE), POINTER :: FV
-
-MFV => MESHES(NM)
-FV => MFV%FV
-H_PER_MEMBER = CC_CV_H_PER_MEMBER
-DO IF_=1,FV%FACE%N_INT
-   IF (FV%FACE%FTYPE(IF_) == CC_FTYPE_RGGAS) CYCLE
-   IF (H_PER_MEMBER) THEN
-      IG = FV%FACE%OWNER_GCELL(IF_)
-      IF (IG < 1 .OR. IG > FV%GCELL%N_INT) CYCLE
-      ! A mesh-interface face is a boundary here. The per-mesh matrix takes the neighbour H
-      ! from the guard, the same way L0 does, and does not use the CV role.
-      IF (FV_PRESSURE_NBR_IS_REMOTE(NM,IF_,.TRUE.)) CYCLE
-      I = FV%GCELL%IJK(IAXIS,IG); J = FV%GCELL%IJK(JAXIS,IG); K = FV%GCELL%IJK(KAXIS,IG)
-   ELSE
-      IF (FV%FACE%ROLE(IF_) /= CC_FACE_ROLE_EXTERNAL) CYCLE
-      IF (FV%FACE%OWNER_CV_NM(IF_) /= NM) CYCLE
-      ICV = FV%FACE%OWNER_CV(IF_)
-      I = FV%CV%IJK(IAXIS,ICV); J = FV%CV%IJK(JAXIS,ICV); K = FV%CV%IJK(KAXIS,ICV)
-   ENDIF
-   IF (ZONE_MESH(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT /= IPZ) CYCLE
-   IF (H_PER_MEMBER) THEN
-      CALL GET_FV_GCELL_UNKH(NM,FV%FACE%OWNER_GCELL(IF_),IND(LOW_IND))
-      CALL GET_FV_GCELL_UNKH(NM,FV%FACE%NBR_GCELL(IF_),IND(HIGH_IND))
-   ELSE
-      IND(LOW_IND) = FV%CV%UNKH(ICV)
-      IF (FV%FACE%NBR_CV_NM(IF_) /= NM) THEN
-         IF (FV%FACE%NBR_GCELL(IF_)<1) CYCLE
-         CALL GET_FV_GCELL_UNKH(NM,FV%FACE%NBR_GCELL(IF_),IND(HIGH_IND))
-      ELSE
-         IND(HIGH_IND) = FV%CV%UNKH(FV%FACE%NBR_CV(IF_))
-      ENDIF
-   ENDIF
-   IF (MINVAL(IND) < 1 .OR. IND(LOW_IND)==IND(HIGH_IND)) CYCLE
-
-   CALL GET_FV_FACE_PRESSURE_BIJ(NM,IF_,BIJ)
-   IF (BIJ<=TWO_EPSILON_EB) CYCLE
-   KFACE(LOW_IND,LOW_IND)=BIJ;   KFACE(LOW_IND,HIGH_IND)=-BIJ
-   KFACE(HIGH_IND,LOW_IND)=-BIJ; KFACE(HIGH_IND,HIGH_IND)=BIJ
-   DO ILOC=LOW_IND,HIGH_IND
-      IROW = IND(ILOC)
-      IF (IROW<1 .OR. IROW>SIZE(D_H_MAT,DIM=2)) CYCLE
-      DO JLOC=LOW_IND,HIGH_IND
-         JCOL = FV%FACE%JDH(ILOC,JLOC,IF_)
-         D_H_MAT(JCOL,IROW) = D_H_MAT(JCOL,IROW) + KFACE(ILOC,JLOC)
-      ENDDO
-   ENDDO
-ENDDO
-
-END SUBROUTINE ULMAT_FV_H_MATRIX
 
 ! ---------------------------------- ULMAT_H_MATRIX ----------------------------------
 
@@ -2711,89 +2545,85 @@ ENDDO AXIS_LOOP_1
 
 ! Contribution to Laplacian matrix from Cut-cells:
 CC_IF : IF ( CC_IBM ) THEN
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   CALL ULMAT_FV_H_MATRIX(NM,IPZ)
-ELSE
-   ! Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
-   RCFACE_LOOP : DO IFACE=1,MESHES(NM)%CC_NRCFACE_H
-      RCF => RC_FACE(MESHES(NM)%RCF_H(IFACE)); IF(RCF%PRES_ZONE/=IPZ) CYCLE RCFACE_LOOP
-      I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
-      ! Unknowns on related cells:
-      IND(LOW_IND)  = RCF%UNKH(LOW_IND)
-      IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
-      SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            AF  = DY(J)*DZ(K)
-            IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(JAXIS)
-            AF  = DX(I)*DZ(K)
-            IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(KAXIS)
-            AF  = DX(I)*DY(J)
-            IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-      ENDSELECT
-      IDX = 1._EB / ( RCF%XCEN(X1AXIS,HIGH_IND) - RCF%XCEN(X1AXIS,LOW_IND) )
+! Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
+RCFACE_LOOP : DO IFACE=1,MESHES(NM)%CC_NRCFACE_H
+   RCF => RC_FACE(MESHES(NM)%RCF_H(IFACE)); IF(RCF%PRES_ZONE/=IPZ) CYCLE RCFACE_LOOP
+   I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
+   ! Unknowns on related cells:
+   IND(LOW_IND)  = RCF%UNKH(LOW_IND)
+   IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
+   ! Row ind(1),ind(2):
+   LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
+   SELECT CASE(X1AXIS)
+      CASE(IAXIS)
+         AF  = DY(J)*DZ(K)
+         IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(JAXIS)
+         AF  = DX(I)*DZ(K)
+         IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(KAXIS)
+         AF  = DX(I)*DY(J)
+         IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+   ENDSELECT
+   IDX = 1._EB / ( RCF%XCEN(X1AXIS,HIGH_IND) - RCF%XCEN(X1AXIS,LOW_IND) )
+   ! Now add to Adiff corresponding coeff:
+   BIJ   = IDX*AF
+   !    Cols 1,2: ind(LOW_IND) ind(HIGH_IND), Rows 1,2: ind_loc(LOW_IND) ind_loc(HIGH_IND)
+   KFACE(1,1) = BIJ; KFACE(2,1) =-BIJ; KFACE(1,2) =-BIJ; KFACE(2,2) = BIJ
+   DO ILOC=LOCROW_1,LOCROW_2      ! Local row number in Kface
+      DO JLOC=LOW_IND,HIGH_IND    ! Local col number in Kface, JD
+          IROW=IND(ILOC)          ! Process Local Unknown number.
+          JCOL=RCF%JDH(ILOC,JLOC) ! Local position of coef in D_MAT_H
+          ! Add coefficient:
+          D_H_MAT(JCOL,IROW) = D_H_MAT(JCOL,IROW) + KFACE(ILOC,JLOC)
+      ENDDO
+   ENDDO
+ENDDO RCFACE_LOOP
+
+! Now Gasphase CUT_FACES:
+CF_LOOP_1 : DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
+   IF ( CUT_FACE(ICF)%STATUS/=CC_GASPHASE .OR. CUT_FACE(ICF)%IWC>0) CYCLE CF_LOOP_1
+   IF ( CUT_FACE(ICF)%PRES_ZONE/=IPZ) CYCLE CF_LOOP_1
+   I = CUT_FACE(ICF)%IJK(IAXIS)
+   J = CUT_FACE(ICF)%IJK(JAXIS)
+   K = CUT_FACE(ICF)%IJK(KAXIS)
+   X1AXIS = CUT_FACE(ICF)%IJK(KAXIS+1)
+   ! Row ind(1),ind(2):
+   LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
+   SELECT CASE(X1AXIS)
+      CASE(IAXIS)
+         IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(JAXIS)
+         IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+      CASE(KAXIS)
+         IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
+         IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
+   ENDSELECT
+   DO IFACE=1,MESHES(NM)%CUT_FACE(ICF)%NFACE
+      IND(LOW_IND)  = CUT_FACE(ICF)%UNKH(LOW_IND,IFACE)
+      IND(HIGH_IND) = CUT_FACE(ICF)%UNKH(HIGH_IND,IFACE)
+      AF = CUT_FACE(ICF)%AREA(IFACE)
+      IDX= 1._EB/ ( CUT_FACE(ICF)%XCENHIGH(X1AXIS,IFACE) - CUT_FACE(ICF)%XCENLOW(X1AXIS, IFACE) )
       ! Now add to Adiff corresponding coeff:
       BIJ   = IDX*AF
       !    Cols 1,2: ind(LOW_IND) ind(HIGH_IND), Rows 1,2: ind_loc(LOW_IND) ind_loc(HIGH_IND)
       KFACE(1,1) = BIJ; KFACE(2,1) =-BIJ; KFACE(1,2) =-BIJ; KFACE(2,2) = BIJ
-      DO ILOC=LOCROW_1,LOCROW_2      ! Local row number in Kface
-         DO JLOC=LOW_IND,HIGH_IND    ! Local col number in Kface, JD
-             IROW=IND(ILOC)          ! Process Local Unknown number.
-             JCOL=RCF%JDH(ILOC,JLOC) ! Local position of coef in D_MAT_H
-             ! Add coefficient:
-             D_H_MAT(JCOL,IROW) = D_H_MAT(JCOL,IROW) + KFACE(ILOC,JLOC)
+      DO ILOC=LOCROW_1,LOCROW_2 ! Local row number in Kface
+         DO JLOC=LOW_IND,HIGH_IND ! Local col number in Kface, JD
+               IROW=IND(ILOC)
+               JCOL=CUT_FACE(ICF)%JDH(ILOC,JLOC,IFACE)
+               ! Add coefficient:
+               D_H_MAT(JCOL,IROW) = D_H_MAT(JCOL,IROW) + KFACE(ILOC,JLOC)
          ENDDO
       ENDDO
-   ENDDO RCFACE_LOOP
+   ENDDO
+ENDDO CF_LOOP_1
 
-   ! Now Gasphase CUT_FACES:
-   CF_LOOP_1 : DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
-      IF ( CUT_FACE(ICF)%STATUS/=CC_GASPHASE .OR. CUT_FACE(ICF)%IWC>0) CYCLE CF_LOOP_1
-      IF ( CUT_FACE(ICF)%PRES_ZONE/=IPZ) CYCLE CF_LOOP_1
-      I = CUT_FACE(ICF)%IJK(IAXIS)
-      J = CUT_FACE(ICF)%IJK(JAXIS)
-      K = CUT_FACE(ICF)%IJK(KAXIS)
-      X1AXIS = CUT_FACE(ICF)%IJK(KAXIS+1)
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND; LOCROW_2 = HIGH_IND
-      SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            IF ( I == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( I == IBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(JAXIS)
-            IF ( J == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( J == JBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-         CASE(KAXIS)
-            IF ( K == 0    ) LOCROW_1 = HIGH_IND ! Only high side unknown row.
-            IF ( K == KBAR ) LOCROW_2 =  LOW_IND ! Only low side unknown row.
-      ENDSELECT
-      DO IFACE=1,MESHES(NM)%CUT_FACE(ICF)%NFACE
-         IND(LOW_IND)  = CUT_FACE(ICF)%UNKH(LOW_IND,IFACE)
-         IND(HIGH_IND) = CUT_FACE(ICF)%UNKH(HIGH_IND,IFACE)
-         AF = CUT_FACE(ICF)%AREA(IFACE)
-         IDX= 1._EB/ ( CUT_FACE(ICF)%XCENHIGH(X1AXIS,IFACE) - CUT_FACE(ICF)%XCENLOW(X1AXIS, IFACE) )
-         ! Now add to Adiff corresponding coeff:
-         BIJ   = IDX*AF
-         !    Cols 1,2: ind(LOW_IND) ind(HIGH_IND), Rows 1,2: ind_loc(LOW_IND) ind_loc(HIGH_IND)
-         KFACE(1,1) = BIJ; KFACE(2,1) =-BIJ; KFACE(1,2) =-BIJ; KFACE(2,2) = BIJ
-         DO ILOC=LOCROW_1,LOCROW_2 ! Local row number in Kface
-            DO JLOC=LOW_IND,HIGH_IND ! Local col number in Kface, JD
-                  IROW=IND(ILOC)
-                  JCOL=CUT_FACE(ICF)%JDH(ILOC,JLOC,IFACE)
-                  ! Add coefficient:
-                  D_H_MAT(JCOL,IROW) = D_H_MAT(JCOL,IROW) + KFACE(ILOC,JLOC)
-            ENDDO
-         ENDDO
-      ENDDO
-   ENDDO CF_LOOP_1
-
-ENDIF
 ENDIF CC_IF
 
 
@@ -3571,48 +3401,31 @@ IF (ERROR /= 0 .AND. MY_RANK==0) WRITE(LU_ERR,*) 'GLMAT_SOLVER: The following ER
                ENDDO
             ENDDO
             FV => MESHES(NM)%FV
-            IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-               DO ICV=1,FV%CV%N
-                  IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%ICC(ICV)<1) CYCLE
-                  I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-                  IROW=FV%CV%UNKH(ICV)-ZSL%UNKH_IND(NM_START)
-                  IF (IROW<=0 .OR. ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-                  IF (PREDICTOR) THEN
-                     RHO_CC=FV%CV%RHO(ICV)
-                  ELSE
-                     RHO_CC=FV%CV%RHOS(ICV)
-                  ENDIF
-                  VOL=FV%CV%VOLUME(ICV); KRES_CC=FV%CV%KRES(ICV)
-                  SUM_GAUGE(1)=SUM_GAUGE(1)+VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
-                  SUM_GAUGE(2)=SUM_GAUGE(2)+VOL*RHO_CC
-               ENDDO
-            ELSE
-               DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-                  I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
-                  IF (ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-                  IF(ONE_UNKH_PER_CUTCELL) THEN
-                     DO JCC=1,CUT_CELL(ICC)%NCELL
-                        RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
-                        IROW = CUT_CELL(ICC)%UNKH(JCC) - ZSL%UNKH_IND(NM_START)
-                        VOL = CUT_CELL(ICC)%VOLUME(JCC)
-                        ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
-                        IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
-                        SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
-                        SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
-                     ENDDO
-                  ELSE
-                     IROW = CUT_CELL(ICC)%UNKH(1) - ZSL%UNKH_IND(NM_START)
-                     DO JCC=1,CUT_CELL(ICC)%NCELL
-                        RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
-                        VOL = CUT_CELL(ICC)%VOLUME(JCC)
-                        ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
-                        IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
-                        SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
-                        SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
-                     ENDDO
-                  ENDIF
-               ENDDO
-            ENDIF
+            DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+               I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
+               IF (ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
+               IF(ONE_UNKH_PER_CUTCELL) THEN
+                  DO JCC=1,CUT_CELL(ICC)%NCELL
+                     RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
+                     IROW = CUT_CELL(ICC)%UNKH(JCC) - ZSL%UNKH_IND(NM_START)
+                     VOL = CUT_CELL(ICC)%VOLUME(JCC)
+                     ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+                     IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
+                     SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
+                     SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
+                  ENDDO
+               ELSE
+                  IROW = CUT_CELL(ICC)%UNKH(1) - ZSL%UNKH_IND(NM_START)
+                  DO JCC=1,CUT_CELL(ICC)%NCELL
+                     RHO_CC = GET_CUTCELL_RHOP(NM,ICC,JCC,MERGE(1._EB,0._EB,PREDICTOR))
+                     VOL = CUT_CELL(ICC)%VOLUME(JCC)
+                     ICV = CUT_CELL(ICC)%IG(JCC); KRES_CC = 0._EB
+                     IF (ICV>=1) KRES_CC = FV%CV%KRES(ICV)
+                     SUM_GAUGE(1) = SUM_GAUGE(1) + VOL*RHO_CC*(KRES_CC+ZSL%X_H(IROW))
+                     SUM_GAUGE(2) = SUM_GAUGE(2) + VOL*RHO_CC
+                  ENDDO
+               ENDIF
+            ENDDO
          ENDDO
          IF (N_MPI_PROCESSES>1) CALL MPI_ALLREDUCE(MPI_IN_PLACE,SUM_GAUGE(1),2,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
          SHIFT_H = SUM_GAUGE(1)/(SUM_GAUGE(2)+TWENTY_EPSILON_EB)
