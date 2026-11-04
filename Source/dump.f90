@@ -10749,7 +10749,7 @@ USE CC_SCALARS, ONLY: GET_FV_CV_FOR_CUTCELL
 REAL(EB) :: VC,Y_MF_INT(1:N_SPECIES),ZZ_GET(1:N_TRACKED_SPECIES),MASS_INTEGRAL(0:N_SPECIES+N_TRACKED_SPECIES),RHO_CC
 REAL(EB), INTENT(IN) :: DT
 INTEGER, INTENT(IN) :: NM
-INTEGER :: I,J,K,ICC,JCC,NCELL,ICV,IG
+INTEGER :: I,J,K,ICC,JCC,NCELL,IG
 TYPE(CC_FV_TYPE), POINTER :: FV
 TYPE(CC_CV_TYPE), POINTER :: CV
 
@@ -10772,15 +10772,8 @@ DO K=1,KBAR
                ICC=CCVAR(I,J,K,CC_IDCC)
                NCELL=CUT_CELL(ICC)%NCELL
                DO JCC=1,NCELL
-                  ICV=0
-                  IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-                     CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
                   IG = CUT_CELL(ICC)%IG(JCC)
-                  IF (ICV>0) THEN
-                     VC = CV%VOLUME(ICV)
-                  ELSE
-                     VC = CUT_CELL(ICC)%VOLUME(JCC)
-                  ENDIF
+                  VC = CUT_CELL(ICC)%VOLUME(JCC)
                   IF (IG>=1) THEN
                      RHO_CC = CV%RHO(IG)
                      ZZ_GET(1:N_TRACKED_SPECIES) = CV%ZZ(1:N_TRACKED_SPECIES,IG)

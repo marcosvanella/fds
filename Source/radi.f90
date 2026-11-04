@@ -4967,7 +4967,7 @@ USE CC_SCALARS, ONLY: GET_FV_CV_FOR_CUTCELL
 USE TYPES, ONLY: CC_CV_TYPE
 INTEGER, INTENT(IN) :: MODE
 REAL(EB) :: TIME_RAMP_FACTOR,RR
-INTEGER :: N,I,J,K,ICC,JCC,ICV
+INTEGER :: N,I,J,K,ICC,JCC
 TYPE(INITIALIZATION_TYPE), POINTER :: IN
 TYPE(CC_CV_TYPE), POINTER :: CV
 
@@ -5005,14 +5005,7 @@ DO N=1,N_INIT
                IF (CCVAR(I,J,K,CC_IDCC) > 0) THEN ! we have a cutcell
                   ICC=CCVAR(I,J,K,CC_IDCC)
                   DO JCC=1,CUT_CELL(ICC)%NCELL
-                     ICV=0
-                     IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-                        CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
-                     IF (ICV>0) THEN
-                        CV%Q(ICV)=CV%Q(ICV)+TIME_RAMP_FACTOR*IN%HRRPUV
-                     ELSEIF (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_IDENTITY) THEN
-                        CV%Q(CUT_CELL(ICC)%IG(JCC))=CV%Q(CUT_CELL(ICC)%IG(JCC))+TIME_RAMP_FACTOR*IN%HRRPUV
-                     ENDIF
+                     CV%Q(CUT_CELL(ICC)%IG(JCC))=CV%Q(CUT_CELL(ICC)%IG(JCC))+TIME_RAMP_FACTOR*IN%HRRPUV
                   ENDDO
                ENDIF
             ENDIF CC_IBM_IF

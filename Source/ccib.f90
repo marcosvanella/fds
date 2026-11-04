@@ -46,7 +46,6 @@ PRIVATE
 LOGICAL, PARAMETER :: DEBUG_CC_INTERPOLATION=.FALSE. ! IBM interpolation and forcing scheme.
 LOGICAL, PARAMETER :: DEBUG_MATVEC_DATA=.FALSE.  ! Cut-cell region indexing, construction of regular, rc faces for scalars, etc.
 LOGICAL, PARAMETER :: DEBUG_CC_SCALAR_TRANSPORT=.FALSE. ! Time integration algorithms for scalar tranport in cut-cell region.
-LOGICAL, PARAMETER :: DEBUG_CC_CV_STATE=.FALSE. ! Compare legacy CUT_CELL state against FV CV state.
 LOGICAL, PARAMETER :: TIME_CC_IBM=.FALSE. ! Enable timers for main CC_IBM routines. Time stepping wall times in CHID_cc_cpu.csv
 INTEGER :: LU_DB_CCIB
 
@@ -148,7 +147,7 @@ PUBLIC :: ADD_CUTCELL_D_PBAR_DT, ADD_LINKEDCELL_D_PBAR_DT,ADD_CUTCELL_PSUM,ADD_L
           GET_RCFACES_H, &
           GET_CC_MATRIXGRAPH_H,GET_CC_IROW,GET_CC_UNKH,GET_CUTCELL_HP,GET_FV_HP,GET_LINKED_FV,GET_PRES_CFACE_BCS, &
           GET_FV_CV_FOR_CUTCELL,GET_FV_CV_STORAGE_FOR_CUTCELL,GET_FV_CV_DDDTVOL, &
-          GET_CUTCELL_RHOP,GET_CUTCELL_TMP,GET_CUTCELL_ZZV,GET_CUTCELL_ZZP,GET_CUTCELL_H,FV_CV_PUBLISHED_ROW, &
+          GET_CUTCELL_RHOP,GET_CUTCELL_TMP,GET_CUTCELL_ZZV,GET_CUTCELL_ZZP,GET_CUTCELL_H, &
           GET_PRES_CFACE, GET_PRES_CFACE_TEST, GET_UVWGAS_CFACE, GET_CFACE_RAD_NVEC, GET_MUDNS_CFACE, &
           GET_BOUNDFACE_GEOM_INFO_H, &
           GET_FH_FROM_PRHS_AND_BCS,GET_LINKED_VELOCITIES, &
@@ -415,12 +414,10 @@ END SUBROUTINE EXCHANGE_BACK_CFACE_DATA
 SUBROUTINE COPY_UNST_DM_TO_CART(NM)
 ! Assumes POINT_TO_MESH(NM) has been called.
 INTEGER, INTENT(IN) :: NM
-INTEGER :: ICC,JCC,ICV,I,J,K,NS
+INTEGER :: ICC,JCC,I,J,K,NS
 REAL(EB) :: VOL
 TYPE(CC_FV_TYPE), POINTER :: FV
-LOGICAL :: FV_IDENTITY_ROWS
 FV=>MESHES(NM)%FV
-FV_IDENTITY_ROWS = CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY
 
 DO ICC=1,MESHES(NM)%N_CUTCELL_MESH+MESHES(NM)%N_GCCUTCELL_MESH
    CC => CUT_CELL(ICC);  I = CC%IJK(IAXIS); J = CC%IJK(JAXIS);  K = CC%IJK(KAXIS)
@@ -431,21 +428,12 @@ DO ICC=1,MESHES(NM)%N_CUTCELL_MESH+MESHES(NM)%N_GCCUTCELL_MESH
    IF (.NOT.ALLOCATED(MESHES(NM)%D_SOURCE)) CYCLE
    VOL=DX(I)*DY(J)*DZ(K); D_SOURCE(I,J,K) =0._EB; M_DOT_PPP(I,J,K,1:N_TRACKED_SPECIES)=0._EB
    DO JCC=1,CC%NCELL
-      ICV=0
-      IF (FV_IDENTITY_ROWS) CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
-      IF (ICV>0) THEN
-         D_SOURCE(I,J,K)=D_SOURCE(I,J,K)+FV%CV%D_SOURCE(ICV)*FV%CV%VOLUME(ICV)
+      ! A piece with no IG row has no solver row in either numbering and contributes to no budget.
+      IF (CC%IG(JCC)>=1) THEN
+         D_SOURCE(I,J,K)=D_SOURCE(I,J,K)+FV%CV%D_SOURCE(CC%IG(JCC))*CC%VOLUME(JCC)
          DO NS=1,N_TRACKED_SPECIES
-            M_DOT_PPP(I,J,K,NS)=M_DOT_PPP(I,J,K,NS)+FV%CV%M_DOT_PPP(NS,ICV)*FV%CV%VOLUME(ICV)
+            M_DOT_PPP(I,J,K,NS)=M_DOT_PPP(I,J,K,NS)+FV%CV%M_DOT_PPP(NS,CC%IG(JCC))*CC%VOLUME(JCC)
          ENDDO
-      ELSEIF (.NOT.FV_IDENTITY_ROWS) THEN
-         ! A piece with no IG row has no solver row in either numbering and contributes to no budget.
-         IF (CC%IG(JCC)>=1) THEN
-            D_SOURCE(I,J,K)=D_SOURCE(I,J,K)+FV%CV%D_SOURCE(CC%IG(JCC))*CC%VOLUME(JCC)
-            DO NS=1,N_TRACKED_SPECIES
-               M_DOT_PPP(I,J,K,NS)=M_DOT_PPP(I,J,K,NS)+FV%CV%M_DOT_PPP(NS,CC%IG(JCC))*CC%VOLUME(JCC)
-            ENDDO
-         ENDIF
       ENDIF
    ENDDO
    D_SOURCE(I,J,K) = D_SOURCE(I,J,K)/VOL
@@ -1998,17 +1986,6 @@ RETURN
 END SUBROUTINE CC_BAROCLINIC_CORRECTION
 
 
-FUNCTION FV_CV_PUBLISHED_ROW(NM_LOC,ICC_LOC,JCC_LOC) RESULT(ICV_OUT)
-! Owner CV row for cut-cell piece (ICC,JCC) at IDENTITY. Returns 0 when the solver is off,
-! at CROSS_MESH, or when the owner mesh is remote.
-INTEGER, INTENT(IN) :: NM_LOC,ICC_LOC,JCC_LOC
-INTEGER :: ICV_OUT
-ICV_OUT=0
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-   CALL GET_FV_CV_FOR_CUTCELL(NM_LOC,ICC_LOC,JCC_LOC,ICV_OUT)
-END FUNCTION FV_CV_PUBLISHED_ROW
-
-
 FUNCTION CC_FV_CUTFACE_MOM(NM,ICF,JCF,IVAR) RESULT(VAL)
 ! VEL, VELS, FN or FN_B of piece JCF of cut-face ICF, from its FACE row FC(JCF).
 INTEGER, INTENT(IN) :: NM,ICF,JCF,IVAR
@@ -3122,7 +3099,7 @@ PRED_CORR_IF : IF (PREDICTOR) THEN
       DIVVOL = 0._EB; DPCC   = 0._EB; VOL    = 0._EB
       IF (ONE_UNKH_PER_CUTCELL) THEN ! DDDTVOL(JCC) defined per cut-cell.
          DO JCC=1,NCELL
-            CALL GET_SOLVER_CV_VOLUME(NM,ICC,JCC,VCV)
+            VCV = CUT_CELL(ICC)%VOLUME(JCC)
             CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,0._EB,DIV_JCC) ! U,V,W divergence.
             DIVVOL = DIVVOL + DIV_JCC*VCV
             IG = CUT_CELL(ICC)%IG(JCC)
@@ -3131,7 +3108,7 @@ PRED_CORR_IF : IF (PREDICTOR) THEN
          ENDDO
       ELSE
          DO JCC=1,NCELL
-            CALL GET_SOLVER_CV_VOLUME(NM,ICC,JCC,VCV)
+            VCV = CUT_CELL(ICC)%VOLUME(JCC)
             VOL  = VOL + VCV
             CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,0._EB,DIV_JCC) ! U,V,W divergence.
             DIVVOL = DIVVOL + DIV_JCC*VCV
@@ -3155,7 +3132,7 @@ ELSEIF (CORRECTOR) THEN PRED_CORR_IF
       DIVVOL = 0._EB; DPCC   = 0._EB; VOL    = 0._EB
       IF (ONE_UNKH_PER_CUTCELL) THEN ! DDDTVOL(JCC) defined per cut-cell.
          DO JCC=1,NCELL
-            CALL GET_SOLVER_CV_VOLUME(NM,ICC,JCC,VCV)
+            VCV = CUT_CELL(ICC)%VOLUME(JCC)
             CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,1._EB,DIV_JCC) ! US,VS,WS divergence.
             IG = CUT_CELL(ICC)%IG(JCC)
             DPCC= (1._EB-PRFCT)*FV%CV%D(IG) + PRFCT*FV%CV%DS(IG)
@@ -3164,7 +3141,7 @@ ELSEIF (CORRECTOR) THEN PRED_CORR_IF
          ENDDO
       ELSE
          DO JCC=1,NCELL
-            CALL GET_SOLVER_CV_VOLUME(NM,ICC,JCC,VCV)
+            VCV = CUT_CELL(ICC)%VOLUME(JCC)
             VOL  = VOL + VCV
             CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,1._EB,DIV_JCC) ! US,VS,WS divergence.
             DIVVOL = DIVVOL + DIV_JCC*VCV
@@ -5319,7 +5296,6 @@ RECV_MESH_LOOP: DO NOM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   ENDIF
                ENDDO
             ENDDO
-            IF (DEBUG_CC_CV_STATE) CALL CC_FV_VALIDATE_CCHALO(NOM,NM,M2,'CODE1')
          ENDIF
 
          ! Unpack momentum rhs FN for cut-faces, in PREDICTOR or CORRECTOR, IBM forcing:
@@ -5393,7 +5369,6 @@ RECV_MESH_LOOP: DO NOM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   ENDIF
                ENDDO
             ENDDO
-            IF (DEBUG_CC_CV_STATE) CALL CC_FV_VALIDATE_CCHALO(NOM,NM,M2,'CODE4')
          ENDIF
 
          IF (CODE==6 .AND. M2%NFCC_R(1)>0) THEN
@@ -5502,14 +5477,12 @@ TYPE(CC_CUTCELL_TYPE), POINTER :: OCC
 TYPE(CC_FV_TYPE), POINTER :: FV_SRC,FV_DST
 TYPE(OMESH_TYPE), POINTER :: OM
 INTEGER :: NM,NOM,NN,ICC,JCC,IW,IIO,JJO,KKO,ICV,IROW,IG
-LOGICAL :: VALID_SOURCE_CC,USE_FV_SRC,USE_FV_DST,SOURCE_REMOTE,USE_CCHALO
+LOGICAL :: VALID_SOURCE_CC,USE_FV_SRC,SOURCE_REMOTE,USE_CCHALO
 
 ! Here inject OMESH cut-cell info obtained in MESH_CC_EXCHANGE into ghost-cell cc containers:
 MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL POINT_TO_MESH(NM)
    FV_DST=>MESHES(NM)%FV
-   USE_FV_DST = CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY .AND. &
-                ALLOCATED(FV_DST%CV%RHO)
    EXTERNAL_WALL_LOOP : DO IW=1,N_EXTERNAL_WALL_CELLS
       WC=>WALL(IW)
       IF (.NOT.(WC%BOUNDARY_TYPE == INTERPOLATED_BOUNDARY)) CYCLE EXTERNAL_WALL_LOOP
@@ -5585,7 +5558,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                              ZZ_CC(NN) = ZZ_CC(NN) + OM%CCHALO_ZZ(NN,IROW)*VCELL
                           ENDDO
                        ENDIF
-                       IF (DEBUG_CC_CV_STATE) CALL CC_FV_HOP2_HALO_READ_STAT(NM,.TRUE.,.FALSE.,.FALSE.)
                        VOL = VOL + VCELL
                     ELSE IF (.NOT.SOURCE_REMOTE) THEN
                        VCELL   = OCC%VOLUME(JCC)
@@ -5633,10 +5605,7 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                              ENDDO
                           ENDIF
                        ENDIF
-                       IF (DEBUG_CC_CV_STATE) CALL CC_FV_HOP2_HALO_READ_STAT(NM,.FALSE.,SOURCE_REMOTE,.FALSE.)
                        VOL = VOL + VCELL
-                    ELSE
-                       IF (DEBUG_CC_CV_STATE) CALL CC_FV_HOP2_HALO_READ_STAT(NM,.FALSE.,.TRUE.,.FALSE.)
                     ENDIF
                  ENDDO
               ELSEIF(MESHES(NOM)%CCVAR(IIO,JJO,KKO,CC_CGSC) == CC_GASPHASE .OR. ICC > 0) THEN
@@ -5665,40 +5634,27 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ICC   = CCVAR(BC%II,BC%JJ,BC%KK,CC_IDCC)
       IF (PREDICTOR) THEN
          DO JCC=1,CUT_CELL(ICC)%NCELL
-            ICV=0
-            IF (USE_FV_DST) CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
             IG = CUT_CELL(ICC)%IG(JCC)
             IF (IG>=1) THEN
                FV_DST%CV%RHOS(IG) = RHO_CC/VOL
                FV_DST%CV%TMP(IG)  = TMP_CC/VOL
                FV_DST%CV%RSUM(IG) = RSUM_CC/VOL
                FV_DST%CV%ZZS(1:N_TOTAL_SCALARS,IG) = ZZ_CC(1:N_TOTAL_SCALARS)/VOL
-            ENDIF
-            IF (ICV>0) THEN
-               FV_DST%CV%D(ICV) = D_CC/VOL
-            ELSEIF (IG>=1) THEN
-               FV_DST%CV%D(IG)  = D_CC/VOL
+               FV_DST%CV%D(IG)    = D_CC/VOL
             ENDIF
          ENDDO
       ELSE
          DO JCC=1,CUT_CELL(ICC)%NCELL
-            ICV=0
-            IF (USE_FV_DST) CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
             IG = CUT_CELL(ICC)%IG(JCC)
             IF (IG>=1) THEN
                FV_DST%CV%RHO(IG) = RHO_CC/VOL
                FV_DST%CV%TMP(IG)  = TMP_CC/VOL
                FV_DST%CV%ZZ(1:N_TOTAL_SCALARS,IG) = ZZ_CC(1:N_TOTAL_SCALARS)/VOL
-            ENDIF
-            IF (ICV>0) THEN
-               FV_DST%CV%DS(ICV) = D_CC/VOL
-            ELSEIF (IG>=1) THEN
-               FV_DST%CV%DS(IG)  = D_CC/VOL
+               FV_DST%CV%DS(IG)   = D_CC/VOL
             ENDIF
          ENDDO
      ENDIF
    ENDDO EXTERNAL_WALL_LOOP
-   IF (DEBUG_CC_CV_STATE) CALL CC_FV_HOP2_HALO_READ_STAT(NM,.FALSE.,.FALSE.,.TRUE.)
 ENDDO MESH_LOOP
 
 
@@ -5796,11 +5752,6 @@ DO ICC1=1,OM%NICC_R(1)
       ENDIF
    ENDDO
 ENDDO
-IF (DEBUG_CC_CV_STATE) THEN
-   WRITE(LU_ERR,'(A,I0,A,I0,A,I0,A,I0)') ' CC_FV_VALIDATE_CCHALO :  NM=',NM_RECV, &
-      '  NOM=',NOM_SEND,'  n_alloc=',OM%NICC_R(2),'  n_filled=',IROW
-   FLUSH(LU_ERR)
-ENDIF
 END SUBROUTINE ALLOCATE_CCHALO
 
 SUBROUTINE ALLOCATE_CFHALO(OM,NOM_SEND)
@@ -6665,13 +6616,11 @@ INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(INOUT) :: QCOMB,QRAD,QPRES,SP_ENTH
 
 ! Local Variables:
-INTEGER :: ICC,JCC,ICV,I,J,K,IG
+INTEGER :: ICC,JCC,I,J,K,IG
 REAL(EB):: VC,ZZ_GET(1:N_TRACKED_SPECIES),H_S
 TYPE(CC_FV_TYPE), POINTER :: FV
-LOGICAL :: FV_IDENTITY_ROWS
 
 FV=>MESHES(NM)%FV
-FV_IDENTITY_ROWS = CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY
 
 DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
    I = CUT_CELL(ICC)%IJK(IAXIS)
@@ -6680,29 +6629,14 @@ DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
    VC = DX(I)*DY(J)*DZ(K)
    QPRES = QPRES + 0.5_EB*(D_PBAR_DT_S(PRESSURE_ZONE(I,J,K))+D_PBAR_DT(PRESSURE_ZONE(I,J,K)))*VC
    DO JCC=1,CUT_CELL(ICC)%NCELL
-      ICV=0
-      IF (FV_IDENTITY_ROWS) CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
-      IF (ICV>0) THEN
-         QCOMB=QCOMB+FV%CV%Q(ICV)*FV%CV%VOLUME(ICV)
-         QRAD=QRAD+FV%CV%QR(ICV)*FV%CV%VOLUME(ICV)
-         ZZ_GET(1:N_TRACKED_SPECIES) = FV%CV%ZZ(1:N_TRACKED_SPECIES,ICV)
-         IG = CUT_CELL(ICC)%IG(JCC)
-         IF (IG>=1) THEN
-            CALL GET_SENSIBLE_ENTHALPY(ZZ_GET,H_S,FV%CV%TMP(IG))
-         ELSE
-            CALL GET_SENSIBLE_ENTHALPY(ZZ_GET,H_S,TMP(I,J,K))
-         ENDIF
-         SP_ENTH = SP_ENTH + FV%CV%RHO(ICV)*H_S*FV%CV%VOLUME(ICV)
-      ELSEIF (.NOT.FV_IDENTITY_ROWS) THEN
-         IG = CUT_CELL(ICC)%IG(JCC)
-         ! A piece with no IG row has no solver row in either numbering and contributes to no budget.
-         IF (IG>=1) THEN
-            QCOMB=QCOMB+FV%CV%Q(IG)*CUT_CELL(ICC)%VOLUME(JCC)
-            QRAD=QRAD+FV%CV%QR(IG)*CUT_CELL(ICC)%VOLUME(JCC)
-            CALL GET_CUTCELL_ZZV(NM,ICC,JCC,1._EB,ZZ_GET)
-            CALL GET_SENSIBLE_ENTHALPY(ZZ_GET,H_S,GET_CUTCELL_TMP(NM,ICC,JCC))
-            SP_ENTH = SP_ENTH + GET_CUTCELL_RHOP(NM,ICC,JCC,1._EB)*H_S*CUT_CELL(ICC)%VOLUME(JCC)
-         ENDIF
+      IG = CUT_CELL(ICC)%IG(JCC)
+      ! A piece with no IG row has no solver row in either numbering and contributes to no budget.
+      IF (IG>=1) THEN
+         QCOMB=QCOMB+FV%CV%Q(IG)*CUT_CELL(ICC)%VOLUME(JCC)
+         QRAD=QRAD+FV%CV%QR(IG)*CUT_CELL(ICC)%VOLUME(JCC)
+         CALL GET_CUTCELL_ZZV(NM,ICC,JCC,1._EB,ZZ_GET)
+         CALL GET_SENSIBLE_ENTHALPY(ZZ_GET,H_S,GET_CUTCELL_TMP(NM,ICC,JCC))
+         SP_ENTH = SP_ENTH + GET_CUTCELL_RHOP(NM,ICC,JCC,1._EB)*H_S*CUT_CELL(ICC)%VOLUME(JCC)
       ENDIF
    ENDDO
 ENDDO
@@ -7866,7 +7800,7 @@ INTEGER, INTENT(IN) :: NM,ITER
 REAL(EB), INTENT(IN) :: T
 
 ! Local Variables:
-INTEGER ICC,JCC,ICV,I,J,K,IG
+INTEGER ICC,JCC,I,J,K,IG
 REAL(EB):: DUMMY1
 INTEGER :: DUMMY2
 REAL(EB) :: TNOW
@@ -7878,17 +7812,7 @@ DUMMY2=ITER
 TNOW = CURRENT_TIME()
 FV=>MESHES(NM)%FV
 
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   IF (.NOT.RADIATION) THEN
-      IF (N_REACTIONS>0 .AND. FV%CV%N>0) FV%CV%QR=-FV%CV%CHI_R*FV%CV%Q
-   ELSE
-      DO ICV=1,FV%CV%N
-         IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) CYCLE
-         I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-         FV%CV%QR(ICV)=QR(I,J,K)
-      ENDDO
-   ENDIF
-ELSEIF(.NOT.RADIATION) THEN
+IF(.NOT.RADIATION) THEN
    IF (N_REACTIONS>0) THEN
       DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
          DO JCC=1,CUT_CELL(ICC)%NCELL
@@ -8496,11 +8420,6 @@ REAL(EB):: TNOW
 LOGICAL :: DUMLOG
 REAL(EB):: TNOW2
 
-IF (DEBUG_CC_CV_STATE) THEN
-   IF (PREDICTOR) CALL CC_FV_VALIDATE_CV_STATE('END_STEP_PRED')
-   IF (CORRECTOR) CALL CC_FV_VALIDATE_CV_STATE('END_STEP_CORR')
-ENDIF
-
 IF (FREEZE_VELOCITY .OR. SOLID_PHASE_ONLY) RETURN
 
 TNOW = CURRENT_TIME()
@@ -8528,358 +8447,6 @@ IF (TIME_CC_IBM) T_CC_USED(CC_END_STEP_TIME_INDEX) = T_CC_USED(CC_END_STEP_TIME_
 RETURN
 
 END SUBROUTINE CC_END_STEP
-
-! ------------------------ CC_FV_VALIDATE_CV_STATE ---------------------------
-
-SUBROUTINE CC_FV_VALIDATE_CV_STATE(TAG)
-
-! Compare legacy CUT_CELL(ICC)%F(...,JCC) against FV%CV%F(...,ICV) for every
-! in-mesh cut piece. Reporting instrument only: never sets STOP_STATUS.
-
-CHARACTER(*), INTENT(IN) :: TAG
-
-INTEGER, PARAMETER :: N_R1=20, N_R2=5, N_I1=2
-REAL(EB), PARAMETER :: REL_TOL=1.E-12_EB
-INTEGER :: NM,ICC,JCC,ICV,IPTR,IG,I,J,K,N_WALK,N_REG_MEMBER,N_REG_CMP,N_BAD_MEMBER,N_PIECE_LEGACY,IFLD,NS,N1
-LOGICAL :: MESH_HAS_REPORT,HAS_CC,REG_DID_CMP
-TYPE(MESH_TYPE), POINTER :: M
-
-TYPE :: CMP_STAT
-   CHARACTER(24) :: NAME
-   INTEGER :: N_CMP,N_DIFF,N_DIFF_TOL,STATE,N1_LEG,N1_CV
-   REAL(EB) :: MAX_ABS,MAX_REL
-   REAL(EB) :: ABS_FLOOR = 0._EB
-   INTEGER :: ICC_ABS,JCC_ABS,ICV_ABS,COMP_ABS
-   INTEGER :: ICC_REL,JCC_REL,ICV_REL,COMP_REL
-END TYPE CMP_STAT
-TYPE(CMP_STAT) :: S_VOL,S_R1(N_R1),S_R2(N_R2),S_I1(N_I1)
-
-MESH_LOOP: DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-   M => MESHES(NM)
-   IF (M%FV%CV%N < 1) CYCLE MESH_LOOP
-
-   N_WALK = 0
-   N_REG_MEMBER = 0
-   N_REG_CMP = 0
-   N_BAD_MEMBER = 0
-   N_PIECE_LEGACY = 0
-   CALL RESET_STAT(S_VOL,'VOLUME')
-   CALL RESET_STAT(S_R1( 1),'RHO (reg)')   ! cut-cell cmp retired with dest-mirrors; regular-cell cmp still live
-   CALL RESET_STAT(S_R1( 2),'RHOS (reg)')  ! cut-cell cmp retired with dest-mirrors; regular-cell cmp still live
-   CALL RESET_STAT(S_R1( 3),'TMP (reg)')   ! cut-cell cmp retired with dest-mirrors; regular-cell cmp still live
-   CALL RESET_STAT(S_R1( 4),'RSUM (reg)')  ! cut-cell cmp retired with dest-mirrors; regular-cell cmp still live
-   CALL RESET_STAT(S_R1( 5),'(retired)')  ! RTRM moved to CV-only
-   CALL RESET_STAT(S_R1( 6),'(retired)')  ! R_H_G moved to CV-only
-   CALL RESET_STAT(S_R1( 7),'(retired)')  ! RHO_0 moved to CV-only
-   CALL RESET_STAT(S_R1( 8),'(retired)')  ! H moved to CV-only
-   CALL RESET_STAT(S_R1( 9),'(retired)')  ! HS moved to CV-only
-   CALL RESET_STAT(S_R1(10),'(retired)')  ! KRES moved to CV-only
-   CALL RESET_STAT(S_R1(11),'(retired)')  ! D moved to CV-only
-   CALL RESET_STAT(S_R1(12),'(retired)')  ! DS moved to CV-only
-   CALL RESET_STAT(S_R1(13),'(retired)')  ! DVOL moved to CV-only
-   CALL RESET_STAT(S_R1(14),'(retired)')  ! gap: DVOL_PR moved to CV-only; keep slot to avoid renumbering
-   CALL RESET_STAT(S_R1(15),'(retired)')  ! DDDTVOL moved to CV-only; keep slot to avoid renumbering
-   CALL RESET_STAT(S_R1(16),'(retired)')  ! Q moved to CV-only
-   CALL RESET_STAT(S_R1(17),'(retired)')  ! QR moved to CV-only
-   CALL RESET_STAT(S_R1(18),'(retired)')  ! CHI_R moved to CV-only
-   CALL RESET_STAT(S_R1(19),'(retired)')  ! MIX_TIME moved to CV-only
-   CALL RESET_STAT(S_R1(20),'(retired)')  ! D_SOURCE moved to CV-only
-   CALL RESET_STAT(S_R2(1),'ZZ (reg)')   ! cut-cell cmp retired with dest-mirrors; regular-cell cmp still live
-   CALL RESET_STAT(S_R2(2),'ZZS (reg)')  ! cut-cell cmp retired with dest-mirrors; regular-cell cmp still live
-   CALL RESET_STAT(S_R2(3),'(retired)')  ! M_DOT_PPP moved to CV-only
-   CALL RESET_STAT(S_R2(4),'(retired)')  ! DEL_RHO_D_DEL_Z_VOL moved to CV-only
-   CALL RESET_STAT(S_R2(5),'(retired)')  ! U_DOT_DEL_RHO_Z_VOL moved to CV-only
-   CALL RESET_STAT(S_I1(1),'UNKZ');      CALL RESET_STAT(S_I1(2),'UNKH')
-   ! Divergence and flux accumulators are sums of larger cancelling terms, so a
-   ! relative test against their own near-zero magnitude is meaningless. Fields
-   ! without cancellation keep the default ABS_FLOOR=0 (pure relative test).
-
-   ! Allocation / shape once per field per mesh, not per cut piece.
-   HAS_CC = ALLOCATED(M%CUT_CELL) .AND. M%N_CUTCELL_MESH>=1
-   IF (HAS_CC) THEN
-      CALL SET_ALLOC_STATE(ALLOCATED(M%CUT_CELL(1)%VOLUME),ALLOCATED(M%FV%CV%VOLUME),S_VOL)
-      CALL SET_ALLOC_STATE(ALLOCATED(M%CUT_CELL(1)%UNKZ),ALLOCATED(M%FV%CV%UNKZ),S_I1(1))
-      CALL SET_ALLOC_STATE(ALLOCATED(M%CUT_CELL(1)%UNKH),ALLOCATED(M%FV%CV%UNKH),S_I1(2))
-   ENDIF
-
-   DO ICC=1,M%N_CUTCELL_MESH
-      N_PIECE_LEGACY = N_PIECE_LEGACY + M%CUT_CELL(ICC)%NCELL
-   ENDDO
-
-   IF (.NOT.ALLOCATED(M%FV%CV%MEMBER_PTR) .OR. .NOT.ALLOCATED(M%FV%CV%MEMBER_LIST) .OR. &
-       .NOT.ALLOCATED(M%FV%GCELL%ICC)) THEN
-      WRITE(LU_ERR,'(A,A,A,I0,A)') ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG), &
-         '  NM=',NM,'  membership CSR not allocated'
-      CYCLE MESH_LOOP
-   ENDIF
-
-   DO ICV=1,M%FV%CV%N
-      IF (M%FV%CV%N_MEMBER(ICV) < 1) CYCLE
-      DO IPTR=M%FV%CV%MEMBER_PTR(ICV),M%FV%CV%MEMBER_PTR(ICV+1)-1
-         IG = M%FV%CV%MEMBER_LIST(IPTR)
-         IF (M%FV%GCELL%CELL_TYPE(IG) /= CC_GCELL_CUT) THEN
-            N_REG_MEMBER = N_REG_MEMBER + 1
-            IF (.NOT.ALLOCATED(M%FV%GCELL%IJK)) CYCLE
-            I = M%FV%GCELL%IJK(IAXIS,IG)
-            J = M%FV%GCELL%IJK(JAXIS,IG)
-            K = M%FV%GCELL%IJK(KAXIS,IG)
-            REG_DID_CMP = .FALSE.
-            IF (S_R1( 1)%STATE==0 .AND. ALLOCATED(M%RHO)) THEN
-               CALL ACCUM_REAL(M%RHO(I,J,K),M%FV%CV%RHO(ICV),0,0,ICV,0,S_R1(1))
-               REG_DID_CMP = .TRUE.
-            ENDIF
-            IF (S_R1( 2)%STATE==0 .AND. ALLOCATED(M%RHOS)) THEN
-               CALL ACCUM_REAL(M%RHOS(I,J,K),M%FV%CV%RHOS(ICV),0,0,ICV,0,S_R1(2))
-               REG_DID_CMP = .TRUE.
-            ENDIF
-            IF (S_R1( 3)%STATE==0 .AND. ALLOCATED(M%TMP)) THEN
-               CALL ACCUM_REAL(M%TMP(I,J,K),M%FV%CV%TMP(ICV),0,0,ICV,0,S_R1(3))
-               REG_DID_CMP = .TRUE.
-            ENDIF
-            IF (S_R1( 4)%STATE==0 .AND. ALLOCATED(M%RSUM)) THEN
-               CALL ACCUM_REAL(M%RSUM(I,J,K),M%FV%CV%RSUM(ICV),0,0,ICV,0,S_R1(4))
-               REG_DID_CMP = .TRUE.
-            ENDIF
-            IF ((S_R2(1)%STATE==0 .OR. S_R2(1)%STATE==4) .AND. ALLOCATED(M%ZZ)) THEN
-               N1 = MIN(SIZE(M%ZZ,DIM=4),SIZE(M%FV%CV%ZZ,DIM=1))
-               DO NS=1,N1
-                  CALL ACCUM_REAL(M%ZZ(I,J,K,NS),M%FV%CV%ZZ(NS,ICV),0,0,ICV,NS,S_R2(1))
-               ENDDO
-               REG_DID_CMP = .TRUE.
-            ENDIF
-            IF ((S_R2(2)%STATE==0 .OR. S_R2(2)%STATE==4) .AND. ALLOCATED(M%ZZS)) THEN
-               N1 = MIN(SIZE(M%ZZS,DIM=4),SIZE(M%FV%CV%ZZS,DIM=1))
-               DO NS=1,N1
-                  CALL ACCUM_REAL(M%ZZS(I,J,K,NS),M%FV%CV%ZZS(NS,ICV),0,0,ICV,NS,S_R2(2))
-               ENDDO
-               REG_DID_CMP = .TRUE.
-            ENDIF
-            IF (REG_DID_CMP) N_REG_CMP = N_REG_CMP + 1
-            CYCLE
-         ENDIF
-         ICC = M%FV%GCELL%ICC(IG); JCC = M%FV%GCELL%JCC(IG)
-         IF (ICC < 1 .OR. JCC < 1) THEN
-            N_BAD_MEMBER = N_BAD_MEMBER + 1
-            CYCLE
-         ENDIF
-         N_WALK = N_WALK + 1
-
-         IF (S_VOL%STATE==0) CALL ACCUM_REAL(M%CUT_CELL(ICC)%VOLUME(JCC),M%FV%CV%VOLUME(ICV),ICC,JCC,ICV,0,S_VOL)
-
-         IF (S_I1(1)%STATE==0) CALL ACCUM_INT(M%CUT_CELL(ICC)%UNKZ(JCC),M%FV%CV%UNKZ(ICV),ICC,JCC,ICV,S_I1(1))
-         IF (S_I1(2)%STATE==0) CALL ACCUM_INT(M%CUT_CELL(ICC)%UNKH(JCC),M%FV%CV%UNKH(ICV),ICC,JCC,ICV,S_I1(2))
-      ENDDO
-   ENDDO
-
-   ! Regular members are normal structure, not a fault. A bad member or an
-   ! unreached legacy piece is a genuine inconsistency and does trigger a report.
-   MESH_HAS_REPORT = (N_BAD_MEMBER>0) .OR. (N_PIECE_LEGACY/=N_WALK) .OR. &
-                     (S_VOL%STATE/=0) .OR. (S_VOL%N_DIFF_TOL>0)
-   DO IFLD=1,N_R1
-      MESH_HAS_REPORT = MESH_HAS_REPORT .OR. (S_R1(IFLD)%STATE/=0) .OR. (S_R1(IFLD)%N_DIFF_TOL>0)
-   ENDDO
-   DO IFLD=1,N_R2
-      MESH_HAS_REPORT = MESH_HAS_REPORT .OR. (S_R2(IFLD)%STATE/=0) .OR. (S_R2(IFLD)%N_DIFF_TOL>0)
-   ENDDO
-   DO IFLD=1,N_I1
-      MESH_HAS_REPORT = MESH_HAS_REPORT .OR. (S_I1(IFLD)%STATE/=0) .OR. (S_I1(IFLD)%N_DIFF_TOL>0)
-   ENDDO
-   IF (.NOT.MESH_HAS_REPORT) CYCLE MESH_LOOP
-
-   WRITE(LU_ERR,'(A,A,A,I0,A,I0,A,I0,A,I0,A,I0,A,I0)') ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG), &
-      '  NM=',NM,'  n_piece_legacy=',N_PIECE_LEGACY,'  n_walk=',N_WALK, &
-      '  n_reg_member=',N_REG_MEMBER,'  n_reg_cmp=',N_REG_CMP,'  n_bad_member=',N_BAD_MEMBER
-   CALL EMIT_STAT(S_VOL,2)
-   DO IFLD=1,N_R1
-      CALL EMIT_STAT(S_R1(IFLD),0)
-   ENDDO
-   DO IFLD=1,N_R2
-      CALL EMIT_STAT(S_R2(IFLD),1)
-   ENDDO
-   DO IFLD=1,N_I1
-      CALL EMIT_STAT(S_I1(IFLD),0)
-   ENDDO
-   FLUSH(LU_ERR)
-ENDDO MESH_LOOP
-
-CONTAINS
-
-SUBROUTINE RESET_STAT(S,NAME)
-TYPE(CMP_STAT), INTENT(OUT) :: S
-CHARACTER(*), INTENT(IN) :: NAME
-S%NAME = NAME
-S%N_CMP = 0; S%N_DIFF = 0; S%N_DIFF_TOL = 0; S%STATE = 0
-S%N1_LEG = 0; S%N1_CV = 0
-S%MAX_ABS = 0._EB; S%MAX_REL = 0._EB
-S%ABS_FLOOR = 0._EB
-S%ICC_ABS = 0; S%JCC_ABS = 0; S%ICV_ABS = 0; S%COMP_ABS = 0
-S%ICC_REL = 0; S%JCC_REL = 0; S%ICV_REL = 0; S%COMP_REL = 0
-END SUBROUTINE RESET_STAT
-
-SUBROUTINE SET_ALLOC_STATE(LEG_ALLOC,CV_ALLOC,S)
-LOGICAL, INTENT(IN) :: LEG_ALLOC,CV_ALLOC
-TYPE(CMP_STAT), INTENT(INOUT) :: S
-IF (.NOT.LEG_ALLOC .AND. .NOT.CV_ALLOC) THEN
-   S%STATE = 3
-ELSEIF (.NOT.LEG_ALLOC) THEN
-   S%STATE = 1
-ELSEIF (.NOT.CV_ALLOC) THEN
-   S%STATE = 2
-ENDIF
-END SUBROUTINE SET_ALLOC_STATE
-
-SUBROUTINE ACCUM_REAL(A,B,ICC_A,JCC_A,ICV_A,COMP,S)
-REAL(EB), INTENT(IN) :: A,B
-INTEGER, INTENT(IN) :: ICC_A,JCC_A,ICV_A,COMP
-TYPE(CMP_STAT), INTENT(INOUT) :: S
-REAL(EB) :: ADIFF,RDIFF
-S%N_CMP = S%N_CMP + 1
-ADIFF = ABS(A-B)
-IF (ADIFF==0._EB) RETURN
-S%N_DIFF = S%N_DIFF + 1
-RDIFF = ADIFF/MAX(ABS(A),ABS(B),TINY(1._EB))
-IF (ADIFF>S%ABS_FLOOR .AND. RDIFF>REL_TOL) S%N_DIFF_TOL = S%N_DIFF_TOL + 1
-IF (ADIFF>S%MAX_ABS) THEN
-   S%MAX_ABS = ADIFF
-   S%ICC_ABS = ICC_A; S%JCC_ABS = JCC_A; S%ICV_ABS = ICV_A; S%COMP_ABS = COMP
-ENDIF
-IF (RDIFF>S%MAX_REL) THEN
-   S%MAX_REL = RDIFF
-   S%ICC_REL = ICC_A; S%JCC_REL = JCC_A; S%ICV_REL = ICV_A; S%COMP_REL = COMP
-ENDIF
-END SUBROUTINE ACCUM_REAL
-
-SUBROUTINE ACCUM_INT(A,B,ICC_A,JCC_A,ICV_A,S)
-INTEGER, INTENT(IN) :: A,B,ICC_A,JCC_A,ICV_A
-TYPE(CMP_STAT), INTENT(INOUT) :: S
-REAL(EB) :: ADIFF,RDIFF
-S%N_CMP = S%N_CMP + 1
-IF (A==B) RETURN
-S%N_DIFF = S%N_DIFF + 1
-S%N_DIFF_TOL = S%N_DIFF_TOL + 1
-ADIFF = REAL(ABS(A-B),EB)
-RDIFF = ADIFF/MAX(ABS(REAL(A,EB)),ABS(REAL(B,EB)),TINY(1._EB))
-IF (ADIFF>S%MAX_ABS) THEN
-   S%MAX_ABS = ADIFF
-   S%ICC_ABS = ICC_A; S%JCC_ABS = JCC_A; S%ICV_ABS = ICV_A; S%COMP_ABS = 0
-ENDIF
-IF (RDIFF>S%MAX_REL) THEN
-   S%MAX_REL = RDIFF
-   S%ICC_REL = ICC_A; S%JCC_REL = JCC_A; S%ICV_REL = ICV_A; S%COMP_REL = 0
-ENDIF
-END SUBROUTINE ACCUM_INT
-
-SUBROUTINE EMIT_STAT(S,KIND)
-TYPE(CMP_STAT), INTENT(IN) :: S
-INTEGER, INTENT(IN) :: KIND
-IF (S%STATE==1) THEN
-   WRITE(LU_ERR,'(A,A,A,I0,2X,A,A)') ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG),'  NM=',NM, &
-      TRIM(S%NAME),'  legacy unallocated'
-ELSEIF (S%STATE==2) THEN
-   WRITE(LU_ERR,'(A,A,A,I0,2X,A,A)') ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG),'  NM=',NM, &
-      TRIM(S%NAME),'  CV unallocated'
-ELSEIF (S%STATE==3) THEN
-   WRITE(LU_ERR,'(A,A,A,I0,2X,A,A)') ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG),'  NM=',NM, &
-      TRIM(S%NAME),'  legacy and CV unallocated'
-ELSEIF (S%STATE==4) THEN
-   WRITE(LU_ERR,'(A,A,A,I0,2X,A,A,I0,A,I0)') ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG),'  NM=',NM, &
-      TRIM(S%NAME),'  shape mismatch  n1_legacy=',S%N1_LEG,'  n1_cv=',S%N1_CV
-ENDIF
-IF (S%N_DIFF_TOL==0) RETURN
-IF (KIND==2) THEN
-   WRITE(LU_ERR,'(A,A,A,I0,A,I0,A,I0,A,I0,A,ES13.6,A,I0,A,I0,A,I0,A,ES13.6,A,I0,A,I0,A,I0)') &
-      ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG),'  NM=',NM,'  VOLUME MISMATCH  n_cmp=',S%N_CMP, &
-      '  n_diff=',S%N_DIFF,'  n_diff_tol=',S%N_DIFF_TOL, &
-      '  max_abs=',S%MAX_ABS,' at ICC,JCC,ICV=',S%ICC_ABS,',',S%JCC_ABS,',',S%ICV_ABS, &
-      '  max_rel=',S%MAX_REL,' at ICC,JCC,ICV=',S%ICC_REL,',',S%JCC_REL,',',S%ICV_REL
-ELSEIF (KIND==1) THEN
-   WRITE(LU_ERR,'(A,A,A,I0,2X,A,A,I0,A,I0,A,I0,A,ES13.6,A,I0,A,I0,A,I0,A,I0,A,ES13.6,A,I0,A,I0,A,I0,A,I0)') &
-      ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG),'  NM=',NM,TRIM(S%NAME), &
-      '  n_cmp=',S%N_CMP,'  n_diff=',S%N_DIFF,'  n_diff_tol=',S%N_DIFF_TOL, &
-      '  max_abs=',S%MAX_ABS,' at ICC,JCC,ICV,comp=',S%ICC_ABS,',',S%JCC_ABS,',',S%ICV_ABS,',',S%COMP_ABS, &
-      '  max_rel=',S%MAX_REL,' at ICC,JCC,ICV,comp=',S%ICC_REL,',',S%JCC_REL,',',S%ICV_REL,',',S%COMP_REL
-ELSE
-   WRITE(LU_ERR,'(A,A,A,I0,2X,A,A,I0,A,I0,A,I0,A,ES13.6,A,I0,A,I0,A,I0,A,ES13.6,A,I0,A,I0,A,I0)') &
-      ' CC_FV_VALIDATE_CV_STATE : ',TRIM(TAG),'  NM=',NM,TRIM(S%NAME), &
-      '  n_cmp=',S%N_CMP,'  n_diff=',S%N_DIFF,'  n_diff_tol=',S%N_DIFF_TOL, &
-      '  max_abs=',S%MAX_ABS,' at ICC,JCC,ICV=',S%ICC_ABS,',',S%JCC_ABS,',',S%ICV_ABS, &
-      '  max_rel=',S%MAX_REL,' at ICC,JCC,ICV=',S%ICC_REL,',',S%JCC_REL,',',S%ICV_REL
-ENDIF
-END SUBROUTINE EMIT_STAT
-
-END SUBROUTINE CC_FV_VALIDATE_CV_STATE
-
-! ------------------------ CC_FV_VALIDATE_CCHALO ----------------------------
-
-SUBROUTINE CC_FV_VALIDATE_CCHALO(NM_RECV,NM_SEND,OM,TAG)
-
-! After a PKG11 unpack, confirm the halo row the unpack just wrote is the
-! (ICC,JCC) recorded at setup, and that VOLUME(row) still matches the replica.
-! Silent when every compared row agrees.
-
-CHARACTER(*), INTENT(IN) :: TAG
-INTEGER, INTENT(IN) :: NM_RECV,NM_SEND
-TYPE(OMESH_TYPE), INTENT(IN) :: OM
-INTEGER :: ICC1,ICC,JCC,IROW,N_WRITTEN,N_MISMATCH_IDX,N_MISMATCH_VOL
-LOGICAL, SAVE :: POP_REPORTED=.FALSE.
-
-IF (.NOT.ALLOCATED(OM%CCHALO_ICC) .OR. .NOT.ALLOCATED(OM%CCHALO_JCC)) RETURN
-IF (.NOT.ALLOCATED(OM%CCHALO_VOLUME)) RETURN
-
-N_WRITTEN = 0
-N_MISMATCH_IDX = 0
-N_MISMATCH_VOL = 0
-IROW = 0
-DO ICC1=1,OM%NICC_R(1)
-   ICC = OM%ICC_UNKZ_CC_R(ICC1)
-   IF (ICC < 1) CYCLE
-   DO JCC=1,MESHES(NM_SEND)%CUT_CELL(ICC)%NCELL
-      IROW = IROW + 1
-      N_WRITTEN = N_WRITTEN + 1
-      IF (OM%CCHALO_ICC(IROW)/=ICC .OR. OM%CCHALO_JCC(IROW)/=JCC) N_MISMATCH_IDX = N_MISMATCH_IDX + 1
-      IF (OM%CCHALO_VOLUME(IROW)/=MESHES(NM_SEND)%CUT_CELL(ICC)%VOLUME(JCC)) N_MISMATCH_VOL = N_MISMATCH_VOL + 1
-   ENDDO
-ENDDO
-
-IF (.NOT.POP_REPORTED) THEN
-   WRITE(LU_ERR,'(A,A,A,I0,A,I0,A,I0,A,I0)') ' CC_FV_VALIDATE_CCHALO : ',TRIM(TAG), &
-      '  NM=',NM_RECV,'  NOM=',NM_SEND,'  n_written=',N_WRITTEN,'  n_alloc=',OM%NICC_R(2)
-   FLUSH(LU_ERR)
-   POP_REPORTED = .TRUE.
-ENDIF
-
-IF (N_MISMATCH_IDX==0 .AND. N_MISMATCH_VOL==0) RETURN
-WRITE(LU_ERR,'(A,A,A,I0,A,I0,A,I0,A,I0,A,I0)') ' CC_FV_VALIDATE_CCHALO : ',TRIM(TAG), &
-   '  NM=',NM_RECV,'  NOM=',NM_SEND,'  n_written=',N_WRITTEN, &
-   '  n_mismatch_idx=',N_MISMATCH_IDX,'  n_mismatch_vol=',N_MISMATCH_VOL
-FLUSH(LU_ERR)
-
-END SUBROUTINE CC_FV_VALIDATE_CCHALO
-
-! ------------------------ CC_FV_HOP2_HALO_READ_STAT ---------------------------
-
-SUBROUTINE CC_FV_HOP2_HALO_READ_STAT(NM,FROM_HALO,REMOTE_UNRESOLVED,FLUSH_OUT)
-
-INTEGER, INTENT(IN) :: NM
-LOGICAL, INTENT(IN) :: FROM_HALO,REMOTE_UNRESOLVED,FLUSH_OUT
-INTEGER, SAVE :: N_HALO=0, N_REPLICA=0, N_UNRESOLVED=0
-
-IF (.NOT.FLUSH_OUT) THEN
-   IF (FROM_HALO) THEN
-      N_HALO = N_HALO + 1
-   ELSE
-      N_REPLICA = N_REPLICA + 1
-      IF (REMOTE_UNRESOLVED) N_UNRESOLVED = N_UNRESOLVED + 1
-   ENDIF
-   RETURN
-ENDIF
-IF (N_HALO==0 .AND. N_REPLICA==0 .AND. N_UNRESOLVED==0) RETURN
-WRITE(LU_ERR,'(A,I0,A,I0,A,I0,A,I0)') ' CC_FV_VALIDATE_CCHALO :  HOP2_READ  NM=',NM, &
-   '  n_halo_read=',N_HALO,'  n_replica_read=',N_REPLICA,'  n_unresolved=',N_UNRESOLVED
-FLUSH(LU_ERR)
-N_HALO=0; N_REPLICA=0; N_UNRESOLVED=0
-
-END SUBROUTINE CC_FV_HOP2_HALO_READ_STAT
 
 ! ----------------------------- INIT_CUTCELL_DATA -------------------------------
 
@@ -9420,7 +8987,6 @@ TYPE(CC_FV_TYPE), POINTER :: FV
 REAL(EB) :: VCELL,VCCELL,DIVVOL,DUMMY,RTRMVOL,CCVOL,R_H_G_CC,RTRM_CC
 
 LOGICAL, PARAMETER :: DO_CONDUCTION_HEAT_FLUX=.TRUE.
-LOGICAL :: FV_IDENTITY_ROWS
 INTEGER :: DIFFHFLX_IND, JFLX_IND
 
 LOGICAL, PARAMETER :: SET_DIV_TO_ZERO  = .FALSE.
@@ -9450,7 +9016,6 @@ JFLX_IND     = LOW_IND
 
 CALL POINT_TO_MESH(NM)
 FV=>MESHES(NM)%FV
-FV_IDENTITY_ROWS = CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY
 
 RDT = 1._EB/DT
 
@@ -9489,11 +9054,6 @@ DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
 ENDDO
 FV%CV%DEL_RHO_D_DEL_Z_VOL=0._EB
 FV%CV%U_DOT_DEL_RHO_Z_VOL=0._EB
-! Identity FV accumulators; SAME_MESH keeps member CUT/DPVOL + UNKZ until a once-per-CV
-! advection/conduction operator owns FV%CV%DVOL for N_TOTAL_SCALARS==1 as well.
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   FV%CV%DVOL=0._EB
-ENDIF
 IF (CORRECTOR) THEN
    IF (ALLOCATED(MESHES(NM)%D_SOURCE)) THEN
       DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
@@ -9507,19 +9067,11 @@ IF (CORRECTOR) THEN
          ! NOTE : Assumes the source from particles is distributed evenly over CCs of the Cartesian cell.
          VCCELL = SUM(CUT_CELL(ICC)%VOLUME(1:CUT_CELL(ICC)%NCELL))
          DO JCC=1,CUT_CELL(ICC)%NCELL
-            ICV=0
-            IF (FV_IDENTITY_ROWS) &
-               CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
-            IF (ICV>0) THEN
-               FV%CV%D_SOURCE(ICV)=FV%CV%D_SOURCE(ICV)+D_SOURCE(I,J,K)
-               FV%CV%M_DOT_PPP(:,ICV)=FV%CV%M_DOT_PPP(:,ICV)+M_DOT_PPP(I,J,K,1:N_TOTAL_SCALARS)
-            ELSEIF (.NOT.FV_IDENTITY_ROWS) THEN
-               ! A piece with no IG row has no solver row in either numbering and contributes to no budget.
-               IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
-               FV%CV%D_SOURCE(IG)=FV%CV%D_SOURCE(IG)+D_SOURCE(I,J,K)
-               FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)= &
-                  FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)+M_DOT_PPP(I,J,K,1:N_TOTAL_SCALARS)
-            ENDIF
+            ! A piece with no IG row has no solver row in either numbering and contributes to no budget.
+            IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
+            FV%CV%D_SOURCE(IG)=FV%CV%D_SOURCE(IG)+D_SOURCE(I,J,K)
+            FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)= &
+               FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)+M_DOT_PPP(I,J,K,1:N_TOTAL_SCALARS)
          ENDDO
       ENDDO
    ENDIF
@@ -9589,20 +9141,13 @@ DO K=1,KBAR
 ENDDO
 
 ! HERE Cut-cells \dot{q}'''*VOL and QR*VOL:
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   DO ICV=1,FV%CV%N
-      IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) CYCLE
-      FV%CV%DVOL(ICV)=FV%CV%DVOL(ICV)+(FV%CV%Q(ICV)+FV%CV%QR(ICV))*FV%CV%VOLUME(ICV)
+DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+   DO JCC=1,CUT_CELL(ICC)%NCELL
+      IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
+      FV%CV%DVOL(IG) = FV%CV%DVOL(IG)+ &
+                       (FV%CV%Q(IG)+FV%CV%QR(IG))*CUT_CELL(ICC)%VOLUME(JCC)
    ENDDO
-ELSE
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      DO JCC=1,CUT_CELL(ICC)%NCELL
-         IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
-         FV%CV%DVOL(IG) = FV%CV%DVOL(IG)+ &
-                          (FV%CV%Q(IG)+FV%CV%QR(IG))*CUT_CELL(ICC)%VOLUME(JCC)
-      ENDDO
-   ENDDO
-ENDIF
+ENDDO
 
 ! 3. Enthalpy advection term = - \bar{ u dot Grad (rho h_s) }:
 ! R_H_G = 1/(Cp * T)
@@ -9659,23 +9204,9 @@ DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
       RTRM_CC = R_H_G_CC/RHOPV(0)
       FV%CV%R_H_G(CC%IG(JCC)) = R_H_G_CC
       FV%CV%RTRM(CC%IG(JCC))  = RTRM_CC
-      IF (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_IDENTITY) THEN
-         IG = CC%IG(JCC); IF (IG>=1) FV%CV%DVOL(IG) = RTRM_CC*FV%CV%DVOL(IG)
-      ENDIF
+      IG = CC%IG(JCC); IF (IG>=1) FV%CV%DVOL(IG) = RTRM_CC*FV%CV%DVOL(IG)
    ENDDO
 ENDDO
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   DO ICV=1,FV%CV%N
-      IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) CYCLE
-      ZZ_GET(1:N_TRACKED_SPECIES)=PRFCT*FV%CV%ZZ(1:N_TRACKED_SPECIES,ICV)+ &
-                                  (1._EB-PRFCT)*FV%CV%ZZS(1:N_TRACKED_SPECIES,ICV)
-      CALL GET_SPECIFIC_HEAT(ZZ_GET,CPV(0),FV%CV%TMP(ICV))
-      FV%CV%R_H_G(ICV)=1._EB/(CPV(0)*FV%CV%TMP(ICV))
-      RHOPV(0)=PRFCT*FV%CV%RHO(ICV)+(1._EB-PRFCT)*FV%CV%RHOS(ICV)
-      FV%CV%RTRM(ICV)=FV%CV%R_H_G(ICV)/RHOPV(0)
-      FV%CV%DVOL(ICV)=FV%CV%RTRM(ICV)*FV%CV%DVOL(ICV)
-   ENDDO
-ENDIF
 
 
 ! 4. Enthalpy flux due to mass diffusion and advection:
@@ -9707,19 +9238,7 @@ CONST_GAMMA_IF_2: IF (.NOT.CONSTANT_SPECIFIC_HEAT_RATIO) THEN
       ENDDO
 
       ! Cut-cells:
-      IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-         DO ICV=1,FV%CV%N
-            IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) CYCLE
-            CALL GET_SENSIBLE_ENTHALPY_Z(N,FV%CV%TMP(ICV),H_S)
-            IF (PREDICTOR) THEN
-               FV%CV%DVOL(ICV)=FV%CV%DVOL(ICV)+(SM%RCON/FV%CV%RSUM(ICV)-H_S*FV%CV%R_H_G(ICV))/FV%CV%RHOS(ICV)* &
-                  (FV%CV%DEL_RHO_D_DEL_Z_VOL(N,ICV)-FV%CV%U_DOT_DEL_RHO_Z_VOL(N,ICV))
-            ELSE
-               FV%CV%DVOL(ICV)=FV%CV%DVOL(ICV)+(SM%RCON/FV%CV%RSUM(ICV)-H_S*FV%CV%R_H_G(ICV))/FV%CV%RHO(ICV)* &
-                  (FV%CV%DEL_RHO_D_DEL_Z_VOL(N,ICV)-FV%CV%U_DOT_DEL_RHO_Z_VOL(N,ICV))
-            ENDIF
-         ENDDO
-      ELSEIF (PREDICTOR) THEN
+      IF (PREDICTOR) THEN
          DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
             CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
             DO JCC=1,CC%NCELL
@@ -9770,20 +9289,13 @@ IF (ALLOCATED(MESHES(NM)%D_SOURCE)) THEN
    ENDDO
 
    ! Cut cells:
-   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-      DO ICV=1,FV%CV%N
-         IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) CYCLE
-         FV%CV%DVOL(ICV)=FV%CV%DVOL(ICV)+FV%CV%D_SOURCE(ICV)*FV%CV%VOLUME(ICV)
+   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+      CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+      DO JCC=1,CC%NCELL
+         IG=CC%IG(JCC)
+         FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+FV%CV%D_SOURCE(IG)*CC%VOLUME(JCC)
       ENDDO
-   ELSE
-      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-         CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-         DO JCC=1,CC%NCELL
-            IG=CC%IG(JCC)
-            FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+FV%CV%D_SOURCE(IG)*CC%VOLUME(JCC)
-         ENDDO
-      ENDDO
-   ENDIF
+   ENDDO
 
 ENDIF
 
@@ -9805,19 +9317,11 @@ IF (STRATIFICATION) THEN
       CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
       DO JCC=1,CC%NCELL
          ! D = D + w*rho_0*g/(rho*Cp*T)*Vii
-         ICV=0
-         IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-            CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
          CALL GET_FV_CV_STORAGE_FOR_CUTCELL(NM,ICC,JCC,IROW_STOR); IF (IROW_STOR<1) CYCLE
          RTRM_CC = FV%CV%RTRM(IROW_STOR)
-         IF (ICV>0) THEN
-            FV%CV%DVOL(ICV)=FV%CV%DVOL(ICV)+FV%CV%RTRM(ICV)*FV%CV%WVEL(IROW_STOR)*FV%CV%RHO_0(CC%IG(JCC))* &
-                             GVEC(KAXIS)*FV%CV%VOLUME(ICV)
-         ELSE
-            IG = CC%IG(JCC)
-            IF (IG>=1) FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+RTRM_CC*FV%CV%WVEL(IROW_STOR)*FV%CV%RHO_0(CC%IG(JCC))* &
-                                       GVEC(KAXIS)*CC%VOLUME(JCC)
-         ENDIF
+         IG = CC%IG(JCC)
+         IF (IG>=1) FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+RTRM_CC*FV%CV%WVEL(IROW_STOR)*FV%CV%RHO_0(CC%IG(JCC))* &
+                                    GVEC(KAXIS)*CC%VOLUME(JCC)
       ENDDO
    ENDDO
 ENDIF
@@ -9864,19 +9368,11 @@ MMS_IF: IF (PERIODIC_TEST==7) THEN
                   CASE(2); Q_Z =  VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
                END SELECT
                CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
-               ICV=0
-               IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-                  CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
                IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
                R_H_G_CC = FV%CV%R_H_G(IG)
-               IF (ICV>0) THEN
-                  FV%CV%DVOL(ICV)=FV%CV%DVOL(ICV)+(SM%RCON/FV%CV%RSUM(IG)-H_S*FV%CV%R_H_G(ICV))* &
-                                      Q_Z/FV%CV%RHOS(IG)*FV%CV%VOLUME(ICV)
-               ELSE
-                  FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+ &
-                     (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC)-H_S*R_H_G_CC)* &
-                     Q_Z/GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*CUT_CELL(ICC)%VOLUME(JCC)
-               ENDIF
+               FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+ &
+                  (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC)-H_S*R_H_G_CC)* &
+                  Q_Z/GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*CUT_CELL(ICC)%VOLUME(JCC)
             ENDDO
          ENDDO
       ENDDO
@@ -9896,19 +9392,11 @@ MMS_IF: IF (PERIODIC_TEST==7) THEN
                   CASE(2); Q_Z =  VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
                END SELECT
                CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
-               ICV=0
-               IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-                  CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
                IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
                R_H_G_CC = FV%CV%R_H_G(IG)
-               IF (ICV>0) THEN
-                  FV%CV%DVOL(ICV)=FV%CV%DVOL(ICV)+(SM%RCON/FV%CV%RSUM(IG)-H_S*FV%CV%R_H_G(ICV))* &
-                                      Q_Z/FV%CV%RHO(IG)*FV%CV%VOLUME(ICV)
-               ELSE
-                  FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+ &
-                     (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC)-H_S*R_H_G_CC)* &
-                     Q_Z/GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*CUT_CELL(ICC)%VOLUME(JCC)
-               ENDIF
+               FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+ &
+                  (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC)-H_S*R_H_G_CC)* &
+                  Q_Z/GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*CUT_CELL(ICC)%VOLUME(JCC)
             ENDDO
          ENDDO
       ENDDO
@@ -9955,16 +9443,9 @@ If (PREDICTOR) THEN
       IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
       DO JCC=1,CUT_CELL(ICC)%NCELL
          INDZ = CUT_CELL(ICC)%UNKZ(JCC) - UNKZ_IND(NM_START)
-         ICV=0
-         IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-            CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
          RTRM_CC = FV%CV%RTRM(CUT_CELL(ICC)%IG(JCC))
-         IF (ICV>0) THEN
-            DIVRG_VEC(INDZ)=DIVRG_VEC(INDZ)+FV%CV%DVOL(ICV)
-         ELSE
-            IG = CUT_CELL(ICC)%IG(JCC)
-            IF (IG>=1) DIVRG_VEC(INDZ)=DIVRG_VEC(INDZ)+FV%CV%DVOL(IG)
-         ENDIF
+         IG = CUT_CELL(ICC)%IG(JCC)
+         IF (IG>=1) DIVRG_VEC(INDZ)=DIVRG_VEC(INDZ)+FV%CV%DVOL(IG)
          RTRM_VEC(INDZ)=RTRM_VEC(INDZ)+RTRM_CC*CUT_CELL(ICC)%VOLUME(JCC)
          VOLDVRG(INDZ)=VOLDVRG(INDZ)+CUT_CELL(ICC)%VOLUME(JCC)
       ENDDO
@@ -9977,16 +9458,9 @@ ELSE ! CORRECTOR
       IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
       DO JCC=1,CUT_CELL(ICC)%NCELL
          INDZ = CUT_CELL(ICC)%UNKZ(JCC) - UNKZ_IND(NM_START)
-         ICV=0
-         IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-            CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
          RTRM_CC = FV%CV%RTRM(CUT_CELL(ICC)%IG(JCC))
-         IF (ICV>0) THEN
-            DIVRG_VEC(INDZ)=DIVRG_VEC(INDZ)+FV%CV%DVOL(ICV)
-         ELSE
-            IG = CUT_CELL(ICC)%IG(JCC)
-            IF (IG>=1) DIVRG_VEC(INDZ)=DIVRG_VEC(INDZ)+FV%CV%DVOL(IG)
-         ENDIF
+         IG = CUT_CELL(ICC)%IG(JCC)
+         IF (IG>=1) DIVRG_VEC(INDZ)=DIVRG_VEC(INDZ)+FV%CV%DVOL(IG)
          RTRM_VEC(INDZ)=RTRM_VEC(INDZ)+RTRM_CC*CUT_CELL(ICC)%VOLUME(JCC)
          VOLDVRG(INDZ)=VOLDVRG(INDZ)+CUT_CELL(ICC)%VOLUME(JCC)
       ENDDO
@@ -10025,21 +9499,6 @@ DO K=1,KBAR
    ENDDO
 ENDDO
 
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   DO ICV=1,FV%CV%N
-      IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_REG) CYCLE
-      I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-      FV%CV%DVOL(ICV)=DP(I,J,K)*FV%CV%VOLUME(ICV)
-      FV%CV%RTRM(ICV)=RTRM(I,J,K)
-      FV%CV%DEL_RHO_D_DEL_Z_VOL(1:N_TRACKED_SPECIES,ICV)= &
-         DEL_RHO_D_DEL_Z(I,J,K,1:N_TRACKED_SPECIES)*FV%CV%VOLUME(ICV)
-      IF (PREDICTOR) THEN
-         FV%CV%DS(ICV)=DP(I,J,K)
-      ELSE
-         FV%CV%D(ICV)=DP(I,J,K)
-      ENDIF
-   ENDDO
-ENDIF
 
 IF (PREDICTOR) THEN
    DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
@@ -10052,21 +9511,11 @@ IF (PREDICTOR) THEN
       CCVOL  = 0._EB
       DO JCC=1,CUT_CELL(ICC)%NCELL
          INDZ = CUT_CELL(ICC)%UNKZ(JCC) - UNKZ_IND(NM_START)
-         ICV=0
-         IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-            CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
          FV%CV%RTRM(CUT_CELL(ICC)%IG(JCC))=RTRM_VEC(INDZ)
-         IF (ICV>0) THEN
-            FV%CV%DVOL(ICV)=DIVRG_VEC(INDZ)*FV%CV%VOLUME(ICV)
-            FV%CV%DS(ICV)=DIVRG_VEC(INDZ)
-            FV%CV%RTRM(ICV)=RTRM_VEC(INDZ)
-            DIVVOL = DIVVOL + FV%CV%DVOL(ICV)
-         ELSE
-            IG = CUT_CELL(ICC)%IG(JCC)
-            FV%CV%DVOL(IG)=DIVRG_VEC(INDZ)*CUT_CELL(ICC)%VOLUME(JCC)
-            FV%CV%DS(IG)=DIVRG_VEC(INDZ)
-            DIVVOL = DIVVOL + FV%CV%DVOL(IG)
-         ENDIF
+         IG = CUT_CELL(ICC)%IG(JCC)
+         FV%CV%DVOL(IG)=DIVRG_VEC(INDZ)*CUT_CELL(ICC)%VOLUME(JCC)
+         FV%CV%DS(IG)=DIVRG_VEC(INDZ)
+         DIVVOL = DIVVOL + FV%CV%DVOL(IG)
          RTRMVOL= RTRMVOL+ RTRM_VEC(INDZ)*CUT_CELL(ICC)%VOLUME(JCC)
          CCVOL  = CCVOL  + CUT_CELL(ICC)%VOLUME(JCC)
       ENDDO
@@ -10086,21 +9535,11 @@ ELSE ! CORRECTOR
       CCVOL  = 0._EB
       DO JCC=1,CUT_CELL(ICC)%NCELL
          INDZ = CUT_CELL(ICC)%UNKZ(JCC) - UNKZ_IND(NM_START)
-         ICV=0
-         IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) &
-            CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
          FV%CV%RTRM(CUT_CELL(ICC)%IG(JCC))=RTRM_VEC(INDZ)
-         IF (ICV>0) THEN
-            FV%CV%DVOL(ICV)=DIVRG_VEC(INDZ)*FV%CV%VOLUME(ICV)
-            FV%CV%D(ICV)=DIVRG_VEC(INDZ)
-            FV%CV%RTRM(ICV)=RTRM_VEC(INDZ)
-            DIVVOL = DIVVOL + FV%CV%DVOL(ICV)
-         ELSE
-            IG = CUT_CELL(ICC)%IG(JCC)
-            FV%CV%DVOL(IG)=DIVRG_VEC(INDZ)*CUT_CELL(ICC)%VOLUME(JCC)
-            FV%CV%D(IG)=DIVRG_VEC(INDZ)
-            DIVVOL = DIVVOL + FV%CV%DVOL(IG)
-         ENDIF
+         IG = CUT_CELL(ICC)%IG(JCC)
+         FV%CV%DVOL(IG)=DIVRG_VEC(INDZ)*CUT_CELL(ICC)%VOLUME(JCC)
+         FV%CV%D(IG)=DIVRG_VEC(INDZ)
+         DIVVOL = DIVVOL + FV%CV%DVOL(IG)
          RTRMVOL= RTRMVOL+ RTRM_VEC(INDZ)*CUT_CELL(ICC)%VOLUME(JCC)
          CCVOL  = CCVOL  + CUT_CELL(ICC)%VOLUME(JCC)
       ENDDO
@@ -10239,18 +9678,13 @@ SUBROUTINE ADD_CC_THERMODYNAMIC_VALUE(ICC_LOC,JCC_LOC,QUANTITY,NQ,VALUE)
 
 INTEGER, INTENT(IN) :: ICC_LOC,JCC_LOC,QUANTITY,NQ
 REAL(EB), INTENT(IN) :: VALUE
-INTEGER :: ICV_LOC,IROW
+INTEGER :: IROW
 
 IF (QUANTITY==CC_FV_ADVECT_SPECIES) THEN
    CALL GET_FV_CV_STORAGE_FOR_CUTCELL(NM,ICC_LOC,JCC_LOC,IROW)
    IF (IROW>=1) FV%CV%U_DOT_DEL_RHO_Z_VOL(NQ,IROW)=FV%CV%U_DOT_DEL_RHO_Z_VOL(NQ,IROW)+VALUE
 ELSE
-   CALL GET_FV_CV_FOR_CUTCELL(NM,ICC_LOC,JCC_LOC,ICV_LOC)
-   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY .AND. ICV_LOC>0) THEN
-      FV%CV%DVOL(ICV_LOC)=FV%CV%DVOL(ICV_LOC)+VALUE
-   ELSE
-      IG = CUT_CELL(ICC_LOC)%IG(JCC_LOC); IF (IG>=1) FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+VALUE
-   ENDIF
+   IG = CUT_CELL(ICC_LOC)%IG(JCC_LOC); IF (IG>=1) FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+VALUE
 ENDIF
 END SUBROUTINE ADD_CC_THERMODYNAMIC_VALUE
 
@@ -13458,7 +12892,7 @@ REAL(EB), INTENT(IN) :: T,DT
 
 ! Local Variables:
 INTEGER :: N
-INTEGER :: I,J,K,NM,ICC,JCC,ICV,IG
+INTEGER :: I,J,K,NM,ICC,JCC,IG
 REAL(EB) :: ZZ_GET(1:N_TRACKED_SPECIES),VCCELL,TNOW,PBAR_K
 TYPE(CC_FV_TYPE), POINTER :: FV
 ! CHARACTER(len=20) :: filename
@@ -13555,15 +12989,6 @@ IF (PREDICTOR) THEN
          ENDDO
       ENDDO
 
-      IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-         DO ICV=1,FV%CV%N
-            IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_REG) CYCLE
-            I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-            FV%CV%RHOS(ICV)=RHOS(I,J,K); FV%CV%TMP(ICV)=TMP(I,J,K)
-            FV%CV%RSUM(ICV)=RSUM(I,J,K)
-            FV%CV%ZZS(1:N_TOTAL_SCALARS,ICV)=ZZS(I,J,K,1:N_TOTAL_SCALARS)
-         ENDDO
-      ENDIF
 
    ENDDO MESHES_LOOP1
 
@@ -13630,15 +13055,6 @@ ELSE ! CORRECTOR
          ENDDO
       ENDDO
 
-      IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-         DO ICV=1,FV%CV%N
-            IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_REG) CYCLE
-            I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-            FV%CV%RHO(ICV)=RHO(I,J,K); FV%CV%TMP(ICV)=TMP(I,J,K)
-            FV%CV%RSUM(ICV)=RSUM(I,J,K)
-            FV%CV%ZZ(1:N_TOTAL_SCALARS,ICV)=ZZ(I,J,K,1:N_TOTAL_SCALARS)
-         ENDDO
-      ENDIF
 
    ENDDO MESHES_LOOP2
 
@@ -13769,16 +13185,7 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    ENDIF
 
    ! Then add cut-CV contributions to F_Z.
-   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-      DO ICV=1,FV%CV%N
-         IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) CYCLE
-         I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-         IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-         IF (FV%CV%UNKZ(ICV)<1) CYCLE
-         IROW=FV%CV%UNKZ(ICV)-UNKZ_IND(NM_START)
-         F_Z(IROW)=F_Z(IROW)-FV%CV%M_DOT_PPP(N,ICV)*FV%CV%VOLUME(ICV)
-      ENDDO
-   ELSEIF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
+   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
       DO IGC=1,FV%GCELL%N
          KEY_NM=FV%CV%GCELL_TO_CV_NM(IGC)
          ICV=FV%CV%GCELL_TO_CV(IGC)
@@ -14299,16 +13706,7 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    ENDDO
 
    ! Now cut CVs:
-   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-      DO ICV=1,FV%CV%N
-         IF (FV%CV%N_MEMBER(ICV)<1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) CYCLE
-         I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-         IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-         IF (FV%CV%UNKZ(ICV)<1) CYCLE
-         IROW=FV%CV%UNKZ(ICV)-UNKZ_IND(NM_START)
-         F_Z(IROW)=F_Z(IROW)-FV%CV%DEL_RHO_D_DEL_Z_VOL(N,ICV)
-      ENDDO
-   ELSEIF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
+   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
       CALL GET_FV_L2_DIFFUSIVE_VECTOR(NM,N)
    ELSE
       DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
@@ -14347,10 +13745,9 @@ FOUND=.TRUE.
 END SUBROUTINE CC_FV_CACHE_ADVECTIVE_REGULAR_FACE
 
 
-SUBROUTINE CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N,F_Z_OUT)
+SUBROUTINE CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N)
 INTEGER, INTENT(IN) :: NM,IF_,N
-REAL(EB), INTENT(INOUT), OPTIONAL :: F_Z_OUT(:)
-INTEGER :: ICV,IROW,IUNK,OWN_NM,NBR_NM,OWN_CV,NBR_CV,I,J,K
+INTEGER :: IUNK,OWN_NM,NBR_NM,OWN_CV,NBR_CV
 REAL(EB) :: ORIENT,AF,FLUX,ADV_RHS
 TYPE(CC_FV_TYPE), POINTER :: FV
 
@@ -14358,64 +13755,23 @@ FV=>MESHES(NM)%FV
 IF (FV%FACE%ROLE(IF_)/=CC_FACE_ROLE_EXTERNAL) RETURN
 OWN_NM=FV%FACE%OWNER_CV_NM(IF_); NBR_NM=FV%FACE%NBR_CV_NM(IF_)
 OWN_CV=FV%FACE%OWNER_CV(IF_); NBR_CV=FV%FACE%NBR_CV(IF_)
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH .AND. FV%FACE%KIND(IF_)==CC_FACE_KIND_REMOTE) THEN
-   IF (NM/=MIN(OWN_NM,NBR_NM)) RETURN
-ENDIF
+IF (FV%FACE%KIND(IF_)==CC_FACE_KIND_REMOTE .AND. NM/=MIN(OWN_NM,NBR_NM)) RETURN
 
 ORIENT=FV%FACE%NVEC(FV%FACE%X1AXIS(IF_),IF_)
 AF=FV%FACE%FLUX_AREA(IF_); FLUX=FV%FACE%ADV_FLUX(N,IF_)
 ADV_RHS=ORIENT*FLUX*AF
 
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
-   CALL GET_FV_GLOBAL_UNKZ(OWN_NM,OWN_CV,IUNK)
-   IF (IUNK>0) CALL ADD_FV_L2_SCALAR_RHS(IUNK,ADV_RHS)
-   IF (NBR_NM>0 .AND. NBR_CV>0) THEN
-      CALL GET_FV_GLOBAL_UNKZ(NBR_NM,NBR_CV,IUNK)
-      IF (IUNK>0) CALL ADD_FV_L2_SCALAR_RHS(IUNK,-ADV_RHS)
-   ENDIF
-   RETURN
-ENDIF
-
-ICV=OWN_CV
-IF (ICV>0) THEN
-   IROW=FV%CV%UNKZ(ICV)-UNKZ_IND(NM_START)
-   IF (IROW>=1) THEN
-      IF (PRESENT(F_Z_OUT)) THEN
-         F_Z_OUT(IROW)=F_Z_OUT(IROW)+ADV_RHS
-      ELSE
-         F_Z(IROW)=F_Z(IROW)+ADV_RHS
-      ENDIF
-   ENDIF
-ENDIF
-IF (FV%FACE%KIND(IF_)==CC_FACE_KIND_COUPLING .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-   I=FV%GCELL%IJK(IAXIS,FV%FACE%NBR_GCELL(IF_))
-   J=FV%GCELL%IJK(JAXIS,FV%FACE%NBR_GCELL(IF_))
-   K=FV%GCELL%IJK(KAXIS,FV%FACE%NBR_GCELL(IF_))
-   IROW=MESHES(NM)%CCVAR(I,J,K,CC_UNKZ)-UNKZ_IND(NM_START)
-   IF (IROW>=1) THEN
-      IF (PRESENT(F_Z_OUT)) THEN
-         IF (IROW<=SIZE(F_Z_OUT)) F_Z_OUT(IROW)=F_Z_OUT(IROW)-ADV_RHS
-      ELSE
-         IF (IROW<=SIZE(F_Z)) F_Z(IROW)=F_Z(IROW)-ADV_RHS
-      ENDIF
-   ENDIF
-ELSEIF (NBR_NM==NM .AND. NBR_CV>0) THEN
-   ICV=NBR_CV
-   IROW=FV%CV%UNKZ(ICV)-UNKZ_IND(NM_START)
-   IF (IROW>=1) THEN
-      IF (PRESENT(F_Z_OUT)) THEN
-         F_Z_OUT(IROW)=F_Z_OUT(IROW)-ADV_RHS
-      ELSE
-         F_Z(IROW)=F_Z(IROW)-ADV_RHS
-      ENDIF
-   ENDIF
+CALL GET_FV_GLOBAL_UNKZ(OWN_NM,OWN_CV,IUNK)
+IF (IUNK>0) CALL ADD_FV_L2_SCALAR_RHS(IUNK,ADV_RHS)
+IF (NBR_NM>0 .AND. NBR_CV>0) THEN
+   CALL GET_FV_GLOBAL_UNKZ(NBR_NM,NBR_CV,IUNK)
+   IF (IUNK>0) CALL ADD_FV_L2_SCALAR_RHS(IUNK,-ADV_RHS)
 ENDIF
 END SUBROUTINE CC_FV_ACCUMULATE_ADVECTIVE_FACE
 
-SUBROUTINE GET_FV_EXPLICIT_ADVECTIVE_VECTOR(NM,N,F_Z_OUT)
+SUBROUTINE GET_FV_EXPLICIT_ADVECTIVE_VECTOR(NM,N)
 ! Assemble conservative rho*Z advection from cached face fluxes and FV owner/neighbor topology.
 INTEGER, INTENT(IN) :: NM,N
-REAL(EB), INTENT(INOUT), OPTIONAL :: F_Z_OUT(:)
 INTEGER :: IRC,ICF,JFC,IF_
 TYPE(CC_FV_TYPE), POINTER :: FV
 FV => MESHES(NM)%FV
@@ -14424,20 +13780,20 @@ FV => MESHES(NM)%FV
 ! RGGAS rows have no compact legacy source index, so consume them in canonical FACE order first.
 DO IF_=1,FV%FACE%N_INT
    IF (FV%FACE%FTYPE(IF_)/=CC_FTYPE_RGGAS) CYCLE
-   CALL CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N,F_Z_OUT)
+   CALL CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N)
 ENDDO
 DO IRC=1,MESHES(NM)%CC_NRCFACE_Z
    IF (MESHES(NM)%RC_FACE(IRC)%IWC>0) CYCLE
    IF_=MESHES(NM)%RC_FACE(IRC)%FC
    IF (FV%FACE%FTYPE(IF_)/=CC_FTYPE_RCGAS) CYCLE
-   CALL CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N,F_Z_OUT)
+   CALL CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N)
 ENDDO
 DO ICF=1,MESHES(NM)%N_CUTFACE_MESH
    IF (MESHES(NM)%CUT_FACE(ICF)%STATUS/=CC_GASPHASE .OR. MESHES(NM)%CUT_FACE(ICF)%IWC>0) CYCLE
    DO JFC=1,MESHES(NM)%CUT_FACE(ICF)%NFACE
       IF_=MESHES(NM)%CUT_FACE(ICF)%FC(JFC); IF (IF_<1) CYCLE
       IF (FV%FACE%FTYPE(IF_)/=CC_FTYPE_CFGAS) CYCLE
-      CALL CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N,F_Z_OUT)
+      CALL CC_FV_ACCUMULATE_ADVECTIVE_FACE(NM,IF_,N)
    ENDDO
 ENDDO
 END SUBROUTINE GET_FV_EXPLICIT_ADVECTIVE_VECTOR
@@ -15164,27 +14520,23 @@ SPECIES_LOOP: DO N=1,N_TRACKED_SPECIES
       ENDDO
    ENDDO
    IF (PREDICTOR) THEN
-      IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-            DO JCC=1,CC%NCELL
-               ICV = CC%ICV(JCC); IF (ICV<1) CYCLE
-               IROW_LOC = CC%UNKZ(JCC)-UNKZ_IND(NM_START)
-               MESHES(NM)%FV%CV%ZZS(N,CC%IG(JCC)) = RZ_Z(IROW_LOC)
-            ENDDO
+      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+         CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+         DO JCC=1,CC%NCELL
+            ICV = CC%ICV(JCC); IF (ICV<1) CYCLE
+            IROW_LOC = CC%UNKZ(JCC)-UNKZ_IND(NM_START)
+            MESHES(NM)%FV%CV%ZZS(N,CC%IG(JCC)) = RZ_Z(IROW_LOC)
          ENDDO
-      ENDIF
+      ENDDO
    ELSE
-      IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-            DO JCC=1,CC%NCELL
-               ICV = CC%ICV(JCC); IF (ICV<1) CYCLE
-               IROW_LOC = CC%UNKZ(JCC)-UNKZ_IND(NM_START)
-               MESHES(NM)%FV%CV%ZZ(N,CC%IG(JCC)) = RZ_Z(IROW_LOC)
-            ENDDO
+      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+         CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+         DO JCC=1,CC%NCELL
+            ICV = CC%ICV(JCC); IF (ICV<1) CYCLE
+            IROW_LOC = CC%UNKZ(JCC)-UNKZ_IND(NM_START)
+            MESHES(NM)%FV%CV%ZZ(N,CC%IG(JCC)) = RZ_Z(IROW_LOC)
          ENDDO
-      ENDIF
+      ENDDO
    ENDIF
 
 ENDDO SPECIES_LOOP
@@ -15295,7 +14647,7 @@ END SUBROUTINE CC_CHECK_MASS_DENSITY
 SUBROUTINE GET_RHOZZ_CC_3D
 
 ! Local Variables:
-INTEGER :: NM,N,I,J,K,ICC,JCC,ICV,IG,NCELL_MAX
+INTEGER :: NM,N,I,J,K,ICC,JCC,IG,NCELL_MAX
 INTEGER, ALLOCATABLE :: IG_OF_JCC(:)
 REAL(EB), POINTER, DIMENSION(:,:,:)   :: RHOP,UP
 REAL(EB), POINTER, DIMENSION(:,:,:,:) :: ZZP
@@ -15325,7 +14677,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
          IG_OF_JCC(1:CC%NCELL) = 0
          DO JCC=1,CC%NCELL
-            ICV = FV_CV_PUBLISHED_ROW(NM,ICC,JCC)
             IG = CC%IG(JCC)
             IF (IG>=1) THEN
                IG_OF_JCC(JCC) = IG
@@ -15368,14 +14719,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                ! Clip passive scalars:
                IF (N_PASSIVE_SCALARS>0) FV%CV%ZZS(ZETA_INDEX,IG) = MAX(0._EB,MIN(1._EB,FV%CV%ZZS(ZETA_INDEX,IG)))
-               ! A cut owner is converted when its own piece is visited. Copying this
-               ! piece's mass fractions onto it first makes the later sum equal 1.
-               IF (ICV>0 .AND. ICV/=IG) THEN
-                  IF (FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) THEN
-                     FV%CV%RHOS(ICV) = FV%CV%RHOS(IG)
-                     FV%CV%ZZS(1:N_TOTAL_SCALARS,ICV) = FV%CV%ZZS(1:N_TOTAL_SCALARS,IG)
-                  ENDIF
-               ENDIF
             ENDIF
          ENDDO
 
@@ -15407,7 +14750,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
          IG_OF_JCC(1:CC%NCELL) = 0
          DO JCC=1,CC%NCELL
-            ICV = FV_CV_PUBLISHED_ROW(NM,ICC,JCC)
             IG = CC%IG(JCC)
             IF (IG>=1) THEN
                IG_OF_JCC(JCC) = IG
@@ -15449,14 +14791,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                ! Clip passive scalars:
                IF (N_PASSIVE_SCALARS>0) FV%CV%ZZ(ZETA_INDEX,IG) = MAX(0._EB,MIN(1._EB,FV%CV%ZZ(ZETA_INDEX,IG)))
-               ! A cut owner is converted when its own piece is visited. Copying this
-               ! piece's mass fractions onto it first makes the later sum equal 1.
-               IF (ICV>0 .AND. ICV/=IG) THEN
-                  IF (FV%CV%CELL_TYPE(ICV)/=CC_GCELL_CUT) THEN
-                     FV%CV%RHO(ICV) = FV%CV%RHO(IG)
-                     FV%CV%ZZ(1:N_TOTAL_SCALARS,ICV) = FV%CV%ZZ(1:N_TOTAL_SCALARS,IG)
-                  ENDIF
-               ENDIF
             ENDIF
          ENDDO
 
@@ -15530,19 +14864,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ENDDO
    ENDDO
 
-   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-      DO ICV=1,FV%CV%N
-         IF (FV%CV%N_MEMBER(ICV)/=1 .OR. FV%CV%CELL_TYPE(ICV)/=CC_GCELL_REG) CYCLE
-         I=FV%CV%IJK(IAXIS,ICV); J=FV%CV%IJK(JAXIS,ICV); K=FV%CV%IJK(KAXIS,ICV)
-         IF (PREDICTOR) THEN
-            FV%CV%RHOS(ICV)=RHOP(I,J,K)
-            FV%CV%ZZS(1:N_TOTAL_SCALARS,ICV)=ZZP(I,J,K,1:N_TOTAL_SCALARS)
-         ELSE
-            FV%CV%RHO(ICV)=RHOP(I,J,K)
-            FV%CV%ZZ(1:N_TOTAL_SCALARS,ICV)=ZZP(I,J,K,1:N_TOTAL_SCALARS)
-         ENDIF
-      ENDDO
-   ENDIF
 
    IF (ALLOCATED(IG_OF_JCC)) DEALLOCATE(IG_OF_JCC)
 
@@ -15693,7 +15014,7 @@ SUBROUTINE PUT_RHOZZVECTOR_SCALAR_3D(N)
 INTEGER, INTENT(IN) :: N
 
 ! Local Variables:
-INTEGER :: NM,I,J,K,IROW_LOC,ICC,JCC,ICV,IG,IPTR
+INTEGER :: NM,I,J,K,IROW_LOC,ICC,JCC,IG
 TYPE(CC_FV_TYPE), POINTER :: FV
 REAL(EB), POINTER, DIMENSION(:,:,:,:) :: ZZP
 
@@ -15708,50 +15029,24 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    FV=>MESHES(NM)%FV
    IF (PREDICTOR) THEN
       ZZP  => ZZS ! Copy rho*z obtained for species N in the end of substep container for z.
-      IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-         DO ICV=1,FV%CV%N
-            IF (FV%CV%N_MEMBER(ICV)<1) CYCLE
-            IF (FV%CV%UNKZ(ICV)<1) CYCLE
-            IROW_LOC=FV%CV%UNKZ(ICV)-UNKZ_IND(NM_START)
-            FV%CV%ZZS(N,ICV)=RZ_Z(IROW_LOC)
-            DO IPTR=FV%CV%MEMBER_PTR(ICV),FV%CV%MEMBER_PTR(ICV+1)-1
-               IG=FV%CV%MEMBER_LIST(IPTR)
-               IF (IG>=1 .AND. IG/=ICV) FV%CV%ZZS(N,IG)=RZ_Z(IROW_LOC)
-            ENDDO
+      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+         CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+         DO JCC=1,CC%NCELL
+            IROW_LOC      = CC%UNKZ(JCC) - UNKZ_IND(NM_START)
+            IG = CC%IG(JCC)
+            IF (IG>=1) FV%CV%ZZS(N,IG) = RZ_Z(IROW_LOC)
          ENDDO
-      ELSE
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-            DO JCC=1,CC%NCELL
-               IROW_LOC      = CC%UNKZ(JCC) - UNKZ_IND(NM_START)
-               IG = CC%IG(JCC)
-               IF (IG>=1) FV%CV%ZZS(N,IG) = RZ_Z(IROW_LOC)
-            ENDDO
-         ENDDO
-      ENDIF
+      ENDDO
    ELSE
       ZZP  => ZZ  ! Copy rho*z obtained for species N in the end of substep container for z.
-      IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_IDENTITY) THEN
-         DO ICV=1,FV%CV%N
-            IF (FV%CV%N_MEMBER(ICV)<1) CYCLE
-            IF (FV%CV%UNKZ(ICV)<1) CYCLE
-            IROW_LOC=FV%CV%UNKZ(ICV)-UNKZ_IND(NM_START)
-            FV%CV%ZZ(N,ICV)=RZ_Z(IROW_LOC)
-            DO IPTR=FV%CV%MEMBER_PTR(ICV),FV%CV%MEMBER_PTR(ICV+1)-1
-               IG=FV%CV%MEMBER_LIST(IPTR)
-               IF (IG>=1 .AND. IG/=ICV) FV%CV%ZZ(N,IG)=RZ_Z(IROW_LOC)
-            ENDDO
+      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+         CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+         DO JCC=1,CC%NCELL
+            IROW_LOC     = CC%UNKZ(JCC) - UNKZ_IND(NM_START)
+            IG = CC%IG(JCC)
+            IF (IG>=1) FV%CV%ZZ(N,IG) = RZ_Z(IROW_LOC)
          ENDDO
-      ELSE
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-            DO JCC=1,CC%NCELL
-               IROW_LOC     = CC%UNKZ(JCC) - UNKZ_IND(NM_START)
-               IG = CC%IG(JCC)
-               IF (IG>=1) FV%CV%ZZ(N,IG) = RZ_Z(IROW_LOC)
-            ENDDO
-         ENDDO
-      ENDIF
+      ENDDO
    ENDIF
 
    ! Loop on Cartesian Cells:
@@ -18838,7 +18133,7 @@ MESHES_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       DPCC   = 0._EB
       VOL    = 0._EB
       JCC_LOOP : DO JCC=1,NCELL
-         CALL GET_SOLVER_CV_VOLUME(NM,ICC,JCC,VCV)
+         VCV = CUT_CELL(ICC)%VOLUME(JCC)
          VOL  = VOL + VCV
          CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,PRFCT,DIV_JCC)
          DIVVOL = DIVVOL + DIV_JCC*VCV
@@ -19145,23 +18440,6 @@ ELSE
 ENDIF
 
 END SUBROUTINE CC_FV_SET_DIFFUSION_GEOM
-
-
-SUBROUTINE GET_SOLVER_CV_VOLUME(NM,ICC,JCC,VCV)
-! Return the volume carried by the active solver CV. Legacy CUT_CELL remains the fallback.
-
-INTEGER, INTENT(IN) :: NM,ICC,JCC
-REAL(EB), INTENT(OUT) :: VCV
-INTEGER :: ICV
-TYPE(CC_FV_TYPE), POINTER :: FV
-
-FV=>MESHES(NM)%FV
-VCV = MESHES(NM)%CUT_CELL(ICC)%VOLUME(JCC)
-IF (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_IDENTITY) RETURN
-CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV)
-IF (ICV > 0) VCV = FV%CV%VOLUME(ICV)
-
-END SUBROUTINE GET_SOLVER_CV_VOLUME
 
 
 ! ----------------------- GET_FN_DIVERGENCE_CUTCELL --------------------------
