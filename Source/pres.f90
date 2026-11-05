@@ -3382,7 +3382,7 @@ IF (ERROR /= 0 .AND. MY_RANK==0) WRITE(LU_ERR,*) 'GLMAT_SOLVER: The following ER
 
    IF (ZSL%MTYPE==SYMM_INDEFINITE) THEN
       IF ((.NOT.PRES_ON_WHOLE_DOMAIN .OR. N_ZONE<=1) .AND. PERIODIC_TEST/=7 .AND. &
-          (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_CROSS_MESH)) THEN
+          (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_CROSS_MESH .OR. CC_CV_H_PER_MEMBER)) THEN
          ! In the case of periodic test 7, we don't want to apply the gauge shift assuming P_mean=0, here H_mean=0.
          ! Apply the physical-pressure gauge directly when it is well-defined.
          SUM_GAUGE = 0._EB
