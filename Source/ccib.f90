@@ -26996,10 +26996,10 @@ SUBROUTINE GET_LINKED_FACE_INDEXES_F
 
 USE MPI_F08
 
-INTEGER :: NM,I,J,K,X1AXIS,X2AXIS,X3AXIS,ICF,JCF,LO_UNKZ,HI_UNKZ,IEC,IEDGE,LOHI,II,JJ,KK,IIO,JJO,KKO,IERC,&
-           OFACE(3),OLO_UNKZ,OHI_UNKZ,OICF,OJCF,IECE,JECE,ILINK,ICC,JCC,IW,COUNT,IF_,IL,N_NOROW,ICF2
+INTEGER :: NM,I,J,K,X1AXIS,X2AXIS,X3AXIS,ICF,JCF,IEC,IEDGE,LOHI,II,JJ,KK,IIO,JJO,KKO,&
+           OICF,OJCF,IECE,ILINK,ICC,JCC,IW,COUNT,IF_,IL,N_NOROW,ICF2
 REAL(EB):: ACRT,CCVOL_THRES
-LOGICAL :: ALL_FLG,CC_LINKED
+LOGICAL :: CC_LINKED
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_FV_TYPE), POINTER :: FV
 INTEGER :: ILOC,SIZE_FACE
@@ -27097,10 +27097,8 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
    ! 2. Link small faces. At L2 the passes are global, after every mesh has self-numbered.
    IF (.NOT.L2_HERE) THEN
-   ALL_FLG=.FALSE.
    LINK_ITER : DO ILINK=1,N_LINK_ATTMP_F
-      IF(ILINK>3) ALL_FLG=.TRUE.
-      CALL LINK_FACES_TO_NEIGHBORS(ALL_FLG)
+      CALL LINK_FACES_TO_NEIGHBORS
       ! Test For remaining unlinked faces:
       DO ICF=1,M%N_CUTFACE_MESH
          CF => M%CUT_FACE(ICF); IF(CF%STATUS/=CC_GASPHASE) CYCLE
@@ -27147,12 +27145,11 @@ ENDDO MESH_LOOP
 
 IF (L2_HERE) THEN
    DO ILINK=1,N_LINK_ATTMP_F
-      ALL_FLG = ILINK>3
       DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          M => MESHES(NM)
          FV => M%FV
          CALL POINT_TO_MESH(NM)
-         CALL LINK_FACES_TO_NEIGHBORS(ALL_FLG)
+         CALL LINK_FACES_TO_NEIGHBORS
       ENDDO
       CALL EXCHANGE_L2_GROUPS
       IF (L2_PASSES_DONE()) EXIT
@@ -27628,425 +27625,11 @@ ENDDO
 END SUBROUTINE EXCHANGE_L2_GROUPS
 
 
-SUBROUTINE LINK_FACES_TO_NEIGHBORS(ALL_FLG)
-
-LOGICAL, INTENT(IN) :: ALL_FLG
-
-LOGICAL, PARAMETER  :: CANDIDATE_LIST=.TRUE.
+SUBROUTINE LINK_FACES_TO_NEIGHBORS
 
 NPICK = 0
 L2_DEFER = CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH
 
-IF(.NOT.CANDIDATE_LIST) THEN
-
-ICF_LOOP_2 : DO ICF=1,M%N_CUTFACE_MESH
-   CF => M%CUT_FACE(ICF); IF(CF%STATUS/=CC_GASPHASE) CYCLE ICF_LOOP_2
-   I  = CF%IJK(IAXIS); J = CF%IJK(JAXIS); K = CF%IJK(KAXIS); X1AXIS = CF%IJK(KAXIS+1)
-   SELECT CASE(X1AXIS)
-   CASE(IAXIS) ! Face in X axis:
-       ACRT = M%DY(J)*M%DZ(K)
-       IAXIS_JCF_LOOP : DO JCF=1,CF%NFACE
-          IF(CC_FV_UNKF_CF(NM,ICF,JCF)<1) THEN ! .AND. CF%AREA(JCF) < CCVOL_LINK*ACRT+TWENTY_EPSILON_EB) THEN
-             LO_UNKZ = CF%UNKZ(LOW_IND, JCF)
-             HI_UNKZ = CF%UNKZ(HIGH_IND,JCF)
-             ! Loop edges to find next face in X2AXIS, X3AXIS plane:
-             IAXIS_IEC_LOOP : DO IEC=2,CF%CEDGES(1,JCF)+1
-                IEDGE = CF%CEDGES(IEC,JCF)
-                IAXIS_IEC_SELECT : SELECT CASE(CF%EDGE_LIST(1,IEDGE))
-                CASE(CC_ETYPE_RGGAS) IAXIS_IEC_SELECT ! Cut-faces Regular Gas Edge.
-                   LOHI   = CF%EDGE_LIST(2,IEDGE)
-                   X2AXIS = CF%EDGE_LIST(3,IEDGE)
-                   IF (X2AXIS==JAXIS) THEN ! Edge pointed in X3AXIS=KAXIS direction.
-                      X3AXIS = KAXIS; II=I; JJ=J; KK=K; IF(LOHI==LOW_IND) JJ=J-1
-                      IERC   = M%ECVAR(II,JJ,KK,CC_IDCE,X3AXIS); IF(IERC==0) CYCLE IAXIS_IEC_LOOP ! Index in CC_RCEDGE
-                      IF(LOHI==LOW_IND) THEN ! Indexes of other Cartesian face @ J-1
-                         IIO=I; JJO=J-1; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3,-2) ! X Face in low J
-                      ELSE ! Indexes of other Cartesian face @ J+1
-                         IIO=I; JJO=J+1; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3, 2) ! X Face in high J
-                      ENDIF
-                      IF(L2_NBR_SKIP(JAXIS,JJO,I,J,K)) CYCLE IAXIS_IEC_LOOP
-                   ELSEIF(X2AXIS==KAXIS) THEN ! Edge pointed in X3AXIS=JAXIS direction.
-                      X3AXIS = JAXIS; II=I; JJ=J; KK=K; IF(LOHI==LOW_IND) KK=K-1
-                      IERC   = M%ECVAR(II,JJ,KK,CC_IDCE,X3AXIS); IF(IERC==0) CYCLE IAXIS_IEC_LOOP
-                      IF(LOHI==LOW_IND) THEN ! Indexes of other Cartesian face @ K-1
-                         IIO=I; JJO=J; KKO=K-1; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3,-1) ! Face in low K
-                      ELSE ! Indexes of other Cartesian face @ K+1
-                         IIO=I; JJO=J; KKO=K+1; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3, 1) ! Face in high K
-                      ENDIF
-                      IF(L2_NBR_SKIP(KAXIS,KKO,I,J,K)) CYCLE IAXIS_IEC_LOOP
-                   ENDIF
-                   ! Now look for other potential face and link CC_FV_UNKF_CF(NM,ICF,JCF):
-                   IAXIS_OFACE_SELECT : SELECT CASE (OFACE(1))
-                   CASE(CC_FTYPE_RGGAS) IAXIS_OFACE_SELECT
-                      OLO_UNKZ = M%CCVAR(IIO  ,JJO  ,KKO  ,CC_UNKZ)
-                      OHI_UNKZ = M%CCVAR(IIO+1,JJO  ,KKO  ,CC_UNKZ)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to regular face:
-                         IL=CC_FV_UNKF_REG(NM,IIO,JJO,KKO,X1AXIS)
-                         IF (IL<1) THEN
-                            M%NUNK_F = M%NUNK_F + 1
-                            CALL STORE_UNKF_REG(IIO,JJO,KKO,X1AXIS,M%NUNK_F)
-                            IL=M%NUNK_F
-                         ENDIF
-                         CALL STORE_UNKF_CF(ICF,JCF,IL)
-                         CF%LINK_LEV(JCF) = -1
-                         CYCLE IAXIS_JCF_LOOP
-                      ENDIF
-                   CASE(CC_FTYPE_RCGAS) IAXIS_OFACE_SELECT
-                      OICF     = OFACE(2)
-                      OLO_UNKZ = M%RC_FACE(OICF)%UNKZ(LOW_IND)
-                      OHI_UNKZ = M%RC_FACE(OICF)%UNKZ(HIGH_IND)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to RC face:
-                         IL=CC_FV_UNKF_RC(NM,OICF)
-                         IF (IL<1) THEN
-                            M%NUNK_F = M%NUNK_F + 1
-                            CALL STORE_UNKF_RC(OICF,M%NUNK_F)
-                            IL=M%NUNK_F
-                         ENDIF
-                         CALL STORE_UNKF_CF(ICF,JCF,IL)
-                         CF%LINK_LEV(JCF) = -1
-                         CYCLE IAXIS_JCF_LOOP
-                      ENDIF
-                   CASE(CC_FTYPE_CFGAS) IAXIS_OFACE_SELECT
-                      OICF     = OFACE(2); OJCF     = OFACE(3)
-                      OLO_UNKZ = M%CUT_FACE(OICF)%UNKZ(LOW_IND,OJCF)
-                      OHI_UNKZ = M%CUT_FACE(OICF)%UNKZ(HIGH_IND,OJCF)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to other cut-face:
-                          IF(CC_FV_UNKF_CF(NM,OICF,OJCF)>0) THEN
-                             CALL STORE_UNKF_CF(ICF,JCF,CC_FV_UNKF_CF(NM,OICF,OJCF))
-                             CF%LINK_LEV(JCF) = M%CUT_FACE(OICF)%LINK_LEV(OJCF) - 1
-                             CYCLE IAXIS_JCF_LOOP
-                          ELSEIF(CF%AREA(JCF)+M%CUT_FACE(OICF)%AREA(OJCF) > CCVOL_LINK * ACRT) THEN
-                             M%NUNK_F = M%NUNK_F + 1
-                             CALL STORE_UNKF_CF(ICF,JCF,M%NUNK_F); CALL STORE_UNKF_CF(OICF,OJCF,M%NUNK_F)
-                             CF%LINK_LEV(JCF) = -1; M%CUT_FACE(OICF)%LINK_LEV(OJCF) = -1
-                             CYCLE IAXIS_JCF_LOOP
-                          ENDIF
-                      ENDIF
-                   END SELECT IAXIS_OFACE_SELECT
-
-                CASE(CC_ETYPE_CFGAS) IAXIS_IEC_SELECT ! Gas cut-edge.
-                   IECE = CF%EDGE_LIST(2,IEDGE); JECE = CF%EDGE_LIST(3,IEDGE)
-                   II=M%CUT_EDGE(IECE)%IJK(IAXIS); JJ=M%CUT_EDGE(IECE)%IJK(JAXIS); KK=M%CUT_EDGE(IECE)%IJK(KAXIS);
-                   X3AXIS = M%CUT_EDGE(IECE)%IJK(KAXIS+1);
-                   IF (X3AXIS==KAXIS) THEN ! X3AXIS==Edge Axis, X2AXIS = JAXIS
-                      IF(JJ==J-1) THEN ! LOWER cut-face in the J direction.
-                         IIO = I; JJO = J-1; KKO = K ! Indexes of other Cartesian face @ J-1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2,-2, JECE) ! X Face in low J
-                      ELSEIF(JJ==J) THEN ! UPPER cut-face in the J direction.
-                         IIO = I; JJO = J+1; KKO = K ! Indexes of other Cartesian face @ J+1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2, 2, JECE) ! X Face in high J
-                      ENDIF
-                      IF(L2_NBR_SKIP(JAXIS,JJO,I,J,K)) CYCLE IAXIS_IEC_LOOP
-                   ELSEIF (X3AXIS==JAXIS) THEN ! X2AXIS = KAXIS
-                      IF(KK==K-1) THEN ! LOWER cut-face in the K direction.
-                         IIO = I; JJO = J; KKO = K-1 ! Indexes of other Cartesian face @ K-1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2,-1, JECE) ! X Face in low K
-                      ELSEIF(KK==K) THEN ! UPPER cut-face in the K direction.
-                         IIO = I; JJO = J; KKO = K+1 ! Indexes of other Cartesian face @ K+1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2, 1, JECE) ! X Face in high K
-                      ENDIF
-                      IF(L2_NBR_SKIP(KAXIS,KKO,I,J,K)) CYCLE IAXIS_IEC_LOOP
-                   ENDIF
-                   OICF     = OFACE(2); OJCF     = OFACE(3)
-                   IF(OICF<1 .OR. OJCF<1) CYCLE IAXIS_IEC_LOOP
-                   OLO_UNKZ = M%CUT_FACE(OICF)%UNKZ(LOW_IND,OJCF)
-                   OHI_UNKZ = M%CUT_FACE(OICF)%UNKZ(HIGH_IND,OJCF)
-                   IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to other cut-face:
-                       IF(CC_FV_UNKF_CF(NM,OICF,OJCF)>0) THEN
-                          CALL STORE_UNKF_CF(ICF,JCF,CC_FV_UNKF_CF(NM,OICF,OJCF))
-                          CF%LINK_LEV(JCF) = M%CUT_FACE(OICF)%LINK_LEV(OJCF) - 1
-                          CYCLE IAXIS_JCF_LOOP
-                       ELSEIF(CF%AREA(JCF)+M%CUT_FACE(OICF)%AREA(OJCF) > CCVOL_LINK * ACRT) THEN
-                          M%NUNK_F = M%NUNK_F + 1
-                          CALL STORE_UNKF_CF(ICF,JCF,M%NUNK_F); CALL STORE_UNKF_CF(OICF,OJCF,M%NUNK_F)
-                          CF%LINK_LEV(JCF) = -1; M%CUT_FACE(OICF)%LINK_LEV(OJCF) = -1
-                          CYCLE IAXIS_JCF_LOOP
-                       ENDIF
-                   ENDIF
-                END SELECT IAXIS_IEC_SELECT
-             ENDDO IAXIS_IEC_LOOP
-          ENDIF
-       ENDDO IAXIS_JCF_LOOP
-   CASE(JAXIS)
-       IF (TWO_D) CYCLE ICF_LOOP_2
-       ACRT = M%DX(I)*M%DZ(K)
-       JAXIS_JCF_LOOP : DO JCF=1,CF%NFACE
-          IF(CC_FV_UNKF_CF(NM,ICF,JCF)<1) THEN ! .AND. CF%AREA(JCF) < CCVOL_LINK*ACRT+TWENTY_EPSILON_EB) THEN
-             LO_UNKZ = CF%UNKZ(LOW_IND, JCF)
-             HI_UNKZ = CF%UNKZ(HIGH_IND,JCF)
-             ! Loop edges to find next face in X2AXIS, X3AXIS plane:
-             JAXIS_IEC_LOOP : DO IEC=2,CF%CEDGES(1,JCF)+1
-                IEDGE = CF%CEDGES(IEC,JCF)
-                JAXIS_IEC_SELECT : SELECT CASE(CF%EDGE_LIST(1,IEDGE))
-                CASE(CC_ETYPE_RGGAS) JAXIS_IEC_SELECT ! Cut-faces Regular Gas Edge.
-                   LOHI   = CF%EDGE_LIST(2,IEDGE)
-                   X2AXIS = CF%EDGE_LIST(3,IEDGE)
-                   IF (X2AXIS==IAXIS) THEN ! Edge pointed in X3AXIS=KAXIS direction.
-                      X3AXIS = KAXIS; II=I; JJ=J; KK=K; IF(LOHI==LOW_IND) II=I-1
-                      IERC   = M%ECVAR(II,JJ,KK,CC_IDCE,X3AXIS); IF(IERC==0) CYCLE JAXIS_IEC_LOOP ! Index in CC_RCEDGE
-                      IF(LOHI==LOW_IND) THEN ! Indexes of other Cartesian face @ I-1
-                         IIO=I-1; JJO=J; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3,-1) ! Y Face in low I
-                      ELSE ! Indexes of other Cartesian face @ I+1
-                         IIO=I+1; JJO=J; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3, 1) ! Y Face in high I
-                      ENDIF
-                      IF(L2_NBR_SKIP(IAXIS,IIO,I,J,K)) CYCLE JAXIS_IEC_LOOP
-                   ELSEIF(X2AXIS==KAXIS) THEN ! Edge pointed in X3AXIS=IAXIS direction.
-                      X3AXIS = IAXIS; II=I; JJ=J; KK=K; IF(LOHI==LOW_IND) KK=K-1
-                      IERC   = M%ECVAR(II,JJ,KK,CC_IDCE,X3AXIS); IF(IERC==0) CYCLE JAXIS_IEC_LOOP
-                      IF(LOHI==LOW_IND) THEN ! Indexes of other Cartesian face @ K-1
-                         IIO=I; JJO=J; KKO=K-1; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3,-2) ! Y Face in low K
-                      ELSE ! Indexes of other Cartesian face @ K+1
-                         IIO=I; JJO=J; KKO=K+1; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3, 2) ! Y Face in high K
-                      ENDIF
-                      IF(L2_NBR_SKIP(KAXIS,KKO,I,J,K)) CYCLE JAXIS_IEC_LOOP
-                   ENDIF
-                   ! Now look for other potential face and link CC_FV_UNKF_CF(NM,ICF,JCF):
-                   JAXIS_OFACE_SELECT : SELECT CASE (OFACE(1))
-                   CASE(CC_FTYPE_RGGAS) JAXIS_OFACE_SELECT
-                      OLO_UNKZ = M%CCVAR(IIO  ,JJO  ,KKO  ,CC_UNKZ)
-                      OHI_UNKZ = M%CCVAR(IIO  ,JJO+1,KKO  ,CC_UNKZ)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to regular face:
-                         IL=CC_FV_UNKF_REG(NM,IIO,JJO,KKO,X1AXIS)
-                         IF (IL<1) THEN
-                            M%NUNK_F = M%NUNK_F + 1
-                            CALL STORE_UNKF_REG(IIO,JJO,KKO,X1AXIS,M%NUNK_F)
-                            IL=M%NUNK_F
-                         ENDIF
-                         CALL STORE_UNKF_CF(ICF,JCF,IL)
-                         CF%LINK_LEV(JCF) = -1
-                         ! IF(I==35 .AND. J== 1 .AND. K==15) &
-                         ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, RGGAS J= 1=',I,J,K,IIO,JJO,KKO
-                         ! IF(I==35 .AND. J==30 .AND. K==15) &
-                         ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, RGGAS J=30=',I,J,K,IIO,JJO,KKO
-                         CYCLE JAXIS_JCF_LOOP
-                      ENDIF
-                   CASE(CC_FTYPE_RCGAS) JAXIS_OFACE_SELECT
-                      OICF     = OFACE(2)
-                      OLO_UNKZ = M%RC_FACE(OICF)%UNKZ(LOW_IND)
-                      OHI_UNKZ = M%RC_FACE(OICF)%UNKZ(HIGH_IND)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to RC face:
-                         IL=CC_FV_UNKF_RC(NM,OICF)
-                         IF (IL<1) THEN
-                            M%NUNK_F = M%NUNK_F + 1
-                            CALL STORE_UNKF_RC(OICF,M%NUNK_F)
-                            IL=M%NUNK_F
-                         ENDIF
-                         CALL STORE_UNKF_CF(ICF,JCF,IL)
-                         CF%LINK_LEV(JCF) = -1
-                         ! IF(I==35 .AND. J== 1 .AND. K==15) &
-                         ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, RCGAS J= 1=',I,J,K,IIO,JJO,KKO
-                         ! IF(I==35 .AND. J==30 .AND. K==15) &
-                         ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, RCGAS J=30=',I,J,K,IIO,JJO,KKO
-                         CYCLE JAXIS_JCF_LOOP
-                      ENDIF
-                   CASE(CC_FTYPE_CFGAS) JAXIS_OFACE_SELECT
-                      OICF     = OFACE(2); OJCF     = OFACE(3)
-                      OLO_UNKZ = M%CUT_FACE(OICF)%UNKZ(LOW_IND,OJCF)
-                      OHI_UNKZ = M%CUT_FACE(OICF)%UNKZ(HIGH_IND,OJCF)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to other cut-face:
-                          IF(CC_FV_UNKF_CF(NM,OICF,OJCF)>0) THEN
-                             CALL STORE_UNKF_CF(ICF,JCF,CC_FV_UNKF_CF(NM,OICF,OJCF))
-                             CF%LINK_LEV(JCF) = M%CUT_FACE(OICF)%LINK_LEV(OJCF) - 1
-                             ! IF(I==35 .AND. J== 1 .AND. K==15) &
-                             ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS1 J= 1=',I,J,K,IIO,JJO,KKO
-                             ! IF(I==35 .AND. J==30 .AND. K==15) &
-                             ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS1 J=30=',I,J,K,IIO,JJO,KKO
-                             CYCLE JAXIS_JCF_LOOP
-                          ELSEIF(CF%AREA(JCF)+M%CUT_FACE(OICF)%AREA(OJCF) > CCVOL_LINK * ACRT) THEN
-                             M%NUNK_F = M%NUNK_F + 1
-                             CALL STORE_UNKF_CF(ICF,JCF,M%NUNK_F); CALL STORE_UNKF_CF(OICF,OJCF,M%NUNK_F)
-                             CF%LINK_LEV(JCF) = -1; M%CUT_FACE(OICF)%LINK_LEV(OJCF) = -1
-                             ! IF(I==35 .AND. J== 1 .AND. K==15) &
-                             ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS2 J= 1=',I,J,K,IIO,JJO,KKO
-                             ! IF(I==35 .AND. J==30 .AND. K==15) &
-                             ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS2 J=30=',I,J,K,IIO,JJO,KKO
-                             CYCLE JAXIS_JCF_LOOP
-                          ENDIF
-                      ENDIF
-                   END SELECT JAXIS_OFACE_SELECT
-
-                CASE(CC_ETYPE_CFGAS) JAXIS_IEC_SELECT ! Gas cut-edge.
-                   IECE = CF%EDGE_LIST(2,IEDGE);  JECE = CF%EDGE_LIST(3,IEDGE)
-                   II=M%CUT_EDGE(IECE)%IJK(IAXIS); JJ=M%CUT_EDGE(IECE)%IJK(JAXIS); KK=M%CUT_EDGE(IECE)%IJK(KAXIS);
-                   X3AXIS = M%CUT_EDGE(IECE)%IJK(KAXIS+1);
-                   IF (X3AXIS==KAXIS) THEN ! X3AXIS==Edge Axis, X2AXIS = IAXIS
-                      IF(II==I-1) THEN ! LOWER cut-face in the I direction.
-                         IIO = I-1; JJO = J; KKO = K ! Indexes of other Cartesian face @ I-1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2,-1, JECE) ! Y Face in low I
-                      ELSEIF(II==I) THEN ! UPPER cut-face in the I direction.
-                         IIO = I+1; JJO = J; KKO = K ! Indexes of other Cartesian face @ I+1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2, 1, JECE) ! Y Face in high I
-                      ENDIF
-                      IF(L2_NBR_SKIP(IAXIS,IIO,I,J,K)) CYCLE JAXIS_IEC_LOOP
-                   ELSEIF (X3AXIS==IAXIS) THEN ! X2AXIS = KAXIS
-                      IF(KK==K-1) THEN ! LOWER cut-face in the K direction.
-                         IIO = I; JJO = J; KKO = K-1 ! Indexes of other Cartesian face @ K-1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2,-2, JECE) ! Y Face in low K
-                      ELSEIF(KK==K) THEN ! UPPER cut-face in the K direction.
-                         IIO = I; JJO = J; KKO = K+1 ! Indexes of other Cartesian face @ K+1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2, 2, JECE) ! Y Face in high K
-                      ENDIF
-                      IF(L2_NBR_SKIP(KAXIS,KKO,I,J,K)) CYCLE JAXIS_IEC_LOOP
-                   ENDIF
-                   OICF     = OFACE(2); OJCF     = OFACE(3)
-                   IF(OICF<1 .OR. OJCF<1) CYCLE JAXIS_IEC_LOOP
-                   OLO_UNKZ = M%CUT_FACE(OICF)%UNKZ(LOW_IND,OJCF)
-                   OHI_UNKZ = M%CUT_FACE(OICF)%UNKZ(HIGH_IND,OJCF)
-                   IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to other cut-face:
-                       IF(CC_FV_UNKF_CF(NM,OICF,OJCF)>0) THEN
-                          CALL STORE_UNKF_CF(ICF,JCF,CC_FV_UNKF_CF(NM,OICF,OJCF))
-                          CF%LINK_LEV(JCF) = M%CUT_FACE(OICF)%LINK_LEV(OJCF) - 1
-                          ! IF(I==35 .AND. J== 1 .AND. K==15) &
-                          ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS1 J= 1=',I,J,K,IIO,JJO,KKO
-                          ! IF(I==35 .AND. J==30 .AND. K==15) &
-                          ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS1 J=30=',I,J,K,IIO,JJO,KKO
-                          CYCLE JAXIS_JCF_LOOP
-                       ELSEIF(CF%AREA(JCF)+M%CUT_FACE(OICF)%AREA(OJCF) > CCVOL_LINK * ACRT) THEN
-                          M%NUNK_F = M%NUNK_F + 1
-                          CALL STORE_UNKF_CF(ICF,JCF,M%NUNK_F); CALL STORE_UNKF_CF(OICF,OJCF,M%NUNK_F)
-                          CF%LINK_LEV(JCF) = -1; M%CUT_FACE(OICF)%LINK_LEV(OJCF) = -1
-                          ! IF(I==35 .AND. J== 1 .AND. K==15) &
-                          ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS2 J= 1=',I,J,K,IIO,JJO,KKO
-                          ! IF(I==35 .AND. J==30 .AND. K==15) &
-                          ! WRITE(LU_ERR,*) X3AXIS,'ETYPE_RGGAS, CFGAS2 J=30=',I,J,K,IIO,JJO,KKO
-                          CYCLE JAXIS_JCF_LOOP
-                       ENDIF
-                   ENDIF
-                END SELECT JAXIS_IEC_SELECT
-             ENDDO JAXIS_IEC_LOOP
-          ENDIF
-       ENDDO JAXIS_JCF_LOOP
-
-   CASE(KAXIS)
-       ACRT = M%DY(J)*M%DX(I)
-       KAXIS_JCF_LOOP : DO JCF=1,CF%NFACE
-          IF(CC_FV_UNKF_CF(NM,ICF,JCF)<1) THEN ! .AND. CF%AREA(JCF) < CCVOL_LINK*ACRT+TWENTY_EPSILON_EB) THEN
-             LO_UNKZ = CF%UNKZ(LOW_IND, JCF)
-             HI_UNKZ = CF%UNKZ(HIGH_IND,JCF)
-             ! Loop edges to find next face in X2AXIS, X3AXIS plane:
-             KAXIS_IEC_LOOP : DO IEC=2,CF%CEDGES(1,JCF)+1
-                IEDGE = CF%CEDGES(IEC,JCF)
-                KAXIS_IEC_SELECT : SELECT CASE(CF%EDGE_LIST(1,IEDGE))
-                CASE(CC_ETYPE_RGGAS) KAXIS_IEC_SELECT ! Cut-faces Regular Gas Edge.
-                   LOHI   = CF%EDGE_LIST(2,IEDGE)
-                   X2AXIS = CF%EDGE_LIST(3,IEDGE)
-                   IF (X2AXIS==IAXIS) THEN ! Edge pointed in X3AXIS=JAXIS direction.
-                      X3AXIS = JAXIS; II=I; JJ=J; KK=K; IF(LOHI==LOW_IND) II=I-1
-                      IERC   = M%ECVAR(II,JJ,KK,CC_IDCE,X3AXIS); IF(IERC==0) CYCLE KAXIS_IEC_LOOP ! Index in CC_RCEDGE
-                      !WRITE(LU_ERR,*) 'EDGE=',IERC,II,JJ,KK,X3AXIS,', CF=',I,J,K,X1AXIS
-                      IF(LOHI==LOW_IND) THEN ! Indexes of other Cartesian face @ I-1
-                         IIO=I-1; JJO=J; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3,-2) ! Z Face in low I
-                      ELSE ! Indexes of other Cartesian face @ I+1
-                         IIO=I+1; JJO=J; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3, 2) ! Z Face in high I
-                      ENDIF
-                      IF(L2_NBR_SKIP(IAXIS,IIO,I,J,K)) CYCLE KAXIS_IEC_LOOP
-                   ELSEIF(X2AXIS==JAXIS) THEN ! Edge pointed in X3AXIS=IAXIS direction.
-                      X3AXIS = IAXIS; II=I; JJ=J; KK=K; IF(LOHI==LOW_IND) JJ=J-1
-                      IERC   = M%ECVAR(II,JJ,KK,CC_IDCE,X3AXIS); IF(IERC==0) CYCLE KAXIS_IEC_LOOP
-                      IF(LOHI==LOW_IND) THEN ! Indexes of other Cartesian face @ J-1
-                         IIO=I; JJO=J-1; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3,-1) ! Z Face in low J
-                      ELSE ! Indexes of other Cartesian face @ J+1
-                         IIO=I; JJO=J+1; KKO=K; OFACE(1:3) = M%CC_RCEDGE(IERC)%FACE_LIST(1:3, 1) ! Z Face in high J
-                      ENDIF
-                      IF(L2_NBR_SKIP(JAXIS,JJO,I,J,K)) CYCLE KAXIS_IEC_LOOP
-                   ENDIF
-                   ! Now look for other potential face and link CC_FV_UNKF_CF(NM,ICF,JCF):
-                   KAXIS_OFACE_SELECT : SELECT CASE (OFACE(1))
-                   CASE(CC_FTYPE_RGGAS) KAXIS_OFACE_SELECT
-                      OLO_UNKZ = M%CCVAR(IIO  ,JJO  ,KKO  ,CC_UNKZ)
-                      OHI_UNKZ = M%CCVAR(IIO  ,JJO  ,KKO+1,CC_UNKZ)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to regular face:
-                         IL=CC_FV_UNKF_REG(NM,IIO,JJO,KKO,X1AXIS)
-                         IF (IL<1) THEN
-                            M%NUNK_F = M%NUNK_F + 1
-                            CALL STORE_UNKF_REG(IIO,JJO,KKO,X1AXIS,M%NUNK_F)
-                            IL=M%NUNK_F
-                         ENDIF
-                         CALL STORE_UNKF_CF(ICF,JCF,IL)
-                         CF%LINK_LEV(JCF) = -1
-                         CYCLE KAXIS_JCF_LOOP
-                      ENDIF
-                   CASE(CC_FTYPE_RCGAS) KAXIS_OFACE_SELECT
-                      OICF     = OFACE(2)
-                      OLO_UNKZ = M%RC_FACE(OICF)%UNKZ(LOW_IND)
-                      OHI_UNKZ = M%RC_FACE(OICF)%UNKZ(HIGH_IND)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to RC face:
-                         IL=CC_FV_UNKF_RC(NM,OICF)
-                         IF (IL<1) THEN
-                            M%NUNK_F = M%NUNK_F + 1
-                            CALL STORE_UNKF_RC(OICF,M%NUNK_F)
-                            IL=M%NUNK_F
-                         ENDIF
-                         CALL STORE_UNKF_CF(ICF,JCF,IL)
-                         CF%LINK_LEV(JCF) = -1
-                         CYCLE KAXIS_JCF_LOOP
-                      ENDIF
-                   CASE(CC_FTYPE_CFGAS) KAXIS_OFACE_SELECT
-                      OICF     = OFACE(2); OJCF     = OFACE(3)
-                      OLO_UNKZ = M%CUT_FACE(OICF)%UNKZ(LOW_IND,OJCF)
-                      OHI_UNKZ = M%CUT_FACE(OICF)%UNKZ(HIGH_IND,OJCF)
-                      IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to other cut-face:
-                          IF(CC_FV_UNKF_CF(NM,OICF,OJCF)>0) THEN
-                             CALL STORE_UNKF_CF(ICF,JCF,CC_FV_UNKF_CF(NM,OICF,OJCF))
-                             CF%LINK_LEV(JCF) = M%CUT_FACE(OICF)%LINK_LEV(OJCF) - 1
-                             CYCLE KAXIS_JCF_LOOP
-                          ELSEIF(CF%AREA(JCF)+M%CUT_FACE(OICF)%AREA(OJCF) > CCVOL_LINK * ACRT) THEN
-                             M%NUNK_F = M%NUNK_F + 1
-                             CALL STORE_UNKF_CF(ICF,JCF,M%NUNK_F); CALL STORE_UNKF_CF(OICF,OJCF,M%NUNK_F)
-                             CF%LINK_LEV(JCF) = -1; M%CUT_FACE(OICF)%LINK_LEV(OJCF) = -1
-                             CYCLE KAXIS_JCF_LOOP
-                          ENDIF
-                      ENDIF
-                   END SELECT KAXIS_OFACE_SELECT
-
-                CASE(CC_ETYPE_CFGAS) KAXIS_IEC_SELECT ! Gas cut-edge.
-                   IECE = CF%EDGE_LIST(2,IEDGE);  JECE = CF%EDGE_LIST(3,IEDGE)
-                   II=M%CUT_EDGE(IECE)%IJK(IAXIS); JJ=M%CUT_EDGE(IECE)%IJK(JAXIS); KK=M%CUT_EDGE(IECE)%IJK(KAXIS);
-                   X3AXIS = M%CUT_EDGE(IECE)%IJK(KAXIS+1);
-                   IF (X3AXIS==JAXIS) THEN ! X3AXIS==Edge Axis, X2AXIS = IAXIS
-                      IF(II==I-1) THEN ! LOWER cut-face in the I direction.
-                         IIO = I-1; JJO = J; KKO = K ! Indexes of other Cartesian face @ I-1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2,-2, JECE) ! Z Face in low I
-                      ELSEIF(II==I) THEN ! UPPER cut-face in the I direction.
-                         IIO = I+1; JJO = J; KKO = K ! Indexes of other Cartesian face @ I+1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2, 2, JECE) ! Z Face in high I
-                      ENDIF
-                      IF(L2_NBR_SKIP(IAXIS,IIO,I,J,K)) CYCLE KAXIS_IEC_LOOP
-                   ELSEIF (X3AXIS==IAXIS) THEN ! X2AXIS = JAXIS
-                      IF(JJ==J-1) THEN ! LOWER cut-face in the J direction.
-                         IIO = I; JJO = J-1; KKO = K ! Indexes of other Cartesian face @ J-1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2,-1, JECE) ! Z Face in low J
-                      ELSEIF(JJ==J) THEN ! UPPER cut-face in the J direction.
-                         IIO = I; JJO = J+1; KKO = K ! Indexes of other Cartesian face @ J+1
-                         OFACE(2:3) = M%CUT_EDGE(IECE)%FACE_LIST(1:2, 1, JECE) ! Z Face in high J
-                      ENDIF
-                      IF(L2_NBR_SKIP(JAXIS,JJO,I,J,K)) CYCLE KAXIS_IEC_LOOP
-                   ENDIF
-                   OICF     = OFACE(2); OJCF     = OFACE(3)
-                   IF(OICF<1 .OR. OJCF<1) CYCLE KAXIS_IEC_LOOP
-                   OLO_UNKZ = M%CUT_FACE(OICF)%UNKZ(LOW_IND,OJCF)
-                   OHI_UNKZ = M%CUT_FACE(OICF)%UNKZ(HIGH_IND,OJCF)
-                   IF(LO_UNKZ==OLO_UNKZ .OR. HI_UNKZ==OHI_UNKZ .OR. ALL_FLG) THEN ! Link cut-face to other cut-face:
-                       IF(CC_FV_UNKF_CF(NM,OICF,OJCF)>0) THEN
-                          CALL STORE_UNKF_CF(ICF,JCF,CC_FV_UNKF_CF(NM,OICF,OJCF))
-                          CF%LINK_LEV(JCF) = M%CUT_FACE(OICF)%LINK_LEV(OJCF) - 1
-                          CYCLE KAXIS_JCF_LOOP
-                       ELSEIF(CF%AREA(JCF)+M%CUT_FACE(OICF)%AREA(OJCF) > CCVOL_LINK * ACRT) THEN
-                          M%NUNK_F = M%NUNK_F + 1
-                          CALL STORE_UNKF_CF(ICF,JCF,M%NUNK_F); CALL STORE_UNKF_CF(OICF,OJCF,M%NUNK_F)
-                          CF%LINK_LEV(JCF) = -1; M%CUT_FACE(OICF)%LINK_LEV(OJCF) = -1
-                          CYCLE KAXIS_JCF_LOOP
-                       ENDIF
-                   ENDIF
-                END SELECT KAXIS_IEC_SELECT
-             ENDDO KAXIS_IEC_LOOP
-          ENDIF
-       ENDDO KAXIS_JCF_LOOP
-   END SELECT
-
-ENDDO ICF_LOOP_2
-
-ELSE
 
 ICF_LOOP_3 : DO ICF=1,M%N_CUTFACE_MESH
    CF => M%CUT_FACE(ICF); IF(CF%STATUS/=CC_GASPHASE) CYCLE ICF_LOOP_3
@@ -28248,8 +27831,6 @@ ENDDO ICF_LOOP_3
 IF (L2_DEFER) THEN
    L2_DEFER = .FALSE.
    CALL APPLY_L2_PICKS
-ENDIF
-
 ENDIF
 
 END SUBROUTINE LINK_FACES_TO_NEIGHBORS
