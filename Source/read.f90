@@ -2084,9 +2084,10 @@ H_F_REFERENCE_TEMPERATURE = H_F_REFERENCE_TEMPERATURE + TMPM
 
 IF (HVAC_MASS_TRANSPORT_CELL_L > 0._EB) HVAC_MASS_TRANSPORT = .TRUE.
 
-! CV solver scope is 0 or 2. Cross-mesh linking follows scope 2.
-IF (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_IDENTITY .AND. CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_CROSS_MESH) THEN
-   WRITE(MESSAGE,'(A,I0)') 'ERROR: CC_CV_SOLVER_SCOPE must be 0 or 2; got ',CC_CV_SOLVER_SCOPE
+! CV solver scope is 2: the legacy scheme (scope 0) has been removed. Cross-mesh linking follows scope 2.
+IF (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_CROSS_MESH) THEN
+   WRITE(MESSAGE,'(A,I0,A)') 'ERROR: CC_CV_SOLVER_SCOPE must be 2 (scope 0, the legacy scheme, was removed); got ', &
+      CC_CV_SOLVER_SCOPE,'.'
    CALL SHUTDOWN(MESSAGE) ; RETURN
 ENDIF
 CC_CV_H_PER_MEMBER = CC_CV_H_PER_MEMBER .AND. &

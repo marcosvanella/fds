@@ -5481,10 +5481,7 @@ INTEGER, PARAMETER :: INT_RHO0_IND=1, INT_WCEN_IND=3
 INTEGER, SAVE ::      NQT2C = INT_P_IND+2   ! The +2 is because we pass RHO0, WCEN.
 
 ! Max numbers of link attempts for small faces and cut-cells:
-INTEGER, PARAMETER :: N_LINK_ATTMP = 1, N_LINK_ATTMP_F=50
-! Number of digits in loose precision used in normals definition for linking.
-INTEGER, PARAMETER :: LINK_DIGITS = 8
-REAL(EB),PARAMETER :: LINK_FCT    = REAL(10**LINK_DIGITS,EB)
+INTEGER, PARAMETER :: N_LINK_ATTMP_F=50
 
 ! Areas per SURF and GEOM:
 REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: FDS_AREA_GEOM
@@ -5494,8 +5491,6 @@ INTEGER, PARAMETER :: NOT_BLOCKED        = 0
 INTEGER, PARAMETER :: BLOCKED_SMALL_CELL = 1
 INTEGER, PARAMETER :: BLOCKED_SPLIT_CELL = 2
 INTEGER, PARAMETER :: BLOCKED_REFI_INTER = 3
-INTEGER, PARAMETER :: BLOCKED_CAVITY_CELL= 4
-INTEGER, PARAMETER :: BLOCKED_UNLINK_CELL= 5
 INTEGER, PARAMETER :: BLOCKED_SPECIAL_CELL=6
 
 ! Future CV merge/block policy parameters:
@@ -5679,33 +5674,6 @@ SUBROUTINE EXCHANGE_CC_NOADVANCE_INFO
 
 END SUBROUTINE EXCHANGE_CC_NOADVANCE_INFO
 
-! ----------------------- EXCHANGE_CC_ELIMINATED_INFO ---------------------------
-
-SUBROUTINE EXCHANGE_CC_ELIMINATED_INFO
-
-   INTEGER :: NM,ICELL,NPACK
-   TYPE(MESH_TYPE), POINTER :: M
-   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-      CALL POINT_TO_MESH(NM)
-      M => MESHES(NM)
-      NPACK = M%N_CC_ELIMINATED
-      M%N_CC_BLOCKED = NPACK
-      IF (NPACK>0) THEN
-         IF(ALLOCATED(M%XYZ_CC_BLOCKED)) DEALLOCATE(M%XYZ_CC_BLOCKED)
-         IF(ALLOCATED(M%JBT_CC_BLOCKED)) DEALLOCATE(M%JBT_CC_BLOCKED)
-         ALLOCATE(M%XYZ_CC_BLOCKED(3,NPACK))
-         ALLOCATE(M%JBT_CC_BLOCKED(4,NPACK))
-         DO ICELL=1,NPACK
-            M%XYZ_CC_BLOCKED(1:3,ICELL) = M%XYZ_CC_ELIMINATED(1:3,ICELL)
-            M%JBT_CC_BLOCKED(1:4,ICELL) = M%JBT_CC_ELIMINATED(1:4,ICELL)
-         ENDDO
-      ELSE
-         M%N_CC_BLOCKED = 0
-      ENDIF
-   ENDDO
-   CALL EXCHANGE_CC_BLOCKED_LISTS
-END SUBROUTINE EXCHANGE_CC_ELIMINATED_INFO
-
 ! ----------------------- EXCHANGE_CC_BLOCKED_LISTS -----------------------------
 
 SUBROUTINE EXCHANGE_CC_BLOCKED_LISTS
@@ -5861,601 +5829,6 @@ END SUBROUTINE REGISTER_ELIMINATED_CUTCELL
 
 
 ! -------------------------- GET_CELL_LINK_INFO -----------------------------------
-
-SUBROUTINE CC_GRID_RESET_LINK_STATE_AND_TAG_SLIVERS(NM)
-
-INTEGER, INTENT(IN) :: NM
-
-INTEGER :: ICC,JCC,I,J,K,DUM,AX_MIN,AX_OTHERS(2)
-REAL(EB) :: XYZCELL(IAXIS:KAXIS,LOW_IND:HIGH_IND),MINMAX_XYZ_CC(IAXIS:KAXIS,LOW_IND:HIGH_IND),CELL_DELTA(IAXIS:KAXIS)
-LOGICAL :: BLOCK_SLIM_IF,SOLID_FACES
-TYPE (MESH_TYPE), POINTER :: M
-TYPE (CC_CUTCELL_TYPE), POINTER :: CC
-
-M => MESHES(NM)
-
-! Initialize UNKZ, used here to define if cell has been noted in linking hierarchy. Assume CCVAR has been allocated:
-M%CCVAR(:,:,:,CC_UNKZ) = CC_UNDEFINED
-DO ICC=1,M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH
-   CC => M%CUT_CELL(ICC)
-   I = CC%IJK(IAXIS)
-   J = CC%IJK(JAXIS)
-   K = CC%IJK(KAXIS)
-   ! Test for sliver trapped cells blocking.
-   XYZCELL(IAXIS,LOW_IND) = XFACE(I-1); XYZCELL(IAXIS,HIGH_IND) = XFACE(I)
-   XYZCELL(JAXIS,LOW_IND) = YFACE(J-1); XYZCELL(JAXIS,HIGH_IND) = YFACE(J)
-   XYZCELL(KAXIS,LOW_IND) = ZFACE(K-1); XYZCELL(KAXIS,HIGH_IND) = ZFACE(K)
-   MINMAX_XYZ_CC(IAXIS:KAXIS,LOW_IND) =  HUGE(EB)
-   MINMAX_XYZ_CC(IAXIS:KAXIS,HIGH_IND)= -HUGE(EB)
-   DO JCC=1,CC%NCELL
-      ! Get cut-cell bounding box:
-      CALL CUT_CELL_BOUNDING_BOX(NM,ICC,JCC,XYZCELL,MINMAX_XYZ_CC)
-      ! Perform tests:
-      DO DUM=IAXIS,KAXIS
-         CELL_DELTA(DUM) = ABS(MINMAX_XYZ_CC(DUM,HIGH_IND)-MINMAX_XYZ_CC(DUM,LOW_IND))
-      ENDDO
-      ! Axis with minimum width:
-      AX_MIN = MINLOC(CELL_DELTA(IAXIS:KAXIS),DIM=1)
-      SELECT CASE(AX_MIN)
-      CASE(IAXIS); AX_OTHERS(1:2) = (/ JAXIS, KAXIS /); SOLID_FACES = ALL(M%FCVAR(I-1:I,J,K,CC_FGSC,IAXIS)==CC_SOLID)
-      CASE(JAXIS); AX_OTHERS(1:2) = (/ IAXIS, KAXIS /); SOLID_FACES = ALL(M%FCVAR(I,J-1:J,K,CC_FGSC,JAXIS)==CC_SOLID)
-      CASE(KAXIS); AX_OTHERS(1:2) = (/ IAXIS, JAXIS /); SOLID_FACES = ALL(M%FCVAR(I,J,K-1:K,CC_FGSC,KAXIS)==CC_SOLID)
-      END SELECT
-      BLOCK_SLIM_IF = (CELL_DELTA(AX_MIN)<10._EB*MIN_LENGTH_FACTOR*CELL_DELTA(AX_OTHERS(1))) .AND. &
-                      (CELL_DELTA(AX_MIN)<10._EB*MIN_LENGTH_FACTOR*CELL_DELTA(AX_OTHERS(2)))
-      IF(BLOCK_SLIM_IF .AND. SOLID_FACES) CC%NOADVANCE(JCC) = BLOCKED_SMALL_CELL
-   ENDDO
-   CC%UNKZ(:) = CC_UNDEFINED
-   DO JCC=1,CC%NCELL
-      IF (CC%NOADVANCE(JCC)>0) CC%IJK_LINK(1,JCC) = CC_SOLID
-   ENDDO
-ENDDO
-
-END SUBROUTINE CC_GRID_RESET_LINK_STATE_AND_TAG_SLIVERS
-
-SUBROUTINE CC_GRID_SEED_LINK_UNKZ(NM)
-
-INTEGER, INTENT(IN) :: NM
-
-INTEGER :: ICC,JCC,I,J,K,INGH,JNGH,KNGH
-REAL(EB) :: CCVOL_THRES
-TYPE (MESH_TYPE), POINTER :: M
-
-M => MESHES(NM)
-
-! Loop on Cartesian cells, number unknowns for cells type CC_CUTCFE and surrounding CC_GASPHASE:
-DO K=0,M%KBP1
-   DO J=0,M%JBP1
-      DO I=0,M%IBP1
-         IF (M%CCVAR(I,J,K,CC_CGSC) /= CC_CUTCFE) CYCLE
-         ! First add the cut-cell
-         ICC = M%CCVAR(I,J,K,CC_IDCC)
-         IF (ICC <= M%N_CUTCELL_MESH .AND. .NOT. M%CELL(M%CELL_INDEX(I,J,K))%SOLID) THEN ! Don't number GC cut-cells,
-                                                                                           ! or cutcells inside an OBST.
-            CCVOL_THRES = CCVOL_LINK * (M%DX(I)*M%DY(J)*M%DZ(K))
-            DO JCC=1,M%CUT_CELL(ICC)%NCELL
-               IF (M%CUT_CELL(ICC)%NOADVANCE(JCC)>0) CYCLE
-               IF (M%CUT_CELL(ICC)%VOLUME(JCC) > CCVOL_THRES) M%CUT_CELL(ICC)%UNKZ(JCC) = 1
-            ENDDO
-         ENDIF
-         ! Run over neighbors: case 27 cells. Only internal cells for the mesh in the stencil (I-1:I+1,J-1:J+1,K-1:K+1)
-         ! around Cartesian cell I,J,K of type CC_CUTCFE:
-         DO KNGH=K-1,K+1
-            IF ( (KNGH < 1) .OR. (KNGH > M%KBAR) ) CYCLE
-            DO JNGH=J-1,J+1
-               IF ( (JNGH < 1) .OR. (JNGH > M%JBAR) ) CYCLE
-               DO INGH=I-1,I+1
-                  ! Either not GASPHASE or already counted:
-                  IF ((M%CCVAR(INGH,JNGH,KNGH,CC_CGSC)/=CC_GASPHASE) .OR. (M%CCVAR(INGH,JNGH,KNGH,CC_UNKZ)>0)) CYCLE
-                  IF ( (INGH < 1) .OR. (INGH > M%IBAR) ) CYCLE
-                  IF (M%CELL(CELL_INDEX(INGH,JNGH,KNGH))%SOLID) CYCLE
-                  M%CCVAR(INGH,JNGH,KNGH,CC_UNKZ) = 1
-               ENDDO
-            ENDDO
-         ENDDO
-      ENDDO
-   ENDDO
-ENDDO
-
-END SUBROUTINE CC_GRID_SEED_LINK_UNKZ
-
-SUBROUTINE GET_ICC2_JCC2(NM,ICC,IFACE,INXT,JNXT,KNXT,ICC2,JCC2)
-
-INTEGER, INTENT(IN) :: NM,ICC,IFACE,INXT,JNXT,KNXT
-INTEGER, INTENT(OUT):: ICC2, JCC2
-
-INTEGER :: IFC, IFACE2
-TYPE (MESH_TYPE), POINTER :: M
-TYPE(CC_CUTCELL_TYPE), POINTER :: CC2
-
-M => MESHES(NM)
-
-ICC2 = 0
-JCC2 = 0
-ICC2=M%CCVAR(INXT,JNXT,KNXT,CC_IDCC)
-IF (ICC2<=0) RETURN
-CC2 => M%CUT_CELL(ICC2)
-DO JCC2=1,CC2%NCELL
-   ! Loop faces and test:
-   DO IFC=1,CC2%CCELEM(1,JCC2)
-      IFACE2 = CC2%CCELEM(IFC+1,JCC2)
-      ! If face type in face_list is not CC_FTYPE_RCGAS, drop:
-      IF(CC2%FACE_LIST(1,IFACE2) /= CC_FTYPE_RCGAS) CYCLE
-      ! Does X1AXIS match and LOWHIGH are different?
-      IF(CC2%FACE_LIST(3,IFACE2) /= M%CUT_CELL(ICC)%FACE_LIST(3,IFACE)) CYCLE ! X1AXIS is different.
-      IF(ABS(CC2%FACE_LIST(2,IFACE2)  - M%CUT_CELL(ICC)%FACE_LIST(2,IFACE)) < 1) CYCLE ! Same LOWHIGH.
-      ! Found the cut-cell ICC2,JCC2 on the other side of IFACE for cut-cell ICC,JCC.
-      RETURN
-   ENDDO
-ENDDO
-JCC2=0
-RETURN
-END SUBROUTINE GET_ICC2_JCC2
-
-SUBROUTINE GET_CELL_LINK_INFO(NM)
-
-! Small cell linking subroutine in the mesh. Builds linking information for cutcell ICC,JCC:
-! CUT_CELL(ICC)%IJK_LINK(1:KAXIS+2,JCC) of cell linked to, and CUT_CELL(ICC)%LINK_LEV(JCC) level within link tree.
-
-INTEGER, INTENT(IN) :: NM
-
-! Local Variables:
-INTEGER :: ICC,JCC,ICC2,JCC2,JCC_LNK,I,J,K,I_LNK,J_LNK,K_LNK,IFC,IFC2,IFACE,IFACE2,IFACE3,IBOD,IWSEL,VAL_UNKZ,&
-           LINK_ITER,X1AXIS,ILH,INRM(1:3),DUM,LNK_LEV,ULINK_COUNT,LINK_LEV_UP
-REAL(EB):: AREA,AF,NRML(IAXIS:KAXIS),VAL_CVOL,CCVOL_THRES
-LOGICAL :: QUITLINK_FLG,CRTCELL_FLG,MASK(IAXIS:KAXIS)
-CHARACTER(MESSAGE_LENGTH) :: UNLINKED_FILE
-INTEGER, SAVE :: LU_UNLNK
-LOGICAL, SAVE :: UNLINKED_1ST_CALL=.TRUE.
-TYPE (MESH_TYPE), POINTER :: M
-TYPE (CC_CUTCELL_TYPE), POINTER :: CC
-
-M => MESHES(NM)
-
-CALL CC_GRID_RESET_LINK_STATE_AND_TAG_SLIVERS(NM)
-CALL CC_GRID_SEED_LINK_UNKZ(NM)
-
-! Now link small cells to surrounding cells in the mesh:
-! NOTE: This scheme links two unknowns local to the mesh, therefore parallel consistency is not maintained.
-! 1. Try linking them to adjacent regular cell with UNKZ > 0. Attempt going in surface normal direction first.
-! 2. Try linking to adjacent cut-cell with UNKZ > 0. Attempt going in surface normal direction first.
-! 3. If cut-cell could not be linked after N_LINK_ATTMP, block it.
-LINK_ITER = 0; LINK_LEV_UP = 0
-LINK_LOOP : DO ! Cut-cell linking loop for small cells. -> Algo defined by CCVOL_LINK.
-   QUITLINK_FLG = .TRUE.
-
-   IF (LINK_ITER==0) THEN
-   ICC_LOOP_1 : DO ICC=1,M%N_CUTCELL_MESH
-      CC => M%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-      IF (M%CELL(M%CELL_INDEX(I,J,K))%SOLID) CYCLE
-      CCVOL_THRES = CCVOL_LINK * (M%DX(I)*M%DY(J)*M%DZ(K))
-
-      JCC_LOOP_1 : DO JCC=1,CC%NCELL
-         IF ( CC%NOADVANCE(JCC)>0 .OR. CC%UNKZ(JCC)>0 ) CYCLE
-         CRTCELL_FLG = .FALSE.
-         VAL_UNKZ = CC_UNDEFINED
-         VAL_CVOL = CCVOL_THRES
-         ! Find area averaged body surface normal:
-         NRML(IAXIS:KAXIS) = 0._EB; AREA = 0._EB
-         DO IFC=1,CC%CCELEM(1,JCC)
-            IFACE   = CC%CCELEM(IFC+1,JCC)
-            IF(CC%FACE_LIST(1,IFACE)/=CC_FTYPE_CFINB) CYCLE
-            IFC2    = CC%FACE_LIST(4,IFACE)
-            IFACE2  = CC%FACE_LIST(5,IFACE)
-            IBOD    = M%CUT_FACE(IFC2)%BODTRI(1,IFACE2)
-            IWSEL   = M%CUT_FACE(IFC2)%BODTRI(2,IFACE2)
-            IF (.NOT.VALID_GEOMETRY_FACE_DONOR(IBOD,IWSEL)) CYCLE
-            AF      = M%CUT_FACE(IFC2)%AREA(    IFACE2)
-            NRML(IAXIS:KAXIS) = NRML(IAXIS:KAXIS) + GEOMETRY(IBOD)%FACES_NORMAL(IAXIS:KAXIS,IWSEL)*AF
-            AREA    = AREA + AF
-         ENDDO
-
-         ! With the surface normal search for a Regular Gasphase face in that direction.
-         AREA_IF_1 : IF (AREA > TWENTY_EPSILON_EB) THEN
-            NRML = NRML / AREA ! Normalize unit vector:
-            ! Normalize NRML vector to LINK_DIGITS:
-            DO DUM=IAXIS,KAXIS
-               NRML(DUM) = REAL(INT(LINK_FCT*NRML(DUM)),EB)/LINK_FCT
-            ENDDO
-            MASK(IAXIS:KAXIS) = .TRUE.
-            INRM(1) = MAXLOC(ABS(NRML(IAXIS:KAXIS)),MASK=MASK,DIM=1); MASK(INRM(1))=.FALSE.
-            INRM(2) = MAXLOC(ABS(NRML(IAXIS:KAXIS)),MASK=MASK,DIM=1); MASK(INRM(2))=.FALSE.
-            INRM(3) = MAXLOC(ABS(NRML(IAXIS:KAXIS)),MASK=MASK,DIM=1)
-            AXIS_LOOP_1 : DO DUM=IAXIS,KAXIS
-               X1AXIS=INRM(DUM)
-               IFC_LOOP_1 : DO IFC=1,CC%CCELEM(1,JCC)
-                  IFACE   = CC%CCELEM(IFC+1,JCC)
-                  ILH     = 2*CC%FACE_LIST(2,IFACE) - 3 ! -1 for LOW_IND, 1 for HIGH_IND
-                  IF( (X1AXIS /= CC%FACE_LIST(3,IFACE)) .OR. &
-                      (CC%FACE_LIST(1,IFACE) /= CC_FTYPE_RCGAS) .OR. &
-                      (ILH /= INT(SIGN(1._EB,NRML(X1AXIS)))) ) CYCLE IFC_LOOP_1
-                  SELECT CASE(X1AXIS)
-                  CASE(IAXIS)
-                     I_LNK = I+ILH; J_LNK = J; K_LNK = K
-                     IF(M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ) > 0) THEN ! Regular Cartesian Cell
-                        VAL_UNKZ = M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ)
-                        CRTCELL_FLG = .TRUE.
-                     ENDIF
-                  CASE(JAXIS)
-                     I_LNK = I; J_LNK = J+ILH; K_LNK = K
-                     IF(M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ) > 0) THEN ! Regular Cartesian Cell
-                        VAL_UNKZ = M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ)
-                        CRTCELL_FLG = .TRUE.
-                     ENDIF
-                  CASE(KAXIS)
-                     I_LNK = I; J_LNK = J; K_LNK = K+ILH
-                     IF(M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ) > 0) THEN ! Regular Cartesian Cell
-                        VAL_UNKZ = M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ)
-                        CRTCELL_FLG = .TRUE.
-                     ENDIF
-                  END SELECT
-                  IF ( CRTCELL_FLG ) EXIT AXIS_LOOP_1
-               ENDDO IFC_LOOP_1
-            ENDDO AXIS_LOOP_1
-         ENDIF AREA_IF_1
-
-         ! If not successful try any Regular Gasphase face.
-         ! Small cells, get CC_UNKZ from a large cell neighbor:
-         IF (.NOT. CRTCELL_FLG) THEN
-            IFC_LOOP_2 : DO IFC=1,CC%CCELEM(1,JCC)
-               IFACE   = CC%CCELEM(IFC+1,JCC)
-               ILH     = 2*CC%FACE_LIST(2,IFACE) - 3
-               IF(CC%FACE_LIST(1,IFACE)/=CC_FTYPE_RCGAS) CYCLE IFC_LOOP_2
-               X1AXIS  = CC%FACE_LIST(3,IFACE)
-               SELECT CASE(X1AXIS)
-               CASE(IAXIS)
-                  I_LNK = I+ILH; J_LNK = J; K_LNK = K
-                  IF(M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ) > 0) THEN ! Regular Cartesian Cell
-                     VAL_UNKZ = M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ)
-                     CRTCELL_FLG = .TRUE.
-                  ENDIF
-               CASE(JAXIS)
-                  I_LNK = I; J_LNK = J+ILH; K_LNK = K
-                  IF(M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ) > 0) THEN ! Regular Cartesian Cell
-                     VAL_UNKZ = M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ)
-                     CRTCELL_FLG = .TRUE.
-                  ENDIF
-               CASE(KAXIS)
-                  I_LNK = I; J_LNK = J; K_LNK = K+ILH
-                  IF(M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ) > 0) THEN ! Regular Cartesian Cell
-                     VAL_UNKZ = M%CCVAR(I_LNK,J_LNK,K_LNK,CC_UNKZ)
-                     CRTCELL_FLG = .TRUE.
-                  ENDIF
-               END SELECT
-               IF ( CRTCELL_FLG ) EXIT IFC_LOOP_2
-            ENDDO IFC_LOOP_2
-         ENDIF
-         IF (VAL_UNKZ>0) THEN
-            CC%FACE_LIST(6,IFACE)      = INTEGER_ONE ! This face is shared with master.
-            CC%UNKZ(JCC) = VAL_UNKZ     !(/    Cell Type,     I,     J,     K, JCC_LNK /)
-            CC%IJK_LINK(1:KAXIS+2,JCC) = (/ CC_GASPHASE, I_LNK, J_LNK, K_LNK,       0 /)
-            CC%LINK_LEV(JCC)           = -1 ! One link hierarchy level below regular cells (at LNK_LEV=0).
-         ENDIF
-      ENDDO JCC_LOOP_1
-   ENDDO ICC_LOOP_1
-   ENDIF
-
-
-   ! Then attempt to connect to large cut-cells, or already connected small cells (CUT_CELL(ICC)%UNKZ(JCC) > 0):
-   ICC_LOOP_2 : DO ICC=1,M%N_CUTCELL_MESH
-      CC => M%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-      IF (M%CELL(M%CELL_INDEX(I,J,K))%SOLID) CYCLE
-      CCVOL_THRES = CCVOL_LINK * (M%DX(I)*M%DY(J)*M%DZ(K))
-
-      JCC_LOOP_2 : DO JCC=1,CC%NCELL
-         IF ( CC%NOADVANCE(JCC)>0 .OR. CC%UNKZ(JCC)>0 ) CYCLE
-         VAL_UNKZ = CC_UNDEFINED
-         VAL_CVOL = -GEOMEPS
-
-         ! Find area averaged body surface normal:
-         NRML(IAXIS:KAXIS) = 0._EB; AREA = 0._EB
-         DO IFC=1,CC%CCELEM(1,JCC)
-            IFACE   = CC%CCELEM(IFC+1,JCC)
-            IF(CC%FACE_LIST(1,IFACE)/=CC_FTYPE_CFINB) CYCLE
-            IFC2    = CC%FACE_LIST(4,IFACE)
-            IFACE2  = CC%FACE_LIST(5,IFACE)
-            IBOD    = M%CUT_FACE(IFC2)%BODTRI(1,IFACE2)
-            IWSEL   = M%CUT_FACE(IFC2)%BODTRI(2,IFACE2)
-            IF (.NOT.VALID_GEOMETRY_FACE_DONOR(IBOD,IWSEL)) CYCLE
-            AF      = M%CUT_FACE(IFC2)%AREA(    IFACE2)
-            NRML(IAXIS:KAXIS) = NRML(IAXIS:KAXIS) + GEOMETRY(IBOD)%FACES_NORMAL(IAXIS:KAXIS,IWSEL)*AF
-            AREA    = AREA + AF
-         ENDDO
-
-         AREA_IF_2 : IF (AREA > TWENTY_EPSILON_EB) THEN
-            NRML = NRML / AREA ! Normalize unit vector:
-            ! Normalize NRML vector to LINK_DIGITS:
-            DO DUM=IAXIS,KAXIS
-               NRML(DUM) = REAL(INT(LINK_FCT*NRML(DUM)),EB)/LINK_FCT
-            ENDDO
-            MASK(IAXIS:KAXIS) = .TRUE.
-            INRM(1) = MAXLOC(ABS(NRML(IAXIS:KAXIS)),MASK=MASK,DIM=1); MASK(INRM(1))=.FALSE.
-            INRM(2) = MAXLOC(ABS(NRML(IAXIS:KAXIS)),MASK=MASK,DIM=1); MASK(INRM(2))=.FALSE.
-            INRM(3) = MAXLOC(ABS(NRML(IAXIS:KAXIS)),MASK=MASK,DIM=1)
-            AXIS_LOOP_2 : DO DUM=IAXIS,KAXIS
-               X1AXIS=INRM(DUM)
-               IFC_LOOP_3 : DO IFC=1,CC%CCELEM(1,JCC)
-                  IFACE   = CC%CCELEM(IFC+1,JCC)
-                  IF((CC%FACE_LIST(1,IFACE)==CC_FTYPE_CFINB) .OR. &
-                     (CC%FACE_LIST(1,IFACE)==CC_FTYPE_SVERT)) CYCLE IFC_LOOP_3
-                  ILH     = 2*CC%FACE_LIST(2,IFACE) - 3 ! -1 for LOW_IND, 1 for HIGH_IND
-                  IF( (X1AXIS /= CC%FACE_LIST(3,IFACE)) .OR. &
-                      (ILH /= INT(SIGN(1._EB,NRML(X1AXIS)))) ) CYCLE IFC_LOOP_3
-                  SELECT CASE(X1AXIS)
-                  CASE(IAXIS)
-                     IF( (I+ILH < 1) .OR. (I+ILH > M%IBAR) ) CYCLE IFC_LOOP_3 ! Drop if outside the mesh.
-                  CASE(JAXIS)
-                     IF( (J+ILH < 1) .OR. (J+ILH > M%JBAR) ) CYCLE IFC_LOOP_3
-                  CASE(KAXIS)
-                     IF( (K+ILH < 1) .OR. (K+ILH > M%KBAR) ) CYCLE IFC_LOOP_3
-                  END SELECT
-                  SELECT CASE(CC%FACE_LIST(1,IFACE)) ! 1. Check if a surrounding cell is a regular cell:
-                  CASE(CC_FTYPE_RCGAS) ! REGULAR GASPHASE
-                     SELECT CASE(X1AXIS)
-                     CASE(IAXIS)
-                        IF(M%CCVAR(I+ILH,J,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                           CALL GET_ICC2_JCC2(NM,ICC,IFACE,I+ILH,J,K,ICC2,JCC2)
-                           IF(ANY((/ICC2,JCC2/)==0))CYCLE IFC_LOOP_3; IF(M%CUT_CELL(ICC2)%UNKZ(JCC2)<1)CYCLE IFC_LOOP_3
-                           IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_3
-                           I_LNK = I+ILH; J_LNK = J; K_LNK = K; JCC_LNK = JCC2
-                           VAL_UNKZ = M%CUT_CELL(ICC2)%UNKZ(JCC2); LNK_LEV=M%CUT_CELL(ICC2)%LINK_LEV(JCC2);
-                           EXIT AXIS_LOOP_2
-                        ENDIF
-                     CASE(JAXIS)
-                        IF(M%CCVAR(I,J+ILH,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                           CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J+ILH,K,ICC2,JCC2)
-                           IF(ANY((/ICC2,JCC2/)==0))CYCLE IFC_LOOP_3; IF(M%CUT_CELL(ICC2)%UNKZ(JCC2)<1)CYCLE IFC_LOOP_3
-                           IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_3
-                           I_LNK = I; J_LNK = J+ILH; K_LNK = K; JCC_LNK = JCC2
-                           VAL_UNKZ = M%CUT_CELL(ICC2)%UNKZ(JCC2); LNK_LEV=M%CUT_CELL(ICC2)%LINK_LEV(JCC2);
-                           EXIT AXIS_LOOP_2
-                        ENDIF
-                     CASE(KAXIS)
-                        IF(M%CCVAR(I,J,K+ILH,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                           CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J,K+ILH,ICC2,JCC2)
-                           IF(ANY((/ICC2,JCC2/)==0))CYCLE IFC_LOOP_3; IF(M%CUT_CELL(ICC2)%UNKZ(JCC2)<1)CYCLE IFC_LOOP_3
-                           IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_3
-                           I_LNK = I; J_LNK = J; K_LNK = K+ILH; JCC_LNK = JCC2
-                           VAL_UNKZ=M%CUT_CELL(ICC2)%UNKZ(JCC2); LNK_LEV=M%CUT_CELL(ICC2)%LINK_LEV(JCC2);
-                           EXIT AXIS_LOOP_2
-                        ENDIF
-                     END SELECT
-                  CASE(CC_FTYPE_CFGAS) ! 2. Check for large surrounding cut-cells:
-                     IFC2    = CC%FACE_LIST(4,IFACE)
-                     IFACE2  = CC%FACE_LIST(5,IFACE)
-                     ICC2    = M%CUT_FACE(IFC2)%CELL_LIST(2,CC%FACE_LIST(2,IFACE),IFACE2)
-                     JCC2    = M%CUT_FACE(IFC2)%CELL_LIST(3,CC%FACE_LIST(2,IFACE),IFACE2)
-                     IF (M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_3
-                     IF (M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_3
-                     I_LNK    = M%CUT_CELL(ICC2)%IJK(IAXIS); J_LNK   = M%CUT_CELL(ICC2)%IJK(JAXIS);
-                     K_LNK    = M%CUT_CELL(ICC2)%IJK(KAXIS); JCC_LNK = JCC2
-                     VAL_UNKZ = M%CUT_CELL(ICC2)%UNKZ(JCC2); LNK_LEV=M%CUT_CELL(ICC2)%LINK_LEV(JCC2); EXIT AXIS_LOOP_2
-                  END SELECT
-               ENDDO IFC_LOOP_3
-            ENDDO AXIS_LOOP_2
-            IF (VAL_UNKZ > 0) THEN
-               CC%FACE_LIST(6,IFACE)      = INTEGER_ONE ! This face is shared with master.
-               CC%UNKZ(JCC)               = VAL_UNKZ
-               CC%IJK_LINK(1:KAXIS+2,JCC) = (/ CC_CUTCFE, I_LNK, J_LNK, K_LNK, JCC_LNK /)
-               CC%LINK_LEV(JCC)           = LNK_LEV-1 ! One link hierarchy level below master cell.
-               CYCLE JCC_LOOP_2
-            ENDIF
-         ENDIF AREA_IF_2
-
-         ! Small cells, get CC_UNKZ from a large cell neighbor:
-         IFACE3 = CC_UNDEFINED
-         IFC_LOOP_4 : DO IFC=1,CC%CCELEM(1,JCC)
-            IFACE   = CC%CCELEM(IFC+1,JCC)
-            IF((CC%FACE_LIST(1,IFACE)==CC_FTYPE_CFINB) .OR. &
-               (CC%FACE_LIST(1,IFACE)==CC_FTYPE_SVERT)) CYCLE IFC_LOOP_4
-            ILH     = 2*CC%FACE_LIST(2,IFACE) - 3 ! -1 for LOW_IND, 1 for HIGH_IND
-
-            ! Cycle if surrounding cell is located in the guard-cell region, if so drop, as we don't have
-            ! at this point unknown numbers on guard-cells/guard-cell ccs:
-            X1AXIS  = CC%FACE_LIST(3,IFACE)
-            SELECT CASE(X1AXIS)
-            CASE(IAXIS)
-               IF( (I+ILH < 1) .OR. (I+ILH > M%IBAR) ) CYCLE IFC_LOOP_4
-            CASE(JAXIS)
-               IF( (J+ILH < 1) .OR. (J+ILH > M%JBAR) ) CYCLE IFC_LOOP_4
-            CASE(KAXIS)
-               IF( (K+ILH < 1) .OR. (K+ILH > M%KBAR) ) CYCLE IFC_LOOP_4
-            END SELECT
-
-            SELECT CASE(CC%FACE_LIST(1,IFACE)) ! 1. Check if a surrounding cell is a regular cell:
-            CASE(CC_FTYPE_RCGAS) ! REGULAR GASPHASE
-               SELECT CASE(X1AXIS)
-               CASE(IAXIS)
-                  IF(M%CCVAR(I+ILH,J,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                     CALL GET_ICC2_JCC2(NM,ICC,IFACE,I+ILH,J,K,ICC2,JCC2)
-                     IF(ANY((/ ICC2, JCC2 /) == 0)) CYCLE IFC_LOOP_4
-                     IF(M%CUT_CELL(ICC2)%VOLUME(JCC2)<VAL_CVOL .OR. M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_4
-                     IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_4
-                     I_LNK = I+ILH; J_LNK = J; K_LNK = K; JCC_LNK = JCC2
-                     VAL_CVOL = M%CUT_CELL(ICC2)%VOLUME(JCC2); VAL_UNKZ = M%CUT_CELL(ICC2)%UNKZ(JCC2)
-                     LNK_LEV  = M%CUT_CELL(ICC2)%LINK_LEV(JCC2); IFACE3 = IFACE
-                  ENDIF
-               CASE(JAXIS)
-                  IF(M%CCVAR(I,J+ILH,K,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                     CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J+ILH,K,ICC2,JCC2)
-                     IF(ANY((/ ICC2, JCC2 /) == 0)) CYCLE IFC_LOOP_4
-                     IF(M%CUT_CELL(ICC2)%VOLUME(JCC2)<VAL_CVOL .OR. M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_4
-                     IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_4
-                     I_LNK = I; J_LNK = J+ILH; K_LNK = K; JCC_LNK = JCC2
-                     VAL_CVOL = M%CUT_CELL(ICC2)%VOLUME(JCC2); VAL_UNKZ = M%CUT_CELL(ICC2)%UNKZ(JCC2)
-                     LNK_LEV  = M%CUT_CELL(ICC2)%LINK_LEV(JCC2); IFACE3 = IFACE
-                  ENDIF
-               CASE(KAXIS)
-                  IF(M%CCVAR(I,J,K+ILH,CC_UNKZ) <= 0) THEN ! Cut - cell.
-                     CALL GET_ICC2_JCC2(NM,ICC,IFACE,I,J,K+ILH,ICC2,JCC2)
-                     IF(ANY((/ ICC2, JCC2 /) == 0)) CYCLE IFC_LOOP_4
-                     IF(M%CUT_CELL(ICC2)%VOLUME(JCC2)<VAL_CVOL .OR. M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_4
-                     IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_4
-                     I_LNK = I; J_LNK = J; K_LNK = K+ILH; JCC_LNK = JCC2
-                     VAL_CVOL = M%CUT_CELL(ICC2)%VOLUME(JCC2); VAL_UNKZ = M%CUT_CELL(ICC2)%UNKZ(JCC2)
-                     LNK_LEV  = M%CUT_CELL(ICC2)%LINK_LEV(JCC2); IFACE3 = IFACE
-                  ENDIF
-               END SELECT
-            CASE(CC_FTYPE_CFGAS) ! 2. Check for large surrounding cut-cells:
-               IFC2    = CC%FACE_LIST(4,IFACE)
-               IFACE2  = CC%FACE_LIST(5,IFACE)
-               ICC2    = M%CUT_FACE(IFC2)%CELL_LIST(2,CC%FACE_LIST(2,IFACE),IFACE2)
-               JCC2    = M%CUT_FACE(IFC2)%CELL_LIST(3,CC%FACE_LIST(2,IFACE),IFACE2)
-               IF(M%CUT_CELL(ICC2)%VOLUME(JCC2)<VAL_CVOL .OR. M%CUT_CELL(ICC2)%UNKZ(JCC2)<1) CYCLE IFC_LOOP_4
-               IF(M%CUT_CELL(ICC2)%LINK_LEV(JCC2)/=LINK_LEV_UP)CYCLE IFC_LOOP_4
-               I_LNK=M%CUT_CELL(ICC2)%IJK(IAXIS); J_LNK=M%CUT_CELL(ICC2)%IJK(JAXIS); K_LNK=M%CUT_CELL(ICC2)%IJK(KAXIS)
-               JCC_LNK  = JCC2; VAL_CVOL = M%CUT_CELL(ICC2)%VOLUME(JCC2);
-               VAL_UNKZ = M%CUT_CELL(ICC2)%UNKZ(JCC2); LNK_LEV  = M%CUT_CELL(ICC2)%LINK_LEV(JCC2); IFACE3 = IFACE
-            END SELECT
-         ENDDO IFC_LOOP_4
-
-         ! This small cut-cell still has an undefined unknown, redo link-loop to test for updated unknown number on
-         ! neighbors:
-         IF (VAL_UNKZ > 0) THEN
-            CC%FACE_LIST(6,IFACE3)     = INTEGER_ONE ! This face is shared with master.
-            CC%UNKZ(JCC)               = VAL_UNKZ
-            CC%IJK_LINK(1:KAXIS+2,JCC) = (/ CC_CUTCFE, I_LNK, J_LNK, K_LNK, JCC_LNK /)
-            CC%LINK_LEV(JCC)           = LNK_LEV-1 ! One link hierarchy level below master cell.
-         ELSE
-            QUITLINK_FLG = .FALSE.
-         ENDIF
-      ENDDO JCC_LOOP_2
-   ENDDO ICC_LOOP_2
-
-   ! Then fuse cut-cell unknowns if several ccs in one Cartesian cell and one of them has CUT_CELL(ICC)%UNKZ(JCC)>0:
-   ! IF(.NOT. ONE_UNKH_PER_CUTCELL) THEN
-   !    DO ICC=1,M%N_CUTCELL_MESH
-   !       CC => M%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-   !       ! Don't attempt to link cut-cells inside an OBST:
-   !       IF ( M%CELL(M%CELL_INDEX(I,J,K))%SOLID ) CYCLE
-   !       ! Cases with more than one cut-cell: define UNKZ of all cells to be the one of first cut-cell with UNKZ > 0:
-   !       DO JCC=1,CC%NCELL; IF(CC%UNKZ(JCC)>0) EXIT; ENDDO
-   !       JCC_LNK = JCC
-   !       IF (JCC_LNK <= CC%NCELL) THEN
-   !          DO JCC=1,CC%NCELL
-   !             IF ( CC%NOADVANCE(JCC)>0 .OR. JCC==JCC_LNK ) CYCLE
-   !             CC%UNKZ(JCC)               = CC%UNKZ(JCC_LNK)
-   !             CC%IJK_LINK(1:KAXIS+2,JCC) = (/ CC_CUTCFE, I, J, K, JCC_LNK /)
-   !             CC%LINK_LEV(JCC)           = CC%LINK_LEV(JCC_LNK) - 1
-   !          ENDDO
-   !       ENDIF
-   !    ENDDO
-   ! ENDIF
-
-   IF (QUITLINK_FLG) EXIT LINK_LOOP
-
-   LINK_LEV_UP = LINK_LEV_UP - 1
-
-   LINK_ITER = LINK_ITER + 1
-   BLOCK_CELL_IF : IF (LINK_ITER > N_LINK_ATTMP) THEN
-       ! Count how many unlinked cells we have in this mesh:
-       ULINK_COUNT = 0
-       DO ICC=1,M%N_CUTCELL_MESH
-          CC => M%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-          IF (M%CELL(M%CELL_INDEX(I,J,K))%SOLID) CYCLE
-          DO JCC=1,CC%NCELL
-             IF ( CC%NOADVANCE(JCC)>0 .OR. CC%UNKZ(JCC)>0 ) CYCLE
-             ULINK_COUNT = ULINK_COUNT + 1
-          ENDDO
-       ENDDO
-
-       IF (GET_CUTCELLS_VERBOSE) THEN
-          ! Write out unlinked cells properties:
-          ! Open file to write unlinked cells:
-          WRITE(UNLINKED_FILE,'(A,A,I0,A)') TRIM(RESULTS_DIR)//TRIM(CHID),'_unlinked_',MY_RANK,'.log'
-          ! Create file:
-          IF (UNLINKED_1ST_CALL) THEN
-             LU_UNLNK = GET_FILE_NUMBER()
-             OPEN(UNIT=LU_UNLNK,FILE=TRIM(UNLINKED_FILE),STATUS='UNKNOWN')
-             WRITE(LU_UNLNK,*) 'Unlinked cut-cell Information for Process=',MY_RANK
-             CLOSE(LU_UNLNK)
-             UNLINKED_1ST_CALL = .FALSE.
-          ENDIF
-          ! Open file to write unlinked cell information:
-          OPEN(UNIT=LU_UNLNK,FILE=TRIM(UNLINKED_FILE),STATUS='OLD',POSITION='APPEND')
-          WRITE(LU_UNLNK,*) ' '
-          WRITE(LU_UNLNK,'(A,I4,A,I4)') ' Mesh NM=',NM,', number of unlinked cells=',ULINK_COUNT
-
-          ! Dump info:
-          ULINK_COUNT = 0
-          DO ICC=1,M%N_CUTCELL_MESH
-             CC => M%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-             IF (M%CELL(M%CELL_INDEX(I,J,K))%SOLID) CYCLE
-             DO JCC=1,CC%NCELL
-                IF (CC%NOADVANCE(JCC)>0 .OR. CC%UNKZ(JCC)>0) CYCLE
-                ULINK_COUNT = ULINK_COUNT + 1
-                WRITE(LU_UNLNK,'(I8,A,5I8,A,5F22.8)') &
-                ULINK_COUNT,', I,J,K,ICC,JCC=',I,J,K,ICC,JCC,', X,Y,Z,CCVOL,CCVOL_CRT=',M%X(I),M%Y(J),M%Z(K), &
-                CC%VOLUME(JCC),M%DX(I)*M%DY(J)*M%DZ(K)
-             ENDDO
-          ENDDO
-          CLOSE(LU_UNLNK)
-       ENDIF
-
-       ! Unlinked cells get blocked, inboundary cut-faces are dropped, shared gas cut-faces are made inboundary faces
-       ! for neighbors. If no cut-cells left in location I,J,K => CCVAR(I,J,K,CC_CGSC) is set to CC_SOLID.
-       DO ICC=1,M%N_CUTCELL_MESH
-          DO JCC=1,M%CUT_CELL(ICC)%NCELL
-             IF ( M%CUT_CELL(ICC)%UNKZ(JCC) > 0 ) CYCLE
-             M%CUT_CELL(ICC)%IJK_LINK(1,JCC) = CC_SOLID ! Flag for Blocking after main mesh loop in SET_CUTCELLS_3D
-          ENDDO
-       ENDDO
-
-       ! Recount unlinked cells (i.e. no other viable cells in the mesh).
-       ULINK_COUNT = 0
-       DO ICC=1,M%N_CUTCELL_MESH
-          CC => M%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-          IF (M%CELL(M%CELL_INDEX(I,J,K))%SOLID) CYCLE
-          DO JCC=1,CC%NCELL
-             IF ( CC%UNKZ(JCC) > 0 .OR. CC%IJK_LINK(1,JCC)==CC_SOLID) CYCLE
-             ULINK_COUNT = ULINK_COUNT + 1
-          ENDDO
-       ENDDO
-
-       IF (GET_CUTCELLS_VERBOSE) THEN
-          ! Write out remaining unlinked cells properties.
-          ! Open file to write unlinked cell information:
-          OPEN(UNIT=LU_UNLNK,FILE=TRIM(UNLINKED_FILE),STATUS='OLD',POSITION='APPEND')
-          WRITE(LU_UNLNK,*) ' '
-          WRITE(LU_UNLNK,*) 'STATUS AFTER BLOCKING SMALL UNLINKED CUT-CELLS:'
-          WRITE(LU_UNLNK,'(A,I4,A,I4)') ' Mesh NM=',NM,', number of unlinked cells after blocking=',ULINK_COUNT
-          IF(ULINK_COUNT > 0) THEN
-             ! Dump info:
-             ULINK_COUNT = 0
-             DO ICC=1,M%N_CUTCELL_MESH
-                CC => M%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-                IF (M%CELL(M%CELL_INDEX(I,J,K))%SOLID) CYCLE
-                DO JCC=1,CC%NCELL
-                   IF (CC%UNKZ(JCC)>0) CYCLE
-                   ULINK_COUNT = ULINK_COUNT + 1
-                   WRITE(LU_UNLNK,'(I8,A,5I8,A,5F22.8)') &
-                   ULINK_COUNT,', I,J,K,ICC,JCC=',I,J,K,ICC,JCC,', X,Y,Z,CCVOL,CCVOL_CRT=',M%X(I),M%Y(J),M%Z(K), &
-                   CC%VOLUME(JCC),M%DX(I)*M%DY(J)*M%DZ(K)
-                ENDDO
-             ENDDO
-          ENDIF
-          CLOSE(LU_UNLNK)
-       ENDIF
-       EXIT LINK_LOOP
-   ENDIF BLOCK_CELL_IF
-ENDDO LINK_LOOP
-
-! Finally compute M%FINEST_LINK_LEV:
-DO ICC=1,M%N_CUTCELL_MESH
-   DO JCC=1,M%CUT_CELL(ICC)%NCELL
-      IF(M%CUT_CELL(ICC)%IJK_LINK(1,JCC)==CC_SOLID) THEN
-         IF(M%CUT_CELL(ICC)%NOADVANCE(JCC)==NOT_BLOCKED) M%CUT_CELL(ICC)%NOADVANCE(JCC) = BLOCKED_UNLINK_CELL
-         M%CUT_CELL(ICC)%LINK_LEV(JCC)  = CC_UNDEFINED
-         M%CUT_CELL(ICC)%IJK_LINK(2:5,JCC)= CC_UNDEFINED
-      ELSEIF(M%CUT_CELL(ICC)%LINK_LEV(JCC) < M%FINEST_LINK_LEV) THEN
-         M%FINEST_LINK_LEV = M%CUT_CELL(ICC)%LINK_LEV(JCC)
-      ENDIF
-   ENDDO
-ENDDO
-
-RETURN
-
-END SUBROUTINE GET_CELL_LINK_INFO
 
 
 
@@ -8518,7 +7891,7 @@ REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: GEOM_AREA_SURF_OLD,GEOM_AREA_SURF_NEW
 REAL(EB) :: TNOW, CPUTIME_START_MESH
 LOGICAL, SAVE :: FIRST_CALL_ARG=.TRUE., FIRST_CALL_ARG2=.TRUE.
 CHARACTER(200) :: VERBOSE_FILE
-LOGICAL :: EARLY_RETURN_FROM_SET_CUTCELLS,DO_AGGLOMERATE_CVS,USE_LEGACY_SCOPE0_SETUP
+LOGICAL :: EARLY_RETURN_FROM_SET_CUTCELLS,DO_AGGLOMERATE_CVS
 INTEGER, SAVE :: CALL_COUNT = 0
 
 IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH .AND. &
@@ -8529,12 +7902,9 @@ IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH .AND. &
    ENDIF
 ENDIF
 
-! Construction is unconditional. The legacy-blocking freeze follows the scope:
-! scope 0 uses the frozen legacy blocking path, higher scopes use CVS-neutral
-! blocking. Agglomeration is requested by CC_USE_SET_CVS_3D and is skipped when
+! Construction is unconditional. Blocking is CVS-neutral. Agglomeration is requested by CC_USE_SET_CVS_3D and is skipped when
 ! the identity solver needs the one-CV-per-GCELL map.
 DO_AGGLOMERATE_CVS      = CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH
-USE_LEGACY_SCOPE0_SETUP = .NOT.DO_AGGLOMERATE_CVS
 
 ! Phase 1 now reuses the shared raw cut-cell build path.
 CALL CC_GRID_BUILD_RAW_CUTCELLS(ISTR,IEND,JSTR,JEND,KSTR,KEND,CC_COMPUTE_MESH,GEOM_ZMAX_AUX, &
@@ -8551,49 +7921,32 @@ IF (GET_CUTCELLS_VERBOSE) THEN
    FLUSH(LU_SETCC)
 ENDIF
 
-IF (USE_LEGACY_SCOPE0_SETUP) THEN
-   ! Scope 0 is a storage/topology migration of the original method. Freeze the exact legacy
-   ! blocking and CCVOL_LINK hierarchy before normalizing it into identity GCELL/CV/FACE storage.
-   DO NM=1,NMESHES
-      CALL CC_GRID_POSTBUILD_BLOCK_AND_LINK_MESH(NM,CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND,GEOM_AREA_SURF_OLD)
-      IF (STOP_STATUS==SETUP_STOP) THEN
-         IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
-         RETURN
-      ENDIF
-   ENDDO
-   CALL CC_GRID_EXCHANGE_AND_REBLOCK(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
+! CVS-neutral blocking so FV agglomeration, not a legacy link tree,
+! owns the reduced control-volume topology.
+! A coarse cell over a fine sliver the raw build blocked is blocked before the slivers are dropped.
+ALLOCATE(FM_PENDING_BLOCK_SCAN(1:NMESHES)); FM_PENDING_BLOCK_SCAN = .FALSE.
+DO NM=1,NMESHES
+   IF (CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) CALL PROMOTE_REFINEMENT_FOOTPRINTS_FROM_BLOCKED_FINE(NM)
+ENDDO
+DO NM=1,NMESHES
+   IF (CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) THEN
+      CALL CC_GRID_APPLY_SPECIAL_CELL_BLOCKING(NM)
+      CALL POINT_TO_MESH(NM)
+      CALL CC_GRID_ENFORCE_ONE_CC_PER_CARTESIAN_CELL(NM)
+   ENDIF
+   CALL CC_GRID_CVS_REBUILD_MESH_AFTER_BLOCK_TAGS(NM,CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND,GEOM_AREA_SURF_OLD,.TRUE.)
    IF (STOP_STATUS==SETUP_STOP) THEN
       IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
       RETURN
    ENDIF
-ELSE
-   ! Higher scopes retain CVS-neutral blocking so FV agglomeration, not the legacy link tree,
-   ! owns the reduced control-volume topology.
-   ! As at L0, a coarse cell over a fine sliver the raw build blocked is blocked before the slivers are dropped.
-   ALLOCATE(FM_PENDING_BLOCK_SCAN(1:NMESHES)); FM_PENDING_BLOCK_SCAN = .FALSE.
-   DO NM=1,NMESHES
-      IF (CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) CALL PROMOTE_REFINEMENT_FOOTPRINTS_FROM_BLOCKED_FINE(NM)
-   ENDDO
-   DO NM=1,NMESHES
-      IF (CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) THEN
-         CALL CC_GRID_APPLY_SPECIAL_CELL_BLOCKING(NM)
-         CALL POINT_TO_MESH(NM)
-         CALL CC_GRID_ENFORCE_ONE_CC_PER_CARTESIAN_CELL(NM)
-      ENDIF
-      CALL CC_GRID_CVS_REBUILD_MESH_AFTER_BLOCK_TAGS(NM,CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND,GEOM_AREA_SURF_OLD,.TRUE.)
-      IF (STOP_STATUS==SETUP_STOP) THEN
-         IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
-         RETURN
-      ENDIF
-   ENDDO
+ENDDO
 
-   CALL CC_GRID_CVS_EXCHANGE_AND_REBUILD_BLOCKS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND,GEOM_AREA_SURF_OLD)
-   DEALLOCATE(FM_PENDING_BLOCK_SCAN)
+CALL CC_GRID_CVS_EXCHANGE_AND_REBUILD_BLOCKS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND,GEOM_AREA_SURF_OLD)
+DEALLOCATE(FM_PENDING_BLOCK_SCAN)
 
-   IF (STOP_STATUS==SETUP_STOP) THEN
-      IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
-      RETURN
-   ENDIF
+IF (STOP_STATUS==SETUP_STOP) THEN
+   IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
+   RETURN
 ENDIF
 
 DO NM=1,NMESHES
@@ -12730,13 +12083,6 @@ RETURN
 
 END SUBROUTINE SET_GC_CUTCELLS_3D
 
-SUBROUTINE CC_GRID_REBUILD_FACE_AND_LINK_INFO(NM,PHASE)
-INTEGER, INTENT(IN) :: NM,PHASE
-
-CALL GET_CC_FACE_CELL_LIST_INFO(NM,PHASE=PHASE)
-CALL GET_CELL_LINK_INFO(NM)
-END SUBROUTINE CC_GRID_REBUILD_FACE_AND_LINK_INFO
-
 SUBROUTINE CC_GRID_PREPARE_BLOCKED_CUT_PIECES_FOR_DROP(NM,N_READY)
 INTEGER, INTENT(IN) :: NM
 INTEGER, INTENT(OUT) :: N_READY
@@ -12810,130 +12156,6 @@ DO IDIM=1,MAX_DIM
 ENDDO
 END SUBROUTINE CC_GRID_CVS_EXCHANGE_AND_REBUILD_BLOCKS
 
-SUBROUTINE CC_GRID_TAG_CAVITY_CUTCELLS(NM,N_CAVITY_CELLS)
-
-INTEGER, INTENT(IN) :: NM
-INTEGER, INTENT(OUT) :: N_CAVITY_CELLS
-
-INTEGER :: ICC1,J,I,IFACE,SIDE,X1AXIS,IIF,JJF,KKF,SUM_FACE,SUM_CCELL,ICF1
-REAL(EB) :: ACRT
-LOGICAL :: MESH_BOUNDARY_FACE
-TYPE(CC_CUTCELL_TYPE), POINTER :: CC
-TYPE(CC_CUTFACE_TYPE), POINTER :: CF
-TYPE(MESH_TYPE), POINTER :: M
-INTEGER, PARAMETER :: ADDI(LOW_IND:HIGH_IND,IAXIS:KAXIS) = RESHAPE((/-1,0, 0,0, 0,0/),(/2,3/))
-INTEGER, PARAMETER :: ADDJ(LOW_IND:HIGH_IND,IAXIS:KAXIS) = RESHAPE((/ 0,0,-1,0, 0,0/),(/2,3/))
-INTEGER, PARAMETER :: ADDK(LOW_IND:HIGH_IND,IAXIS:KAXIS) = RESHAPE((/ 0,0, 0,0,-1,0/),(/2,3/))
-
-N_CAVITY_CELLS = 0
-M => MESHES(NM)
-
-! Block any cells that contain only one gas cut-face (cavity type cut-cells):
-DO ICC1=1,M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH
-   CC=>M%CUT_CELL(ICC1)
-   DO J=1,CC%NCELL
-      SUM_FACE=0; SUM_CCELL=0
-      DO I=2,CC%CCELEM(1,J)
-         SELECT CASE(CC%FACE_LIST(1,CC%CCELEM(I,J)))
-         CASE(CC_FTYPE_CFGAS); SUM_FACE = SUM_FACE+1
-         CASE(CC_FTYPE_RCGAS); SUM_CCELL=SUM_CCELL+1
-         END SELECT
-      ENDDO
-      IF(SUM_FACE>1 .OR. SUM_CCELL>0) CYCLE
-      IF(CC%NOADVANCE(J)==NOT_BLOCKED) CC%NOADVANCE(J)=BLOCKED_CAVITY_CELL
-      N_CAVITY_CELLS = N_CAVITY_CELLS + 1
-   ENDDO
-ENDDO
-
-! Block cells trapped against a mesh boundary whose only same-mesh gas opening is a small cut-face.
-DO ICC1=1,M%N_CUTCELL_MESH+M%N_GCCUTCELL_MESH
-   CC=>M%CUT_CELL(ICC1)
-   DO J=1,CC%NCELL
-      IF(CC%NOADVANCE(J)/=NOT_BLOCKED) CYCLE
-      SUM_FACE=0; SUM_CCELL=0; ICF1=0
-      DO I=1,CC%CCELEM(1,J)
-         IFACE  = CC%CCELEM(I+1,J)
-         SELECT CASE(CC%FACE_LIST(1,IFACE))
-         CASE(CC_FTYPE_CFGAS,CC_FTYPE_RCGAS)
-            SIDE   = CC%FACE_LIST(2,IFACE)
-            X1AXIS = CC%FACE_LIST(3,IFACE)
-            IIF = CC%IJK(IAXIS) + ADDI(SIDE,X1AXIS)
-            JJF = CC%IJK(JAXIS) + ADDJ(SIDE,X1AXIS)
-            KKF = CC%IJK(KAXIS) + ADDK(SIDE,X1AXIS)
-            MESH_BOUNDARY_FACE = .FALSE.
-            SELECT CASE(X1AXIS)
-            CASE(IAXIS); MESH_BOUNDARY_FACE = IIF==0 .OR. IIF==M%IBAR
-            CASE(JAXIS); MESH_BOUNDARY_FACE = JJF==0 .OR. JJF==M%JBAR
-            CASE(KAXIS); MESH_BOUNDARY_FACE = KKF==0 .OR. KKF==M%KBAR
-            END SELECT
-            IF(MESH_BOUNDARY_FACE) CYCLE
-            SELECT CASE(CC%FACE_LIST(1,IFACE))
-            CASE(CC_FTYPE_CFGAS)
-               SUM_FACE = SUM_FACE+1
-               ICF1     = CC%FACE_LIST(4,IFACE)
-            CASE(CC_FTYPE_RCGAS)
-               SUM_CCELL = SUM_CCELL+1
-            END SELECT
-         END SELECT
-      ENDDO
-      IF(SUM_FACE/=1 .OR. SUM_CCELL>0) CYCLE
-      CF => M%CUT_FACE(ICF1)
-      IIF=CF%IJK(IAXIS); JJF=CF%IJK(JAXIS); KKF=CF%IJK(KAXIS)
-      SELECT CASE(CF%IJK(KAXIS+1))
-      CASE(IAXIS); ACRT = DYFACE(JJF)*DZFACE(KKF)
-      CASE(JAXIS); ACRT = DZFACE(KKF)*DXFACE(IIF)
-      CASE(KAXIS); ACRT = DXFACE(IIF)*DYFACE(JJF)
-      END SELECT
-      IF(SUM(CF%AREA(1:CF%NFACE))/ACRT>=CCVOL_LINK) CYCLE
-      CC%NOADVANCE(J)=BLOCKED_CAVITY_CELL
-      N_CAVITY_CELLS = N_CAVITY_CELLS + 1
-   ENDDO
-ENDDO
-
-END SUBROUTINE CC_GRID_TAG_CAVITY_CUTCELLS
-
-SUBROUTINE CC_GRID_REBLOCK_MESH_AFTER_NEIGHBOR_EXCHANGE(NM,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-INTEGER, INTENT(IN) :: NM
-INTEGER, INTENT(INOUT) :: ISTR, IEND, JSTR, JEND, KSTR, KEND
-
-INTEGER :: SUM_CCELL,N_CAVITY_CELLS
-
-CALL POINT_TO_MESH(NM)
-CALL DEFINE_XYZFACE_CELL(NM,ALLOC_FLG=.TRUE.,ISTR=ISTR,IEND=IEND,JSTR=JSTR,JEND=JEND,KSTR=KSTR,KEND=KEND)
-
-! Block cut-cells whose volume factor is less than MIN_VOL_FACTOR, or remain unlinked:
-CALL BLOCK_SMALL_UNLINKED_CUTCELLS(NM,SUM_CCELL)
-IF(SUM_CCELL>0) CALL CC_GRID_REBUILD_FACE_AND_LINK_INFO(NM,PHASE=2)
-
-! Block any cells that contain only one gas cut-face (cavity type cut-cells).
-CALL CC_GRID_TAG_CAVITY_CUTCELLS(NM,N_CAVITY_CELLS)
-IF (N_CAVITY_CELLS>0) FM_PENDING_BLOCK_SCAN(NM) = .TRUE.
-
-CALL DEFINE_XYZFACE_CELL(NM,ALLOC_FLG=.FALSE.,ISTR=ISTR,IEND=IEND,JSTR=JSTR,JEND=JEND,KSTR=KSTR,KEND=KEND)
-
-END SUBROUTINE CC_GRID_REBLOCK_MESH_AFTER_NEIGHBOR_EXCHANGE
-
-SUBROUTINE CC_GRID_FINAL_REBLOCK_MESH(NM,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-INTEGER, INTENT(IN) :: NM
-INTEGER, INTENT(INOUT) :: ISTR, IEND, JSTR, JEND, KSTR, KEND
-
-INTEGER :: SUM_CCELL
-
-CALL POINT_TO_MESH(NM)
-CALL DEFINE_XYZFACE_CELL(NM,ALLOC_FLG=.TRUE.,ISTR=ISTR,IEND=IEND,JSTR=JSTR,JEND=JEND,KSTR=KSTR,KEND=KEND)
-
-CALL CC_GRID_REBUILD_FACE_AND_LINK_INFO(NM,PHASE=2)
-
-! Block cut-cells whose volume factor is less than MIN_VOL_FACTOR, or remain unlinked:
-CALL BLOCK_SMALL_UNLINKED_CUTCELLS(NM,SUM_CCELL)
-IF(SUM_CCELL>0) CALL CC_GRID_REBUILD_FACE_AND_LINK_INFO(NM,PHASE=2)
-
-CALL DEFINE_XYZFACE_CELL(NM,ALLOC_FLG=.FALSE.,ISTR=ISTR,IEND=IEND,JSTR=JSTR,JEND=JEND,KSTR=KSTR,KEND=KEND)
-
-END SUBROUTINE CC_GRID_FINAL_REBLOCK_MESH
-
 LOGICAL FUNCTION CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)
 
 INTEGER, INTENT(IN) :: NM
@@ -12943,106 +12165,6 @@ CC_GRID_SHOULD_PROCESS_MESH = CC_COMPUTE_MESH(NM)
 IF (PERIODIC_TEST==105 .AND. PROCESS(NM)/=MY_RANK) CC_GRID_SHOULD_PROCESS_MESH = .FALSE.
 
 END FUNCTION CC_GRID_SHOULD_PROCESS_MESH
-
-SUBROUTINE CC_GRID_EXCHANGE_REBLOCK_PASS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-INTEGER, INTENT(INOUT) :: ISTR, IEND, JSTR, JEND, KSTR, KEND
-LOGICAL, INTENT(IN), DIMENSION(:) :: CC_COMPUTE_MESH
-INTEGER :: NM
-
-FM_PENDING_BLOCK_SCAN = .FALSE.
-DO NM=1,NMESHES; MESHES(NM)%N_CC_ELIMINATED = 0; ENDDO
-
-! Exchange CC%NOADVANCE(JCC)>0 information among NEIGHBOURING meshes:
-CALL EXCHANGE_CC_NOADVANCE_INFO
-! Mirror owner-side NOADVANCE flags onto OMESH replicas of the same mesh:
-CALL APPLY_OWN_BLOCKED_TO_REPLICAS(CC_COMPUTE_MESH)
-! Add CC%NOADVANCE(JCC) where needed:
-CALL ADD_NEIGHBOR_BLOCKED_CELLS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-! Reblock each mesh (block small/unlinked cut-cells + cavity cut-cells); sets FM_PENDING_BLOCK_SCAN:
-DO NM=1,NMESHES
-   IF (.NOT.CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) CYCLE
-   CALL CC_GRID_REBLOCK_MESH_AFTER_NEIGHBOR_EXCHANGE(NM,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-ENDDO
-
-! Propagate DROP_CUTCELL eliminations (fine interior, NCELL==1) to coarse ghost band;
-! ghost solidifies, then TAG_CC_BLOCKING_REFINEMENT closes fine footprint.
-CALL EXCHANGE_CC_ELIMINATED_INFO
-CALL APPLY_OWN_BLOCKED_TO_REPLICAS(CC_COMPUTE_MESH)
-CALL ADD_NEIGHBOR_BLOCKED_CELLS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-   IF (MESHES(NM)%N_CC_ELIMINATED>0) FM_PENDING_BLOCK_SCAN(NM) = .TRUE.
-ENDDO
-DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX; MESHES(NM)%N_CC_ELIMINATED = 0; ENDDO
-
-! Promote refinement footprints from blocked fine cells, then relink affected meshes:
-IF (ANY(FM_PENDING_BLOCK_SCAN)) THEN
-   DO WHILE (ANY(FM_PENDING_BLOCK_SCAN))
-      DO NM=1,NMESHES
-         IF (.NOT.FM_PENDING_BLOCK_SCAN(NM)) CYCLE
-         FM_PENDING_BLOCK_SCAN(NM) = .FALSE.
-         CALL PROMOTE_REFINEMENT_FOOTPRINTS_FROM_BLOCKED_FINE(NM)
-      ENDDO
-   ENDDO
-   FM_PENDING_BLOCK_SCAN = .FALSE.
-   DO NM=1,NMESHES
-      IF (.NOT.CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) CYCLE
-      CALL CC_GRID_FINAL_REBLOCK_MESH(NM,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-   ENDDO
-ENDIF
-CALL EXCHANGE_CC_NOADVANCE_INFO
-CALL APPLY_OWN_BLOCKED_TO_REPLICAS(CC_COMPUTE_MESH)
-CALL ADD_NEIGHBOR_BLOCKED_CELLS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-! Call tag boundary cut-cells for blocking in refinement interfaces:
-CALL TAG_CC_BLOCKING_REFINEMENT
-
-END SUBROUTINE CC_GRID_EXCHANGE_REBLOCK_PASS
-
-SUBROUTINE CC_GRID_FINAL_REBLOCK_PASS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-INTEGER, INTENT(INOUT) :: ISTR, IEND, JSTR, JEND, KSTR, KEND
-LOGICAL, INTENT(IN), DIMENSION(:) :: CC_COMPUTE_MESH
-INTEGER :: NM
-
-! Propagate TAG_CC_BLOCKING_REFINEMENT effects across ranks before the final BLOCK_SMALL pass:
-CALL EXCHANGE_CC_NOADVANCE_INFO
-CALL APPLY_OWN_BLOCKED_TO_REPLICAS(CC_COMPUTE_MESH)
-CALL ADD_NEIGHBOR_BLOCKED_CELLS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-DO NM=1,NMESHES
-   IF (.NOT.CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) CYCLE
-   CALL CC_GRID_FINAL_REBLOCK_MESH(NM,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-ENDDO
-
-END SUBROUTINE CC_GRID_FINAL_REBLOCK_PASS
-
-SUBROUTINE CC_GRID_EXCHANGE_AND_REBLOCK(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-INTEGER, INTENT(INOUT) :: ISTR, IEND, JSTR, JEND, KSTR, KEND
-LOGICAL, INTENT(IN), DIMENSION(:) :: CC_COMPUTE_MESH
-INTEGER :: IDIM,NM
-
-IF (ALLOCATED(FM_PENDING_BLOCK_SCAN)) DEALLOCATE(FM_PENDING_BLOCK_SCAN)
-ALLOCATE(FM_PENDING_BLOCK_SCAN(1:NMESHES)); FM_PENDING_BLOCK_SCAN = .FALSE.
-
-! Promote refinement footprints from initially blocked fine cells (e.g., slivers tagged
-! BLOCKED_SMALL_CELL in GET_CARTCELL_CUTCELLS / GET_CELL_LINK_INFO):
-DO NM=1,NMESHES
-   IF (.NOT.CC_GRID_SHOULD_PROCESS_MESH(NM,CC_COMPUTE_MESH)) CYCLE
-   CALL PROMOTE_REFINEMENT_FOOTPRINTS_FROM_BLOCKED_FINE(NM)
-ENDDO
-
-DO IDIM=1,MAX_DIM
-   CALL CC_GRID_EXCHANGE_REBLOCK_PASS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-ENDDO
-
-CALL CC_GRID_FINAL_REBLOCK_PASS(CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND)
-
-IF (ALLOCATED(FM_PENDING_BLOCK_SCAN)) DEALLOCATE(FM_PENDING_BLOCK_SCAN)
-
-END SUBROUTINE CC_GRID_EXCHANGE_AND_REBLOCK
 
 SUBROUTINE CC_GRID_TAG_COARSE_CELL_FROM_NEIGHBOR_BLOCK(NM,M,M2,I2,J2,K2,XCO,YCO,ZCO,BLOCK_TAG,IBOD_DONOR,ITRI_DONOR)
 
@@ -14505,27 +13627,6 @@ DO K=1,M%KBAR
 ENDDO
 
 END SUBROUTINE CC_GRID_ACCUMULATE_BLOCKED_INB_AREA_OLD
-
-SUBROUTINE CC_GRID_POSTBUILD_BLOCK_AND_LINK_MESH(NM,CC_COMPUTE_MESH,ISTR,IEND,JSTR,JEND,KSTR,KEND,GEOM_AREA_SURF_OLD)
-
-INTEGER, INTENT(IN) :: NM
-LOGICAL, INTENT(IN), DIMENSION(:) :: CC_COMPUTE_MESH
-INTEGER, INTENT(INOUT) :: ISTR, IEND, JSTR, JEND, KSTR, KEND
-REAL(EB), ALLOCATABLE, INTENT(INOUT), DIMENSION(:,:) :: GEOM_AREA_SURF_OLD
-
-IF (.NOT.CC_COMPUTE_MESH(NM)) RETURN ! Only MESHES assigned to processor and OMESHES of these.
-IF (PERIODIC_TEST==105 .AND. PROCESS(NM)/=MY_RANK) RETURN ! Don't do OMESHES for PERIODIC_TEST==105
-
-CALL DEFINE_XYZFACE_CELL(NM,ALLOC_FLG=.TRUE.,ISTR=ISTR,IEND=IEND,JSTR=JSTR,JEND=JEND,KSTR=KSTR,KEND=KEND)
-
-CALL CC_GRID_APPLY_SPECIAL_CELL_BLOCKING(NM)
-CALL CC_GRID_ENFORCE_ONE_CC_PER_CARTESIAN_CELL(NM)
-CALL CC_GRID_REBUILD_FACE_AND_LINK_INFO(NM,PHASE=1)
-CALL CC_GRID_ACCUMULATE_BLOCKED_INB_AREA_OLD(NM,GEOM_AREA_SURF_OLD)
-
-CALL DEFINE_XYZFACE_CELL(NM,ALLOC_FLG=.FALSE.,ISTR=ISTR,IEND=IEND,JSTR=JSTR,JEND=JEND,KSTR=KSTR,KEND=KEND)
-
-END SUBROUTINE CC_GRID_POSTBUILD_BLOCK_AND_LINK_MESH
 
 SUBROUTINE CC_GRID_POSTPROCESS_AND_CLEANUP(NM,CC_COMPUTE_MESH,GEOM_AREA_SURF_NEW)
 
