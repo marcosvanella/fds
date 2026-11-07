@@ -3289,7 +3289,7 @@ IPZ_LOOP : DO IPZ=0,N_ZONE_GLOBMAT
       ! A zero-row rank can still own a mesh whose cells deposit into FV_L2_FH_REMOTE
       ! via ADD_FV_L2_PRESSURE_RHS. L2 must enter GET_FH so those deposits happen.
       ! Non-L2 has no remote buffer, so the skip stays.
-      IF (ZSL%NUNKH_LOCAL==0 .AND. CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_CROSS_MESH) CYCLE
+      IF (ZSL%NUNKH_LOCAL==0 .AND. .NOT.CC_IBM) CYCLE
       CALL POINT_TO_MESH(NM)
       ! Build FH(:):
       CALL GET_FH_FROM_PRHS_AND_BCS(NM,DT,CYL_FCT,UNKH,ZSL%NUNKH_LOCAL,IPZ,ZSL%F_H)
@@ -3299,7 +3299,7 @@ IPZ_LOOP : DO IPZ=0,N_ZONE_GLOBMAT
    IF (ZSL%MTYPE==SYMM_INDEFINITE) THEN
       SUM_FH = 0._EB; MEAN_FH = 0._EB
       WHOLE_DOM_IF1 : IF(.NOT.PRES_ON_WHOLE_DOMAIN .AND. &
-                         (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_CROSS_MESH)) THEN
+                         (.NOT.CC_IBM)) THEN
          ! Sum source F_H by Pressure Zone:
          DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             CALL POINT_TO_MESH(NM)
@@ -3382,7 +3382,7 @@ IF (ERROR /= 0 .AND. MY_RANK==0) WRITE(LU_ERR,*) 'GLMAT_SOLVER: The following ER
 
    IF (ZSL%MTYPE==SYMM_INDEFINITE) THEN
       IF ((.NOT.PRES_ON_WHOLE_DOMAIN .OR. N_ZONE<=1) .AND. PERIODIC_TEST/=7 .AND. &
-          (CC_CV_SOLVER_SCOPE/=CC_CV_SCOPE_CROSS_MESH .OR. CC_CV_H_PER_MEMBER)) THEN
+          (.NOT.CC_IBM .OR. CC_CV_H_PER_MEMBER)) THEN
          ! In the case of periodic test 7, we don't want to apply the gauge shift assuming P_mean=0, here H_mean=0.
          ! Apply the physical-pressure gauge directly when it is well-defined.
          SUM_GAUGE = 0._EB
@@ -3458,7 +3458,7 @@ IF (ERROR /= 0 .AND. MY_RANK==0) WRITE(LU_ERR,*) 'GLMAT_SOLVER: The following ER
          DO J=1,JBAR
             DO I=1,IBAR
                IF (CCVAR(I,J,K,UNKH) <= 0 .OR. ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-               IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH .AND. &
+               IF (CC_IBM .AND. &
                    .NOT.CC_CV_H_PER_MEMBER) THEN
                   CALL GET_FV_L2_PRESSURE_VALUE(CCVAR(I,J,K,UNKH),HVAL)
                   HP(I,J,K)=-HVAL
@@ -5455,7 +5455,7 @@ PRES_ZONE_LOOP : DO IPZ=0,N_ZONE_GLOBMAT
                DO I=1,IBAR
                   IF ( CCVAR(I,J,K,CGSC) /= IS_GASPHASE ) CYCLE
                   IF ( ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT /= IPZ ) CYCLE
-                  IF (.NOT.CC_CV_H_PER_MEMBER .AND. CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
+                  IF (.NOT.CC_CV_H_PER_MEMBER .AND. CC_IBM) THEN
                      IF (.NOT.CC_CV_CELL_IS_CV_MASTER(NM,I,J,K,0,0)) CYCLE
                   ENDIF
                   ZSL%NUNKH_LOC(NM) = ZSL%NUNKH_LOC(NM) + 1
@@ -5511,12 +5511,12 @@ PRES_ZONE_LOOP : DO IPZ=0,N_ZONE_GLOBMAT
       ENDIF IF_PRES_ON_WHOLE_DOMAIN2
    ENDDO MAIN_MESH_LOOP2
 
-   IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH) THEN
+   IF (CC_IBM) THEN
       CALL SYNC_FV_PRESSURE_UNKNOWNS_GLOBAL
    ENDIF
 
 ENDDO PRES_ZONE_LOOP
-IF (CC_CV_SOLVER_SCOPE==CC_CV_SCOPE_CROSS_MESH .AND. &
+IF (CC_IBM .AND. &
     .NOT.CC_CV_H_PER_MEMBER) CALL BUILD_FV_L2_PRESSURE_EDGES
 
 RETURN
