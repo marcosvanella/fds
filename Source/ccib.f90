@@ -7190,7 +7190,7 @@ REAL(EB), INTENT(IN) :: TLEVEL
 INTEGER, INTENT(IN)  :: N
 
 ! Local Variables:
-INTEGER :: NM, I, J ,K, IROW, ICC, JCC
+INTEGER :: NM, I, J ,K, ICC, JCC
 REAL(EB), POINTER, DIMENSION(:,:,:) :: RHOP
 REAL(EB) :: PREDFCT,D_Z_N(0:I_MAX_TEMP),XLOC(2,1),XGLOB(2,1),Q_Z,D_Z_TEMP,RHO_IJK,FCT
 REAL(EB) :: SIN_T, COS_T
@@ -7237,7 +7237,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       DO J=1,JBAR
          DO I=1,IBAR
             IF(CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-            IROW = CCVAR(I,J,K,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
             ! Global position:
             XGLOB(1:2,1) = (/ XC(I), ZC(K) /)
             ! Local position:
@@ -7254,7 +7253,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    ! Then add Cut-cell contributions to F_Z:
    DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
       DO JCC=1,CUT_CELL(ICC)%NCELL
-         IROW = CUT_CELL(ICC)%UNKZ(JCC) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
          ! Global position:
          XGLOB(1:2,1) = (/ CUT_CELL(ICC)%XYZCEN(IAXIS,JCC), CUT_CELL(ICC)%XYZCEN(KAXIS,JCC) /)
          ! Local position:
@@ -7327,7 +7325,7 @@ REAL(EB),INTENT(IN) :: T
 INTEGER, INTENT(IN) :: N
 
 ! Local Variables:
-INTEGER I,J,K,NM,IROW,ICC,JCC
+INTEGER I,J,K,NM,ICC,JCC
 REAL(EB) :: FCT,XHAT,ZHAT,Q_Z
 
 FCT=REAL(2*(1-N)+1,EB)
@@ -7342,7 +7340,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       DO J=1,JBAR
          DO I=1,IBAR
             IF(CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-            IROW = CCVAR(I,J,K,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
             ! divergence from EOS
             XHAT = XC(I) - UF_MMS*T
             ZHAT = ZC(K) - WF_MMS*T
@@ -7355,7 +7352,6 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    ! Then add Cut-cell contributions to F_Z:
    DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
       DO JCC=1,CUT_CELL(ICC)%NCELL
-         IROW = CUT_CELL(ICC)%UNKZ(JCC) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
          ! divergence from EOS
          XHAT = CUT_CELL(ICC)%XYZCEN(IAXIS,JCC) - UF_MMS*T
          ZHAT = CUT_CELL(ICC)%XYZCEN(KAXIS,JCC) - WF_MMS*T
@@ -8238,7 +8234,7 @@ ENDIF
 
 IF (RDN_METHOD==3) THEN
    ! Volume weighted centroid, volume and INBOUNDARY area of each linked control volume.
-   ! Same row as method 1: the scalar storage row, which is the local unknown at L0.
+   ! Same row as method 1: the scalar storage row.
    ALLOCATE(XYZC_UNKZ(IAXIS:KAXIS,1:NROW_CV)); XYZC_UNKZ = 0._EB
    MESH_LOOP_03 : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       CALL POINT_TO_MESH(NM)
@@ -24913,8 +24909,8 @@ ENDIF
 END SUBROUTINE SEED_FV_FACE_UNKF
 
 SUBROUTINE SYNC_FV_SCALAR_UNKNOWNS(NM)
-! Copy numbered scalar IDs from cut/CCVAR into active FV%CV rows. Shared by L0–L2; N_MEMBER skips
-! absorbed child slots after agglomeration.
+! Copy numbered scalar IDs from cut/CCVAR into active FV%CV rows; N_MEMBER skips absorbed child slots after
+! agglomeration.
 INTEGER, INTENT(IN) :: NM
 INTEGER :: ICV,ICC,JCC,I,J,K
 TYPE(MESH_TYPE), POINTER :: MFV
