@@ -1174,9 +1174,8 @@ COUNT_GEOM_LOOP: DO
    GEOM_LINE(N_GEOMETRY) = INPUT_FILE_LINE_NUMBER
 ENDDO COUNT_GEOM_LOOP
 REWIND(LU_INPUT) ; INPUT_FILE_LINE_NUMBER = 0
-! No cut-cell region. Scope 2 indexes CCVAR and reduces in a different order from scope 0.
+! No cut-cell region: pressure is not per member.
 IF (N_GEOMETRY==0 .AND. .NOT.CC_IBM) THEN
-   CC_CV_SOLVER_SCOPE = CC_CV_SCOPE_IDENTITY
    CC_CV_H_PER_MEMBER = .FALSE.
    RETURN
 ENDIF
