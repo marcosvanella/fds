@@ -26057,7 +26057,14 @@ DO
       DONE(N) = .TRUE.
       MOVED = .TRUE.
    ENDDO
-   IF (.NOT.MOVED) EXIT
+   IF (MOVED) CYCLE
+   ! A cycle of forced links (pieces that pick each other) reaches no group: its first record founds one.
+   DO N=1,ND
+      IF (.NOT.DONE(N)) EXIT
+   ENDDO
+   IF (N>ND) EXIT
+   IF (PP(N)>0) GI(7,PP(N)) = GI(6,PP(N))
+   DONE(N) = .TRUE.
 ENDDO
 END SUBROUTINE L2G_APPLY
 
