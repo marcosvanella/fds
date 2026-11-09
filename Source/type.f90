@@ -1388,9 +1388,9 @@ TYPE CC_CUTCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)    ::           XYZCEN !< Cut-cell centroid locations. (IAXIS:KAXIS,1:NCELL)
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::             UNKZ !< Cut-cells unknown number for scalars.
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::               IG !< (1:NCELL) FV GCELL index; 0 if not in GCELL inventory.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)      ::              ICV !< (1:NCELL) solver-active owner FV CV on this mesh; 0 if inactive/remote.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)      ::              ICV !< (1:NCELL) active owner CV on this mesh; 0: inactive or remote.
    INTEGER,  ALLOCATABLE, DIMENSION(:)      ::        NOADVANCE !< Array to define if cut-cell should be blocked. (1:NCELL)
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:)    ::     BODTRI_DONOR !< Donor body/triangle for blocked-cell generated inboundary faces. (1:2,1:NCELL)
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:)    ::     BODTRI_DONOR !< (1:2,1:NCELL) donor body/triangle of faces made by blocking.
    INTEGER                                  ::       N_NOMICC=0 !< Number of entries in NOMICC
    INTEGER,  ALLOCATABLE, DIMENSION(:,:)    ::           NOMICC !< OMESH cut-cells array. (1:2,1:N_NOMICC)
 
@@ -1454,7 +1454,7 @@ TYPE CC_CV_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_NM    !< (1:N) mesh number that owns the CV row.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: OWNER_GCELL !< (1:N) identity owner/member GCELL index.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: N_MEMBER    !< (1:N) GCELL members; 0 = agglomeration child, skip in CELL_TYPE loops.
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_NM   !< (1:MAX_MEMBERS,1:N) diagnostic member mesh numbers; MAX_MEMBERS = max(2, max members-per-CV).
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_NM   !< (1:MAX_MEMBERS,1:N) member meshes; MAX_MEMBERS = max(2, members per CV).
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: MEMBER_GCELL !< (1:MAX_MEMBERS,1:N) diagnostic member GCELL indices.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CELL_TYPE   !< (1:N) identity source type, CC_GCELL_CUT or CC_GCELL_REG.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK         !< (IAXIS:KAXIS,1:N) identity host Cartesian cell indices.
@@ -1506,8 +1506,8 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PARTNER     !< (1:N) FACE row of the same face on mesh PARTNER_NM, else 0.
    ! --- provenance back to legacy faces ---
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: FTYPE       !< (1:N) legacy source kind CC_FTYPE_RCGAS/CFGAS/CFINB/RGGAS.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IRC     !< (1:N) source RC_FACE index for RCGAS; set in GET_GASPHASE_REGRCFACES_DATA.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IREG    !< (1:N) source CC_REGFACE_*_Z index for RGGAS; set in GET_GASPHASE_REGRCFACES_DATA.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IRC     !< (1:N) RC_FACE of an RCGAS row (GET_GASPHASE_REGRCFACES_DATA).
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IREG    !< (1:N) CC_REGFACE_*_Z of an RGGAS row (GET_GASPHASE_REGRCFACES_DATA).
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_ICF     !< (1:N) source CUT_FACE index for cut-face-based faces, else 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_JCF     !< (1:N) source CUT_FACE polygon for cut-face-based faces, else 0.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IWC         !< (1:N) owner-side WALL index of a wall-bearing face, else 0.
@@ -1515,10 +1515,6 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK_FACE    !< (IAXIS:KAXIS,1:N) Cartesian face locator for axis faces.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: NBR_IJK     !< (IAXIS:KAXIS,1:N) outside Cartesian cell for FV/structured coupling.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKF        !< (1:N) link number. The only copy.
-   ! Link group -> FACE rows (CSR): rows with UNKF==IL are (LINK_NM,LINK_ROW)(LINK_PTR(IL):LINK_PTR(IL+1)-1).
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_PTR    !< (1:NUNK_F+1) CSR offsets into LINK_NM/LINK_ROW.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_NM     !< (1:sum group sizes) mesh of each group member.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: LINK_ROW    !< (1:sum group sizes) FACE row of each group member.
    ! --- geometry ---
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: AREA        !< (1:N) face area.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: FLUX_AREA   !< (1:N) legacy-exact area used by identity-scope flux operators.

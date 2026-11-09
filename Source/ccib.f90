@@ -169,8 +169,9 @@ PUBLIC :: ADD_CUTCELL_D_PBAR_DT, ADD_LINKEDCELL_D_PBAR_DT,ADD_CUTCELL_PSUM,ADD_L
 LOGICAL, SAVE :: CF_BACK_EXCHANGE_ACTIVE=.FALSE.
 INTEGER, SAVE :: N_CF_BACK_SEND=0,N_CF_BACK_RECV=0
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: CF_BACK_SEND_CNT3,CF_BACK_SDISPL3,CF_BACK_RECV_CNT3,CF_BACK_RDISPL3
-INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: CF_BACK_SEND_NOM,CF_BACK_MAP_IDX     !< Requester side: owner mesh and back CFACE index per query
-INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: CF_BACK_RECV_NOM,CF_BACK_RECV_IDX    !< Owner side: owner mesh and resolved local CFACE index per query
+! Requester side: owner mesh and back CFACE index per query. Owner side: owner mesh and resolved local CFACE index.
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: CF_BACK_SEND_NOM,CF_BACK_MAP_IDX
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: CF_BACK_RECV_NOM,CF_BACK_RECV_IDX
 
 ! L2 global-CV pressure bridge. The registry maps the stable (owner mesh, owner CV) key to the
 ! global UGLMAT pressure row. The edge list is gathered once after numbering so rows owned by this
@@ -25189,11 +25190,10 @@ SUBROUTINE SEED_FV_FACE_UNKF(NM)
 
 ! Once after GET_LINKED_FACE_INDEXES_F, at every scope. The linker already wrote FACE%UNKF.
 ! This copies that number through the source map (a self-assignment on the map row; the second row of
-! a thin barrier takes the map row's number) and builds the link group -> FACE row CSR.
+! a thin barrier takes the map row's number).
 ! A cut-face or REGFACE_Z source map that does not lead back to its row stops the run.
 INTEGER, INTENT(IN) :: NM
-INTEGER :: IF_,IF_MAP,ICF,JCF,IRC,IREG,I,J,K,X1AXIS,IL,NLINK,N_DUP
-INTEGER, ALLOCATABLE, DIMENSION(:) :: CURSOR
+INTEGER :: IF_,IF_MAP,ICF,JCF,IRC,IREG,I,J,K,X1AXIS,N_DUP
 TYPE(MESH_TYPE), POINTER :: MFV
 TYPE(CC_FV_TYPE), POINTER :: FV
 
@@ -25234,34 +25234,10 @@ DO IF_=1,FV%FACE%N
    N_DUP=N_DUP+1
 ENDDO
 
-! Link group -> FACE rows, rows ascending within a group.
-ALLOCATE(FV%FACE%LINK_PTR(MFV%NUNK_F+1)); FV%FACE%LINK_PTR=0
-DO IF_=1,FV%FACE%N
-   IF (IF_>FV%FACE%N_INT .AND. FV%FACE%FTYPE(IF_)/=CC_FTYPE_RCGAS) CYCLE
-   IL=FV%FACE%UNKF(IF_)
-   IF (IL>0) FV%FACE%LINK_PTR(IL+1)=FV%FACE%LINK_PTR(IL+1)+1
-ENDDO
-FV%FACE%LINK_PTR(1)=1
-DO IL=1,MFV%NUNK_F
-   FV%FACE%LINK_PTR(IL+1)=FV%FACE%LINK_PTR(IL+1)+FV%FACE%LINK_PTR(IL)
-ENDDO
-NLINK=FV%FACE%LINK_PTR(MFV%NUNK_F+1)-1
-ALLOCATE(FV%FACE%LINK_NM(NLINK),FV%FACE%LINK_ROW(NLINK),CURSOR(MFV%NUNK_F))
-CURSOR=FV%FACE%LINK_PTR(1:MFV%NUNK_F)
-DO IF_=1,FV%FACE%N
-   IF (IF_>FV%FACE%N_INT .AND. FV%FACE%FTYPE(IF_)/=CC_FTYPE_RCGAS) CYCLE
-   IL=FV%FACE%UNKF(IF_)
-   IF (IL<1) CYCLE
-   FV%FACE%LINK_NM(CURSOR(IL))=NM
-   FV%FACE%LINK_ROW(CURSOR(IL))=IF_
-   CURSOR(IL)=CURSOR(IL)+1
-ENDDO
-
 IF (N_DUP>0) THEN
    WRITE(LU_ERR,'(A,I0,A,I0)') 'ERROR: SEED_FV_FACE_UNKF: FACE rows share a legacy face, NM=',NM,', rows=',N_DUP
    STOP_STATUS=SETUP_STOP
 ENDIF
-DEALLOCATE(CURSOR)
 END SUBROUTINE SEED_FV_FACE_UNKF
 
 SUBROUTINE SYNC_FV_SCALAR_UNKNOWNS(NM)
