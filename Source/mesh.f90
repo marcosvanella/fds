@@ -273,6 +273,7 @@ TYPE MESH_TYPE
 
    ! Linked face velocity arrays:
    REAL(EB), ALLOCATABLE, DIMENSION(:) :: EWC_UN_LNK, UN_LNK, UN_ULNK
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: LNK_CART, LNK_PIECE !< FACE rows of the linked Cartesian faces and cut pieces.
 
    ! Array with boundary cut-face areas pes cut-cell, for use in cut-cell blocking.
    TYPE(CC_INBCF_AREA_TYPE), ALLOCATABLE, DIMENSION(:,:,:) :: INBCF_AREA
