@@ -274,6 +274,10 @@ TYPE MESH_TYPE
    ! Linked face velocity arrays:
    REAL(EB), ALLOCATABLE, DIMENSION(:) :: EWC_UN_LNK, UN_LNK, UN_ULNK
    INTEGER, ALLOCATABLE, DIMENSION(:) :: LNK_CART, LNK_PIECE !< FACE rows of the linked Cartesian faces and cut pieces.
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: GRAV_FACE !< (I,J,K) of the regular gas faces beside a scalar CV, by axis.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: GRAV_PTR    !< GRAV_FACE(:,GRAV_PTR(AX):GRAV_PTR(AX+1)-1) are the AX faces.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: INB_CF,INB_PTR !< In-boundary cut faces with a solid face and cell behind.
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: INB_SF,INB_ZF !< (I,J,K,axis): those faces by INB_PTR; all solid faces.
 
    ! Array with boundary cut-face areas pes cut-cell, for use in cut-cell blocking.
    TYPE(CC_INBCF_AREA_TYPE), ALLOCATABLE, DIMENSION(:,:,:) :: INBCF_AREA
