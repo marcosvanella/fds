@@ -283,6 +283,10 @@ TYPE MESH_TYPE
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: CFL_REG,CFL_CUT !< (I,J,K,slot) and (ICC,JCC,slot) of the CV members.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: CFL_XSLOT,CFL_XOWN,CFL_XMAP !< Cross-mesh rows: slot, owner, owner's entry.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: CFL_XQ !< (4,:) Their partial sums of UVWA, MURA, VOL, DIVG.
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: TH_REG,TH_CUT,TH_OCV !< Thermodynamic rows: (I,J,K,slot), (JCC,slot),
+                                                                !< (ICV,slot) of the members and owned CVs.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: TH_CPTR !< TH_CUT(:,TH_CPTR(ICC):TH_CPTR(ICC+1)-1) are cut cell ICC's.
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: TH_FSLOT !< (owner side, neighbor side) slot of each FACE row, 0 if none.
 
    ! Array with boundary cut-face areas pes cut-cell, for use in cut-cell blocking.
    TYPE(CC_INBCF_AREA_TYPE), ALLOCATABLE, DIMENSION(:,:,:) :: INBCF_AREA
