@@ -278,6 +278,11 @@ TYPE MESH_TYPE
    INTEGER, ALLOCATABLE, DIMENSION(:) :: GRAV_PTR    !< GRAV_FACE(:,GRAV_PTR(AX):GRAV_PTR(AX+1)-1) are the AX faces.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: INB_CF,INB_PTR !< In-boundary cut faces with a solid face and cell behind.
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: INB_SF,INB_ZF !< (I,J,K,axis): those faces by INB_PTR; all solid faces.
+   INTEGER :: CFL_NSLOT=0 !< Scalar CV rows with a member here (linked-cell CFL check), as slots in global row order.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: CFL_SROW !< Global row of each slot (setup only).
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: CFL_REG,CFL_CUT !< (I,J,K,slot) and (ICC,JCC,slot) of the CV members.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: CFL_XSLOT,CFL_XOWN,CFL_XMAP !< Cross-mesh rows: slot, owner, owner's entry.
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: CFL_XQ !< (4,:) Their partial sums of UVWA, MURA, VOL, DIVG.
 
    ! Array with boundary cut-face areas pes cut-cell, for use in cut-cell blocking.
    TYPE(CC_INBCF_AREA_TYPE), ALLOCATABLE, DIMENSION(:,:,:) :: INBCF_AREA

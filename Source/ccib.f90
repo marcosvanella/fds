@@ -27,7 +27,7 @@ USE COMPLEX_GEOMETRY_GRID, ONLY: DELTA_INT,DELTA_VERT,DIST_THRES,FDS_AREA_GEOM,I
      GLOBAL_DELTA_FACE,SET_CVS_3D,BLOCK_CC_SOLID_EXTWALLCELLS,INIT_CFACE_CELL,GET_REGULAR_CUT_EDGES_BC, &
      GET_SOLID_CUTCELL_EDGES_BC,GET_BACK_CFACE_INDEX,CC_CV_GET_SOLVER_KEY,CC_CV_CELL_IS_CV_MASTER, &
      CC_GRID_SET_CV_CANON_XYZ_TOL,CC_GRID_WALL_IS_THIN_BARRIER,CC_GRID_APPEND_REGFACE_TAIL, &
-     CC_GRID_APPEND_SEAM_RCFACE
+     CC_GRID_APPEND_SEAM_RCFACE,CC_GRID_SEAM_EXCHANGE
 USE PRECISION_PARAMETERS
 USE GLOBAL_CONSTANTS
 USE MESH_POINTERS
@@ -205,8 +205,8 @@ INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: FV_H_EDGE_ROW,FV_H_EDGE_COL,FV_H_EDG
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: FV_H_EDGE_BIJ,FV_L2_FH_REMOTE,FV_L2_XH_GLOBAL,FV_L2_FZ_REMOTE, &
                                              FV_L2_DVOL_FACE
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: FV_L2_DEL_RHO_D_DEL_Z_FACE
-LOGICAL, SAVE :: FV_L2_CFLVN_ACTIVE=.FALSE.
-REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: FV_L2_CFL_UVWA,FV_L2_CFL_MURA,FV_L2_CFL_VOL,FV_L2_CFL_DIVG
+INTEGER, SAVE :: CFL_NREMOTE=0 !< Held CFL rows whose owner is on another rank.
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:,:) :: CFL_RMAP !< (owner mesh, CFL_XQ entry) of each CFL record received here.
 
 CONTAINS
 
@@ -897,6 +897,166 @@ DEALLOCATE(CFL,PTR,SF,ZF)
 END SUBROUTINE CC_SET_MOMENTUM_FACE_LISTS
 
 
+! ------------------------------ CC_SET_CFL_ROWS ------------------------------------
+
+SUBROUTINE CC_SET_CFL_ROWS
+! Rows of the linked-cell CFL check (CHECK_CFLVN_LINKED_CELLS), set once. Per mesh: the scalar CV rows its members
+! touch, as slots in global row order (MAXLOC keeps the first of equal rows, as over the global rows); the members in
+! the order of the loops they replace; the cross-mesh rows (members on more than one mesh), each with its owner mesh
+! (FV%CV%GCELL_TO_CV_NM). A row held here and owned on another mesh sends its partial sums to the owner each step
+! (FINALIZE_FV_L2_CFLVN_ROWS): the owner's entry is found here on this rank, else for each record it will receive.
+INTEGER :: NM,I,J,K,ICC,JCC,IG,IROW,IPASS,NREG,NCUT,N,L,S,O,NS,NR
+INTEGER, ALLOCATABLE :: ORD(:),SLOT(:),OWN(:),NSORT(:),DEST(:)
+REAL(EB), ALLOCATABLE :: R(:,:),SB(:,:),RB(:,:)
+TYPE(MESH_TYPE), POINTER :: M
+
+ALLOCATE(NSORT(LOWER_MESH_INDEX:UPPER_MESH_INDEX))
+NS = 0
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   ! Members: regular cells K-J-I, then cut cells; the global row in the last entry until the slots are known.
+   DO IPASS=1,2
+      NREG = 0
+      DO K=1,M%KBAR
+         DO J=1,M%JBAR
+            DO I=1,M%IBAR
+               IROW = CFL_ROW(M%CCVAR(I,J,K,CC_UNKZ)); IF (IROW<1) CYCLE
+               NREG = NREG+1
+               IF (IPASS==2) M%CFL_REG(:,NREG) = (/I,J,K,IROW/)
+            ENDDO
+         ENDDO
+      ENDDO
+      NCUT = 0
+      DO ICC=1,M%N_CUTCELL_MESH
+         DO JCC=1,M%CUT_CELL(ICC)%NCELL
+            IROW = CFL_ROW(M%CUT_CELL(ICC)%UNKZ(JCC)); IF (IROW<1) CYCLE
+            NCUT = NCUT+1
+            IF (IPASS==2) M%CFL_CUT(:,NCUT) = (/ICC,JCC,IROW/)
+         ENDDO
+      ENDDO
+      IF (IPASS==1) ALLOCATE(M%CFL_REG(4,NREG),M%CFL_CUT(3,NCUT))
+   ENDDO
+   ! Slots: the distinct rows, increasing.
+   N = NREG+NCUT
+   ALLOCATE(R(1,MAX(1,N)),SLOT(MAX(1,N)),M%CFL_SROW(MAX(1,N)))
+   R(1,1:NREG) = REAL(M%CFL_REG(4,1:NREG),EB)
+   R(1,NREG+1:N) = REAL(M%CFL_CUT(3,1:NCUT),EB)
+   CALL KEY_SORT(R,1,N,ORD)
+   S = 0
+   DO L=1,N
+      IROW = NINT(R(1,ORD(L)))
+      IF (S==0) THEN
+         S = 1; M%CFL_SROW(1) = IROW
+      ELSEIF (IROW/=M%CFL_SROW(S)) THEN
+         S = S+1; M%CFL_SROW(S) = IROW
+      ENDIF
+      SLOT(ORD(L)) = S
+   ENDDO
+   M%CFL_REG(4,1:NREG) = SLOT(1:NREG)
+   M%CFL_CUT(3,1:NCUT) = SLOT(NREG+1:N)
+   M%CFL_SROW = M%CFL_SROW(1:S)
+   M%CFL_NSLOT = S; NSORT(NM) = S
+   ! Owner of each slot: a row whose interior GCELL belongs to a CV of another mesh is held here, sent to that mesh.
+   ALLOCATE(OWN(MAX(1,S))); OWN = NM
+   DO IG=1,M%FV%GCELL%N_INT
+      O = M%FV%CV%GCELL_TO_CV_NM(IG); IF (O<1 .OR. O==NM) CYCLE
+      IF (M%FV%GCELL%CELL_TYPE(IG)==CC_GCELL_CUT) THEN
+         IROW = CFL_ROW(M%CUT_CELL(M%FV%GCELL%ICC(IG))%UNKZ(M%FV%GCELL%JCC(IG)))
+      ELSE
+         IROW = CFL_ROW(M%CCVAR(M%FV%GCELL%IJK(IAXIS,IG),M%FV%GCELL%IJK(JAXIS,IG),M%FV%GCELL%IJK(KAXIS,IG),CC_UNKZ))
+      ENDIF
+      S = FIND_SLOT(NM,IROW); IF (S>0) OWN(S) = O
+   ENDDO
+   M%CFL_XSLOT = PACK((/(S,S=1,M%CFL_NSLOT)/),OWN(1:M%CFL_NSLOT)/=NM)
+   M%CFL_XOWN = PACK(OWN(1:M%CFL_NSLOT),OWN(1:M%CFL_NSLOT)/=NM)
+   ALLOCATE(M%CFL_XMAP(SIZE(M%CFL_XSLOT))); M%CFL_XMAP = 0
+   NS = NS+COUNT(PROCESS(M%CFL_XOWN)/=MY_RANK)
+   DEALLOCATE(R,SLOT,OWN,ORD)
+ENDDO
+! Each held row: the owner's entry, directly on this rank, else for each record the exchange will deliver there.
+ALLOCATE(SB(2,MAX(1,NS)),DEST(MAX(1,NS)))
+CFL_NREMOTE = NS
+NS = 0
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   DO L=1,SIZE(M%CFL_XOWN)
+      O = M%CFL_XOWN(L)
+      IF (O==NM) CYCLE
+      IROW = M%CFL_SROW(M%CFL_XSLOT(L))
+      IF (PROCESS(O)==MY_RANK) THEN
+         M%CFL_XMAP(L) = OWNED_ENTRY(O,IROW)
+      ELSE
+         NS = NS+1; SB(:,NS) = (/REAL(IROW,EB),REAL(O,EB)/); DEST(NS) = PROCESS(O)
+      ENDIF
+   ENDDO
+ENDDO
+CALL CC_GRID_SEAM_EXCHANGE(2,NS,SB,DEST,NR,RB)
+ALLOCATE(CFL_RMAP(2,MAX(1,NR)))
+DO L=1,NR
+   O = NINT(RB(2,L))
+   CFL_RMAP(:,L) = (/O,OWNED_ENTRY(O,NINT(RB(1,L)))/)
+ENDDO
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   ALLOCATE(MESHES(NM)%CFL_XQ(4,SIZE(MESHES(NM)%CFL_XSLOT))); MESHES(NM)%CFL_XQ = 0._EB
+   DEALLOCATE(MESHES(NM)%CFL_SROW)
+ENDDO
+
+CONTAINS
+
+INTEGER FUNCTION CFL_ROW(IUNK)
+! Storage row of scalar unknown IUNK, 0 when it is not a row of the CFL check.
+INTEGER, INTENT(IN) :: IUNK
+CFL_ROW = 0
+IF (IUNK<1) RETURN
+CFL_ROW = FV_SCALAR_STORAGE_ROW(IUNK)
+IF (CFL_ROW>NUNKZ_TOTAL) CFL_ROW = 0
+END FUNCTION CFL_ROW
+
+INTEGER FUNCTION FIND_SLOT(NM,IROW)
+! Slot of global row IROW on mesh NM, 0 if none: bisection over the member slots, then the slots added for owners.
+INTEGER, INTENT(IN) :: NM,IROW
+INTEGER :: LO,HI,MID
+FIND_SLOT = 0
+LO = 1; HI = NSORT(NM)
+DO WHILE (LO<=HI)
+   MID = (LO+HI)/2
+   IF (MESHES(NM)%CFL_SROW(MID)==IROW) THEN
+      FIND_SLOT = MID; RETURN
+   ELSEIF (MESHES(NM)%CFL_SROW(MID)<IROW) THEN
+      LO = MID+1
+   ELSE
+      HI = MID-1
+   ENDIF
+ENDDO
+DO MID=NSORT(NM)+1,MESHES(NM)%CFL_NSLOT
+   IF (MESHES(NM)%CFL_SROW(MID)==IROW) FIND_SLOT = MID
+ENDDO
+END FUNCTION FIND_SLOT
+
+INTEGER FUNCTION OWNED_ENTRY(NM,IROW)
+! Cross-row entry of row IROW on its owner mesh NM, added (with a slot, if no member is here) the first time.
+INTEGER, INTENT(IN) :: NM,IROW
+INTEGER :: SL
+TYPE(MESH_TYPE), POINTER :: MO
+MO => MESHES(NM)
+SL = FIND_SLOT(NM,IROW)
+IF (SL<1) THEN
+   MO%CFL_SROW = (/MO%CFL_SROW,IROW/)
+   MO%CFL_NSLOT = MO%CFL_NSLOT+1
+   SL = MO%CFL_NSLOT
+ENDIF
+DO OWNED_ENTRY=1,SIZE(MO%CFL_XSLOT)
+   IF (MO%CFL_XSLOT(OWNED_ENTRY)==SL) RETURN
+ENDDO
+MO%CFL_XSLOT = (/MO%CFL_XSLOT,SL/)
+MO%CFL_XOWN = (/MO%CFL_XOWN,NM/)
+MO%CFL_XMAP = (/MO%CFL_XMAP,0/)
+OWNED_ENTRY = SIZE(MO%CFL_XSLOT)
+END FUNCTION OWNED_ENTRY
+
+END SUBROUTINE CC_SET_CFL_ROWS
+
+
 ! ------------------------------ CUTFACE_VELOCITIES --------------------------------
 
 SUBROUTINE CUTFACE_VELOCITIES(NM,UU,VV,WW,CUTFACES)
@@ -981,14 +1141,13 @@ RETURN
 END SUBROUTINE CUTFACE_VELOCITIES
 
 
-! --------------------------- BEGIN_FV_L2_CFLVN_ROWS --------------------------------
+! ------------------------------ BEGIN_FV_L2_ROWS -----------------------------------
 
 SUBROUTINE BEGIN_FV_L2_ROWS(MODE)
-! Cross-mesh row-reduce open. MODE = CC_FV_L2_THERMO or CC_FV_L2_CFLVN. No-op unless L2.
+! Cross-mesh row-reduce open. MODE = CC_FV_L2_THERMO. No-op unless L2.
 INTEGER, INTENT(IN) :: MODE
 SELECT CASE(MODE)
 CASE(CC_FV_L2_THERMO); CALL BEGIN_FV_L2_THERMODYNAMIC_ROWS
-CASE(CC_FV_L2_CFLVN);  CALL BEGIN_FV_L2_CFLVN_ROWS
 END SELECT
 END SUBROUTINE BEGIN_FV_L2_ROWS
 
@@ -1007,42 +1166,51 @@ END SELECT
 END SUBROUTINE FINALIZE_FV_L2_ROWS
 
 
-SUBROUTINE BEGIN_FV_L2_CFLVN_ROWS
-! Allocate per-UNKZ CFL/VN accumulators for the L2 time-step limit.
-! no-op unless cross-mesh.
-IF (.NOT.CC_IBM) RETURN
-IF (ALLOCATED(FV_L2_CFL_UVWA)) &
-   DEALLOCATE(FV_L2_CFL_UVWA,FV_L2_CFL_MURA,FV_L2_CFL_VOL,FV_L2_CFL_DIVG)
-ALLOCATE(FV_L2_CFL_UVWA(MAX(1,NUNKZ_TOTAL)),FV_L2_CFL_MURA(MAX(1,NUNKZ_TOTAL)), &
-         FV_L2_CFL_VOL(MAX(1,NUNKZ_TOTAL)),FV_L2_CFL_DIVG(MAX(1,NUNKZ_TOTAL)))
-FV_L2_CFL_UVWA=0._EB; FV_L2_CFL_MURA=0._EB; FV_L2_CFL_VOL=0._EB; FV_L2_CFL_DIVG=0._EB
-FV_L2_CFLVN_ACTIVE=.TRUE.
-END SUBROUTINE BEGIN_FV_L2_CFLVN_ROWS
-
-
 ! -------------------------- FINALIZE_FV_L2_CFLVN_ROWS -------------------------------
 
 SUBROUTINE FINALIZE_FV_L2_CFLVN_ROWS(DT,DT_NEW,T)
-! Reduce global CFL/VN rates and apply the same DT limit policy as the linked-cell path.
-! FV_L2_CFLVN_ACTIVE is set by BEGIN; no-op when L2 CFL buffers were not opened.
-USE MPI_F08
+! Cross-mesh rows of the linked-cell CFL check: each held row's partial sums go to its owner mesh (neighbour ranks, in
+! the order fixed by CC_SET_CFL_ROWS), and the owner applies the linked-cell DT limit policy to the sums. FDS takes the
+! smallest DT_NEW over the meshes.
 REAL(EB), INTENT(IN) :: DT,T
 REAL(EB), INTENT(INOUT) :: DT_NEW(:)
-INTEGER :: IERR,IROW,NM
+INTEGER :: NM,L,O,NS,NR
+INTEGER, ALLOCATABLE :: DEST(:)
+REAL(EB), ALLOCATABLE :: SB(:,:),RB(:,:)
 REAL(EB) :: UVW_RATE,VN_RATE,DT_LIMIT
 REAL(EB), PARAMETER :: DT_EPS=1.E-10_EB
+TYPE(MESH_TYPE), POINTER :: M
 
-IF (.NOT.FV_L2_CFLVN_ACTIVE) RETURN
-CALL MPI_ALLREDUCE(MPI_IN_PLACE,FV_L2_CFL_UVWA,SIZE(FV_L2_CFL_UVWA),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-CALL MPI_ALLREDUCE(MPI_IN_PLACE,FV_L2_CFL_MURA,SIZE(FV_L2_CFL_MURA),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-CALL MPI_ALLREDUCE(MPI_IN_PLACE,FV_L2_CFL_VOL,SIZE(FV_L2_CFL_VOL),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
-CALL MPI_ALLREDUCE(MPI_IN_PLACE,FV_L2_CFL_DIVG,SIZE(FV_L2_CFL_DIVG),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+IF (.NOT.CC_IBM) RETURN
+ALLOCATE(SB(4,MAX(1,CFL_NREMOTE)),DEST(MAX(1,CFL_NREMOTE)))
+NS=0
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M=>MESHES(NM)
+   DO L=1,SIZE(M%CFL_XOWN)
+      O=M%CFL_XOWN(L)
+      IF (O==NM) CYCLE
+      IF (PROCESS(O)==MY_RANK) THEN
+         MESHES(O)%CFL_XQ(:,M%CFL_XMAP(L))=MESHES(O)%CFL_XQ(:,M%CFL_XMAP(L))+M%CFL_XQ(:,L)
+      ELSE
+         NS=NS+1; SB(:,NS)=M%CFL_XQ(:,L); DEST(NS)=PROCESS(O)
+      ENDIF
+   ENDDO
+ENDDO
+CALL CC_GRID_SEAM_EXCHANGE(4,NS,SB,DEST,NR,RB)
+DO L=1,NR
+   O=CFL_RMAP(1,L)
+   MESHES(O)%CFL_XQ(:,CFL_RMAP(2,L))=MESHES(O)%CFL_XQ(:,CFL_RMAP(2,L))+RB(:,L)
+ENDDO
 
 UVW_RATE=0._EB; VN_RATE=0._EB
-DO IROW=1,NUNKZ_TOTAL
-   IF (FV_L2_CFL_VOL(IROW)<=TWO_EPSILON_EB) CYCLE
-   UVW_RATE=MAX(UVW_RATE,(FV_L2_CFL_UVWA(IROW)+FV_L2_CFL_DIVG(IROW))/FV_L2_CFL_VOL(IROW))
-   VN_RATE=MAX(VN_RATE,FV_L2_CFL_MURA(IROW)/FV_L2_CFL_VOL(IROW))
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M=>MESHES(NM)
+   DO L=1,SIZE(M%CFL_XOWN)
+      IF (M%CFL_XOWN(L)/=NM .OR. M%CFL_XQ(3,L)<=TWO_EPSILON_EB) CYCLE
+      UVW_RATE=MAX(UVW_RATE,(M%CFL_XQ(1,L)+M%CFL_XQ(4,L))/M%CFL_XQ(3,L))
+      VN_RATE=MAX(VN_RATE,M%CFL_XQ(2,L)/M%CFL_XQ(3,L))
+   ENDDO
+   M%CFL_XQ=0._EB ! A mesh that skips the check next time adds nothing.
 ENDDO
 IF (.NOT.LOCK_TIME_STEP) THEN
    IF (DT*UVW_RATE>=CFL_MAX .OR. DT*VN_RATE>=VN_MAX) THEN
@@ -1062,8 +1230,6 @@ IF (.NOT.LOCK_TIME_STEP) THEN
       ENDDO
    ENDIF
 ENDIF
-DEALLOCATE(FV_L2_CFL_UVWA,FV_L2_CFL_MURA,FV_L2_CFL_VOL,FV_L2_CFL_DIVG)
-FV_L2_CFLVN_ACTIVE=.FALSE.
 END SUBROUTINE FINALIZE_FV_L2_CFLVN_ROWS
 
 ! --------------------------- CHECK_CFLVN_LINKED_CELLS --------------------------------
@@ -1078,7 +1244,7 @@ REAL(EB),INTENT(IN) :: DT
 REAL(EB),INTENT(INOUT) :: UVWMAX,R_DX2,MUTRM
 
 ! Local variables:
-INTEGER :: I,J,K,ICC,JCC,IROW,IMAX,X1AXIS,ILH,IRC,IFC,IFACE,IFC2,IFACE2,ICFA,LOWHIGH,IROW_BEG,IROW_END,IF_,IG
+INTEGER :: I,J,K,ICC,JCC,IROW,IMAX,X1AXIS,ILH,IRC,IFC,IFACE,IFC2,IFACE2,ICFA,LOWHIGH,IROW_BEG,IROW_END,IF_,IG,L
 REAL(EB):: MU_TMP,MURDN,AF,VELN,CFLMAX_TMP,VNMAX_TMP,TWOD_FCT,MU_AVG
 INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJKT
 REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UVWA, MUV, MURA, VOL, DIVG
@@ -1088,9 +1254,9 @@ TYPE(CC_FV_TYPE), POINTER :: FV
 IF (NUNKZ_TOTAL<1) RETURN
 FV=>MESHES(NM)%FV
 
-! Average velocity components on linked cells:
-   IROW_BEG=1
-   IROW_END=MAX(1,NUNKZ_TOTAL)
+! Average velocity components on linked cells, one entry per slot (CC_SET_CFL_ROWS):
+IROW_BEG=1
+IROW_END=MAX(1,MESHES(NM)%CFL_NSLOT)
 ALLOCATE(UVWA(IROW_BEG:IROW_END),MUV(IROW_BEG:IROW_END),MURA(IROW_BEG:IROW_END), &
          IJKT(IAXIS:KAXIS,IROW_BEG:IROW_END),VOL(IROW_BEG:IROW_END),DIVG(IROW_BEG:IROW_END))
 UVWA(:)       = 0._EB
@@ -1102,146 +1268,137 @@ DIVG(:)       = 0._EB
 
 TWOD_FCT = 1._EB; IF(TWO_D) TWOD_FCT = 0._EB
 MU_TMP   = 0._EB
-! First Regular cells that have an UNKZ index:
-DO K=1,KBAR
-   DO J=1,JBAR
-      DO I=1,IBAR
-         IF(CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-         IROW=FV_SCALAR_STORAGE_ROW(CCVAR(I,J,K,CC_UNKZ))
-         IF (IROW<IROW_BEG .OR. IROW>IROW_END) CYCLE
-         IF (CHECK_VN) MU_TMP = MAX(D_Z_MAX(I,J,K),MU(I,J,K)/RHOS(I,J,K))
-         ! X axis:
-         X1AXIS = IAXIS
-         DO ILH=-1,0
-            IRC  = FCVAR(I+ILH,J,K,CC_IDRC,X1AXIS)
+! First Regular cells that have an UNKZ index (CFL_REG, set once):
+DO L=1,SIZE(MESHES(NM)%CFL_REG,2)
+   I = MESHES(NM)%CFL_REG(1,L); J = MESHES(NM)%CFL_REG(2,L); K = MESHES(NM)%CFL_REG(3,L); IROW = MESHES(NM)%CFL_REG(4,L)
+   IF (CHECK_VN) MU_TMP = MAX(D_Z_MAX(I,J,K),MU(I,J,K)/RHOS(I,J,K))
+   ! X axis:
+   X1AXIS = IAXIS
+   DO ILH=-1,0
+      IRC  = FCVAR(I+ILH,J,K,CC_IDRC,X1AXIS)
+      MURDN = MU_TMP/DX(I)
+      IF (IRC>0) THEN
+         IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+         MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
+                 1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
+      ENDIF
+      AF   = DY(J)*DZ(K); VELN = US(I+ILH,J,K)
+      UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH+1,EB)*VELN*AF) ! MAX(u.n A, 0), only positive values.
+      MURA(IROW) = MURA(IROW) + MURDN * AF
+   ENDDO
+   ! Y axis:
+   X1AXIS = JAXIS
+   DO ILH=-1,0
+      IRC  = FCVAR(I,J+ILH,K,CC_IDRC,X1AXIS)
+      MURDN = TWOD_FCT * MU_TMP/DY(J)
+      IF (IRC>0) THEN
+         IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+         MURDN = TWOD_FCT*MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
+                 1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
+      ENDIF
+      AF   = DX(I)*DZ(K); VELN = VS(I,J+ILH,K)
+      UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH+1,EB)*VELN*AF)
+      MURA(IROW) = MURA(IROW) + MURDN * AF
+   ENDDO
+   ! Z axis:
+   X1AXIS = KAXIS
+   DO ILH=-1,0
+      IRC  = FCVAR(I,J,K+ILH,CC_IDRC,X1AXIS)
+      MURDN = MU_TMP/DZ(K)
+      IF (IRC>0) THEN
+         IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+         MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
+                 1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
+      ENDIF
+      AF   = DX(I)*DY(J); VELN = WS(I,J,K+ILH)
+      UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH+1,EB)*VELN*AF)
+      MURA(IROW) = MURA(IROW) + MURDN * AF
+   ENDDO
+   ! Divergence:
+   MUV(IROW)  = MUV(IROW)  + MU_TMP * (DX(I)*DY(J)*DZ(K))
+   DIVG(IROW) = DIVG(IROW) + ABS(DS(I,J,K)) * (DX(I)*DY(J)*DZ(K))
+   VOL(IROW)  = VOL(IROW)  + (DX(I)*DY(J)*DZ(K))
+   IJKT(IAXIS:KAXIS,IROW) = (/ I, J, K /)
+ENDDO
+! Then add Cut-cell contributions:
+CUTCELL_DO : DO L=1,SIZE(MESHES(NM)%CFL_CUT,2)
+   ICC = MESHES(NM)%CFL_CUT(1,L); JCC = MESHES(NM)%CFL_CUT(2,L); IROW = MESHES(NM)%CFL_CUT(3,L)
+   I = CUT_CELL(ICC)%IJK(IAXIS)
+   J = CUT_CELL(ICC)%IJK(JAXIS)
+   K = CUT_CELL(ICC)%IJK(KAXIS)
+   IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+   IF (CHECK_VN) MU_TMP = MAX(D_Z_MAX(I,J,K),MU(I,J,K)/RHOS(I,J,K))
+   IFC_LOOP : DO IFC=1,CUT_CELL(ICC)%CCELEM(1,JCC)
+      IFACE = CUT_CELL(ICC)%CCELEM(IFC+1,JCC)
+      SELECT CASE(CUT_CELL(ICC)%FACE_LIST(1,IFACE))
+      CASE(CC_FTYPE_RCGAS) ! REGULAR GASPHASE
+         LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
+         X1AXIS  = CUT_CELL(ICC)%FACE_LIST(3,IFACE)
+         ILH     = LOWHIGH - 1
+         SELECT CASE(X1AXIS)
+         CASE(IAXIS)
+            IRC  = FCVAR(I-1+ILH,J,K,CC_IDRC,X1AXIS)
             MURDN = MU_TMP/DX(I)
             IF (IRC>0) THEN
                IF(RC_FACE(IRC)%SHAREDZ) CYCLE
                MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                        1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
             ENDIF
-            AF   = DY(J)*DZ(K); VELN = US(I+ILH,J,K)
-            UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH+1,EB)*VELN*AF) ! MAX(u.n A, 0), only positive values.
-            MURA(IROW) = MURA(IROW) + MURDN * AF
-         ENDDO
-         ! Y axis:
-         X1AXIS = JAXIS
-         DO ILH=-1,0
-            IRC  = FCVAR(I,J+ILH,K,CC_IDRC,X1AXIS)
+            AF   = DY(J)*DZ(K); VELN = US(I-1+ILH,J,K)
+         CASE(JAXIS)
+            IRC  = FCVAR(I,J-1+ILH,K,CC_IDRC,X1AXIS)
             MURDN = TWOD_FCT * MU_TMP/DY(J)
             IF (IRC>0) THEN
                IF(RC_FACE(IRC)%SHAREDZ) CYCLE
-               MURDN = TWOD_FCT*MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
-                       1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
+               MURDN=TWOD_FCT*MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
+                      1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
             ENDIF
-            AF   = DX(I)*DZ(K); VELN = VS(I,J+ILH,K)
-            UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH+1,EB)*VELN*AF)
-            MURA(IROW) = MURA(IROW) + MURDN * AF
-         ENDDO
-         ! Z axis:
-         X1AXIS = KAXIS
-         DO ILH=-1,0
-            IRC  = FCVAR(I,J,K+ILH,CC_IDRC,X1AXIS)
+            AF   = DX(I)*DZ(K); VELN = VS(I,J-1+ILH,K)
+         CASE(KAXIS)
+            IRC  = FCVAR(I,J,K-1+ILH,CC_IDRC,X1AXIS)
             MURDN = MU_TMP/DZ(K)
             IF (IRC>0) THEN
                IF(RC_FACE(IRC)%SHAREDZ) CYCLE
                MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                        1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
             ENDIF
-            AF   = DX(I)*DY(J); VELN = WS(I,J,K+ILH)
-            UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH+1,EB)*VELN*AF)
-            MURA(IROW) = MURA(IROW) + MURDN * AF
-         ENDDO
-         ! Divergence:
-         MUV(IROW)  = MUV(IROW)  + MU_TMP * (DX(I)*DY(J)*DZ(K))
-         DIVG(IROW) = DIVG(IROW) + ABS(DS(I,J,K)) * (DX(I)*DY(J)*DZ(K))
-         VOL(IROW)  = VOL(IROW)  + (DX(I)*DY(J)*DZ(K))
-         IJKT(IAXIS:KAXIS,IROW) = (/ I, J, K /)
-      ENDDO
-   ENDDO
-ENDDO
-! Then add Cut-cell contributions:
-CUTCELL_DO : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-   I = CUT_CELL(ICC)%IJK(IAXIS)
-   J = CUT_CELL(ICC)%IJK(JAXIS)
-   K = CUT_CELL(ICC)%IJK(KAXIS)
-   IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-   IF (CHECK_VN) MU_TMP = MAX(D_Z_MAX(I,J,K),MU(I,J,K)/RHOS(I,J,K))
-   DO JCC=1,CUT_CELL(ICC)%NCELL
-      IROW=FV_SCALAR_STORAGE_ROW(CUT_CELL(ICC)%UNKZ(JCC))
-      IF (IROW<IROW_BEG .OR. IROW>IROW_END) CYCLE
-      IFC_LOOP : DO IFC=1,CUT_CELL(ICC)%CCELEM(1,JCC)
-         IFACE = CUT_CELL(ICC)%CCELEM(IFC+1,JCC)
-         SELECT CASE(CUT_CELL(ICC)%FACE_LIST(1,IFACE))
-         CASE(CC_FTYPE_RCGAS) ! REGULAR GASPHASE
-            LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
-            X1AXIS  = CUT_CELL(ICC)%FACE_LIST(3,IFACE)
-            ILH     = LOWHIGH - 1
-            SELECT CASE(X1AXIS)
-            CASE(IAXIS)
-               IRC  = FCVAR(I-1+ILH,J,K,CC_IDRC,X1AXIS)
-               MURDN = MU_TMP/DX(I)
-               IF (IRC>0) THEN
-                  IF(RC_FACE(IRC)%SHAREDZ) CYCLE
-                  MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
-                          1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
-               ENDIF
-               AF   = DY(J)*DZ(K); VELN = US(I-1+ILH,J,K)
-            CASE(JAXIS)
-               IRC  = FCVAR(I,J-1+ILH,K,CC_IDRC,X1AXIS)
-               MURDN = TWOD_FCT * MU_TMP/DY(J)
-               IF (IRC>0) THEN
-                  IF(RC_FACE(IRC)%SHAREDZ) CYCLE
-                  MURDN=TWOD_FCT*MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
-                         1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
-               ENDIF
-               AF   = DX(I)*DZ(K); VELN = VS(I,J-1+ILH,K)
-            CASE(KAXIS)
-               IRC  = FCVAR(I,J,K-1+ILH,CC_IDRC,X1AXIS)
-               MURDN = MU_TMP/DZ(K)
-               IF (IRC>0) THEN
-                  IF(RC_FACE(IRC)%SHAREDZ) CYCLE
-                  MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
-                          1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
-               ENDIF
-               AF   = DX(I)*DY(J); VELN = WS(I,J,K-1+ILH)
-            END SELECT
-            UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH-1,EB)*VELN*AF)
-            MURA(IROW) = MURA(IROW) + MURDN * AF
-         CASE(CC_FTYPE_CFGAS) ! GASPHASE CUT FACE:
-            LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
-            ILH     = LOWHIGH - 1
-            IFC2    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
-            IFACE2  = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
-            IF(CUT_FACE(IFC2)%SHARED(IFACE2)) CYCLE ! If face shared by linked cells CYCLE.
-            X1AXIS  = CUT_FACE(IFC2)%IJK(KAXIS+1)
-            AF      = CUT_FACE(IFC2)%AREA(IFACE2)
-            IF_=CUT_FACE(IFC2)%FC(IFACE2)
-            MURDN   = MU_TMP*GET_FV_FACE_RDN(NM,IF_,&
-                       1._EB/(CUT_FACE(IFC2)%XCENHIGH(X1AXIS,IFACE2)-CUT_FACE(IFC2)%XCENLOW(X1AXIS,IFACE2)))
-            VELN=CC_FV_CUTFACE_MOM(NM,IFC2,IFACE2,CC_FV_MOM_VELS)
-            UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH-1,EB)*VELN*AF)
-            IF(.NOT.(TWO_D .AND. X1AXIS==JAXIS)) MURA(IROW) = MURA(IROW) + MURDN * AF
-         CASE(CC_FTYPE_CFINB) ! INBOUNDARY CUT FACE: Note here we add U_NORMAL with Transpiration velocity due to
-                               ! Poisson solver velocity error.
-            IFC2    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
-            IFACE2  = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
-            ICFA    = CUT_FACE(IFC2)%CFACE_INDEX(IFACE2)
-            AF      = CUT_FACE(IFC2)%AREA(IFACE2)
-            VELN=CC_FV_CUTFACE_MOM(NM,IFC2,IFACE2,CC_FV_MOM_VELS)
-            MURDN   = MU_TMP * BOUNDARY_PROP1(CFACE(ICFA)%B1_INDEX)%RDN
-            ! - to use velocity into gasphase, projected area.
-            UVWA(IROW) = UVWA(IROW) + MAX(0._EB,-VELN*AF)
-            MURA(IROW) = MURA(IROW) + MURDN * AF
+            AF   = DX(I)*DY(J); VELN = WS(I,J,K-1+ILH)
          END SELECT
-      ENDDO IFC_LOOP
-      ! Divergence:
-      MUV(IROW)  = MUV(IROW)  + MU_TMP * CUT_CELL(ICC)%VOLUME(JCC)
-      IG = CUT_CELL(ICC)%IG(JCC)
-      DIVG(IROW) = DIVG(IROW) + ABS(FV%CV%DS(IG)) * CUT_CELL(ICC)%VOLUME(JCC)
-      VOL(IROW)  = VOL(IROW)  + CUT_CELL(ICC)%VOLUME(JCC)
-      IJKT(IAXIS:KAXIS,IROW) = (/ I, J, K /) ! These might rewrite the I,J,K of some IROWs.
-   ENDDO
+         UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH-1,EB)*VELN*AF)
+         MURA(IROW) = MURA(IROW) + MURDN * AF
+      CASE(CC_FTYPE_CFGAS) ! GASPHASE CUT FACE:
+         LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
+         ILH     = LOWHIGH - 1
+         IFC2    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
+         IFACE2  = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
+         IF(CUT_FACE(IFC2)%SHARED(IFACE2)) CYCLE ! If face shared by linked cells CYCLE.
+         X1AXIS  = CUT_FACE(IFC2)%IJK(KAXIS+1)
+         AF      = CUT_FACE(IFC2)%AREA(IFACE2)
+         IF_=CUT_FACE(IFC2)%FC(IFACE2)
+         MURDN   = MU_TMP*GET_FV_FACE_RDN(NM,IF_,&
+                    1._EB/(CUT_FACE(IFC2)%XCENHIGH(X1AXIS,IFACE2)-CUT_FACE(IFC2)%XCENLOW(X1AXIS,IFACE2)))
+         VELN=CC_FV_CUTFACE_MOM(NM,IFC2,IFACE2,CC_FV_MOM_VELS)
+         UVWA(IROW) = UVWA(IROW) + MAX(0._EB,REAL(2*ILH-1,EB)*VELN*AF)
+         IF(.NOT.(TWO_D .AND. X1AXIS==JAXIS)) MURA(IROW) = MURA(IROW) + MURDN * AF
+      CASE(CC_FTYPE_CFINB) ! INBOUNDARY CUT FACE: Note here we add U_NORMAL with Transpiration velocity due to
+                            ! Poisson solver velocity error.
+         IFC2    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
+         IFACE2  = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
+         ICFA    = CUT_FACE(IFC2)%CFACE_INDEX(IFACE2)
+         AF      = CUT_FACE(IFC2)%AREA(IFACE2)
+         VELN=CC_FV_CUTFACE_MOM(NM,IFC2,IFACE2,CC_FV_MOM_VELS)
+         MURDN   = MU_TMP * BOUNDARY_PROP1(CFACE(ICFA)%B1_INDEX)%RDN
+         ! - to use velocity into gasphase, projected area.
+         UVWA(IROW) = UVWA(IROW) + MAX(0._EB,-VELN*AF)
+         MURA(IROW) = MURA(IROW) + MURDN * AF
+      END SELECT
+   ENDDO IFC_LOOP
+   ! Divergence:
+   MUV(IROW)  = MUV(IROW)  + MU_TMP * CUT_CELL(ICC)%VOLUME(JCC)
+   IG = CUT_CELL(ICC)%IG(JCC)
+   DIVG(IROW) = DIVG(IROW) + ABS(FV%CV%DS(IG)) * CUT_CELL(ICC)%VOLUME(JCC)
+   VOL(IROW)  = VOL(IROW)  + CUT_CELL(ICC)%VOLUME(JCC)
+   IJKT(IAXIS:KAXIS,IROW) = (/ I, J, K /) ! These might rewrite the I,J,K of some IROWs.
 ENDDO CUTCELL_DO
 
 IF (CHECK_HT) THEN
@@ -1262,19 +1419,13 @@ IF (CHECK_HT) THEN
    ENDDO
 ENDIF
 
-IF (FV_L2_CFLVN_ACTIVE .AND. ALLOCATED(FV_L2_ROW_IS_CROSS)) THEN
-   ! Same-mesh rows fall through to the linked-cell limit. A cross-mesh row, marked once
-   ! at setup, keeps the raw sums for the reduction.
-   DO IROW=IROW_BEG,IROW_END
-      IF (IROW<1 .OR. IROW>SIZE(FV_L2_ROW_IS_CROSS)) CYCLE
-      IF (.NOT.FV_L2_ROW_IS_CROSS(IROW)) CYCLE
-      FV_L2_CFL_UVWA(IROW)=FV_L2_CFL_UVWA(IROW)+UVWA(IROW)
-      FV_L2_CFL_MURA(IROW)=FV_L2_CFL_MURA(IROW)+MURA(IROW)
-      FV_L2_CFL_VOL(IROW) =FV_L2_CFL_VOL(IROW) +VOL(IROW)
-      FV_L2_CFL_DIVG(IROW)=FV_L2_CFL_DIVG(IROW)+DIVG(IROW)
-      UVWA(IROW)=0._EB; MURA(IROW)=0._EB; MUV(IROW)=0._EB; DIVG(IROW)=0._EB; VOL(IROW)=0._EB
-   ENDDO
-ENDIF
+! Cross-mesh rows (CFL_XSLOT, set once) keep their partial sums for FINALIZE_FV_L2_CFLVN_ROWS; the linked-cell limit
+! below takes the rows with every member on this mesh.
+DO L=1,SIZE(MESHES(NM)%CFL_XSLOT)
+   IROW=MESHES(NM)%CFL_XSLOT(L)
+   MESHES(NM)%CFL_XQ(:,L)=(/UVWA(IROW),MURA(IROW),VOL(IROW),DIVG(IROW)/)
+   UVWA(IROW)=0._EB; MURA(IROW)=0._EB; MUV(IROW)=0._EB; DIVG(IROW)=0._EB; VOL(IROW)=0._EB
+ENDDO
 
 ! Add convective term + divergence:
 UVWA = UVWA + DIVG
@@ -7585,6 +7736,7 @@ CALL SET_CFACES_P1_RDN               ! Set inverse DXN for CFACES, uses cell lin
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL CC_SET_MOMENTUM_FACE_LISTS(NM)
 ENDDO
+CALL CC_SET_CFL_ROWS
 IF (GET_CUTCELLS_VERBOSE .AND. MY_RANK==0) THEN
    CALL CPU_TIME(TDEL)
    WRITE(LU_ERR,'(A,F8.3,A)') ' Executing SET_CFACES_P1_RDN. Time taken : ',TDEL-TNOW,' sec.'
@@ -24993,6 +25145,26 @@ ELSE
 ENDIF
 END FUNCTION TARGET_KEY
 
+SUBROUTINE LGROW(R)
+! Double the columns of R.
+REAL(EB), ALLOCATABLE, INTENT(INOUT) :: R(:,:)
+REAL(EB), ALLOCATABLE :: T(:,:)
+ALLOCATE(T(SIZE(R,1),2*SIZE(R,2)))
+T(:,1:SIZE(R,2)) = R
+CALL MOVE_ALLOC(T,R)
+END SUBROUTINE LGROW
+
+REAL(EB) FUNCTION SLOT_ACRT(II,JJ,KK,AX)
+INTEGER, INTENT(IN) :: II,JJ,KK,AX
+SLOT_ACRT = 0._EB
+IF (AX==IAXIS) SLOT_ACRT = M%DY(JJ)*M%DZ(KK)
+IF (AX==JAXIS) SLOT_ACRT = M%DX(II)*M%DZ(KK)
+IF (AX==KAXIS) SLOT_ACRT = M%DY(JJ)*M%DX(II)
+END FUNCTION SLOT_ACRT
+
+END SUBROUTINE GET_LINKED_FACE_INDEXES_F
+
+
 INTEGER FUNCTION KEY_CMP(A,B)
 ! -1, 0 or 1 as A sorts before, with or after B, leading entry first.
 REAL(EB), INTENT(IN) :: A(:),B(:)
@@ -25052,24 +25224,5 @@ DO
    ORD(I0) = T
 ENDDO
 END SUBROUTINE KEY_SORT
-
-SUBROUTINE LGROW(R)
-! Double the columns of R.
-REAL(EB), ALLOCATABLE, INTENT(INOUT) :: R(:,:)
-REAL(EB), ALLOCATABLE :: T(:,:)
-ALLOCATE(T(SIZE(R,1),2*SIZE(R,2)))
-T(:,1:SIZE(R,2)) = R
-CALL MOVE_ALLOC(T,R)
-END SUBROUTINE LGROW
-
-REAL(EB) FUNCTION SLOT_ACRT(II,JJ,KK,AX)
-INTEGER, INTENT(IN) :: II,JJ,KK,AX
-SLOT_ACRT = 0._EB
-IF (AX==IAXIS) SLOT_ACRT = M%DY(JJ)*M%DZ(KK)
-IF (AX==JAXIS) SLOT_ACRT = M%DX(II)*M%DZ(KK)
-IF (AX==KAXIS) SLOT_ACRT = M%DY(JJ)*M%DX(II)
-END FUNCTION SLOT_ACRT
-
-END SUBROUTINE GET_LINKED_FACE_INDEXES_F
 
 END MODULE CC_SCALARS
