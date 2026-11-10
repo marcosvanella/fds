@@ -25724,36 +25724,29 @@ ENDDO
 END SUBROUTINE L2G_TO_MESH
 
 SUBROUTINE RECORD_L2_PICK
-! Largest area wins. Equal area: smaller centroid, then smaller Cartesian index.
-INTEGER :: ICAND,BEST
-BEST = 1
-DO ICAND=2,COUNT
-   IF (FACE_AREA(ICAND)>FACE_AREA(BEST)) THEN
-      BEST = ICAND
-   ELSEIF (FACE_AREA(ICAND)==FACE_AREA(BEST)) THEN
-      IF (TARGET_BEFORE(ICAND,BEST)) BEST = ICAND
+! Largest area wins. Equal area: the candidate nearest the piece (keys in micrometres: the distance is exact), then
+! the one along the lower axis, then the smaller key. A mirror (x->-x, ...) keeps all but the last test, which only
+! separates the two sides of a piece symmetric in itself.
+INTEGER :: ICAND,BEST,AX,AXB
+REAL(EB) :: KP(4),KT(4),KB(4),D2,D2B
+KP = PIECE_KEY(CF,JCF)
+DO ICAND=1,COUNT
+   KT = TARGET_KEY(ICAND)
+   D2 = SUM((KT-KP)**2)
+   AX = MAXLOC(ABS(FACE_LIST(2:4,ICAND)-(/I,J,K/)),DIM=1)
+   IF (ICAND>1) THEN
+      IF (FACE_AREA(ICAND)<FACE_AREA(BEST)) CYCLE
+      IF (FACE_AREA(ICAND)==FACE_AREA(BEST)) THEN
+         IF (D2>D2B .OR. (D2==D2B .AND. (AX>AXB .OR. (AX==AXB .AND. KEY_CMP(KT,KB)>=0)))) CYCLE
+      ENDIF
    ENDIF
+   BEST = ICAND
+   D2B = D2
+   AXB = AX
+   KB = KT
 ENDDO
 CALL ADD_LINK_REC(0,BEST)
 END SUBROUTINE RECORD_L2_PICK
-
-LOGICAL FUNCTION TARGET_BEFORE(IA,IB)
-! True when candidate IA sorts before IB: centroid, then Cartesian index.
-INTEGER, INTENT(IN) :: IA,IB
-INTEGER :: C,D
-REAL(EB) :: KA(4),KB(4)
-KA = TARGET_KEY(IA)
-KB = TARGET_KEY(IB)
-C = KEY_CMP(KA,KB)
-TARGET_BEFORE = C<0
-IF (C/=0) RETURN
-DO D=2,4
-   IF (FACE_LIST(D,IA)/=FACE_LIST(D,IB)) THEN
-      TARGET_BEFORE = FACE_LIST(D,IA)<FACE_LIST(D,IB)
-      RETURN
-   ENDIF
-ENDDO
-END FUNCTION TARGET_BEFORE
 
 SUBROUTINE FORCE_UNLINKED_FACES
 ! A piece still unlinked records its neighbour along its normal on each side the mesh holds: a cut face, else a gas
