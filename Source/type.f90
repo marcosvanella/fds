@@ -1068,7 +1068,6 @@ TYPE OMESH_TYPE
    LOGICAL, ALLOCATABLE, DIMENSION(:) :: ICC_UNKZ_CC_R_MASK  !< Replica ICC membership in ICC_UNKZ_CC_R
    ! PKG11 receive halo: one SoA row per received gas polyhedron (NICC_R(2)).
    ! Filled in addition to replica CUT_CELL writes; row identity matches the PKG11 unpack walk.
-   INTEGER, ALLOCATABLE, DIMENSION(:) :: CCHALO_ICC, CCHALO_JCC !< Row -> replica (ICC,JCC), filled at setup.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: CCHALO_ROW0            !< Replica ICC -> first halo row; 0 = no rows.
    REAL(EB), ALLOCATABLE, DIMENSION(:) :: CCHALO_VOLUME         !< Replica cut-cell volume, filled at setup.
    REAL(EB), ALLOCATABLE, DIMENSION(:) :: CCHALO_RHO, CCHALO_RHOS, CCHALO_TMP, CCHALO_RSUM, CCHALO_D, CCHALO_DS
@@ -1501,8 +1500,7 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: NBR_GCELL   !< (1:N) neighbor-side GCELL index, 0 if boundary.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: KIND        !< (1:N) CC_FACE_KIND_* (gas / wall / ext-domain / remote / refine).
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: ROLE        !< (1:N) CC_FACE_ROLE_EXTERNAL or CC_FACE_ROLE_INTERNAL.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PARTNER_NM  !< (1:N) mesh holding the other row of a mesh-interface face, else 0.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PARTNER     !< (1:N) FACE row of the same face on mesh PARTNER_NM, else 0.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PARTNER     !< (1:N) FACE row of the same face on the mesh across, else 0.
    ! --- provenance back to legacy faces ---
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: FTYPE       !< (1:N) legacy source kind CC_FTYPE_RCGAS/CFGAS/CFINB/RGGAS.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: SRC_IRC     !< (1:N) RC_FACE of an RCGAS row (GET_GASPHASE_REGRCFACES_DATA).
@@ -1521,21 +1519,16 @@ TYPE CC_FACE_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NVEC_RAD    !< (IAXIS:KAXIS,1:N) cut-cell radiation normal; in-boundary rows only.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: XYZCEN      !< (IAXIS:KAXIS,1:N) face centroid.
    ! --- precomputed stencil coefficients (filled after topology is frozen) ---
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: REF_KIND    !< (1:N) owner-side support kind CC_FACE_REF_* .
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: NBR_REF_KIND !< (1:N) neighbor-side support kind CC_FACE_REF_* .
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: X_FACE_REF  !< (IAXIS:KAXIS,1:N) selected owner-side support point.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: XN_FACE_REF !< (IAXIS:KAXIS,1:N) selected neighbor-side support point (if neighbor CV).
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: D_LR        !< (1:N) compact owner-neighbor support distance.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: RDN        !< (1:N) 1/D_LR; WALL/CFACE-consistent inverse normal spacing.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: INTERP_W    !< (1:N) owner-side linear interpolation weight.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NONORTH_COR !< (IAXIS:KAXIS,1:N) non-orthogonal correction vector.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VEL, VELS   !< (1:N) corrector and predictor owner-normal velocity.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: FN, FN_B    !< (1:N) momentum RHS and baroclinic component.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VEL_SAVE, VEL_LNK !< (1:N) pre-average and linked cut-face velocity.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: ADV_FLUX    !< (1:N_TOTAL_SCALARS,1:N) positive-axis rho*Z advective flux.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: DIFF_FLUX   !< (1:N_TOTAL_SCALARS,1:N) positive-axis rho*D*grad(Z) flux.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: DIFF_H_FLUX !< (1:N) positive-axis sensible-enthalpy diffusion flux.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: COND_FLUX   !< (1:N) owner-outward conductive heat flux.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:,:) :: JDH       !< (2,2,1:N) cached pressure-matrix column slots.
 END TYPE CC_FACE_TYPE
 
