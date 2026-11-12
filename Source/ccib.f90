@@ -146,7 +146,7 @@ TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
 ! Baroclininc torque linking variables.
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: F_LINK,A_LINK
 
-PUBLIC :: ADD_CUTCELL_D_PBAR_DT, ADD_LINKEDCELL_D_PBAR_DT,ADD_CUTCELL_PSUM,ADD_LINKEDCELL_PSUM,&
+PUBLIC :: FACE_SIDE_UNKH,ADD_CUTCELL_D_PBAR_DT, ADD_LINKEDCELL_D_PBAR_DT,ADD_CUTCELL_PSUM,ADD_LINKEDCELL_PSUM,&
           ADD_INPLACE_NNZ_H_WHLDOM,CALL_FOR_GLMAT,CALL_FROM_GLMAT_SETUP,&
           CCCOMPUTE_RADIATION,CC_DIVERGENCE_PART_1,CC_VEL_FACE_TO_SOLID_NODE,CC_BAROCLINIC_CORRECTION,&
           CC_CHECK_DIVERGENCE,CC_COMPUTE_VELOCITY_ERROR, &
@@ -19316,8 +19316,8 @@ DO IFACE=1,MESHES(NM)%CC_NRCFACE_H
    I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
    IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
    ! Unknowns on related cells:
-   IND(LOW_IND)  = RCF%UNKH(LOW_IND)
-   IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
+   IND(LOW_IND)  = FACE_SIDE_UNKH(NM,RCF%CELL_LIST(:,LOW_IND))
+   IND(HIGH_IND) = FACE_SIDE_UNKH(NM,RCF%CELL_LIST(:,HIGH_IND))
    ! Intra-CV face: both sides share a control volume unknown -> internal face, skip. No-op at identity scope.
    IF (IND(LOW_IND)==IND(HIGH_IND)) CYCLE
    IND_LOC(LOW_IND) = IND(LOW_IND) - ZONE_SOLVE(IPZ)%UNKH_IND(NM1) ! All row indexes must refer to ind_loc.
@@ -19394,7 +19394,7 @@ DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
 
       DO IFACE=1,CF%NFACE
          ! Internal unknown
-         IND_INT = CF%UNKH(LOCROW,IFACE)
+         IND_INT = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,LOCROW,IFACE))
          IROW = IND_INT - ZONE_SOLVE(IPZ)%UNKH_IND(NM1)
          AF = CF%AREA(IFACE)
          ! Distance from internal cell centroid to interface
@@ -19467,8 +19467,8 @@ DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
    ENDSELECT
    DO IFACE=1,CF%NFACE
       ! Unknowns on related cells:
-      IND(LOW_IND)     = CF%UNKH(LOW_IND,IFACE)
-      IND(HIGH_IND)    = CF%UNKH(HIGH_IND,IFACE)
+      IND(LOW_IND)     = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,LOW_IND,IFACE))
+      IND(HIGH_IND)    = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,HIGH_IND,IFACE))
       ! Intra-CV face: both sides belong to the same control volume, so this face is internal to the
       ! CV and must not contribute Poisson coefficients. No-op at identity scope (distinct unknowns).
       IF (IND(LOW_IND)==IND(HIGH_IND)) CYCLE
@@ -19944,8 +19944,8 @@ LOOP_FLAG_COND : IF ( LOOP_FLAG ) THEN ! MESH_LOOP_1 in calling routine.
       I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
       IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
       ! Unknowns on related cells:
-      IND(LOW_IND)  = RCF%UNKH(LOW_IND)
-      IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
+      IND(LOW_IND)  = FACE_SIDE_UNKH(NM,RCF%CELL_LIST(:,LOW_IND))
+      IND(HIGH_IND) = FACE_SIDE_UNKH(NM,RCF%CELL_LIST(:,HIGH_IND))
       ! Intra-CV face: internal to a control volume, contributes no graph entry. No-op at identity scope.
       IF (IND(LOW_IND)==IND(HIGH_IND)) CYCLE
       IND_LOC(LOW_IND) = IND(LOW_IND) - ZONE_SOLVE(IPZ)%UNKH_IND(NM1) ! Row indexes must refer to ind_loc.
@@ -19998,7 +19998,7 @@ LOOP_FLAG_COND : IF ( LOOP_FLAG ) THEN ! MESH_LOOP_1 in calling routine.
          NOM = EWC%NOM
          IF (NOM > 0) THEN
             DO IFACE=1,CF%NFACE
-               IND_INT = CF%UNKH(LOCROW_1,IFACE)
+               IND_INT = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,LOCROW_1,IFACE))
                IND_LOC(LOW_IND) = IND_INT - ZONE_SOLVE(IPZ)%UNKH_IND(NM1)
                ! Loop over ALL external cells
                DO KKO = EWC%KKO_MIN, EWC%KKO_MAX
@@ -20023,8 +20023,8 @@ LOOP_FLAG_COND : IF ( LOOP_FLAG ) THEN ! MESH_LOOP_1 in calling routine.
       ! Internal cut-faces (normal processing)
       DO IFACE=1,CF%NFACE
          !% Unknowns on related cells:
-         IND(LOW_IND)     = CF%UNKH(LOW_IND,IFACE)
-         IND(HIGH_IND)    = CF%UNKH(HIGH_IND,IFACE)
+         IND(LOW_IND)     = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,LOW_IND,IFACE))
+         IND(HIGH_IND)    = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,HIGH_IND,IFACE))
          ! Intra-CV face: internal to a control volume, contributes no graph entry. No-op at identity scope.
          IF (IND(LOW_IND)==IND(HIGH_IND)) CYCLE
          IND_LOC(LOW_IND) = IND(LOW_IND) - ZONE_SOLVE(IPZ)%UNKH_IND(NM1) ! Row indexes refer to ind_loc.
@@ -20092,8 +20092,8 @@ ELSE ! MESH_LOOP_2 in calling routine.
       I   = RCF%IJK(IAXIS); J = RCF%IJK(JAXIS); K = RCF%IJK(KAXIS); X1AXIS = RCF%IJK(KAXIS+1)
       IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
       ! Unknowns on related cells:
-      IND(LOW_IND)  = RCF%UNKH(LOW_IND)
-      IND(HIGH_IND) = RCF%UNKH(HIGH_IND)
+      IND(LOW_IND)  = FACE_SIDE_UNKH(NM,RCF%CELL_LIST(:,LOW_IND))
+      IND(HIGH_IND) = FACE_SIDE_UNKH(NM,RCF%CELL_LIST(:,HIGH_IND))
       ! Intra-CV face: internal to a control volume, contributes no graph entry. No-op at identity scope.
       IF (IND(LOW_IND)==IND(HIGH_IND)) CYCLE
       IND_LOC(LOW_IND) = IND(LOW_IND) - ZONE_SOLVE(IPZ)%UNKH_IND(NM1) ! Row indexes must refer to ind_loc.
@@ -20153,8 +20153,8 @@ ELSE ! MESH_LOOP_2 in calling routine.
       CF%JDH(:,:,:) = 0
       DO IFACE=1,CF%NFACE
          !% Unknowns on related cells:
-         IND(LOW_IND)     = CF%UNKH(LOW_IND,IFACE)
-         IND(HIGH_IND)    = CF%UNKH(HIGH_IND,IFACE)
+         IND(LOW_IND)     = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,LOW_IND,IFACE))
+         IND(HIGH_IND)    = FACE_SIDE_UNKH(NM,CF%CELL_LIST(:,HIGH_IND,IFACE))
          ! Intra-CV face: internal to a control volume, contributes no graph entry. No-op at identity scope.
          IF (IND(LOW_IND)==IND(HIGH_IND)) CYCLE
          IND_LOC(LOW_IND) = IND(LOW_IND) - ZONE_SOLVE(IPZ)%UNKH_IND(NM1) ! Row indexes refer to ind_loc.
@@ -20336,7 +20336,7 @@ INTEGER, OPTIONAL, INTENT(IN) :: ONE_NM
 
 ! Local variables:
 INTEGER :: NM,NM_LO,NM_HI
-INTEGER :: NCELL,ICC,JCC,IFC,IFACE,LOWHIGH,ICF1,ICF2,IRC
+INTEGER :: ICC,JCC,IFC,IFACE,LOWHIGH,IRC
 INTEGER :: IW,II,JJ,KK,IIF,JJF,KKF,IOR,LOWHIGH_TEST,X1AXIS
 
 IF (PRESENT(ONE_NM)) THEN
@@ -20351,29 +20351,6 @@ ENDIF
 MAIN_MESH_LOOP : DO NM=NM_LO,NM_HI
 
    CALL POINT_TO_MESH(NM)
-
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      NCELL = CUT_CELL(ICC)%NCELL
-      DO JCC=1,NCELL
-         DO IFC=1,CUT_CELL(ICC)%CCELEM(1,JCC)
-            IFACE = CUT_CELL(ICC)%CCELEM(IFC+1,JCC)
-            ! If face type in face_list is not CC_FTYPE_CFGAS, drop:
-            IF ( CUT_CELL(ICC)%FACE_LIST(1,IFACE) /= CC_FTYPE_CFGAS ) CYCLE
-
-            ! Which face?
-            LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
-            ICF1    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
-            ICF2    = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
-
-            IF ( LOWHIGH == LOW_IND) THEN ! Cut-face on low side of cut-cell:
-               CUT_FACE(ICF1)%UNKH(HIGH_IND,ICF2) = CUT_CELL(ICC)%UNKH(JCC)
-            ELSE ! HIGH
-               CUT_FACE(ICF1)%UNKH(LOW_IND,ICF2) = CUT_CELL(ICC)%UNKH(JCC)
-            ENDIF
-
-         ENDDO
-      ENDDO
-   ENDDO
 
    ! Now Apply external wall cell loop for guard-cell cut cells:
    ULMAT_IF : IF (PRES_FLAG/=ULMAT_FLAG) THEN
@@ -20413,28 +20390,8 @@ MAIN_MESH_LOOP : DO NM=NM_LO,NM_HI
          ! Copy CCVAR(II,JJ,KK,CC_CGSC) to guard cell:
          ICC = MESHES(NM)%CCVAR(II,JJ,KK,CC_IDCC)
 
-         IF (FCVAR(IIF,JJF,KKF,CC_FGSC,X1AXIS) == CC_CUTCFE) THEN
-
-         DO JCC=1,CUT_CELL(ICC)%NCELL
-            ! Loop faces and test:
-            DO IFC=1,CUT_CELL(ICC)%CCELEM(1,JCC)
-               IFACE = CUT_CELL(ICC)%CCELEM(IFC+1,JCC)
-               ! Which face ?
-               LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
-               IF ( CUT_CELL(ICC)%FACE_LIST(1,IFACE) /= CC_FTYPE_CFGAS) CYCLE ! Must Be gasphase cut-face
-               IF ( LOWHIGH                              /= LOWHIGH_TEST) CYCLE ! In same side as EWC from guard-cell
-               IF ( CUT_CELL(ICC)%FACE_LIST(3,IFACE) /= X1AXIS) CYCLE ! Normal to same axis as EWC
-               ICF1    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
-               ICF2    = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
-               IF ( LOWHIGH == LOW_IND) THEN ! Cut-face on low side of cut-cell:
-                  CUT_FACE(ICF1)%UNKH(HIGH_IND,ICF2) = CUT_CELL(ICC)%UNKH(JCC)
-               ELSE ! HIGH
-                  CUT_FACE(ICF1)%UNKH(LOW_IND,ICF2) = CUT_CELL(ICC)%UNKH(JCC)
-               ENDIF
-            ENDDO
-         ENDDO
-
-         ELSEIF (FCVAR(IIF,JJF,KKF,CC_IDRC,X1AXIS) > 0) THEN ! RC_FACE
+         IF (FCVAR(IIF,JJF,KKF,CC_FGSC,X1AXIS) == CC_CUTCFE) CYCLE GUARD_CUT_CELL_LOOP
+         IF (FCVAR(IIF,JJF,KKF,CC_IDRC,X1AXIS) > 0) THEN ! RC_FACE
             IRC = FCVAR(IIF,JJF,KKF,CC_IDRC,X1AXIS)
             IF(ICC>0) THEN
                DO JCC=1,CUT_CELL(ICC)%NCELL
@@ -22989,7 +22946,7 @@ SUBROUTINE SYNC_LEGACY_PRESSURE_FACE_UNKNOWNS(NM)
 ! compatibility kernels that still traverse RC_FACE/CUT_FACE after same-mesh aggregation.
 
 INTEGER, INTENT(IN) :: NM
-INTEGER :: IHF,IRC,ISIDE,ICF,IFC,I,J,K,ICC,JCC
+INTEGER :: IHF,IRC,ISIDE,I,J,K,ICC,JCC
 TYPE(MESH_TYPE), POINTER :: MFV
 
 MFV=>MESHES(NM)
@@ -23012,18 +22969,27 @@ DO IHF=1,MFV%CC_NRCFACE_H
       END SELECT
    ENDDO
 ENDDO
-DO ICF=1,MFV%N_CUTFACE_MESH
-   DO IFC=1,MFV%CUT_FACE(ICF)%NFACE
-      DO ISIDE=LOW_IND,HIGH_IND
-         IF (MFV%CUT_FACE(ICF)%CELL_LIST(1,ISIDE,IFC)/=CC_FTYPE_CFGAS) CYCLE
-         ICC=MFV%CUT_FACE(ICF)%CELL_LIST(2,ISIDE,IFC); JCC=MFV%CUT_FACE(ICF)%CELL_LIST(3,ISIDE,IFC)
-         IF (ICC<1 .OR. JCC<1) CYCLE
-         MFV%CUT_FACE(ICF)%UNKH(ISIDE,IFC)=MFV%CUT_CELL(ICC)%UNKH(JCC)
-      ENDDO
-   ENDDO
-ENDDO
 
 END SUBROUTINE SYNC_LEGACY_PRESSURE_FACE_UNKNOWNS
+
+
+INTEGER FUNCTION FACE_SIDE_UNKH(NM,CL)
+! Pressure unknown of the cell in a face cell-list column CL = (type, I or ICC, J or JCC[, K]): MUNKH on the ULMAT path,
+! CCVAR otherwise, for a regular gas cell (RC faces only); the piece's own unknown for a cut cell; else CC_UNDEFINED.
+INTEGER, INTENT(IN) :: NM,CL(:)
+SELECT CASE(CL(1))
+CASE(CC_FTYPE_RGGAS)
+   IF (PRES_FLAG==ULMAT_FLAG) THEN
+      FACE_SIDE_UNKH=MESHES(NM)%MUNKH(CL(2),CL(3),CL(4))
+   ELSE
+      FACE_SIDE_UNKH=MESHES(NM)%CCVAR(CL(2),CL(3),CL(4),CC_UNKH)
+   ENDIF
+CASE(CC_FTYPE_CFGAS)
+   FACE_SIDE_UNKH=MESHES(NM)%CUT_CELL(CL(2))%UNKH(CL(3))
+CASE DEFAULT
+   FACE_SIDE_UNKH=CC_UNDEFINED
+END SELECT
+END FUNCTION FACE_SIDE_UNKH
 
 
 SUBROUTINE GET_FV_FACE_PRESSURE_BIJ(NM,IF_,BIJ)
@@ -23214,7 +23180,7 @@ EXTERNAL_WALL_LOOP: DO IW=1,N_EXTERNAL_WALL_CELLS
 
    BC => BOUNDARY_COORD(WC%BC_INDEX)
    II = BC%II; JJ = BC%JJ; KK = BC%KK
-   ! Copy MUNKH to current mesh guard cell storage (for same-level CF%UNKH access)
+   ! Copy MUNKH to current mesh guard cell storage (read by the face-side lookups of the matrix assembly)
    ICC = CCVAR(II,JJ,KK,CC_IDCC)
    IF (ICC > 0) THEN ! Cut-cells on this guard-cell Cartesian cell.
       CUT_CELL(ICC)%UNKH(1) = OM%MUNKH(EWC%IIO_MIN,EWC%JJO_MIN,EWC%KKO_MIN)
