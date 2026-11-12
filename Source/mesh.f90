@@ -277,6 +277,10 @@ TYPE MESH_TYPE
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: GRAV_FACE !< (I,J,K) of the regular gas faces beside a scalar CV, by axis.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: GRAV_PTR    !< GRAV_FACE(:,GRAV_PTR(AX):GRAV_PTR(AX+1)-1) are the AX faces.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: INB_CF,INB_PTR !< In-boundary cut faces with a solid face and cell behind.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: CF_GAS,CF_INB !< Gas and in-boundary cut faces of the mesh.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: CF_GSV,CF_PRJ !< Gas cut faces in 0:IBP1 (guard ones from CF_GSV_G); those the
+                                                        !< projection updates (inside, FCVAR names them).
+   INTEGER :: CF_GSV_G=1
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: INB_SF,INB_ZF !< (I,J,K,axis): those faces by INB_PTR; all solid faces.
    INTEGER :: CFL_NSLOT=0 !< Scalar CV rows with a member here (linked-cell CFL check), as slots in global row order.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: CFL_SROW !< Global row of each slot (setup only).
