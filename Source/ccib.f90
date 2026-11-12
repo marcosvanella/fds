@@ -7547,7 +7547,7 @@ REAL(EB), POINTER, DIMENSION(:,:,:) :: UP,VP,WP,HP
 INTEGER :: NM, I, J, K, IG
 TYPE(CC_FV_TYPE), POINTER :: FV
 
-! Copy the Cartesian H of each active cut piece onto its CV row. ONE_UNKH_PER_CUTCELL is not a second value.
+! Copy the Cartesian H of each active cut piece onto its CV row.
 
 MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
