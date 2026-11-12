@@ -1119,6 +1119,17 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ENDDO
       IF (IPASS==1) ALLOCATE(M%TH_OCV(2,N))
    ENDDO
+   DO IPASS=1,2
+      N = 0
+      DO ICC=1,M%N_CUTCELL_MESH
+         DO JCC=1,M%CUT_CELL(ICC)%NCELL
+            IF (M%CUT_CELL(ICC)%IG(JCC)<1) CYCLE
+            N = N+1
+            IF (IPASS==2) M%TH_PIECE(:,N) = (/ICC,JCC/)
+         ENDDO
+      ENDDO
+      IF (IPASS==1) ALLOCATE(M%TH_PIECE(2,N))
+   ENDDO
    ALLOCATE(M%TH_FSLOT(2,FV%FACE%N_INT)); M%TH_FSLOT = 0
    DO IF_=1,FV%FACE%N_INT
       CALL GET_FV_GLOBAL_UNKZ(FV%FACE%OWNER_CV_NM(IF_),FV%FACE%OWNER_CV(IF_),IUNK)
@@ -1948,64 +1959,34 @@ RES=0._EB; LHSS=0._EB; DIV_FN_VOL = 0._EB
 ! CUT_CELL entry:
 ICC=CCVAR(I,J,K,CC_IDCC)
 DO_SEPARABLE_IF : IF (DO_SEPARABLE) THEN
-   IF(ONE_UNKH_PER_CUTCELL) THEN
-      DO JCC=1,CUT_CELL(ICC)%NCELL
-        ! Here we add div(F) in the cut-cell and DDDT:
-        CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.FALSE.)
+   DO JCC=1,CUT_CELL(ICC)%NCELL
+     ! Here we add div(F) in the cut-cell and DDDT:
+     CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.FALSE.)
+     DIV_FN_VOL = DIV_FN_VOL + DIV_FN*CUT_CELL(ICC)%VOLUME(JCC)
 
-        ! Compute int(Grad H dot n) ds for cut-cell:
-        CALL GET_LHS_CUTCELL(NM,PRFCT,ICC,JCC,LHSS_CC,I,J,K,HP,RHOP,P,DO_SEPARABLE=.TRUE.)
-        LHSS       =  LHSS_CC
-        ! Add to RHSS:
-        CALL GET_FV_CV_DDDTVOL(NM,ICC,JCC,DDDT_INT)
-        RHSS = -(DDDT_INT*CUT_CELL(ICC)%VOLUME(JCC) + DIV_FN*CUT_CELL(ICC)%VOLUME(JCC))
-        RES  = RES + ABS(RHSS-LHSS)
-      ENDDO
-   ELSE
-      DO JCC=1,CUT_CELL(ICC)%NCELL
-        ! Here we add div(F) in the cut-cell and DDDT:
-        CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.FALSE.)
-        DIV_FN_VOL = DIV_FN_VOL + DIV_FN*CUT_CELL(ICC)%VOLUME(JCC)
-
-        ! Compute int(Grad H dot n) ds for cut-cell:
-        CALL GET_LHS_CUTCELL(NM,PRFCT,ICC,JCC,LHSS_CC,I,J,K,HP,RHOP,P,DO_SEPARABLE=.TRUE.)
-        LHSS       = LHSS       + LHSS_CC
-      ENDDO
-      ! Add to RHSS:
-      CALL GET_FV_CV_DDDTVOL(NM,ICC,1,DDDT_INT)
-      RHSS = -(DDDT_INT*SUM(CUT_CELL(ICC)%VOLUME(1:CUT_CELL(ICC)%NCELL)) + DIV_FN_VOL)
-      RES  = ABS(RHSS-LHSS)
-   ENDIF
+     ! Compute int(Grad H dot n) ds for cut-cell:
+     CALL GET_LHS_CUTCELL(NM,PRFCT,ICC,JCC,LHSS_CC,I,J,K,HP,RHOP,P,DO_SEPARABLE=.TRUE.)
+     LHSS       = LHSS       + LHSS_CC
+   ENDDO
+   ! Add to RHSS:
+   CALL GET_FV_CV_DDDTVOL(NM,ICC,1,DDDT_INT)
+   RHSS = -(DDDT_INT*SUM(CUT_CELL(ICC)%VOLUME(1:CUT_CELL(ICC)%NCELL)) + DIV_FN_VOL)
+   RES  = ABS(RHSS-LHSS)
 ELSE DO_SEPARABLE_IF
    IF(SUM(CUT_CELL(ICC)%VOLUME(1:CUT_CELL(ICC)%NCELL))/(DX(I)*DY(J)*DZ(K)) < V_THRESH_INSPRES) RETURN
-   IF(ONE_UNKH_PER_CUTCELL) THEN
-      DO JCC=1,CUT_CELL(ICC)%NCELL
-        ! Here we add div(F) in the cut-cell and DDDT:
-        CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.TRUE.)
+   DO JCC=1,CUT_CELL(ICC)%NCELL
+     ! Here we add div(F) in the cut-cell and DDDT:
+     CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.TRUE.)
+     DIV_FN_VOL = DIV_FN_VOL + DIV_FN*CUT_CELL(ICC)%VOLUME(JCC)
 
-        ! Compute int(Grad H dot n) ds for cut-cell:
-        CALL GET_LHS_CUTCELL(NM,PRFCT,ICC,JCC,LHSS_CC,I,J,K,HP,RHOP,P,DO_SEPARABLE=.FALSE.)
-        LHSS       =  LHSS_CC
-        ! Add to RHSS:
-        CALL GET_FV_CV_DDDTVOL(NM,ICC,JCC,DDDT_INT)
-        RHSS = -(DDDT_INT*CUT_CELL(ICC)%VOLUME(JCC) + DIV_FN*CUT_CELL(ICC)%VOLUME(JCC))
-        RES  = RES + ABS(RHSS-LHSS)
-      ENDDO
-   ELSE
-      DO JCC=1,CUT_CELL(ICC)%NCELL
-        ! Here we add div(F) in the cut-cell and DDDT:
-        CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.TRUE.)
-        DIV_FN_VOL = DIV_FN_VOL + DIV_FN*CUT_CELL(ICC)%VOLUME(JCC)
-
-        ! Compute (1/rho*Grad(p)-Grad(Kres)):
-        CALL GET_LHS_CUTCELL(NM,PRFCT,ICC,JCC,LHSS_CC,I,J,K,HP,RHOP,P,DO_SEPARABLE=.FALSE.)
-        LHSS       = LHSS       + LHSS_CC
-      ENDDO
-      ! Add to RHSS:
-      CALL GET_FV_CV_DDDTVOL(NM,ICC,1,DDDT_INT)
-      RHSS = -(DDDT_INT*SUM(CUT_CELL(ICC)%VOLUME(1:CUT_CELL(ICC)%NCELL)) + DIV_FN_VOL)
-      RES  = ABS(RHSS-LHSS)
-   ENDIF
+     ! Compute (1/rho*Grad(p)-Grad(Kres)):
+     CALL GET_LHS_CUTCELL(NM,PRFCT,ICC,JCC,LHSS_CC,I,J,K,HP,RHOP,P,DO_SEPARABLE=.FALSE.)
+     LHSS       = LHSS       + LHSS_CC
+   ENDDO
+   ! Add to RHSS:
+   CALL GET_FV_CV_DDDTVOL(NM,ICC,1,DDDT_INT)
+   RHSS = -(DDDT_INT*SUM(CUT_CELL(ICC)%VOLUME(1:CUT_CELL(ICC)%NCELL)) + DIV_FN_VOL)
+   RES  = ABS(RHSS-LHSS)
 
 ENDIF DO_SEPARABLE_IF
 
@@ -3426,7 +3407,7 @@ SUBROUTINE GET_CUTCELL_DDDT(DT,NM)
 REAL(EB), INTENT(IN) :: DT
 INTEGER,  INTENT(IN) :: NM
 REAL(EB) :: RDT, PRFCT, VOL, DIVVOL, DPCC, DIV_JCC, VCV
-INTEGER  :: I,J,K,IPZ,NCELL,ICC,JCC,IROW,IG
+INTEGER  :: I,J,K,NCELL,ICC,JCC,IROW,IG
 REAL(EB), POINTER, DIMENSION(:) :: D_PBAR_DT_P
 TYPE(CC_FV_TYPE), POINTER :: FV
 
@@ -3449,29 +3430,17 @@ PRED_CORR_IF : IF (PREDICTOR) THEN
       J      = CUT_CELL(ICC)%IJK(JAXIS)
       K      = CUT_CELL(ICC)%IJK(KAXIS)
       IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE ICC_LOOP_1
-      IPZ    = PRESSURE_ZONE(I,J,K)
       NCELL  = CUT_CELL(ICC)%NCELL
       DIVVOL = 0._EB; DPCC   = 0._EB; VOL    = 0._EB
-      IF (ONE_UNKH_PER_CUTCELL) THEN ! DDDTVOL(JCC) defined per cut-cell.
-         DO JCC=1,NCELL
-            VCV = CUT_CELL(ICC)%VOLUME(JCC)
-            CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,0._EB,DIV_JCC) ! U,V,W divergence.
-            DIVVOL = DIVVOL + DIV_JCC*VCV
-            IG = CUT_CELL(ICC)%IG(JCC)
-            DPCC= 0._EB; IF (IG>=1) DPCC= (1._EB-PRFCT)*FV%CV%D(IG) + PRFCT*FV%CV%DS(IG)
-            CALL CC_FV_SET_CV_PRESSURE_SOURCE(NM,ICC,JCC,(DPCC-DIV_JCC)*RDT,DIV_JCC*VCV)
-         ENDDO
-      ELSE
-         DO JCC=1,NCELL
-            VCV = CUT_CELL(ICC)%VOLUME(JCC)
-            VOL  = VOL + VCV
-            CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,0._EB,DIV_JCC) ! U,V,W divergence.
-            DIVVOL = DIVVOL + DIV_JCC*VCV
-            IG = CUT_CELL(ICC)%IG(JCC)
-            DPCC= DPCC + ( (1._EB-PRFCT)*FV%CV%D(IG) + PRFCT*FV%CV%DS(IG) )*VCV
-         ENDDO
-         CALL CC_FV_SET_CV_PRESSURE_SOURCE(NM,ICC,1,(DPCC-DIVVOL)*RDT/VOL,DIVVOL)
-      ENDIF
+      DO JCC=1,NCELL
+         VCV = CUT_CELL(ICC)%VOLUME(JCC)
+         VOL  = VOL + VCV
+         CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,0._EB,DIV_JCC) ! U,V,W divergence.
+         DIVVOL = DIVVOL + DIV_JCC*VCV
+         IG = CUT_CELL(ICC)%IG(JCC)
+         DPCC= DPCC + ( (1._EB-PRFCT)*FV%CV%D(IG) + PRFCT*FV%CV%DS(IG) )*VCV
+      ENDDO
+      CALL CC_FV_SET_CV_PRESSURE_SOURCE(NM,ICC,1,(DPCC-DIVVOL)*RDT/VOL,DIVVOL)
 
    ENDDO ICC_LOOP_1
 
@@ -3482,33 +3451,21 @@ ELSEIF (CORRECTOR) THEN PRED_CORR_IF
       J      = CUT_CELL(ICC)%IJK(JAXIS)
       K      = CUT_CELL(ICC)%IJK(KAXIS)
       IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE ICC_LOOP_2
-      IPZ    = PRESSURE_ZONE(I,J,K)
       NCELL  = CUT_CELL(ICC)%NCELL
       DIVVOL = 0._EB; DPCC   = 0._EB; VOL    = 0._EB
-      IF (ONE_UNKH_PER_CUTCELL) THEN ! DDDTVOL(JCC) defined per cut-cell.
-         DO JCC=1,NCELL
-            VCV = CUT_CELL(ICC)%VOLUME(JCC)
-            CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,1._EB,DIV_JCC) ! US,VS,WS divergence.
-            IG = CUT_CELL(ICC)%IG(JCC)
-            DPCC= (1._EB-PRFCT)*FV%CV%D(IG) + PRFCT*FV%CV%DS(IG)
-            CALL CC_FV_SET_CV_PRESSURE_SOURCE(NM,ICC,JCC, &
-               (2._EB*DPCC*VCV-(DIV_JCC*VCV+FV%CV%DVOL_PR(IG)))*RDT/VCV)
-         ENDDO
-      ELSE
-         DO JCC=1,NCELL
-            VCV = CUT_CELL(ICC)%VOLUME(JCC)
-            VOL  = VOL + VCV
-            CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,1._EB,DIV_JCC) ! US,VS,WS divergence.
-            DIVVOL = DIVVOL + DIV_JCC*VCV
-            ! Thermodynamic divergence * vol:
-            IG = CUT_CELL(ICC)%IG(JCC)
-            DPCC= DPCC + ( (1._EB-PRFCT)*FV%CV%D(IG) + PRFCT*FV%CV%DS(IG) )*VCV
-         ENDDO
-         ! Define average DDDT for CUT_CELL(ICC):
-         CALL GET_FV_CV_STORAGE_FOR_CUTCELL(NM,ICC,1,IROW)
-         IF (IROW<1) CYCLE ICC_LOOP_2
-         CALL CC_FV_SET_CV_PRESSURE_SOURCE(NM,ICC,1,(2._EB*DPCC-(DIVVOL+FV%CV%DVOL_PR(IROW)))*RDT/VOL)
-      ENDIF
+      DO JCC=1,NCELL
+         VCV = CUT_CELL(ICC)%VOLUME(JCC)
+         VOL  = VOL + VCV
+         CALL GET_VELOC_DIVERGENCE_CUTCELL(NM,ICC,JCC,1._EB,DIV_JCC) ! US,VS,WS divergence.
+         DIVVOL = DIVVOL + DIV_JCC*VCV
+         ! Thermodynamic divergence * vol:
+         IG = CUT_CELL(ICC)%IG(JCC)
+         DPCC= DPCC + ( (1._EB-PRFCT)*FV%CV%D(IG) + PRFCT*FV%CV%DS(IG) )*VCV
+      ENDDO
+      ! Define average DDDT for CUT_CELL(ICC):
+      CALL GET_FV_CV_STORAGE_FOR_CUTCELL(NM,ICC,1,IROW)
+      IF (IROW<1) CYCLE ICC_LOOP_2
+      CALL CC_FV_SET_CV_PRESSURE_SOURCE(NM,ICC,1,(2._EB*DPCC-(DIVVOL+FV%CV%DVOL_PR(IROW)))*RDT/VOL)
    ENDDO ICC_LOOP_2
 
 ENDIF PRED_CORR_IF
@@ -4155,7 +4112,7 @@ LOGICAL, INTENT(IN) :: APPLY_TO_ESTIMATED_VARIABLES
 INTEGER, INTENT(IN) :: NM
 
 INTEGER :: ICC,I,J,K,JCC
-REAL(EB):: T_NOW,PRFCT,UVWAV(MAX_DIM),ATOTV(MAX_DIM),UVWAV_AUX(MAX_DIM),ATOTV_AUX(MAX_DIM),KRES_CC,KSUM,VSUM
+REAL(EB):: T_NOW,PRFCT,UVWAV(MAX_DIM),ATOTV(MAX_DIM),UVWAV_AUX(MAX_DIM),ATOTV_AUX(MAX_DIM),KRES_CC
 TYPE(CC_FV_TYPE), POINTER :: FV
 
 T_NOW = CURRENT_TIME()
@@ -4164,29 +4121,18 @@ FV=>MESHES(NM)%FV
 PRFCT = 0._EB; IF(APPLY_TO_ESTIMATED_VARIABLES) PRFCT = 1._EB
 CUTCELL_DO : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
    CC => CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS); IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-   IF (ONE_UNKH_PER_CUTCELL) THEN
-      KSUM = 0._EB; VSUM = 0._EB
-      DO JCC=1,CC%NCELL
-         CALL CC_CUTCELL_VELOCITY(NM,PRFCT,ICC,JCC,UVWAV,ATOTV,RETURN_INTEGRALS=.FALSE.)
-         KRES_CC = 0.5_EB*(UVWAV(IAXIS)**2._EB+UVWAV(JAXIS)**2._EB+UVWAV(KAXIS)**2._EB)
-         FV%CV%KRES(CC%IG(JCC)) = KRES_CC
-         KSUM = KSUM + KRES_CC*CC%VOLUME(JCC); VSUM = VSUM + CC%VOLUME(JCC)
-      ENDDO
-      KRES(I,J,K) = KSUM/VSUM
-   ELSE
-      ATOTV(:) = 0._EB; UVWAV(:) = 0._EB
-      DO JCC=1,CC%NCELL
-         CALL CC_CUTCELL_VELOCITY(NM,PRFCT,ICC,JCC,UVWAV_AUX,ATOTV_AUX,RETURN_INTEGRALS=.TRUE.)
-         UVWAV = UVWAV + UVWAV_AUX
-         ATOTV = ATOTV + ATOTV_AUX
-      ENDDO
-      WHERE(ATOTV>TWENTY_EPSILON_EB) UVWAV = UVWAV / ATOTV
-      KRES_CC = 0.5_EB*(UVWAV(IAXIS)**2._EB+UVWAV(JAXIS)**2._EB+UVWAV(KAXIS)**2._EB)
-      DO JCC=1,CC%NCELL
-         FV%CV%KRES(CC%IG(JCC)) = KRES_CC
-      ENDDO
-      KRES(I,J,K) = KRES_CC
-   ENDIF
+   ATOTV(:) = 0._EB; UVWAV(:) = 0._EB
+   DO JCC=1,CC%NCELL
+      CALL CC_CUTCELL_VELOCITY(NM,PRFCT,ICC,JCC,UVWAV_AUX,ATOTV_AUX,RETURN_INTEGRALS=.TRUE.)
+      UVWAV = UVWAV + UVWAV_AUX
+      ATOTV = ATOTV + ATOTV_AUX
+   ENDDO
+   WHERE(ATOTV>TWENTY_EPSILON_EB) UVWAV = UVWAV / ATOTV
+   KRES_CC = 0.5_EB*(UVWAV(IAXIS)**2._EB+UVWAV(JAXIS)**2._EB+UVWAV(KAXIS)**2._EB)
+   DO JCC=1,CC%NCELL
+      FV%CV%KRES(CC%IG(JCC)) = KRES_CC
+   ENDDO
+   KRES(I,J,K) = KRES_CC
 ENDDO CUTCELL_DO
 
 T_USED(14) = T_USED(14) + CURRENT_TIME() - T_NOW
@@ -8825,7 +8771,7 @@ INTEGER,  INTENT(IN) :: NM
 ! Use velocity divergence equivalence to define divergence on cut-cell underlying Cartesian cells.
 
 ! Local Variables:
-INTEGER :: N,I,J,K,ICC,JCC,ICF,ICV,IF_,IROW_STOR,IG
+INTEGER :: N,I,J,K,ICC,JCC,ICF,ICV,IF_,IG,L
 REAL(EB), POINTER, DIMENSION(:,:,:) :: DP,DPVOL,RHOP,RTRM,CP,R_H_G,U_DOT_DEL_RHO_Z_VOL
 REAL(EB), POINTER, DIMENSION(:,:) :: PBAR_P
 REAL(EB), POINTER, DIMENSION(:,:,:,:) :: ZZP
@@ -8836,7 +8782,8 @@ REAL(EB), POINTER, DIMENSION(:,:,:) :: UU,VV,WW
 TYPE(SPECIES_MIXTURE_TYPE), POINTER :: SM
 TYPE(CC_FV_TYPE), POINTER :: FV
 
-REAL(EB) :: VCELL,VCCELL,DUMMY,R_H_G_CC,RTRM_CC
+REAL(EB) :: DUMMY,R_H_G_CC,RTRM_CC
+TYPE(MESH_TYPE), POINTER :: M
 
 LOGICAL, PARAMETER :: DO_CONDUCTION_HEAT_FLUX=.TRUE.
 INTEGER :: DIFFHFLX_IND, JFLX_IND
@@ -8864,7 +8811,8 @@ DIFFHFLX_IND = LOW_IND  ! -rho Da Grad(Za)
 JFLX_IND     = LOW_IND
 
 CALL POINT_TO_MESH(NM)
-FV=>MESHES(NM)%FV
+M=>MESHES(NM)
+FV=>M%FV
 
 RDT = 1._EB/DT
 
@@ -8896,32 +8844,23 @@ DO K=1,KBAR
       ENDDO
    ENDDO
 ENDDO
-DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-   DO JCC=1,CUT_CELL(ICC)%NCELL
-      IG = CUT_CELL(ICC)%IG(JCC); IF (IG>=1) FV%CV%DVOL(IG)=0._EB
-   ENDDO
+! Members: regular cells with a scalar row (TH_REG) and cut pieces with a GCELL (TH_PIECE), built once.
+DO L=1,SIZE(M%TH_PIECE,2)
+   FV%CV%DVOL(CUT_CELL(M%TH_PIECE(1,L))%IG(M%TH_PIECE(2,L)))=0._EB
 ENDDO
 FV%CV%DEL_RHO_D_DEL_Z_VOL=0._EB
 FV%CV%U_DOT_DEL_RHO_Z_VOL=0._EB
 IF (CORRECTOR) THEN
    IF (ALLOCATED(MESHES(NM)%D_SOURCE)) THEN
-      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-         I     = CUT_CELL(ICC)%IJK(IAXIS)
-         J     = CUT_CELL(ICC)%IJK(JAXIS)
-         K     = CUT_CELL(ICC)%IJK(KAXIS)
-         VCELL = DX(I)*DY(J)*DZ(K)
-
-         ! Up to here in D_SOURCE(I,J,K), M_DOT_PPP(I,J,K,1:N_TOTAL_SCALARS) we have contributions by particles.
-         ! Add these contributions in corresponding cut-cells:
-         ! NOTE : Assumes the source from particles is distributed evenly over CCs of the Cartesian cell.
-         VCCELL = SUM(CUT_CELL(ICC)%VOLUME(1:CUT_CELL(ICC)%NCELL))
-         DO JCC=1,CUT_CELL(ICC)%NCELL
-            ! A piece with no IG row has no solver row in either numbering and contributes to no budget.
-            IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
-            FV%CV%D_SOURCE(IG)=FV%CV%D_SOURCE(IG)+D_SOURCE(I,J,K)
-            FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)= &
-               FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)+M_DOT_PPP(I,J,K,1:N_TOTAL_SCALARS)
-         ENDDO
+      ! Up to here in D_SOURCE(I,J,K), M_DOT_PPP(I,J,K,1:N_TOTAL_SCALARS) we have contributions by particles.
+      ! Add these contributions in corresponding cut-cells:
+      ! NOTE : Assumes the source from particles is distributed evenly over CCs of the Cartesian cell.
+      DO L=1,SIZE(M%TH_PIECE,2)
+         ICC=M%TH_PIECE(1,L); IG=CUT_CELL(ICC)%IG(M%TH_PIECE(2,L))
+         I=CUT_CELL(ICC)%IJK(IAXIS); J=CUT_CELL(ICC)%IJK(JAXIS); K=CUT_CELL(ICC)%IJK(KAXIS)
+         FV%CV%D_SOURCE(IG)=FV%CV%D_SOURCE(IG)+D_SOURCE(I,J,K)
+         FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)= &
+            FV%CV%M_DOT_PPP(1:N_TOTAL_SCALARS,IG)+M_DOT_PPP(I,J,K,1:N_TOTAL_SCALARS)
       ENDDO
    ENDIF
 ENDIF
@@ -8952,13 +8891,8 @@ SPECIES_GT_1_IF: IF (N_TOTAL_SCALARS>1) THEN
    CALL CC_DIFFUSIVE_MASS_FLUXES(NM)
 
    ! Zero out DEL_RHO_D_DEL_Z for impregion regular cells:
-   DO K=1,KBAR
-      DO J=1,JBAR
-         DO I=1,IBAR
-            IF(CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-            DEL_RHO_D_DEL_Z(I,J,K,1:N_TOTAL_SCALARS) = 0._EB
-         ENDDO
-      ENDDO
+   DO L=1,SIZE(M%TH_REG,2)
+      DEL_RHO_D_DEL_Z(M%TH_REG(1,L),M%TH_REG(2,L),M%TH_REG(3,L),1:N_TOTAL_SCALARS) = 0._EB
    ENDDO
 
    ! 1. Diffusive heat flux  = - hs,a (Da Grad(rho*Ya) - Da/rho Grad(rho) (rho Ya)):
@@ -8976,23 +8910,17 @@ ENDIF CONDUCTION_HEAT_IF
 
 ! Add \dot{q}''' and QR to DP:
 ! Regular cells:
-DO K=1,KBAR
-   DO J=1,JBAR
-      DO I=1,IBAR
-         IF (CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-         ! Add \dot{q}''' and QR to DP*Vii:
-         DPVOL(I,J,K) = DPVOL(I,J,K) + (Q(I,J,K) + QR(I,J,K)) * DX(I)*DY(J)*DZ(K)
-      ENDDO
-   ENDDO
+DO L=1,SIZE(M%TH_REG,2)
+   I=M%TH_REG(1,L); J=M%TH_REG(2,L); K=M%TH_REG(3,L)
+   ! Add \dot{q}''' and QR to DP*Vii:
+   DPVOL(I,J,K) = DPVOL(I,J,K) + (Q(I,J,K) + QR(I,J,K)) * DX(I)*DY(J)*DZ(K)
 ENDDO
 
 ! HERE Cut-cells \dot{q}'''*VOL and QR*VOL:
-DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-   DO JCC=1,CUT_CELL(ICC)%NCELL
-      IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
-      FV%CV%DVOL(IG) = FV%CV%DVOL(IG)+ &
-                       (FV%CV%Q(IG)+FV%CV%QR(IG))*CUT_CELL(ICC)%VOLUME(JCC)
-   ENDDO
+DO L=1,SIZE(M%TH_PIECE,2)
+   ICC=M%TH_PIECE(1,L); JCC=M%TH_PIECE(2,L); IG=CUT_CELL(ICC)%IG(JCC)
+   FV%CV%DVOL(IG) = FV%CV%DVOL(IG)+ &
+                    (FV%CV%Q(IG)+FV%CV%QR(IG))*CUT_CELL(ICC)%VOLUME(JCC)
 ENDDO
 
 ! 3. Enthalpy advection term = - \bar{ u dot Grad (rho h_s) }:
@@ -9023,35 +8951,31 @@ CP    => WORK5
 R_H_G => WORK9
 RTRM  => WORK1
 ! Regular cells:
-DO K=1,KBAR
-   DO J=1,JBAR
-      DO I=1,IBAR
-         IF (CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-         ZZ_GET(1:N_TRACKED_SPECIES) = ZZP(I,J,K,1:N_TRACKED_SPECIES)
-         CALL GET_SPECIFIC_HEAT(ZZ_GET,CP(I,J,K),TMP(I,J,K))
-         R_H_G(I,J,K) = 1._EB/(CP(I,J,K)*TMP(I,J,K))
-         RTRM(I,J,K)  = R_H_G(I,J,K)/RHOP(I,J,K)
-         DPVOL(I,J,K) = RTRM(I,J,K)*DPVOL(I,J,K)
-      ENDDO
-   ENDDO
+DO L=1,SIZE(M%TH_REG,2)
+   I=M%TH_REG(1,L); J=M%TH_REG(2,L); K=M%TH_REG(3,L)
+   ZZ_GET(1:N_TRACKED_SPECIES) = ZZP(I,J,K,1:N_TRACKED_SPECIES)
+   CALL GET_SPECIFIC_HEAT(ZZ_GET,CP(I,J,K),TMP(I,J,K))
+   R_H_G(I,J,K) = 1._EB/(CP(I,J,K)*TMP(I,J,K))
+   RTRM(I,J,K)  = R_H_G(I,J,K)/RHOP(I,J,K)
+   DPVOL(I,J,K) = RTRM(I,J,K)*DPVOL(I,J,K)
 ENDDO
 
 ! Cut-cells: per-piece R_H_G / RTRM live on the IG CV row. Do not CSR-mean
 ! onto the owner ICV — that index is the master's IG, so a mean would clobber
 ! the piece value (same trap as DDDTVOL / L1 per-member H).
-DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-   CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-   DO JCC=1,CC%NCELL
-      TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
-      CALL GET_CUTCELL_ZZV(NM,ICC,JCC,PRFCT,ZZ_GET)
-      RHOPV(0) = GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
-      CALL GET_SPECIFIC_HEAT(ZZ_GET,CPV(0),TMPV(0))
-      R_H_G_CC = 1._EB/(CPV(0)*TMPV(0))
-      RTRM_CC = R_H_G_CC/RHOPV(0)
-      FV%CV%R_H_G(CC%IG(JCC)) = R_H_G_CC
-      FV%CV%RTRM(CC%IG(JCC))  = RTRM_CC
-      IG = CC%IG(JCC); IF (IG>=1) FV%CV%DVOL(IG) = RTRM_CC*FV%CV%DVOL(IG)
-   ENDDO
+DO L=1,SIZE(M%TH_PIECE,2)
+   ICC=M%TH_PIECE(1,L); JCC=M%TH_PIECE(2,L); CC => CUT_CELL(ICC)
+   IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+   TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
+   CALL GET_CUTCELL_ZZV(NM,ICC,JCC,PRFCT,ZZ_GET)
+   RHOPV(0) = GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
+   CALL GET_SPECIFIC_HEAT(ZZ_GET,CPV(0),TMPV(0))
+   R_H_G_CC = 1._EB/(CPV(0)*TMPV(0))
+   RTRM_CC = R_H_G_CC/RHOPV(0)
+   IG = CC%IG(JCC)
+   FV%CV%R_H_G(IG) = R_H_G_CC
+   FV%CV%RTRM(IG)  = RTRM_CC
+   FV%CV%DVOL(IG) = RTRM_CC*FV%CV%DVOL(IG)
 ENDDO
 
 
@@ -9068,53 +8992,29 @@ CONST_GAMMA_IF_2: IF (.NOT.CONSTANT_SPECIFIC_HEAT_RATIO) THEN
       SM  => SPECIES_MIXTURE(N)
 
       ! Regular cells:
-      ICC = 0
-      DO K=1,KBAR
-         DO J=1,JBAR
-            DO I=1,IBAR
-               IF (CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-               CALL GET_SENSIBLE_ENTHALPY_Z(N,TMP(I,J,K),H_S)
-               DPVOL(I,J,K) = DPVOL(I,J,K) + (SM%RCON/RSUM(I,J,K) - H_S*R_H_G(I,J,K))* &
-                                             (DEL_RHO_D_DEL_Z(I,J,K,N) - U_DOT_DEL_RHO_Z_VOL(I,J,K))/RHOP(I,J,K)
-               ! Values of DEL_RHO_D_DEL_Z(I,J,K,N) have been filled previously.
-               ! RSUM was computed in the implicit region advance routine for scalars CCDENSITY.
-               ICC = ICC + 1
-            ENDDO
-         ENDDO
+      DO L=1,SIZE(M%TH_REG,2)
+         I=M%TH_REG(1,L); J=M%TH_REG(2,L); K=M%TH_REG(3,L)
+         CALL GET_SENSIBLE_ENTHALPY_Z(N,TMP(I,J,K),H_S)
+         DPVOL(I,J,K) = DPVOL(I,J,K) + (SM%RCON/RSUM(I,J,K) - H_S*R_H_G(I,J,K))* &
+                                       (DEL_RHO_D_DEL_Z(I,J,K,N) - U_DOT_DEL_RHO_Z_VOL(I,J,K))/RHOP(I,J,K)
+         ! Values of DEL_RHO_D_DEL_Z(I,J,K,N) have been filled previously.
+         ! RSUM was computed in the implicit region advance routine for scalars CCDENSITY.
       ENDDO
 
       ! Cut-cells:
-      IF (PREDICTOR) THEN
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-            DO JCC=1,CC%NCELL
-               IG = CC%IG(JCC)
-               CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV); IF (ICV<1) CYCLE
-               TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
-               CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
-               R_H_G_CC = FV%CV%R_H_G(IG)
-               FV%CV%DVOL(IG) = FV%CV%DVOL(IG) + (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC) - H_S*R_H_G_CC)/ &
-                                                GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT) * &
-                                                (MERGE(FV%CV%DEL_RHO_D_DEL_Z_VOL(N,ICV),0._EB,FV%CV%OWNER_GCELL(ICV)==IG) &
-                                                 -FV%CV%U_DOT_DEL_RHO_Z_VOL(N,IG))
-            ENDDO
-         ENDDO
-      ELSE
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-            DO JCC=1,CC%NCELL
-               IG = CC%IG(JCC)
-               CALL GET_FV_CV_FOR_CUTCELL(NM,ICC,JCC,ICV); IF (ICV<1) CYCLE
-               TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
-               CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
-               R_H_G_CC = FV%CV%R_H_G(IG)
-               FV%CV%DVOL(IG) = FV%CV%DVOL(IG) + (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC) - H_S*R_H_G_CC)/ &
-                                                GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT) * &
-                                                (MERGE(FV%CV%DEL_RHO_D_DEL_Z_VOL(N,ICV),0._EB,FV%CV%OWNER_GCELL(ICV)==IG) &
-                                                 -FV%CV%U_DOT_DEL_RHO_Z_VOL(N,IG))
-            ENDDO
-         ENDDO
-      ENDIF
+      DO L=1,SIZE(M%TH_PIECE,2)
+         ICC=M%TH_PIECE(1,L); JCC=M%TH_PIECE(2,L); CC => CUT_CELL(ICC)
+         IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+         IG = CC%IG(JCC)
+         ICV = CC%ICV(JCC); IF (ICV<1) CYCLE
+         TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
+         CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
+         R_H_G_CC = FV%CV%R_H_G(IG)
+         FV%CV%DVOL(IG) = FV%CV%DVOL(IG) + (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC) - H_S*R_H_G_CC)/ &
+                                          GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT) * &
+                                          (MERGE(FV%CV%DEL_RHO_D_DEL_Z_VOL(N,ICV),0._EB,FV%CV%OWNER_GCELL(ICV)==IG) &
+                                           -FV%CV%U_DOT_DEL_RHO_Z_VOL(N,IG))
+      ENDDO
 
    ENDDO SPECIES_LOOP
 
@@ -9125,22 +9025,16 @@ ENDIF CONST_GAMMA_IF_2
 IF (ALLOCATED(MESHES(NM)%D_SOURCE)) THEN
 
    ! Regular Cells on the implicit region:
-   DO K=1,KBAR
-      DO J=1,JBAR
-         DO I=1,IBAR
-            IF (CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-            DPVOL(I,J,K) = DPVOL(I,J,K) + D_SOURCE(I,J,K)*DX(I)*DY(J)*DZ(K)
-         ENDDO
-      ENDDO
+   DO L=1,SIZE(M%TH_REG,2)
+      I=M%TH_REG(1,L); J=M%TH_REG(2,L); K=M%TH_REG(3,L)
+      DPVOL(I,J,K) = DPVOL(I,J,K) + D_SOURCE(I,J,K)*DX(I)*DY(J)*DZ(K)
    ENDDO
 
    ! Cut cells:
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-      DO JCC=1,CC%NCELL
-         IG=CC%IG(JCC)
-         FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+FV%CV%D_SOURCE(IG)*CC%VOLUME(JCC)
-      ENDDO
+   DO L=1,SIZE(M%TH_PIECE,2)
+      CC => CUT_CELL(M%TH_PIECE(1,L)); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+      JCC=M%TH_PIECE(2,L); IG=CC%IG(JCC)
+      FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+FV%CV%D_SOURCE(IG)*CC%VOLUME(JCC)
    ENDDO
 
 ENDIF
@@ -9149,26 +9043,18 @@ ENDIF
 
 IF (STRATIFICATION) THEN
    ! Regular Cells on the implicit region:
-   DO K=1,KBAR
-      DO J=1,JBAR
-         DO I=1,IBAR
-            IF (CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-            DPVOL(I,J,K) = DPVOL(I,J,K) + &
-            RTRM(I,J,K)*0.5_EB*(WW(I,J,K)+WW(I,J,K-1))* &
-            RHO_0_CV(CCVAR(I,J,K,CC_UNKZ))*GVEC(KAXIS)*DX(I)*DY(J)*DZ(K)
-         ENDDO
-      ENDDO
+   DO L=1,SIZE(M%TH_REG,2)
+      I=M%TH_REG(1,L); J=M%TH_REG(2,L); K=M%TH_REG(3,L)
+      DPVOL(I,J,K) = DPVOL(I,J,K) + &
+      RTRM(I,J,K)*0.5_EB*(WW(I,J,K)+WW(I,J,K-1))* &
+      RHO_0_CV(CCVAR(I,J,K,CC_UNKZ))*GVEC(KAXIS)*DX(I)*DY(J)*DZ(K)
    ENDDO
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      CC => CUT_CELL(ICC); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
-      DO JCC=1,CC%NCELL
-         ! D = D + w*rho_0*g/(rho*Cp*T)*Vii
-         CALL GET_FV_CV_STORAGE_FOR_CUTCELL(NM,ICC,JCC,IROW_STOR); IF (IROW_STOR<1) CYCLE
-         RTRM_CC = FV%CV%RTRM(IROW_STOR)
-         IG = CC%IG(JCC)
-         IF (IG>=1) FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+RTRM_CC*FV%CV%WVEL(IROW_STOR)*FV%CV%RHO_0(CC%IG(JCC))* &
-                                    GVEC(KAXIS)*CC%VOLUME(JCC)
-      ENDDO
+   DO L=1,SIZE(M%TH_PIECE,2)
+      CC => CUT_CELL(M%TH_PIECE(1,L)); IF (CELL(CELL_INDEX(CC%IJK(IAXIS),CC%IJK(JAXIS),CC%IJK(KAXIS)))%SOLID) CYCLE
+      ! D = D + w*rho_0*g/(rho*Cp*T)*Vii
+      JCC=M%TH_PIECE(2,L); IG=CC%IG(JCC)
+      RTRM_CC = FV%CV%RTRM(IG)
+      FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+RTRM_CC*FV%CV%WVEL(IG)*FV%CV%RHO_0(IG)*GVEC(KAXIS)*CC%VOLUME(JCC)
    ENDDO
 ENDIF
 
@@ -9178,75 +9064,44 @@ MMS_IF: IF (PERIODIC_TEST==7) THEN
    IF (PREDICTOR) TT=T+DT
    IF (CORRECTOR) TT=T
    ! Regular cells on cut-cell region:
-   DO K=1,KBAR
-      DO J=1,JBAR
-         DO I=1,IBAR
-            IF (CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE
-            ! this term is similar to D_REACTION from fire
-            XHAT = XC(I) - UF_MMS*TT
-            ZHAT = ZC(K) - WF_MMS*TT
-            DO N=1,N_TRACKED_SPECIES
-               SM => SPECIES_MIXTURE(N)
-               SELECT CASE(N)
-                  CASE(1); Q_Z = -VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
-                  CASE(2); Q_Z =  VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
-               END SELECT
-               CALL GET_SENSIBLE_ENTHALPY_Z(N,TMP(I,J,K),H_S)
-               DPVOL(I,J,K) = DPVOL(I,J,K) + ( SM%RCON/RSUM(I,J,K) - H_S*R_H_G(I,J,K) )*Q_Z/RHOP(I,J,K)*DX(I)*DY(J)*DZ(K)
-            ENDDO
-         ENDDO
+   DO L=1,SIZE(M%TH_REG,2)
+      I=M%TH_REG(1,L); J=M%TH_REG(2,L); K=M%TH_REG(3,L)
+      ! this term is similar to D_REACTION from fire
+      XHAT = XC(I) - UF_MMS*TT
+      ZHAT = ZC(K) - WF_MMS*TT
+      DO N=1,N_TRACKED_SPECIES
+         SM => SPECIES_MIXTURE(N)
+         SELECT CASE(N)
+            CASE(1); Q_Z = -VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
+            CASE(2); Q_Z =  VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
+         END SELECT
+         CALL GET_SENSIBLE_ENTHALPY_Z(N,TMP(I,J,K),H_S)
+         DPVOL(I,J,K) = DPVOL(I,J,K) + ( SM%RCON/RSUM(I,J,K) - H_S*R_H_G(I,J,K) )*Q_Z/RHOP(I,J,K)*DX(I)*DY(J)*DZ(K)
       ENDDO
    ENDDO
    ! Cut-cells:
-   IF (PREDICTOR) THEN
-      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-         I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
-         IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-         DO JCC=1,CUT_CELL(ICC)%NCELL
-            ! this term is similar to D_REACTION from fire
-            XHAT = CUT_CELL(ICC)%XYZCEN(IAXIS,JCC) - UF_MMS*TT
-            ZHAT = CUT_CELL(ICC)%XYZCEN(KAXIS,JCC) - WF_MMS*TT
-            TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
-            DO N=1,N_TRACKED_SPECIES
-               SM => SPECIES_MIXTURE(N)
-               SELECT CASE(N)
-                  CASE(1); Q_Z = -VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
-                  CASE(2); Q_Z =  VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
-               END SELECT
-               CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
-               IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
-               R_H_G_CC = FV%CV%R_H_G(IG)
-               FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+ &
-                  (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC)-H_S*R_H_G_CC)* &
-                  Q_Z/GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*CUT_CELL(ICC)%VOLUME(JCC)
-            ENDDO
-         ENDDO
+   DO L=1,SIZE(M%TH_PIECE,2)
+      ICC=M%TH_PIECE(1,L); JCC=M%TH_PIECE(2,L)
+      I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
+      IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+      ! this term is similar to D_REACTION from fire
+      XHAT = CUT_CELL(ICC)%XYZCEN(IAXIS,JCC) - UF_MMS*TT
+      ZHAT = CUT_CELL(ICC)%XYZCEN(KAXIS,JCC) - WF_MMS*TT
+      TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
+      IG = CUT_CELL(ICC)%IG(JCC)
+      DO N=1,N_TRACKED_SPECIES
+         SM => SPECIES_MIXTURE(N)
+         SELECT CASE(N)
+            CASE(1); Q_Z = -VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
+            CASE(2); Q_Z =  VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
+         END SELECT
+         CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
+         R_H_G_CC = FV%CV%R_H_G(IG)
+         FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+ &
+            (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC)-H_S*R_H_G_CC)* &
+            Q_Z/GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*CUT_CELL(ICC)%VOLUME(JCC)
       ENDDO
-   ELSE ! CORRECTOR
-      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-         I = CUT_CELL(ICC)%IJK(IAXIS); J = CUT_CELL(ICC)%IJK(JAXIS); K = CUT_CELL(ICC)%IJK(KAXIS)
-         IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-         DO JCC=1,CUT_CELL(ICC)%NCELL
-            ! this term is similar to D_REACTION from fire
-            XHAT = CUT_CELL(ICC)%XYZCEN(IAXIS,JCC) - UF_MMS*TT
-            ZHAT = CUT_CELL(ICC)%XYZCEN(KAXIS,JCC) - WF_MMS*TT
-            TMPV(0) = GET_CUTCELL_TMP(NM,ICC,JCC)
-            DO N=1,N_TRACKED_SPECIES
-               SM => SPECIES_MIXTURE(N)
-               SELECT CASE(N)
-                  CASE(1); Q_Z = -VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
-                  CASE(2); Q_Z =  VD2D_MMS_Z_SRC(XHAT,ZHAT,TT)
-               END SELECT
-               CALL GET_SENSIBLE_ENTHALPY_Z(N,TMPV(0),H_S)
-               IG = CUT_CELL(ICC)%IG(JCC); IF (IG<1) CYCLE
-               R_H_G_CC = FV%CV%R_H_G(IG)
-               FV%CV%DVOL(IG)=FV%CV%DVOL(IG)+ &
-                  (SM%RCON/GET_CUTCELL_RSUM(NM,ICC,JCC)-H_S*R_H_G_CC)* &
-                  Q_Z/GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*CUT_CELL(ICC)%VOLUME(JCC)
-            ENDDO
-         ENDDO
-      ENDDO
-   ENDIF
+   ENDDO
 ENDIF MMS_IF
 
    ! Preserve volume-integrated member contributions until every local mesh has completed.
@@ -22364,7 +22219,7 @@ INTEGER, INTENT(IN) :: NM,IPZ
 INTEGER, INTENT(INOUT) :: NUNKH_LC(LOWER_MESH_INDEX:UPPER_MESH_INDEX)
 
 ! Local Variables:
-INTEGER :: ICC, JCC, I, J, K, MICC, KEY_NM, KEY_IJK(IAXIS:KAXIS), KEY_ICC, KEY_JCC
+INTEGER :: ICC, JCC, I, J, K, MICC, KEY_NM, KEY_IJK(IAXIS:KAXIS)
 TYPE(CC_FV_TYPE), POINTER :: FV
 
 FV=>MESHES(NM)%FV
@@ -22383,75 +22238,38 @@ FLAG12_COND : IF (FLAG12) THEN
          CUT_CELL(ICC)%UNKH(:) = CC_UNDEFINED
       ENDDO
    ENDIF
-   UNKH_GRANULARITY : IF (.NOT.ONE_UNKH_PER_CUTCELL) THEN
-      ! Lumped numbering: one unknown per cut Cartesian cell (legacy default).
-      ! Pass A: number CV-master cut cells. When CC_CV_USE_IN_SOLVER is off,
-      ! every gas cut cell is its own CV master so this reproduces the legacy one-unknown-per-cut-Cartesian-cell
-      ! numbering bit-for-bit. At higher scope a cut piece that is absorbed into another control volume is
-      ! deferred to pass B and inherits the master's unknown instead of getting its own.
+   ! Lumped numbering: one unknown per cut Cartesian cell (legacy default).
+   ! Pass A: number CV-master cut cells. When CC_CV_USE_IN_SOLVER is off,
+   ! every gas cut cell is its own CV master so this reproduces the legacy one-unknown-per-cut-Cartesian-cell
+   ! numbering bit-for-bit. At higher scope a cut piece that is absorbed into another control volume is
+   ! deferred to pass B and inherits the master's unknown instead of getting its own.
+   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
+      CC => CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS); IF(CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+      IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ ) CYCLE
+      IF (.NOT.CC_CV_H_PER_MEMBER) THEN
+         IF (.NOT.CC_CV_CELL_IS_CV_MASTER(NM,I,J,K,ICC,1)) CYCLE
+      ENDIF
+      NUNKH_LC(NM) = NUNKH_LC(NM) + 1
+      CUT_CELL(ICC)%UNKH(1:CC%NCELL) = NUNKH_LC(NM)
+   ENDDO
+   ! Pass B: assign deferred (non-master) cut pieces the local unknown of their same-mesh CV master.
+   ! No-op when the gate is off. Cross-mesh masters are
+   ! left for the cross-mesh exchange and keep CC_UNDEFINED here.
+   IF (.NOT.CC_CV_H_PER_MEMBER) THEN
       DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
          CC => CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS); IF(CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
          IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ ) CYCLE
-         IF (.NOT.CC_CV_H_PER_MEMBER) THEN
-            IF (.NOT.CC_CV_CELL_IS_CV_MASTER(NM,I,J,K,ICC,1)) CYCLE
+         IF (CC_CV_CELL_IS_CV_MASTER(NM,I,J,K,ICC,1)) CYCLE
+         CALL CC_CV_GET_SOLVER_KEY(NM,I,J,K,ICC,1,KEY_NM,KEY_IJK)
+         IF (KEY_NM/=NM) CYCLE
+         MICC = CCVAR(KEY_IJK(IAXIS),KEY_IJK(JAXIS),KEY_IJK(KAXIS),CC_IDCC)
+         IF (MICC>0) THEN
+            CUT_CELL(ICC)%UNKH(1:CC%NCELL) = CUT_CELL(MICC)%UNKH(1)
+         ELSE
+            CUT_CELL(ICC)%UNKH(1:CC%NCELL) = CCVAR(KEY_IJK(IAXIS),KEY_IJK(JAXIS),KEY_IJK(KAXIS),CC_UNKH)
          ENDIF
-         NUNKH_LC(NM) = NUNKH_LC(NM) + 1
-         CUT_CELL(ICC)%UNKH(1:CC%NCELL) = NUNKH_LC(NM)
       ENDDO
-      ! Pass B: assign deferred (non-master) cut pieces the local unknown of their same-mesh CV master.
-      ! No-op when the gate is off. Cross-mesh masters are
-      ! left for the cross-mesh exchange and keep CC_UNDEFINED here.
-      IF (.NOT.CC_CV_H_PER_MEMBER) THEN
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS); IF(CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-            IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ ) CYCLE
-            IF (CC_CV_CELL_IS_CV_MASTER(NM,I,J,K,ICC,1)) CYCLE
-            CALL CC_CV_GET_SOLVER_KEY(NM,I,J,K,ICC,1,KEY_NM,KEY_IJK)
-            IF (KEY_NM/=NM) CYCLE
-            MICC = CCVAR(KEY_IJK(IAXIS),KEY_IJK(JAXIS),KEY_IJK(KAXIS),CC_IDCC)
-            IF (MICC>0) THEN
-               CUT_CELL(ICC)%UNKH(1:CC%NCELL) = CUT_CELL(MICC)%UNKH(1)
-            ELSE
-               CUT_CELL(ICC)%UNKH(1:CC%NCELL) = CCVAR(KEY_IJK(IAXIS),KEY_IJK(JAXIS),KEY_IJK(KAXIS),CC_UNKH)
-            ENDIF
-         ENDDO
-      ENDIF
-   ELSE UNKH_GRANULARITY
-      ! Per-sub-cell numbering (ONE_UNKH_PER_CUTCELL): each gas polyhedron carries its own unknown.
-      ! By this point SET_CUTCELLS_3D has already dropped blocked pieces, so CUT_CELL(ICC)%NCELL counts
-      ! only live sub-cells; iterating 1:NCELL matches the divergence/residual assembly loops. While only
-      ! one sub-cell survives per cut Cartesian cell this is identical to the lumped path; it generalizes
-      ! to NCELL>1 once that restriction is lifted. (ICC,JCC) resolves masters at gas-polyhedron granularity.
-      ! Pass A: one unknown per CV-master sub-cell (every sub-cell when the gate is off).
-      DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-         CC => CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS); IF(CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-         IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ ) CYCLE
-         DO JCC=1,CC%NCELL
-            IF (.NOT.CC_CV_H_PER_MEMBER) THEN
-               IF (.NOT.CC_CV_CELL_IS_CV_MASTER(NM,I,J,K,ICC,JCC)) CYCLE
-            ENDIF
-            NUNKH_LC(NM) = NUNKH_LC(NM) + 1
-            CUT_CELL(ICC)%UNKH(JCC) = NUNKH_LC(NM)
-         ENDDO
-      ENDDO
-      ! Pass B: redirect non-master sub-cells to their same-mesh CV master unknown.
-      IF (.NOT.CC_CV_H_PER_MEMBER) THEN
-         DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-            CC => CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS); IF(CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-            IF(ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ ) CYCLE
-            DO JCC=1,CC%NCELL
-               IF (CC_CV_CELL_IS_CV_MASTER(NM,I,J,K,ICC,JCC)) CYCLE
-               CALL CC_CV_GET_SOLVER_KEY(NM,I,J,K,ICC,JCC,KEY_NM,KEY_IJK,KEY_ICC,KEY_JCC)
-               IF (KEY_NM/=NM) CYCLE
-               IF (KEY_ICC>0) THEN
-                  CUT_CELL(ICC)%UNKH(JCC) = CUT_CELL(KEY_ICC)%UNKH(KEY_JCC)
-               ELSE
-                  CUT_CELL(ICC)%UNKH(JCC) = CCVAR(KEY_IJK(IAXIS),KEY_IJK(JAXIS),KEY_IJK(KAXIS),CC_UNKH)
-               ENDIF
-            ENDDO
-         ENDDO
-      ENDIF
-   ENDIF UNKH_GRANULARITY
+   ENDIF
 ELSE
    DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
       CC => CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS); IF(CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
@@ -22489,32 +22307,19 @@ IF (FLAG12) THEN
       ENDDO
    ENDIF
 
-   IF (.NOT.ONE_UNKH_PER_CUTCELL) THEN
-      DO ICC=1,MFV%N_CUTCELL_MESH
-         I = MFV%CUT_CELL(ICC)%IJK(IAXIS); J = MFV%CUT_CELL(ICC)%IJK(JAXIS); K = MFV%CUT_CELL(ICC)%IJK(KAXIS)
-         IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-         IF (ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT /= IPZ) CYCLE
-         NUNKH_LC(NM) = NUNKH_LC(NM) + 1
-         IUNK = NUNKH_LC(NM)
-         MFV%CUT_CELL(ICC)%UNKH(:) = IUNK
-         DO JCC=1,MFV%CUT_CELL(ICC)%NCELL
-            ICV = MFV%CUT_CELL(ICC)%ICV(JCC)
-            IF (ICV < 1) CYCLE
-            FV%CV%UNKH(ICV) = IUNK
-         ENDDO
+   DO ICC=1,MFV%N_CUTCELL_MESH
+      I = MFV%CUT_CELL(ICC)%IJK(IAXIS); J = MFV%CUT_CELL(ICC)%IJK(JAXIS); K = MFV%CUT_CELL(ICC)%IJK(KAXIS)
+      IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+      IF (ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT /= IPZ) CYCLE
+      NUNKH_LC(NM) = NUNKH_LC(NM) + 1
+      IUNK = NUNKH_LC(NM)
+      MFV%CUT_CELL(ICC)%UNKH(:) = IUNK
+      DO JCC=1,MFV%CUT_CELL(ICC)%NCELL
+         ICV = MFV%CUT_CELL(ICC)%ICV(JCC)
+         IF (ICV < 1) CYCLE
+         FV%CV%UNKH(ICV) = IUNK
       ENDDO
-   ELSE
-      DO ICV=1,FV%CV%N
-         IF (FV%CV%CELL_TYPE(ICV) /= CC_GCELL_CUT) CYCLE
-         I = FV%CV%IJK(IAXIS,ICV); J = FV%CV%IJK(JAXIS,ICV); K = FV%CV%IJK(KAXIS,ICV)
-         IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
-         IF (ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT /= IPZ) CYCLE
-         NUNKH_LC(NM) = NUNKH_LC(NM) + 1
-         FV%CV%UNKH(ICV) = NUNKH_LC(NM)
-         ICC = FV%CV%ICC(ICV); JCC = FV%CV%JCC(ICV)
-         MFV%CUT_CELL(ICC)%UNKH(JCC) = NUNKH_LC(NM)
-      ENDDO
-   ENDIF
+   ENDDO
 ELSE
    ! Every numbered piece takes the mesh offset. A cut piece whose CV is the regular
    ! owner is not a cut-typed CV, so walking only cut CVs left its UNKH local and it

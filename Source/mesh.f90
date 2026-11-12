@@ -287,6 +287,7 @@ TYPE MESH_TYPE
                                                                 !< (ICV,slot) of the members and owned CVs.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: TH_CPTR !< TH_CUT(:,TH_CPTR(ICC):TH_CPTR(ICC+1)-1) are cut cell ICC's.
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: TH_FSLOT !< (owner side, neighbor side) slot of each FACE row, 0 if none.
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: TH_PIECE !< (ICC,JCC) of every cut piece with a GCELL, in ICC/JCC order.
 
    ! Array with boundary cut-face areas pes cut-cell, for use in cut-cell blocking.
    TYPE(CC_INBCF_AREA_TYPE), ALLOCATABLE, DIMENSION(:,:,:) :: INBCF_AREA
