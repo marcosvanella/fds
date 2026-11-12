@@ -7481,72 +7481,54 @@ SUBROUTINE CC_RHO0W_INTERP
 
 ! Local Variables:
 REAL(EB), POINTER, DIMENSION(:,:,:) :: WP
-INTEGER :: NM, ICC, NCELL, ICELL, IROW_STOR
-INTEGER :: I, J ,K, INBFC_CCCEN(1:3)
+INTEGER :: NM, ICC, ICELL, IG
+INTEGER :: INBFC_CCCEN(1:3)
 REAL(EB):: XYZ_PP(MAX_DIM)
 REAL(EB):: TNOW
 INTEGER :: INPE,INT_NPE_LO,INT_NPE_HI,EP,VIND
-REAL(EB):: RHO0_EP,RHO0_BP,WCEN_EP,WCEN_BP,COEF_EP,COEF_BP
+REAL(EB):: WCEN_EP,WCEN_BP,COEF_EP,COEF_BP
 TYPE(CC_FV_TYPE), POINTER :: FV
 
-! This routines interpolates RHO_0 and W velocity component to cut-cell centers,
-! It is used when stratification is .TRUE.
+! W at cut-piece centers when stratification is on. RHO_0 is not stored from this walk.
 
 IF (.NOT. STRATIFICATION) RETURN
 IF (PERIODIC_TEST == 103 .OR. PERIODIC_TEST == 11 .OR. PERIODIC_TEST==7) RETURN
 
 TNOW = CURRENT_TIME()
 
-MESH_LOOP : DO NM=1,NMESHES
-
-   IF (PROCESS(NM)/=MY_RANK) CYCLE
+MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
    CALL POINT_TO_MESH(NM)
    FV => MESHES(NM)%FV
 
    IF (PREDICTOR) THEN
-      WP => WS ! End of step velocities.
+      WP => WS
    ELSE
       WP => W
    ENDIF
 
    VIND = 0
-   ICC_LOOP_3 : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      NCELL  = CUT_CELL(ICC)%NCELL
-      I      = CUT_CELL(ICC)%IJK(IAXIS)
-      J      = CUT_CELL(ICC)%IJK(JAXIS)
-      K      = CUT_CELL(ICC)%IJK(KAXIS)
-      RHO0_BP = RHO_0(K)
-      DO ICELL=1,NCELL
-         CALL GET_FV_CV_STORAGE_FOR_CUTCELL(NM,ICC,ICELL,IROW_STOR); IF (IROW_STOR<1) CYCLE
-         RHO0_EP = 0._EB
-         WCEN_EP = 0._EB
-         DO EP=1,INT_N_EXT_PTS  ! External point for cell ICELL
-            INT_NPE_LO = CUT_CELL(ICC)%INT_NPE(LOW_IND,VIND,EP,ICELL)
-            INT_NPE_HI = CUT_CELL(ICC)%INT_NPE(HIGH_IND,VIND,EP,ICELL)
-            DO INPE=INT_NPE_LO+1,INT_NPE_LO+INT_NPE_HI
-               RHO0_EP = RHO0_EP + CUT_CELL(ICC)%INT_COEF(INPE)* &
-                                   CUT_CELL(ICC)%INT_CCVARS(INT_RHO0_IND,INPE)
-               WCEN_EP = WCEN_EP + CUT_CELL(ICC)%INT_COEF(INPE)* &
-                                   CUT_CELL(ICC)%INT_CCVARS(INT_WCEN_IND,INPE)
-            ENDDO
+   DO IG=1,FV%GCELL%N_CUT
+      ICC=FV%GCELL%ICC(IG); ICELL=FV%GCELL%JCC(IG)
+      WCEN_EP = 0._EB
+      DO EP=1,INT_N_EXT_PTS
+         INT_NPE_LO = CUT_CELL(ICC)%INT_NPE(LOW_IND,VIND,EP,ICELL)
+         INT_NPE_HI = CUT_CELL(ICC)%INT_NPE(HIGH_IND,VIND,EP,ICELL)
+         DO INPE=INT_NPE_LO+1,INT_NPE_LO+INT_NPE_HI
+            WCEN_EP = WCEN_EP + CUT_CELL(ICC)%INT_COEF(INPE)* &
+                                CUT_CELL(ICC)%INT_CCVARS(INT_WCEN_IND,INPE)
          ENDDO
-
-         XYZ_PP(IAXIS:KAXIS) = CUT_CELL(ICC)%INT_XYZBF(IAXIS:KAXIS,ICELL)
-         INBFC_CCCEN(1:3)    = CUT_CELL(ICC)%INT_INBFC(1:3,ICELL)
-
-         CALL GET_BOUND_VEL(KAXIS,INBFC_CCCEN,XYZ_PP,WCEN_BP)
-
-         COEF_EP = 0._EB
-         IF (ABS(CUT_CELL(ICC)%INT_XN(1,ICELL)) > TWENTY_EPSILON_EB) &
-         COEF_EP = CUT_CELL(ICC)%INT_XN(0,ICELL)/CUT_CELL(ICC)%INT_XN(1,ICELL)
-         COEF_BP = 1._EB - COEF_EP
-
-         !CUT_CELL(ICC)%RHO_0(ICELL) = COEF_BP*RHO0_BP + COEF_EP*RHO0_EP
-         FV%CV%WVEL(IROW_STOR) = COEF_BP*WCEN_BP + COEF_EP*WCEN_EP
-
       ENDDO
-   ENDDO ICC_LOOP_3
+
+      XYZ_PP(IAXIS:KAXIS) = CUT_CELL(ICC)%INT_XYZBF(IAXIS:KAXIS,ICELL)
+      INBFC_CCCEN(1:3)    = CUT_CELL(ICC)%INT_INBFC(1:3,ICELL)
+      CALL GET_BOUND_VEL(KAXIS,INBFC_CCCEN,XYZ_PP,WCEN_BP)
+      COEF_EP = 0._EB
+      IF (ABS(CUT_CELL(ICC)%INT_XN(1,ICELL)) > TWENTY_EPSILON_EB) &
+         COEF_EP = CUT_CELL(ICC)%INT_XN(0,ICELL)/CUT_CELL(ICC)%INT_XN(1,ICELL)
+      COEF_BP = 1._EB - COEF_EP
+      FV%CV%WVEL(IG) = COEF_BP*WCEN_BP + COEF_EP*WCEN_EP
+   ENDDO
 
    NULLIFY(WP)
 
@@ -7562,15 +7544,11 @@ SUBROUTINE CC_H_INTERP
 
 ! Local Variables:
 REAL(EB), POINTER, DIMENSION(:,:,:) :: UP,VP,WP,HP
-INTEGER :: NM, ICC, NCELL, I, J ,K, JCC, IG
-REAL(EB):: VCRT
-LOGICAL :: VOLFLG
+INTEGER :: NM, I, J, K, IG
 TYPE(CC_FV_TYPE), POINTER :: FV
 
-! This routine interpolates H to cut cells/Cartesian cells at the end of step.
-! Makes use of dH/dXn boundary condition on immersed solid surfaces.
+! Copy the Cartesian H of each active cut piece onto its CV row. ONE_UNKH_PER_CUTCELL is not a second value.
 
-! Interpolate H in cut-cells:
 MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
    CALL POINT_TO_MESH(NM)
@@ -7578,59 +7556,23 @@ MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
    IF (PREDICTOR) THEN
       HP => H
-      UP => US ! End of step velocities.
+      UP => US
       VP => VS
       WP => WS
+      DO IG=1,FV%GCELL%N_CUT
+         I=FV%GCELL%IJK(IAXIS,IG); J=FV%GCELL%IJK(JAXIS,IG); K=FV%GCELL%IJK(KAXIS,IG)
+         FV%CV%H(IG) = HP(I,J,K)
+      ENDDO
    ELSE
       HP => HS
-      UP => U ! End of step velocities.
+      UP => U
       VP => V
       WP => W
+      DO IG=1,FV%GCELL%N_CUT
+         I=FV%GCELL%IJK(IAXIS,IG); J=FV%GCELL%IJK(JAXIS,IG); K=FV%GCELL%IJK(KAXIS,IG)
+         FV%CV%HS(IG) = HP(I,J,K)
+      ENDDO
    ENDIF
-
-   ! Interpolate to cut-cells. Cut-cell loop:
-   ICC_LOOP : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-
-      NCELL  = CUT_CELL(ICC)%NCELL
-
-      I      = CUT_CELL(ICC)%IJK(IAXIS)
-      J      = CUT_CELL(ICC)%IJK(JAXIS)
-      K      = CUT_CELL(ICC)%IJK(KAXIS)
-      VCRT   = DX(I)*DY(J)*DZ(K)
-
-      VOLFLG = .FALSE.
-      IF(NCELL > 0) VOLFLG = ABS(VCRT-CUT_CELL(ICC)%VOLUME(1)) < LOOSEPS*VCRT
-      IF(PERIODIC_TEST == 103 .OR. PERIODIC_TEST == 11 .OR. PERIODIC_TEST==7 .OR. VOLFLG) THEN
-         IF (PREDICTOR) THEN
-            DO JCC=1,NCELL
-               IG = CUT_CELL(ICC)%IG(JCC)
-               IF (IG>=1) FV%CV%H(IG) = HP(I,J,K)
-            ENDDO
-         ELSE
-            DO JCC=1,NCELL
-               IG = CUT_CELL(ICC)%IG(JCC)
-               IF (IG>=1) FV%CV%HS(IG) = HP(I,J,K)
-            ENDDO
-         ENDIF
-         CYCLE
-      ENDIF
-
-      ! Unstructured projection:
-      IF (.NOT.ONE_UNKH_PER_CUTCELL) THEN
-         IF (PREDICTOR) THEN
-            DO JCC=1,NCELL
-               IG = CUT_CELL(ICC)%IG(JCC)
-               IF (IG>=1) FV%CV%H(IG) = HP(I,J,K)
-            ENDDO
-         ELSE
-            DO JCC=1,NCELL
-               IG = CUT_CELL(ICC)%IG(JCC)
-               IF (IG>=1) FV%CV%HS(IG) = HP(I,J,K)
-            ENDDO
-         ENDIF
-      ENDIF
-
-   ENDDO ICC_LOOP
 
    ! Finally set HP to zero inside immersed solids:
    WHERE(MESHES(NM)%CCVAR(0:IBP1,0:JBP1,0:KBP1,CC_CGSC)==CC_SOLID) HP(0:IBP1,0:JBP1,0:KBP1) = 0._EB
@@ -19239,24 +19181,22 @@ INTEGER, INTENT(IN) :: NM,IPZ
 REAL(EB), INTENT(INOUT), POINTER, DIMENSION(:,:,:) :: HP
 
 ! Local Variables:
-INTEGER :: I,J,K,IROW,ICC,JCC,IG
+INTEGER :: I,J,K,IROW,JCC,IG,L
 REAL(EB) :: HVAL
 TYPE(CC_FV_TYPE), POINTER :: FV
 
 FV=>MESHES(NM)%FV
 
 IF (.NOT.CC_CV_H_PER_MEMBER) THEN
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      CC=>MESHES(NM)%CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS)
-      IF (CELL(CELL_INDEX(I,J,K))%SOLID .OR. &
-          ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
+   DO L=MESHES(NM)%H_CPTR(IPZ),MESHES(NM)%H_CPTR(IPZ+1)-1
+      CC=>MESHES(NM)%CUT_CELL(MESHES(NM)%H_CUT(L))
+      I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS)
+      IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
       DO JCC=1,CC%NCELL
          CALL GET_FV_L2_PRESSURE_VALUE(CC%UNKH(JCC),HVAL); HVAL=-HVAL
          IG = CC%IG(JCC)
-         IF (PREDICTOR) THEN
-            IF (IG>=1) FV%CV%H(IG)=HVAL
-         ELSE
-            IF (IG>=1) FV%CV%HS(IG)=HVAL
+         IF (IG>=1) THEN
+            IF (PREDICTOR) THEN; FV%CV%H(IG)=HVAL; ELSE; FV%CV%HS(IG)=HVAL; ENDIF
          ENDIF
          HP(I,J,K)=HVAL
       ENDDO
@@ -19264,39 +19204,18 @@ IF (.NOT.CC_CV_H_PER_MEMBER) THEN
    RETURN
 ENDIF
 
-IF (PREDICTOR) THEN
-
-   ! Note does not take into account ONE_UNKH_PER_CUTCELL:
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      CC => MESHES(NM)%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-      IF(CELL(CELL_INDEX(I,J,K))%SOLID .OR. ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-      IROW = CC%UNKH(1) - ZONE_SOLVE(IPZ)%UNKH_IND(NM_START)
-      ! Assign to the FV rows of the cut pieces:
-      DO JCC=1,CC%NCELL
-         IG = CC%IG(JCC)
-         IF (IG>=1) FV%CV%H(IG) = -ZONE_SOLVE(IPZ)%X_H(IROW)
-      ENDDO
-      ! Assign to HP:
-      HP(I,J,K) = -ZONE_SOLVE(IPZ)%X_H(IROW)
+DO L=MESHES(NM)%H_CPTR(IPZ),MESHES(NM)%H_CPTR(IPZ+1)-1
+   CC=>MESHES(NM)%CUT_CELL(MESHES(NM)%H_CUT(L))
+   I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS)
+   IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+   IROW = CC%UNKH(1) - ZONE_SOLVE(IPZ)%UNKH_IND(NM_START)
+   DO JCC=1,CC%NCELL
+      IG = CC%IG(JCC)
+      IF (IG<1) CYCLE
+      IF (PREDICTOR) THEN; FV%CV%H(IG)=-ZONE_SOLVE(IPZ)%X_H(IROW); ELSE; FV%CV%HS(IG)=-ZONE_SOLVE(IPZ)%X_H(IROW); ENDIF
    ENDDO
-
-ELSE
-
-   ! Note does not take into account ONE_UNKH_PER_CUTCELL:
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      CC => MESHES(NM)%CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-      IF(CELL(CELL_INDEX(I,J,K))%SOLID .OR. ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-      IROW     = CC%UNKH(1) - ZONE_SOLVE(IPZ)%UNKH_IND(NM_START)
-      ! Assign to the FV rows of the cut pieces:
-      DO JCC=1,CC%NCELL
-         IG = CC%IG(JCC)
-         IF (IG>=1) FV%CV%HS(IG) = -ZONE_SOLVE(IPZ)%X_H(IROW)
-      ENDDO
-      ! Assign to HP:
-      HP(I,J,K) = -ZONE_SOLVE(IPZ)%X_H(IROW)
-   ENDDO
-
-ENDIF
+   HP(I,J,K) = -ZONE_SOLVE(IPZ)%X_H(IROW)
+ENDDO
 
 RETURN
 END SUBROUTINE GET_CUTCELL_HP
@@ -19311,40 +19230,33 @@ INTEGER, INTENT(IN)     :: NM,NUNKH,IPZ
 REAL(EB), INTENT(INOUT) :: F_H(1:NUNKH)
 
 ! Local Variables:
-INTEGER :: IROW,ICC,JCC,I,J,K
+INTEGER :: IROW,JCC,I,J,K,L
 REAL(EB):: DIV_FN, DIV_FN_VOL, DDDT_INT
 
 
 IF (.NOT.CC_CV_H_PER_MEMBER) THEN
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      CC=>CUT_CELL(ICC); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS)
-      IF (CELL(CELL_INDEX(I,J,K))%SOLID .OR. &
-          ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
+   DO L=MESHES(NM)%H_CPTR(IPZ),MESHES(NM)%H_CPTR(IPZ+1)-1
+      CC=>CUT_CELL(MESHES(NM)%H_CUT(L)); I=CC%IJK(IAXIS); J=CC%IJK(JAXIS); K=CC%IJK(KAXIS)
+      IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
       DO JCC=1,CC%NCELL
-         CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.FALSE.)
-         CALL GET_FV_CV_DDDTVOL(NM,ICC,JCC,DDDT_INT)
+         CALL GET_FN_DIVERGENCE_CUTCELL(NM,MESHES(NM)%H_CUT(L),JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.FALSE.)
+         CALL GET_FV_CV_DDDTVOL(NM,MESHES(NM)%H_CUT(L),JCC,DDDT_INT)
          CALL ADD_FV_L2_PRESSURE_RHS(CC%UNKH(JCC),-(DDDT_INT*CC%VOLUME(JCC)+DIV_FN*CC%VOLUME(JCC)),IPZ,F_H)
       ENDDO
    ENDDO
    RETURN
 ENDIF
 
-CUTCELL_LOOP_A : DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-   CC   => CUT_CELL(ICC); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
-   IF(CELL(CELL_INDEX(I,J,K))%SOLID .OR. ZONE_SOLVE(PRESSURE_ZONE(I,J,K))%CONNECTED_ZONE_PARENT/=IPZ) CYCLE
-   IROW =  CC%UNKH(1) - ZONE_SOLVE(IPZ)%UNKH_IND(NM_START)
-   ! Here we add div(F) in the cut-cell and DDDT:
+CUTCELL_LOOP_A : DO L=MESHES(NM)%H_CPTR(IPZ),MESHES(NM)%H_CPTR(IPZ+1)-1
+   CC => CUT_CELL(MESHES(NM)%H_CUT(L)); I = CC%IJK(IAXIS); J = CC%IJK(JAXIS); K = CC%IJK(KAXIS)
+   IF (CELL(CELL_INDEX(I,J,K))%SOLID) CYCLE
+   IROW = CC%UNKH(1) - ZONE_SOLVE(IPZ)%UNKH_IND(NM_START)
    DIV_FN_VOL = 0._EB
    DO JCC=1,CC%NCELL
-      CALL GET_FN_DIVERGENCE_CUTCELL(NM,ICC,JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.FALSE.)
+      CALL GET_FN_DIVERGENCE_CUTCELL(NM,MESHES(NM)%H_CUT(L),JCC,DIV_FN,SUBSTRACT_BAROCLINIC=.FALSE.)
       DIV_FN_VOL = DIV_FN_VOL + DIV_FN*CC%VOLUME(JCC)
    ENDDO
-   ! Add to F_H. Accumulate (not overwrite) so that when several gas cut cells are members of one
-   ! control volume they share IROW (their CV-master unknown) and their volume-integrated divergence
-   ! + DDDT sum into the aggregated CV right-hand side. With each cut cell its own CV master, every cut cell owns a
-   ! distinct IROW that F_H has zeroed, so 0-(..) reproduces the legacy single-cell RHS bit-for-bit;
-   ! the Cartesian source loop already accumulates, so a regular CV-master row is also summed correctly.
-   CALL GET_FV_CV_DDDTVOL(NM,ICC,1,DDDT_INT)
+   CALL GET_FV_CV_DDDTVOL(NM,MESHES(NM)%H_CUT(L),1,DDDT_INT)
    F_H(IROW) = F_H(IROW) - (DDDT_INT*SUM(CC%VOLUME(1:CC%NCELL)) + DIV_FN_VOL)
 ENDDO CUTCELL_LOOP_A
 
