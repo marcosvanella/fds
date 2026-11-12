@@ -207,6 +207,9 @@ INTEGER, SAVE :: TH_NSLOT=0
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: TH_DIV,TH_RTRM,TH_VOL,TH_ORTRM
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_OCOEFF
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SSLOT,TH_SDEST,TH_RSLOT,TH_RDEST,TH_BSLOT
+!< TH_SROW: global row of each slot this process touches, increasing (TH_ROW_SLOT). FV_L2_FZ_REMOTE(1,slot): species
+!< right-hand side partials of rows owned on another process (END_FV_L2_SCALAR_RHS sends them to the owner).
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SROW
 !< The same slots serve the RHOZZ rows; TH_OSLOT(IROW) is the slot of this process's solve row IROW (RZ_Z), 0 if none.
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_OSLOT
 !< Per mesh, the members of its link groups that it holds, in one global order (axis, x, y, z): M(1)=1-3 (Cartesian
@@ -222,8 +225,8 @@ TYPE(L2_MEAN_TYPE), ALLOCATABLE, TARGET, SAVE :: L2_MEAN(:)
 REAL(EB), ALLOCATABLE, SAVE :: L2_XS(:,:) !< (1:2,cross-mesh group): sums of u*A and A over all meshes.
 INTEGER, SAVE :: N_FV_H_EDGE_GLOBAL=0
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: FV_H_EDGE_ROW,FV_H_EDGE_COL,FV_H_EDGE_ZONE
-REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: FV_H_EDGE_BIJ,FV_L2_FZ_REMOTE,FV_L2_DVOL_FACE
-REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: FV_L2_DEL_RHO_D_DEL_Z_FACE
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: FV_H_EDGE_BIJ,FV_L2_DVOL_FACE
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: FV_L2_DEL_RHO_D_DEL_Z_FACE,FV_L2_FZ_REMOTE
 INTEGER, SAVE :: CFL_NREMOTE=0 !< Held CFL rows whose owner is on another rank.
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:,:) :: CFL_RMAP !< (owner mesh, CFL_XQ entry) of each CFL record received here.
 TYPE PH_Z
@@ -1177,6 +1180,7 @@ DO L=1,NT
    S = S+1; SROW(S) = IUNK
 ENDDO
 NSORT = S
+TH_SROW = SROW(1:NSORT)
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    M => MESHES(NM)
    DO L=1,SIZE(M%TH_REG,2)
@@ -1228,7 +1232,7 @@ DO L=1,NUNKZ_LOCAL
 ENDDO
 ALLOCATE(TH_DIV(MAX(1,S)),TH_RTRM(MAX(1,S)),TH_VOL(MAX(1,S)),TH_ORTRM(MAX(1,S)), &
          TH_OCOEFF(MAX(1,N_TRACKED_SPECIES),MAX(1,S)),FV_L2_DVOL_FACE(MAX(1,S)), &
-         FV_L2_DEL_RHO_D_DEL_Z_FACE(MAX(1,N_TRACKED_SPECIES),MAX(1,S)))
+         FV_L2_DEL_RHO_D_DEL_Z_FACE(MAX(1,N_TRACKED_SPECIES),MAX(1,S)),FV_L2_FZ_REMOTE(1,MAX(1,S)))
 FV_L2_DVOL_FACE = 0._EB; FV_L2_DEL_RHO_D_DEL_Z_FACE = 0._EB
 
 CONTAINS
@@ -1240,23 +1244,12 @@ NT = NT+SIZE(ROWS)
 END SUBROUTINE ADD_ROWS
 
 INTEGER FUNCTION SLOT(IROW)
-! Slot of global row IROW, 0 if none: bisection over the sorted slots, then the slots added for owners.
+! Slot of global row IROW, 0 if none: the sorted slots, then the slots added for owners.
 INTEGER, INTENT(IN) :: IROW
-INTEGER :: LO,HI,MID
-SLOT = 0
-LO = 1; HI = NSORT
-DO WHILE (LO<=HI)
-   MID = (LO+HI)/2
-   IF (SROW(MID)==IROW) THEN
-      SLOT = MID; RETURN
-   ELSEIF (SROW(MID)<IROW) THEN
-      LO = MID+1
-   ELSE
-      HI = MID-1
-   ENDIF
-ENDDO
-DO MID=NSORT+1,S
-   IF (SROW(MID)==IROW) SLOT = MID
+INTEGER :: L
+SLOT = TH_ROW_SLOT(IROW)
+DO L=NSORT+1,S
+   IF (SROW(L)==IROW) SLOT = L
 ENDDO
 END FUNCTION SLOT
 
@@ -1277,6 +1270,25 @@ ROW_MESH = LO
 END FUNCTION ROW_MESH
 
 END SUBROUTINE CC_SET_THERMO_ROWS
+
+
+INTEGER FUNCTION TH_ROW_SLOT(IROW)
+! Slot of global scalar row IROW among the rows this process touches (TH_SROW), 0 if none.
+INTEGER, INTENT(IN) :: IROW
+INTEGER :: LO,HI,MID
+TH_ROW_SLOT = 0
+LO = 1; HI = SIZE(TH_SROW)
+DO WHILE (LO<=HI)
+   MID = (LO+HI)/2
+   IF (TH_SROW(MID)==IROW) THEN
+      TH_ROW_SLOT = MID; RETURN
+   ELSEIF (TH_SROW(MID)<IROW) THEN
+      LO = MID+1
+   ELSE
+      HI = MID-1
+   ENDIF
+ENDDO
+END FUNCTION TH_ROW_SLOT
 
 
 ! ------------------------------ CUTFACE_VELOCITIES --------------------------------
@@ -22549,37 +22561,36 @@ END SUBROUTINE RELEASE_FV_L2_PRESSURE_ROWS
 
 
 SUBROUTINE BEGIN_FV_L2_SCALAR_RHS
-! Allocate the per-species remote RHS buffer. Called from the scalar transport loop; no-op unless L2.
-IF (ALLOCATED(FV_L2_FZ_REMOTE)) DEALLOCATE(FV_L2_FZ_REMOTE)
-ALLOCATE(FV_L2_FZ_REMOTE(MAX(1,NUNKZ_TOTAL))); FV_L2_FZ_REMOTE=0._EB
+! Zero the partials of rows owned on another process. Called from the scalar transport loop.
+FV_L2_FZ_REMOTE=0._EB
 END SUBROUTINE BEGIN_FV_L2_SCALAR_RHS
 
 
 SUBROUTINE ADD_FV_L2_SCALAR_RHS(IUNK,VALUE)
-! Deposit into local F_Z when the row lives on this rank; otherwise into FV_L2_FZ_REMOTE.
+! Deposit into local F_Z when the row lives on this rank; otherwise into the row's slot of FV_L2_FZ_REMOTE.
 ! BEGIN_FV_L2_SCALAR_RHS must have run for the current species assemble.
 INTEGER, INTENT(IN) :: IUNK
 REAL(EB), INTENT(IN) :: VALUE
-INTEGER :: IROW
+INTEGER :: IROW,IS
 
 IROW=IUNK-UNKZ_IND(NM_START)
 IF (IROW>=1 .AND. IROW<=SIZE(F_Z)) THEN
    F_Z(IROW)=F_Z(IROW)+VALUE
 ELSEIF (IUNK>=1) THEN
-   FV_L2_FZ_REMOTE(IUNK)=FV_L2_FZ_REMOTE(IUNK)+VALUE
+   IS=TH_ROW_SLOT(IUNK)
+   FV_L2_FZ_REMOTE(1,IS)=FV_L2_FZ_REMOTE(1,IS)+VALUE
 ENDIF
 END SUBROUTINE ADD_FV_L2_SCALAR_RHS
 
 
 SUBROUTINE END_FV_L2_SCALAR_RHS
-! Reduce remote contributions and fold the local F_Z slice back in. No-op unless L2.
-USE MPI_F08
-INTEGER :: I,IUNK,IERR
+! Send the partials to the processes owning their rows and add what arrives into F_Z.
+INTEGER :: I,IS
 
-CALL MPI_ALLREDUCE(MPI_IN_PLACE,FV_L2_FZ_REMOTE,SIZE(FV_L2_FZ_REMOTE),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,IERR)
+CALL SCALAR_ROWS_TO_OWNER(FV_L2_FZ_REMOTE,TH_SSLOT,TH_SDEST,TH_RSLOT)
 DO I=1,SIZE(F_Z)
-   IUNK=UNKZ_IND(NM_START)+I
-   F_Z(I)=F_Z(I)+FV_L2_FZ_REMOTE(IUNK)
+   IS=TH_OSLOT(I)
+   IF (IS>0) F_Z(I)=F_Z(I)+FV_L2_FZ_REMOTE(1,IS)
 ENDDO
 END SUBROUTINE END_FV_L2_SCALAR_RHS
 
