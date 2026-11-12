@@ -1482,7 +1482,7 @@ DO L=1,SIZE(MESHES(NM)%CFL_REG,2)
       IRC  = FCVAR(I+ILH,J,K,CC_IDRC,X1AXIS)
       MURDN = MU_TMP/DX(I)
       IF (IRC>0) THEN
-         IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+         IF(FV%FACE%ROLE(RC_FACE(IRC)%FC)==CC_FACE_ROLE_INTERNAL) CYCLE
          MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                  1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
       ENDIF
@@ -1496,7 +1496,7 @@ DO L=1,SIZE(MESHES(NM)%CFL_REG,2)
       IRC  = FCVAR(I,J+ILH,K,CC_IDRC,X1AXIS)
       MURDN = TWOD_FCT * MU_TMP/DY(J)
       IF (IRC>0) THEN
-         IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+         IF(FV%FACE%ROLE(RC_FACE(IRC)%FC)==CC_FACE_ROLE_INTERNAL) CYCLE
          MURDN = TWOD_FCT*MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                  1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
       ENDIF
@@ -1510,7 +1510,7 @@ DO L=1,SIZE(MESHES(NM)%CFL_REG,2)
       IRC  = FCVAR(I,J,K+ILH,CC_IDRC,X1AXIS)
       MURDN = MU_TMP/DZ(K)
       IF (IRC>0) THEN
-         IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+         IF(FV%FACE%ROLE(RC_FACE(IRC)%FC)==CC_FACE_ROLE_INTERNAL) CYCLE
          MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                  1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
       ENDIF
@@ -1544,7 +1544,7 @@ CUTCELL_DO : DO L=1,SIZE(MESHES(NM)%CFL_CUT,2)
             IRC  = FCVAR(I-1+ILH,J,K,CC_IDRC,X1AXIS)
             MURDN = MU_TMP/DX(I)
             IF (IRC>0) THEN
-               IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+               IF(FV%FACE%ROLE(RC_FACE(IRC)%FC)==CC_FACE_ROLE_INTERNAL) CYCLE
                MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                        1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
             ENDIF
@@ -1553,7 +1553,7 @@ CUTCELL_DO : DO L=1,SIZE(MESHES(NM)%CFL_CUT,2)
             IRC  = FCVAR(I,J-1+ILH,K,CC_IDRC,X1AXIS)
             MURDN = TWOD_FCT * MU_TMP/DY(J)
             IF (IRC>0) THEN
-               IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+               IF(FV%FACE%ROLE(RC_FACE(IRC)%FC)==CC_FACE_ROLE_INTERNAL) CYCLE
                MURDN=TWOD_FCT*MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                       1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
             ENDIF
@@ -1562,7 +1562,7 @@ CUTCELL_DO : DO L=1,SIZE(MESHES(NM)%CFL_CUT,2)
             IRC  = FCVAR(I,J,K-1+ILH,CC_IDRC,X1AXIS)
             MURDN = MU_TMP/DZ(K)
             IF (IRC>0) THEN
-               IF(RC_FACE(IRC)%SHAREDZ) CYCLE
+               IF(FV%FACE%ROLE(RC_FACE(IRC)%FC)==CC_FACE_ROLE_INTERNAL) CYCLE
                MURDN = MU_TMP*GET_FV_FACE_RDN(NM,RC_FACE(IRC)%FC,&
                        1._EB/(RC_FACE(IRC)%XCEN(X1AXIS,HIGH_IND)-RC_FACE(IRC)%XCEN(X1AXIS,LOW_IND)))
             ENDIF
@@ -1575,7 +1575,7 @@ CUTCELL_DO : DO L=1,SIZE(MESHES(NM)%CFL_CUT,2)
          ILH     = LOWHIGH - 1
          IFC2    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
          IFACE2  = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
-         IF(CUT_FACE(IFC2)%SHARED(IFACE2)) CYCLE ! If face shared by linked cells CYCLE.
+         IF(FV%FACE%ROLE(CUT_FACE(IFC2)%FC(IFACE2))==CC_FACE_ROLE_INTERNAL) CYCLE ! Face inside one CV.
          X1AXIS  = CUT_FACE(IFC2)%IJK(KAXIS+1)
          AF      = CUT_FACE(IFC2)%AREA(IFACE2)
          IF_=CUT_FACE(IFC2)%FC(IFACE2)
@@ -18511,9 +18511,8 @@ CALL GET_GASPHASE_CUTFACES_DATA ! Here there is no need to populate CELL_LIST on
                                 ! this has been done before calling SET_CC_MATVEC_DATA, when calling
                                 ! GET_CRTCFCC_INT_STENCILS.
 
-! 6. Exchange information at block boundaries for RC_FACE, CUT_FACE
-! fields on each mesh:
-CALL DEFINE_SHARED_FACES
+! 6. RC face index map FCVAR(I,J,K,CC_IDRC,X1AXIS):
+CALL SET_RCFACE_INDEX_MAP
 CALL GET_RCEDGE_FACE_LIST ! This routine makes use of RCFACES index defined in ECVAR(:,:,:,CC_IDRC,:) in the previous.
 
 ! 6.5 Link faces for momentum transport if unstructured projection:
@@ -18744,41 +18743,26 @@ ENDDO
 END SUBROUTINE GET_RCEDGE_CUTFACE
 
 
-! ------------------------- DEFINE_SHARED_FACES --------------------------------
-SUBROUTINE DEFINE_SHARED_FACES
+! ------------------------- SET_RCFACE_INDEX_MAP -------------------------------
+SUBROUTINE SET_RCFACE_INDEX_MAP
 
-! Once cells have been linked, regular and RC faces shared by linked cells are defined as SHARED=.TRUE.
+! RC face ICF of each mesh in FCVAR(I,J,K,CC_IDRC,X1AXIS); 0 on every other face.
 
-INTEGER :: NM,ICF,JCF,I,J,K,X1AXIS
+INTEGER :: NM,ICF,I,J,K,X1AXIS
 
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL POINT_TO_MESH(NM)
-   ! First cut-faces:
-   DO ICF=1,MESHES(NM)%N_CUTFACE_MESH
-      IF(CUT_FACE(ICF)%STATUS/=CC_GASPHASE) CYCLE
-      CUT_FACE(ICF)%SHARED = .FALSE.
-      DO JCF=1,CUT_FACE(ICF)%NFACE
-         IF(CUT_FACE(ICF)%UNKZ(LOW_IND,JCF)==CUT_FACE(ICF)%UNKZ(HIGH_IND,JCF)) &
-         CUT_FACE(ICF)%SHARED(JCF) = .TRUE. ! This face is shared by two linked cut-cells.
-      ENDDO
-   ENDDO
-   ! Then RC faces:
    FCVAR(:,:,:,CC_IDRC,:) = 0
    DO ICF=1,MESHES(NM)%CC_NRCFACE_Z
-      ! Add ICF position in FCVAR(I,J,K,CC_IDRC,X1AXIS):
       I      = RC_FACE(ICF)%IJK(IAXIS)
       J      = RC_FACE(ICF)%IJK(JAXIS)
       K      = RC_FACE(ICF)%IJK(KAXIS)
       X1AXIS = RC_FACE(ICF)%IJK(KAXIS+1)
       FCVAR(I,J,K,CC_IDRC,X1AXIS) = ICF
-      ! Then set if SHARED:
-      IF(RC_FACE(ICF)%UNKZ(LOW_IND)==RC_FACE(ICF)%UNKZ(HIGH_IND)) RC_FACE(ICF)%SHAREDZ = .TRUE.
    ENDDO
-
 ENDDO
 
-RETURN
-END SUBROUTINE DEFINE_SHARED_FACES
+END SUBROUTINE SET_RCFACE_INDEX_MAP
 
 ! --------------------- GET_BOUNDFACE_GEOM_INFO_H --------------------------------
 SUBROUTINE GET_BOUNDFACE_GEOM_INFO_H
@@ -20724,8 +20708,8 @@ USE MPI_F08
 
 ! Local variables:
 INTEGER :: NM
-INTEGER :: NCELL,ICC,JCC,IFC,IFACE,LOWHIGH,ICF1,ICF2
-INTEGER :: IW,II,JJ,KK,IIF,JJF,KKF,IOR,IIG,JJG,KKG,LOWHIGH_TEST,LOWHIGH_TEST_G,X1AXIS
+INTEGER :: ICC,JCC,IFC,IFACE,LOWHIGH,ICF1
+INTEGER :: IW,II,JJ,KK,IIF,JJF,KKF,IOR,IIG,JJG,KKG,LOWHIGH_TEST_G,X1AXIS
 INTEGER :: IERR
 
 ! Mesh loop:
@@ -20733,27 +20717,7 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
    CALL POINT_TO_MESH(NM)
 
-   ! First Scalars:
-   DO ICC=1,MESHES(NM)%N_CUTCELL_MESH
-      NCELL = CUT_CELL(ICC)%NCELL
-      DO JCC=1,NCELL
-         DO IFC=1,CUT_CELL(ICC)%CCELEM(1,JCC)
-            IFACE = CUT_CELL(ICC)%CCELEM(IFC+1,JCC)
-            ! If face type in face_list is not CC_FTYPE_CFGAS, drop:
-            IF ( CUT_CELL(ICC)%FACE_LIST(1,IFACE) /= CC_FTYPE_CFGAS ) CYCLE
-            ! Which face?
-            LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
-            ICF1    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
-            ICF2    = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
-            SELECT CASE(LOWHIGH)
-            CASE( LOW_IND); CUT_FACE(ICF1)%UNKZ(HIGH_IND,ICF2) = CUT_CELL(ICC)%UNKZ(JCC) !Cutface on low side of cutcell
-            CASE(HIGH_IND); CUT_FACE(ICF1)%UNKZ( LOW_IND,ICF2) = CUT_CELL(ICC)%UNKZ(JCC) !CF on high side of CC.
-            END SELECT
-         ENDDO
-      ENDDO
-   ENDDO
-
-   ! Now Apply wall cell loop for cut cells:
+   ! Wall cell loop for cut cells:
    WALL_CUTFACE_LOOP :  DO IW=1,N_EXTERNAL_WALL_CELLS+N_INTERNAL_WALL_CELLS
       WC=>WALL(IW)
       BC => BOUNDARY_COORD(WC%BC_INDEX)
@@ -20765,12 +20729,12 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       ! Drop if face is not of type CC_CUTCFE:
       X1AXIS=ABS(IOR)
       SELECT CASE(IOR)                                           ! V Face on high side of Guard-Cell
-      CASE( IAXIS); IIF=II  ; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST = HIGH_IND; LOWHIGH_TEST_G =  LOW_IND
-      CASE(-IAXIS); IIF=II-1; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST =  LOW_IND; LOWHIGH_TEST_G = HIGH_IND
-      CASE( JAXIS); IIF=II  ; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST = HIGH_IND; LOWHIGH_TEST_G =  LOW_IND
-      CASE(-JAXIS); IIF=II  ; JJF=JJ-1; KKF=KK  ; LOWHIGH_TEST =  LOW_IND; LOWHIGH_TEST_G = HIGH_IND
-      CASE( KAXIS); IIF=II  ; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST = HIGH_IND; LOWHIGH_TEST_G =  LOW_IND
-      CASE(-KAXIS); IIF=II  ; JJF=JJ  ; KKF=KK-1; LOWHIGH_TEST =  LOW_IND; LOWHIGH_TEST_G = HIGH_IND
+      CASE( IAXIS); IIF=II  ; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST_G =  LOW_IND
+      CASE(-IAXIS); IIF=II-1; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST_G = HIGH_IND
+      CASE( JAXIS); IIF=II  ; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST_G =  LOW_IND
+      CASE(-JAXIS); IIF=II  ; JJF=JJ-1; KKF=KK  ; LOWHIGH_TEST_G = HIGH_IND
+      CASE( KAXIS); IIF=II  ; JJF=JJ  ; KKF=KK  ; LOWHIGH_TEST_G =  LOW_IND
+      CASE(-KAXIS); IIF=II  ; JJF=JJ  ; KKF=KK-1; LOWHIGH_TEST_G = HIGH_IND
       END SELECT
 
       IF (FCVAR(IIF,JJF,KKF,CC_FGSC,X1AXIS) /= CC_CUTCFE) CYCLE WALL_CUTFACE_LOOP
@@ -20792,30 +20756,8 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             IF ( LOWHIGH                          /=  LOWHIGH_TEST_G) CYCLE ! In same side as EWC from internal cell
             IF ( CUT_CELL(ICC)%FACE_LIST(3,IFACE) /= X1AXIS) CYCLE ! Normal to same axis as EWC
             ICF1    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
-            CUT_FACE(ICF1)%IWC = IW   ! Rest of info from internal cut-cell has been filled in previous ICC loop.
+            CUT_FACE(ICF1)%IWC = IW
             WC%CUT_FACE_INDEX  = ICF1 ! Add CUT_FACE index in WALL(:) array.
-         ENDDO
-      ENDDO
-
-      ! Now CCVAR(II,JJ,KK,CC_CGSC) from guard cell:
-      IF (CELL(CELL_INDEX(II,JJ,KK))%SOLID) CYCLE WALL_CUTFACE_LOOP
-      ICC = MESHES(NM)%CCVAR(II,JJ,KK,CC_IDCC)
-      DO JCC=1,CUT_CELL(ICC)%NCELL
-         ! Loop faces and test:
-         DO IFC=1,CUT_CELL(ICC)%CCELEM(1,JCC)
-            IFACE = CUT_CELL(ICC)%CCELEM(IFC+1,JCC)
-            ! Which face ?
-            LOWHIGH = CUT_CELL(ICC)%FACE_LIST(2,IFACE)
-            IF ( CUT_CELL(ICC)%FACE_LIST(1,IFACE) /= CC_FTYPE_CFGAS) CYCLE ! Must Be gasphase cut-face
-            IF ( LOWHIGH                              /= LOWHIGH_TEST) CYCLE ! In same side as EWC from guard-cell
-            IF ( CUT_CELL(ICC)%FACE_LIST(3,IFACE) /= X1AXIS) CYCLE ! Normal to same axis as EWC
-
-            ICF1    = CUT_CELL(ICC)%FACE_LIST(4,IFACE)
-            ICF2    = CUT_CELL(ICC)%FACE_LIST(5,IFACE)
-            SELECT CASE(LOWHIGH)
-            CASE( LOW_IND); CUT_FACE(ICF1)%UNKZ(HIGH_IND,ICF2) = CUT_CELL(ICC)%UNKZ(JCC) !Cutface on low side of cutcell
-            CASE(HIGH_IND); CUT_FACE(ICF1)%UNKZ( LOW_IND,ICF2) = CUT_CELL(ICC)%UNKZ(JCC)
-            END SELECT
          ENDDO
       ENDDO
 
@@ -21746,12 +21688,10 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
             ! Add all info required for matrix build:
             ! Cell at i-1, i.e. regular GASPHASE:
-            M%RC_FACE(IRC)%UNKZ(LOW_IND)                     = CCVAR(INCELL,JNCELL,KNCELL,CC_UNKZ)
             M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,LOW_IND)         = (/ XCELL(INCELL), YCELL(JNCELL), ZCELL(KNCELL) /)
             M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1, LOW_IND) = (/ CC_FTYPE_RGGAS, INCELL, JNCELL, KNCELL /)
 
             ! Cell at i+1, i.e. cut-cell:
-            M%RC_FACE(IRC)%UNKZ(HIGH_IND)                    = CUT_CELL(ICC)%UNKZ(JCC)
             M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,HIGH_IND)        = CUT_CELL(ICC)%XYZCEN(IAXIS:KAXIS,JCC)
             M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,HIGH_IND) = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
 
@@ -21768,7 +21708,6 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
             ! Add all info required for matrix build:
             ! Cell at i+1, i.e. cut-cell:
-            M%RC_FACE(IRC)%UNKZ(HIGH_IND)                    = CUT_CELL(ICC)%UNKZ(JCC)
             M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,HIGH_IND)        = CUT_CELL(ICC)%XYZCEN(IAXIS:KAXIS,JCC)
             M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,HIGH_IND) = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
 
@@ -21803,14 +21742,12 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
             ! Add all info required for matrix build:
             ! Cell at i-1, i.e. cut-cell:
-            M%RC_FACE(IRC)%UNKZ(LOW_IND)                     = CUT_CELL(ICC)%UNKZ(JCC)
             M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,LOW_IND)         = CUT_CELL(ICC)%XYZCEN(IAXIS:KAXIS,JCC)
             M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1, LOW_IND) = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
             ! Modify FACE_LIST for the given cut-cell:
             CUT_CELL(ICC)%FACE_LIST(4,IFACE) = IRC
 
             ! Cell at i+1, i.e. regular GASPHASE:
-            M%RC_FACE(IRC)%UNKZ(HIGH_IND)                    = CCVAR(INCELL,JNCELL,KNCELL,CC_UNKZ)
             M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,HIGH_IND)        = (/ XCELL(INCELL), YCELL(JNCELL), ZCELL(KNCELL) /)
             M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,HIGH_IND) = (/ CC_FTYPE_RGGAS, INCELL, JNCELL, KNCELL /)
 
@@ -21825,7 +21762,6 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
             ! Add high cell info required for matrix build:
             ! Cell at i-1, i.e. cut-cell:
-            M%RC_FACE(IRC)%UNKZ(LOW_IND)                     = CUT_CELL(ICC)%UNKZ(JCC)
             M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,LOW_IND)         = CUT_CELL(ICC)%XYZCEN(IAXIS:KAXIS,JCC)
             M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1, LOW_IND) = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
 
@@ -21900,12 +21836,10 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                   ! Add all info required for matrix build:
                   ! Cell at i-1, i.e. regular GASPHASE:
-                  M%RC_FACE(IRC)%UNKZ(LOW_IND)                     = CCVAR(INCELL,JNCELL,KNCELL,CC_UNKZ)
                   M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,LOW_IND)         = (/ XCELL(INCELL), YCELL(JNCELL), ZCELL(KNCELL) /)
                   M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,LOW_IND)  = (/ CC_FTYPE_RGGAS, INCELL, JNCELL, KNCELL /)
 
                   ! Cell at i+1, i.e. cut-cell:
-                  M%RC_FACE(IRC)%UNKZ(HIGH_IND)                    = CC%UNKZ(JCC)
                   M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,HIGH_IND)        = CC%XYZCEN(IAXIS:KAXIS,JCC)
                   M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,HIGH_IND) = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
 
@@ -21926,7 +21860,6 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   IF (INLIST) THEN
                      ! This cut-cell is on the high side of face iifc:
                      ! Cell at i+1, i.e. cut-cell:
-                     M%RC_FACE(IIFC)%UNKZ(HIGH_IND)                    = CC%UNKZ(JCC)
                      M%RC_FACE(IIFC)%XCEN(IAXIS:KAXIS,HIGH_IND)        = CC%XYZCEN(IAXIS:KAXIS,JCC)
                      M%RC_FACE(IIFC)%CELL_LIST(IAXIS:KAXIS+1,HIGH_IND) = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
                      ! Modify FACE_LIST for the given cut-cell:
@@ -21940,7 +21873,6 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                   ! Add all info required for matrix build:
                   ! Cell at i+1, i.e. cut-cell:
-                  M%RC_FACE(IRC)%UNKZ(HIGH_IND)                        = CC%UNKZ(JCC)
                   M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,HIGH_IND)            = CC%XYZCEN(IAXIS:KAXIS,JCC)
                   M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,HIGH_IND)     = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
 
@@ -21973,14 +21905,12 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                   ! Add all info required for matrix build:
                   ! Cell at i-1, i.e. cut-cell:
-                  M%RC_FACE(IRC)%UNKZ(LOW_IND)                     = CC%UNKZ(JCC)
                   M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,LOW_IND)         = CC%XYZCEN(IAXIS:KAXIS,JCC)
                   M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,LOW_IND)  = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
                   ! Modify FACE_LIST for the given cut-cell:
                   CC%FACE_LIST(4,IFACE) = IRC
 
                   ! Cell at i+1, i.e. regular GASPHASE:
-                  M%RC_FACE(IRC)%UNKZ(HIGH_IND)                    = CCVAR(INCELL,JNCELL,KNCELL,CC_UNKZ)
                   M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,HIGH_IND)        = (/ XCELL(INCELL), YCELL(JNCELL), ZCELL(KNCELL) /)
                   M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1,HIGH_IND) = (/ CC_FTYPE_RGGAS, INCELL, JNCELL, KNCELL /)
 
@@ -21999,7 +21929,6 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
                   IF (INLIST) THEN
                      ! This cut-cell is on the high side of face iifc:
                      ! Cell at i-1, i.e. cut-cell:
-                     M%RC_FACE(IIFC)%UNKZ(LOW_IND)                     = CC%UNKZ(JCC)
                      M%RC_FACE(IIFC)%XCEN(IAXIS:KAXIS,LOW_IND)         = CC%XYZCEN(IAXIS:KAXIS,JCC)
                      M%RC_FACE(IIFC)%CELL_LIST(IAXIS:KAXIS+1, LOW_IND) = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
                      ! Modify FACE_LIST for the given cut-cell:
@@ -22013,7 +21942,6 @@ MAIN_MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 
                   ! Add high cell info required for matrix build:
                   ! Cell at i-1, i.e. cut-cell:
-                  M%RC_FACE(IRC)%UNKZ(LOW_IND)                         = CC%UNKZ(JCC)
                   M%RC_FACE(IRC)%XCEN(IAXIS:KAXIS,LOW_IND)             = CC%XYZCEN(IAXIS:KAXIS,JCC)
                   M%RC_FACE(IRC)%CELL_LIST(IAXIS:KAXIS+1, LOW_IND)     = (/ CC_FTYPE_CFGAS, ICC, JCC, IFC /)
                   ! Modify FACE_LIST for the given cut-cell:
@@ -23591,7 +23519,7 @@ END SUBROUTINE COPY_CC_UNKH_TO_HS
 SUBROUTINE DUMP_CC_LINK_MAP(NM)
 
 INTEGER, INTENT(IN) :: NM
-INTEGER :: LU,I,J,K,ICC,JCC,IRC,ICF,JCF,AX,IL,JL,KL,IH,JH,KH
+INTEGER :: LU,I,J,K,ICC,JCC
 CHARACTER(255) :: FN
 TYPE(MESH_TYPE), POINTER :: MFV
 
@@ -23616,40 +23544,6 @@ DO ICC=1,MFV%N_CUTCELL_MESH
 ENDDO
 CLOSE(LU)
 
-WRITE(FN,'(A,A,A,I0,A,I0,A)') TRIM(RESULTS_DIR),TRIM(CHID),'_cc_face_link_',MY_RANK,'_',NM,'.csv'
-LU=GET_FILE_NUMBER()
-OPEN(UNIT=LU,FILE=TRIM(FN),STATUS='REPLACE')
-WRITE(LU,'(A)') 'face_kind,i,j,k,axis,src1,src2,unkz_low,unkz_high,unkf'
-DO AX=IAXIS,KAXIS
-   DO K=0,MFV%KBAR
-      DO J=0,MFV%JBAR
-         DO I=0,MFV%IBAR
-            IF (CC_FV_UNKF_REG(NM,I,J,K,AX)<=0) CYCLE
-            IL=I; JL=J; KL=K; IH=I; JH=J; KH=K
-            SELECT CASE(AX)
-            CASE(IAXIS); IH=I+1
-            CASE(JAXIS); JH=J+1
-            CASE(KAXIS); KH=K+1
-            END SELECT
-            WRITE(LU,'(A,9(",",I0))') 'regular',I,J,K,AX,0,0,MFV%CCVAR(IL,JL,KL,CC_UNKZ), &
-                                      MFV%CCVAR(IH,JH,KH,CC_UNKZ),CC_FV_UNKF_REG(NM,I,J,K,AX)
-         ENDDO
-      ENDDO
-   ENDDO
-ENDDO
-DO IRC=1,MFV%CC_NRCFACE_Z
-   WRITE(LU,'(A,9(",",I0))') 'rc',MFV%RC_FACE(IRC)%IJK(IAXIS:KAXIS),MFV%RC_FACE(IRC)%IJK(KAXIS+1),IRC,0, &
-                             MFV%RC_FACE(IRC)%UNKZ(LOW_IND),MFV%RC_FACE(IRC)%UNKZ(HIGH_IND),CC_FV_UNKF_RC(NM,IRC)
-ENDDO
-DO ICF=1,MFV%N_CUTFACE_MESH
-   IF (MFV%CUT_FACE(ICF)%STATUS/=CC_GASPHASE) CYCLE
-   DO JCF=1,MFV%CUT_FACE(ICF)%NFACE
-      WRITE(LU,'(A,9(",",I0))') 'cut',MFV%CUT_FACE(ICF)%IJK(IAXIS:KAXIS),MFV%CUT_FACE(ICF)%IJK(KAXIS+1),ICF,JCF, &
-                                MFV%CUT_FACE(ICF)%UNKZ(LOW_IND,JCF),MFV%CUT_FACE(ICF)%UNKZ(HIGH_IND,JCF), &
-                                CC_FV_UNKF_CF(NM,ICF,JCF)
-   ENDDO
-ENDDO
-CLOSE(LU)
 
 END SUBROUTINE DUMP_CC_LINK_MAP
 
