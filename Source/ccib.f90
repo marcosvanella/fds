@@ -11356,435 +11356,106 @@ END SUBROUTINE GET_M_DOT_PPP_SCALAR_3D
 ! ---------------------- GET_EXPLICIT_ADVDIFFVECTOR_SCALAR_3D --------------------
 
 SUBROUTINE GET_EXPLICIT_ADVDIFFVECTOR_SCALAR_3D(N)
+! Explicit scalar advection into the L2 right-hand side, one walk over external faces.
+! Gas and periodic regular faces, gas RC faces, and gas cut faces. Real walls are the
+! other routine. The I-axis flux still carries the cylindrical radius R(I).
 
 INTEGER, INTENT(IN) :: N
-
-! Local Variables:
-INTEGER :: NM,I,J,K
-REAL(EB):: PRFCT
-INTEGER :: X1AXIS,IFACE,IND(LOW_IND:HIGH_IND),IND_LOC(LOW_IND:HIGH_IND),ICF
-INTEGER :: LOCROW_1,LOCROW_2,ILOC,IUNK,ICC,JCC,IFV,ISIDE,IW
-REAL(EB):: AF,VELC,RHO_Z_PV(-2:1),RHOPV(-2:1),FCT,ZZ_GET_N,FN_ZZ,RHOZZ
-REAL(EB), POINTER, DIMENSION(:,:,:)  :: RHOP
-REAL(EB), POINTER, DIMENSION(:,:,:,:):: ZZP
-TYPE(CC_REGFACEZ_TYPE),  POINTER, DIMENSION(:) :: REGFACE_Z
-LOGICAL :: DO_LO,DO_HI
-LOGICAL :: FOUND_FV_FACE
+INTEGER :: NM,I,J,K,AX,IREG,IRC,ICF,JCF,IW,IH,JH,KH,IF_,IFV,UNK_LO,UNK_HI
+REAL(EB) :: PRFCT,AF,VELC,FN,RHOZZ
+REAL(EB), POINTER, DIMENSION(:,:,:) :: RHOP
+REAL(EB), POINTER, DIMENSION(:,:,:,:) :: ZZP
 TYPE(CC_FV_TYPE), POINTER :: FV
+LOGICAL :: DO_LO,DO_HI,FOUND
 
-U_TEMP => U_WORK
-F_TEMP => F_WORK
-Z_TEMP => Z_WORK
+U_TEMP=>U_WORK; F_TEMP=>F_WORK; Z_TEMP=>Z_WORK
 
-! Mesh Loop:
 MESH_LOOP : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-
    CALL POINT_TO_MESH(NM)
    FV=>MESHES(NM)%FV
-   ! WORK_U/V/W are the velocity DENSITY formed for the Cartesian scalar update
-   ! (mass.f90): U on the predictor, US on the corrector, external interpolated
-   ! faces replaced from UVW_SAVE. Nothing may overwrite them before CC_DENSITY
-   ! finishes reading them. Every cut-region face uses that one velocity.
-
    IF (PREDICTOR) THEN
-      ZZP  => ZZ
-      RHOP => RHO
-      PRFCT= 1._EB
+      ZZP=>ZZ; RHOP=>RHO; PRFCT=1._EB
    ELSE
-      ZZP  => ZZS
-      RHOP => RHOS
-      PRFCT= 0._EB
+      ZZP=>ZZS; RHOP=>RHOS; PRFCT=0._EB
    ENDIF
-
-   ! X direction bounds:
-   ILO_FACE = 0                    ! Low mesh boundary face index.
-   IHI_FACE = IBAR                 ! High mesh boundary face index.
-
-   ! Y direction bounds:
-   JLO_FACE = 0                    ! Low mesh boundary face index.
-   JHI_FACE = JBAR                 ! High mesh boundary face index.
-
-   ! Z direction bounds:
-   KLO_FACE = 0                    ! Low mesh boundary face index.
-   KHI_FACE = KBAR                 ! High mesh boundary face index.
-
-   ! First add advective fluxes to internal and INTERPOLATED_BOUNDARY regular and cut-cells in the CC region:
-   ! IAXIS faces:
-   X1AXIS = IAXIS
-   REGFACE_Z => CC_REGFACE_IAXIS_Z
-   DO IFACE=1,MESHES(NM)%CC_NREGFACE_Z(X1AXIS)
-      IW = REGFACE_Z(IFACE)%IWC
-      IF (IW>0) THEN
-         IF (.NOT.(WALL(IW)%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY .OR. WALL(IW)%BOUNDARY_TYPE==PERIODIC_BOUNDARY)) CYCLE
-      ENDIF
-      I     = REGFACE_Z(IFACE)%IJK(IAXIS)
-      J     = REGFACE_Z(IFACE)%IJK(JAXIS)
-      K     = REGFACE_Z(IFACE)%IJK(KAXIS)
-      DO_LO = REGFACE_Z(IFACE)%DO_LO_IND
-      DO_HI = REGFACE_Z(IFACE)%DO_HI_IND
-      ! Unknowns on related cells:
-      IND_LOC(LOW_IND) = CCVAR(I  ,J,K,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= CCVAR(I+1,J,K,CC_UNKZ) - UNKZ_IND(NM_START)
-      RHOZZ = FX(I,J,K,N)*WORK_U(I,J,K)*R(I)
-      AF = DY(J)*DZ(K)
-      FOUND_FV_FACE=.FALSE.
-         CALL CC_FV_CACHE_ADVECTIVE_REGULAR_FACE(NM,REGFACE_Z(IFACE)%FC,RHOZZ,FOUND_FV_FACE)
-      IF (.NOT.FOUND_FV_FACE) THEN
+   ! Past N_INT: regular-face tail and unclaimed RC rows, as in the divergence walks.
+   DO IF_=1,FV%FACE%N
+      IF (FV%FACE%ROLE(IF_)/=CC_FACE_ROLE_EXTERNAL) CYCLE
+      SELECT CASE(FV%FACE%FTYPE(IF_))
+      CASE(CC_FTYPE_RGGAS)
+         IREG=FV%FACE%SRC_IREG(IF_)
+         IF (IREG<1) CYCLE
+         AX=FV%FACE%X1AXIS(IF_)
+         CALL EX_REG_IJK(AX,IREG,I,J,K,IW,DO_LO,DO_HI)
+         IF (IW>0) THEN
+            IF (WALL(IW)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY) THEN
+               IF (WALL(IW)%BOUNDARY_TYPE/=PERIODIC_BOUNDARY) CYCLE
+            ENDIF
+         ENDIF
+         CALL EX_REG_FLUX(N,AX,I,J,K,RHOZZ,AF)
+         CALL EX_HIGH(AX,I,J,K,IH,JH,KH)
+         FOUND=.FALSE.
+         IFV=EX_REG_FC(AX,IREG)
+         IF (IFV>=1) CALL CC_FV_CACHE_ADVECTIVE_REGULAR_FACE(NM,IFV,RHOZZ,FOUND)
+         IF (.NOT.FOUND) THEN
             IF (DO_LO) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ),RHOZZ*AF)
-            IF (DO_HI) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I+1,J,K,CC_UNKZ),-RHOZZ*AF)
-      ENDIF
-   ENDDO
-
-   ! JAXIS faces:
-   X1AXIS = JAXIS
-   REGFACE_Z => CC_REGFACE_JAXIS_Z
-   DO IFACE=1,MESHES(NM)%CC_NREGFACE_Z(X1AXIS)
-      IW = REGFACE_Z(IFACE)%IWC
-      IF((IW > 0) .AND. .NOT.(WALL(IW)%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY .OR. &
-                              WALL(IW)%BOUNDARY_TYPE==PERIODIC_BOUNDARY)) CYCLE
-      I     = REGFACE_Z(IFACE)%IJK(IAXIS)
-      J     = REGFACE_Z(IFACE)%IJK(JAXIS)
-      K     = REGFACE_Z(IFACE)%IJK(KAXIS)
-      DO_LO = REGFACE_Z(IFACE)%DO_LO_IND
-      DO_HI = REGFACE_Z(IFACE)%DO_HI_IND
-      ! Unknowns on related cells:
-      IND_LOC(LOW_IND) = CCVAR(I,J  ,K,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= CCVAR(I,J+1,K,CC_UNKZ) - UNKZ_IND(NM_START)
-      RHOZZ = FY(I,J,K,N)*WORK_V(I,J,K)
-      AF = DX(I)*DZ(K)
-      FOUND_FV_FACE=.FALSE.
-         CALL CC_FV_CACHE_ADVECTIVE_REGULAR_FACE(NM,REGFACE_Z(IFACE)%FC,RHOZZ,FOUND_FV_FACE)
-      IF (.NOT.FOUND_FV_FACE) THEN
-            IF (DO_LO) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ),RHOZZ*AF)
-            IF (DO_HI) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J+1,K,CC_UNKZ),-RHOZZ*AF)
-      ENDIF
-   ENDDO
-
-   ! KAXIS faces:
-   X1AXIS = KAXIS
-   REGFACE_Z => CC_REGFACE_KAXIS_Z
-   DO IFACE=1,MESHES(NM)%CC_NREGFACE_Z(X1AXIS)
-      IW = REGFACE_Z(IFACE)%IWC
-      IF((IW > 0) .AND. .NOT.(WALL(IW)%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY .OR. &
-                              WALL(IW)%BOUNDARY_TYPE==PERIODIC_BOUNDARY)) CYCLE
-      I     = REGFACE_Z(IFACE)%IJK(IAXIS)
-      J     = REGFACE_Z(IFACE)%IJK(JAXIS)
-      K     = REGFACE_Z(IFACE)%IJK(KAXIS)
-      DO_LO = REGFACE_Z(IFACE)%DO_LO_IND
-      DO_HI = REGFACE_Z(IFACE)%DO_HI_IND
-      ! Unknowns on related cells:
-      IND_LOC(LOW_IND) = CCVAR(I,J,K  ,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= CCVAR(I,J,K+1,CC_UNKZ) - UNKZ_IND(NM_START)
-      RHOZZ = FZ(I,J,K,N)*WORK_W(I,J,K)
-      AF = DX(I)*DY(J)
-      FOUND_FV_FACE=.FALSE.
-         CALL CC_FV_CACHE_ADVECTIVE_REGULAR_FACE(NM,REGFACE_Z(IFACE)%FC,RHOZZ,FOUND_FV_FACE)
-      IF (.NOT.FOUND_FV_FACE) THEN
-            IF (DO_LO) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ),RHOZZ*AF)
-            IF (DO_HI) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K+1,CC_UNKZ),-RHOZZ*AF)
-      ENDIF
-   ENDDO
-
-
-   ! Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
-   DO IFACE=1,MESHES(NM)%CC_NRCFACE_Z
-
-      IW = MESHES(NM)%RC_FACE(IFACE)%IWC; IF(IW > 0) CYCLE
-
-      I      = MESHES(NM)%RC_FACE(IFACE)%IJK(IAXIS)
-      J      = MESHES(NM)%RC_FACE(IFACE)%IJK(JAXIS)
-      K      = MESHES(NM)%RC_FACE(IFACE)%IJK(KAXIS)
-      X1AXIS = MESHES(NM)%RC_FACE(IFACE)%IJK(KAXIS+1)
-
-      ! Unknowns on related cells:
-      IND(LOW_IND)  = MESHES(NM)%RC_FACE(IFACE)%UNKZ(LOW_IND)
-      IND(HIGH_IND) = MESHES(NM)%RC_FACE(IFACE)%UNKZ(HIGH_IND)
-
-      IND_LOC(LOW_IND) = IND(LOW_IND) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= IND(HIGH_IND)- UNKZ_IND(NM_START)
-
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND
-      LOCROW_2 = HIGH_IND
-      SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            AF = DY(J)*DZ(K)
-            RHOPV(-2:1)      = RHOP(I-1:I+2,J,K)
-            ! First two cells surrounding face:
-            DO ISIDE=-1,0
-               SELECT CASE(RC_FACE(IFACE)%CELL_LIST(1,ISIDE+2))
-               CASE(CC_FTYPE_RGGAS) ! Regular cell -> use stored TMPV from TMP array.
-                  ZZ_GET_N = ZZP(I+1+ISIDE,J,K,N)
-               CASE(CC_FTYPE_CFGAS) ! Cut-cell -> use Temperature value from CUT_CELL data struct:
-                  ICC = RC_FACE(IFACE)%CELL_LIST(2,ISIDE+2)
-                  JCC = RC_FACE(IFACE)%CELL_LIST(3,ISIDE+2)
-                  RHOPV(ISIDE) = GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
-                  ZZ_GET_N     = GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
-               END SELECT
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDDO
-            ! Lower cell:
-            ISIDE=-2
-            IF (CELL(CELL_INDEX(I+1+ISIDE,J,K))%SOLID .OR. CCVAR(I+1+ISIDE,J,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE+1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I+1+ISIDE,J,K,N)
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDIF
-            ! Upper cell:
-            ISIDE=1
-            IF (CELL(CELL_INDEX(I+1+ISIDE,J,K))%SOLID .OR. CCVAR(I+1+ISIDE,J,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE-1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I+1+ISIDE,J,K,N)
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDIF
-            ! Now Godunov flux limited value of rho*zz on face:
-            VELC = WORK_U(I,J,K)
-            ! bar{rho*zz}:
-            Z_TEMP(0:3,1,1) = RHO_Z_PV(-2:1)
-            U_TEMP(1,1,1) = VELC
-            CALL GET_SCALAR_FACE_VALUE(U_TEMP,Z_TEMP,F_TEMP,1,1,1,1,1,1,1,I_FLUX_LIMITER)
-            FN_ZZ = F_TEMP(1,1,1)
-         CASE(JAXIS)
-            AF = DX(I)*DZ(K)
-            RHOPV(-2:1)      = RHOP(I,J-1:J+2,K)
-            DO ISIDE=-1,0
-               SELECT CASE(RC_FACE(IFACE)%CELL_LIST(1,ISIDE+2))
-               CASE(CC_FTYPE_RGGAS) ! Regular cell -> use stored TMPV from TMP array.
-                  ZZ_GET_N = ZZP(I,J+1+ISIDE,K,N)
-               CASE(CC_FTYPE_CFGAS) ! Cut-cell -> use Temperature value from CUT_CELL data struct:
-                  ICC = RC_FACE(IFACE)%CELL_LIST(2,ISIDE+2)
-                  JCC = RC_FACE(IFACE)%CELL_LIST(3,ISIDE+2)
-                  RHOPV(ISIDE) = GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
-                  ZZ_GET_N     = GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
-               END SELECT
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDDO
-            ! Lower cell:
-            ISIDE=-2
-            IF (CELL(CELL_INDEX(I,J+1+ISIDE,K))%SOLID .OR. CCVAR(I,J+1+ISIDE,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE+1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J+1+ISIDE,K,N)
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDIF
-            ! Upper cell:
-            ISIDE=1
-            IF (CELL(CELL_INDEX(I,J+1+ISIDE,K))%SOLID .OR. CCVAR(I,J+1+ISIDE,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE-1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J+1+ISIDE,K,N)
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDIF
-            ! Now Godunov flux limited value of rho*zz on face:
-            VELC = WORK_V(I,J,K)
-            ! bar{rho*zz}:
-            Z_TEMP(0:3,1,1) = RHO_Z_PV(-2:1)
-            U_TEMP(1,1,1) = VELC
-            CALL GET_SCALAR_FACE_VALUE(U_TEMP,Z_TEMP,F_TEMP,1,1,1,1,1,1,1,I_FLUX_LIMITER)
-            FN_ZZ = F_TEMP(1,1,1)
-         CASE(KAXIS)
-            AF = DX(I)*DY(J)
-            RHOPV(-2:1)      = RHOP(I,J,K-1:K+2)
-            DO ISIDE=-1,0
-               SELECT CASE(RC_FACE(IFACE)%CELL_LIST(1,ISIDE+2))
-               CASE(CC_FTYPE_RGGAS) ! Regular cell -> use stored TMPV from TMP array.
-                  ZZ_GET_N = ZZP(I,J,K+1+ISIDE,N)
-               CASE(CC_FTYPE_CFGAS) ! Cut-cell -> use Temperature value from CUT_CELL data struct:
-                  ICC = RC_FACE(IFACE)%CELL_LIST(2,ISIDE+2)
-                  JCC = RC_FACE(IFACE)%CELL_LIST(3,ISIDE+2)
-                  RHOPV(ISIDE) = GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
-                  ZZ_GET_N     = GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
-               END SELECT
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDDO
-            ! Lower cell:
-            ISIDE=-2
-            IF (CELL(CELL_INDEX(I,J,K+1+ISIDE))%SOLID .OR. CCVAR(I,J,K+1+ISIDE,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE+1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J,K+1+ISIDE,N)
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDIF
-            ! Upper cell:
-            ISIDE=1
-            IF (CELL(CELL_INDEX(I,J,K+1+ISIDE))%SOLID .OR. CCVAR(I,J,K+1+ISIDE,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE-1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J,K+1+ISIDE,N)
-               RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-            ENDIF
-            ! Now Godunov flux limited value of rho*zz on face:
-            VELC = WORK_W(I,J,K)
-            ! bar{rho*zz}:
-            Z_TEMP(0:3,1,1) = RHO_Z_PV(-2:1)
-            U_TEMP(1,1,1) = VELC
-            CALL GET_SCALAR_FACE_VALUE(U_TEMP,Z_TEMP,F_TEMP,1,1,1,1,1,1,1,I_FLUX_LIMITER)
-            FN_ZZ = F_TEMP(1,1,1)
-      END SELECT
-
-         FOUND_FV_FACE=.FALSE.
-         IFV=MESHES(NM)%RC_FACE(IFACE)%FC
+            IF (DO_HI) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(IH,JH,KH,CC_UNKZ),-RHOZZ*AF)
+         ENDIF
+      CASE(CC_FTYPE_RCGAS)
+         IRC=FV%FACE%SRC_IRC(IF_)
+         IF (IRC<1 .OR. IRC>MESHES(NM)%CC_NRCFACE_Z) CYCLE
+         IF (RC_FACE(IRC)%IWC>0) CYCLE
+         I=RC_FACE(IRC)%IJK(IAXIS); J=RC_FACE(IRC)%IJK(JAXIS); K=RC_FACE(IRC)%IJK(KAXIS)
+         AX=RC_FACE(IRC)%IJK(KAXIS+1)
+         CALL EX_AREA_VEL(AX,I,J,K,AF,VELC)
+         CALL EX_LIMIT(NM,AX,I,J,K,IRC,0,0,VELC,RHOP,ZZP,PRFCT,N,FN)
+         IFV=RC_FACE(IRC)%FC
          IF (IFV>=1) THEN
             IF (FV%FACE%FTYPE(IFV)==CC_FTYPE_RCGAS) THEN
-               CALL CC_FV_ADD_ADVECTIVE_FACE(NM,IFV,FN_ZZ*VELC)
-               FOUND_FV_FACE=.TRUE.
+               CALL CC_FV_ADD_ADVECTIVE_FACE(NM,IFV,FN*VELC)
+               CYCLE
             ENDIF
          ENDIF
-         IF (.NOT.FOUND_FV_FACE) THEN
-            DO ILOC=LOCROW_1,LOCROW_2
-               FCT = REAL(3-2*ILOC,EB)
-               CALL ADD_FV_L2_SCALAR_RHS(IND(ILOC),FCT*FN_ZZ*VELC*AF)
-            ENDDO
+         CALL EX_SIDE_IUNK(NM,IF_,AX,LOW_IND,IRC,0,0,UNK_LO)
+         CALL EX_SIDE_IUNK(NM,IF_,AX,HIGH_IND,IRC,0,0,UNK_HI)
+         CALL ADD_FV_L2_SCALAR_RHS(UNK_LO,FN*VELC*AF)
+         CALL ADD_FV_L2_SCALAR_RHS(UNK_HI,-FN*VELC*AF)
+      CASE(CC_FTYPE_CFGAS)
+         ICF=FV%FACE%SRC_ICF(IF_); JCF=FV%FACE%SRC_JCF(IF_)
+         IF (ICF<1 .OR. ICF>MESHES(NM)%N_CUTFACE_MESH) CYCLE
+         IF (CUT_FACE(ICF)%STATUS/=CC_GASPHASE) CYCLE
+         IF (CUT_FACE(ICF)%IWC>0) CYCLE
+         I=CUT_FACE(ICF)%IJK(IAXIS); J=CUT_FACE(ICF)%IJK(JAXIS); K=CUT_FACE(ICF)%IJK(KAXIS)
+         AX=CUT_FACE(ICF)%IJK(KAXIS+1); AF=CUT_FACE(ICF)%AREA(JCF)
+         VELC=PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL) + &
+              (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
+         CALL EX_LIMIT(NM,AX,I,J,K,0,ICF,JCF,VELC,RHOP,ZZP,PRFCT,N,FN)
+         IFV=CUT_FACE(ICF)%FC(JCF)
+         IF (IFV>=1) THEN
+            IF (FV%FACE%FTYPE(IFV)==CC_FTYPE_CFGAS) THEN
+               CALL CC_FV_ADD_ADVECTIVE_FACE(NM,IFV,FN*VELC)
+               CYCLE
+            ENDIF
          ENDIF
-
+         CALL EX_SIDE_IUNK(NM,IF_,AX,LOW_IND,0,ICF,JCF,UNK_LO)
+         CALL EX_SIDE_IUNK(NM,IF_,AX,HIGH_IND,0,ICF,JCF,UNK_HI)
+         CALL ADD_FV_L2_SCALAR_RHS(UNK_LO,FN*VELC*AF)
+         CALL ADD_FV_L2_SCALAR_RHS(UNK_HI,-FN*VELC*AF)
+      END SELECT
    ENDDO
-
-   ! Now Gasphase CUT_FACES:
-   DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
-
-      IF ( MESHES(NM)%CUT_FACE(ICF)%STATUS /= CC_GASPHASE ) CYCLE
-
-      IW = MESHES(NM)%CUT_FACE(ICF)%IWC; IF(IW > 0) CYCLE
-
-      I = MESHES(NM)%CUT_FACE(ICF)%IJK(IAXIS)
-      J = MESHES(NM)%CUT_FACE(ICF)%IJK(JAXIS)
-      K = MESHES(NM)%CUT_FACE(ICF)%IJK(KAXIS)
-      X1AXIS = MESHES(NM)%CUT_FACE(ICF)%IJK(KAXIS+1)
-
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND
-      LOCROW_2 = HIGH_IND
-      DO IFACE=1,MESHES(NM)%CUT_FACE(ICF)%NFACE
-
-         ! Unknowns on related cells:
-         IND(LOW_IND)  = MESHES(NM)%CUT_FACE(ICF)%UNKZ(LOW_IND,IFACE)
-         IND(HIGH_IND) = MESHES(NM)%CUT_FACE(ICF)%UNKZ(HIGH_IND,IFACE)
-
-         IND_LOC(LOW_IND) = IND(LOW_IND) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-         IND_LOC(HIGH_IND)= IND(HIGH_IND)- UNKZ_IND(NM_START)
-
-         AF = MESHES(NM)%CUT_FACE(ICF)%AREA(IFACE)
-
-         ! Matrix coefficients for advection:
-         VELC =        PRFCT *CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VEL) + &
-                (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VELS)
-
-         RHOPV(-1:0)    = -1._EB
-         RHO_Z_PV(-1:0) =  0._EB
-         DO ISIDE=-1,0
-            SELECT CASE(CUT_FACE(ICF)%CELL_LIST(1,ISIDE+2,IFACE))
-            CASE(CC_FTYPE_CFGAS) ! Cut-cell -> use Temperature value from CUT_CELL data struct:
-               ICC = CUT_FACE(ICF)%CELL_LIST(2,ISIDE+2,IFACE)
-               JCC = CUT_FACE(ICF)%CELL_LIST(3,ISIDE+2,IFACE)
-               RHOPV(ISIDE) = GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
-               ZZ_GET_N     = GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
-            END SELECT
-            RHO_Z_PV(ISIDE) = RHOPV(ISIDE)*ZZ_GET_N
-         ENDDO
-         SELECT CASE(X1AXIS)
-         CASE(IAXIS)
-            ! Lower cell:
-            ISIDE=-2
-            IF (CELL(CELL_INDEX(I+1+ISIDE,J,K))%SOLID .OR. CCVAR(I+1+ISIDE,J,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE+1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I+1+ISIDE,J,K,N)
-               RHO_Z_PV(ISIDE) = RHOP(I+1+ISIDE,J,K)*ZZ_GET_N
-            ENDIF
-            ! Upper cell:
-            ISIDE=1
-            IF (CELL(CELL_INDEX(I+1+ISIDE,J,K))%SOLID .OR. CCVAR(I+1+ISIDE,J,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE-1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I+1+ISIDE,J,K,N)
-               RHO_Z_PV(ISIDE) = RHOP(I+1+ISIDE,J,K)*ZZ_GET_N
-            ENDIF
-         CASE(JAXIS)
-            ! Lower cell:
-            ISIDE=-2
-            IF (CELL(CELL_INDEX(I,J+1+ISIDE,K))%SOLID .OR. CCVAR(I,J+1+ISIDE,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE+1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J+1+ISIDE,K,N)
-               RHO_Z_PV(ISIDE) = RHOP(I,J+1+ISIDE,K)*ZZ_GET_N
-            ENDIF
-            ! Upper cell:
-            ISIDE=1
-            IF (CELL(CELL_INDEX(I,J+1+ISIDE,K))%SOLID .OR. CCVAR(I,J+1+ISIDE,K,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE-1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J+1+ISIDE,K,N)
-               RHO_Z_PV(ISIDE) = RHOP(I,J+1+ISIDE,K)*ZZ_GET_N
-            ENDIF
-         CASE(KAXIS)
-            ! Lower cell:
-            ISIDE=-2
-            IF (CELL(CELL_INDEX(I,J,K+1+ISIDE))%SOLID .OR. CCVAR(I,J,K+1+ISIDE,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE+1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J,K+1+ISIDE,N)
-               RHO_Z_PV(ISIDE) = RHOP(I,J,K+1+ISIDE)*ZZ_GET_N
-            ENDIF
-            ! Upper cell:
-            ISIDE=1
-            IF (CELL(CELL_INDEX(I,J,K+1+ISIDE))%SOLID .OR. CCVAR(I,J,K+1+ISIDE,CC_CGSC)==CC_SOLID) THEN
-               RHO_Z_PV(ISIDE) = RHO_Z_PV(ISIDE-1) ! Use center cell.
-            ELSE
-               ZZ_GET_N = ZZP(I,J,K+1+ISIDE,N)
-               RHO_Z_PV(ISIDE) = RHOP(I,J,K+1+ISIDE)*ZZ_GET_N
-            ENDIF
-         END SELECT
-         VELC  = PRFCT *CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VEL) + &
-                 (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VELS)
-         ! bar{rho*zz}:
-         Z_TEMP(0:3,1,1) = RHO_Z_PV(-2:1)
-         U_TEMP(1,1,1) = VELC
-         CALL GET_SCALAR_FACE_VALUE(U_TEMP,Z_TEMP,F_TEMP,1,1,1,1,1,1,1,I_FLUX_LIMITER)
-         FN_ZZ = F_TEMP(1,1,1)
-
-            FOUND_FV_FACE=.FALSE.
-            IFV=MESHES(NM)%CUT_FACE(ICF)%FC(IFACE)
-            IF (IFV>=1) THEN
-               IF (FV%FACE%FTYPE(IFV)==CC_FTYPE_CFGAS) THEN
-                  CALL CC_FV_ADD_ADVECTIVE_FACE(NM,IFV,FN_ZZ*VELC)
-                  FOUND_FV_FACE=.TRUE.
-               ENDIF
-            ENDIF
-            IF (.NOT.FOUND_FV_FACE) THEN
-               DO ILOC=LOCROW_1,LOCROW_2
-                  FCT = REAL(3-2*ILOC,EB)
-                  CALL ADD_FV_L2_SCALAR_RHS(IND(ILOC),FCT*FN_ZZ*VELC*AF)
-               ENDDO
-            ENDIF
-
-      ENDDO
-
-   ENDDO
-
-
-   ! Then add (Del rho D Del Z)*dv computed on CCDIVERGENCE_PART_1:
-   ! Loop over regular cells on CC region:
+   ! Diffusion on regular cells the FV map does not own. Cut CVs are the face walk below.
    DO K=1,KBAR
       DO J=1,JBAR
          DO I=1,IBAR
-            IF (CCVAR(I,J,K,CC_UNKZ) <= 0) CYCLE ! Cycle Reg cells not implicit, cut-cells
-                                                  ! underlying Cartesian cells and
-                                                  ! solid cells.
-               IUNK=CCVAR(I,J,K,CC_UNKZ)
-               IF (FV_L2_SCALAR_ROW_IS_FV(IUNK)) CYCLE
-               CALL ADD_FV_L2_SCALAR_RHS(IUNK,-DEL_RHO_D_DEL_Z(I,J,K,N)*DX(I)*DY(J)*DZ(K))
-               CYCLE
+            IF (CCVAR(I,J,K,CC_UNKZ)<=0) CYCLE
+            IF (FV_L2_SCALAR_ROW_IS_FV(CCVAR(I,J,K,CC_UNKZ))) CYCLE
+            CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ), &
+                                      -DEL_RHO_D_DEL_Z(I,J,K,N)*DX(I)*DY(J)*DZ(K))
          ENDDO
       ENDDO
    ENDDO
-
-   ! Now cut CVs:
-      CALL GET_FV_L2_DIFFUSIVE_VECTOR(NM,N)
-
+   CALL GET_FV_L2_DIFFUSIVE_VECTOR(NM,N)
 ENDDO MESH_LOOP
-
 RETURN
 END SUBROUTINE GET_EXPLICIT_ADVDIFFVECTOR_SCALAR_3D
 
@@ -12981,264 +12652,327 @@ END SUBROUTINE GET_CCIFACE_SCALAR_LIM
 ! ------------------------- GET_ADVDIFFVECTOR_SCALAR_3D -------------------------
 
 SUBROUTINE GET_ADVDIFFVECTOR_SCALAR_3D(N)
+! Wall and in-boundary scalar advection into the L2 right-hand side, one face walk.
+! Periodic and interpolated regular faces are gas faces and stay in the explicit routine.
 
 INTEGER, INTENT(IN) :: N
-
-! Local Variables:
-INTEGER :: NM,I,J,K
-REAL(EB):: PRFCT
-INTEGER :: X1AXIS,IFACE,IND(LOW_IND:HIGH_IND),IND_LOC(LOW_IND:HIGH_IND),ICF,IND1,IND2,IOR
-INTEGER :: LOCROW_1,LOCROW_2,ILOC,ICC,JCC,IW
-REAL(EB):: AF,VELC,RHO_Z,FN_ZZ,FCT,RHOZZ
-REAL(EB), POINTER, DIMENSION(:,:,:)  :: RHOP
-REAL(EB), POINTER, DIMENSION(:,:,:,:)::  ZZP
-TYPE(CC_REGFACEZ_TYPE),  POINTER, DIMENSION(:) :: REGFACE_Z
+INTEGER :: NM,I,J,K,AX,IREG,IRC,ICF,JCF,IW,IH,JH,KH,IF_,ILOC,IOR,ICC,JCC,ICFA,IUNK
+REAL(EB) :: PRFCT,AF,VELC,FN,RHOZZ,FCT,RHO_Z
 TYPE(CC_FV_TYPE), POINTER :: FV
+TYPE(WALL_TYPE), POINTER :: WC
+TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+TYPE(CFACE_TYPE), POINTER :: CFA
 LOGICAL :: DO_LO,DO_HI
 
-! This routine computes RHS due to boundary conditions prescribed in immersed solids
-! and domain boundaries.
-
-
-! First Domain Boundaries:
-! Mesh Loop, Advective Fluxes:
 MESH_LOOP_DBND : DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-
    CALL POINT_TO_MESH(NM)
    FV=>MESHES(NM)%FV
-
-   IF (PREDICTOR) THEN
-      ZZP  => ZZ
-      RHOP => RHO
-      PRFCT= 1._EB
-   ELSE
-      ZZP  => ZZS
-      RHOP => RHOS
-      PRFCT= 0._EB
-   ENDIF
-   ! X direction bounds:
-   ILO_FACE = 0                    ! Low mesh boundary face index.
-   IHI_FACE = IBAR                 ! High mesh boundary face index.
-
-   ! Y direction bounds:
-   JLO_FACE = 0                    ! Low mesh boundary face index.
-   JHI_FACE = JBAR                 ! High mesh boundary face index.
-
-   ! Z direction bounds:
-   KLO_FACE = 0                    ! Low mesh boundary face index.
-   KHI_FACE = KBAR                 ! High mesh boundary face index.
-
-   ! First add advective fluxes to domain boundary regular and cut-cells:
-   ! IAXIS faces:
-   X1AXIS = IAXIS
-   REGFACE_Z => CC_REGFACE_IAXIS_Z
-   DO IFACE=1,MESHES(NM)%CC_NREGFACE_Z(X1AXIS)
-      IW = REGFACE_Z(IFACE)%IWC; IF(IW<1) CYCLE; WC => WALL(IW)
-      IF (WC%BOUNDARY_TYPE==NULL_BOUNDARY         .OR. &
-          WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY .OR. &
-          WC%BOUNDARY_TYPE==PERIODIC_BOUNDARY ) CYCLE
-      I    = REGFACE_Z(IFACE)%IJK(IAXIS)
-      J    = REGFACE_Z(IFACE)%IJK(JAXIS)
-      K    = REGFACE_Z(IFACE)%IJK(KAXIS)
-      DO_LO= REGFACE_Z(IFACE)%DO_LO_IND
-      DO_HI= REGFACE_Z(IFACE)%DO_HI_IND
-      ! Unknowns on related cells:
-      IND_LOC(LOW_IND) = CCVAR(I  ,J,K,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= CCVAR(I+1,J,K,CC_UNKZ) - UNKZ_IND(NM_START)
-      RHOZZ = FX(I,J,K,N)*WORK_U(I,J,K)*R(I)
-      AF = DY(J)*DZ(K)
-      IF (DO_LO) THEN
-            CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ),RHOZZ*AF)
-      ENDIF
-      IF (DO_HI) THEN
-            CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I+1,J,K,CC_UNKZ),-RHOZZ*AF)
-      ENDIF
-   ENDDO
-
-   ! JAXIS faces:
-   X1AXIS = JAXIS
-   REGFACE_Z => CC_REGFACE_JAXIS_Z
-   DO IFACE=1,MESHES(NM)%CC_NREGFACE_Z(X1AXIS)
-      IW = REGFACE_Z(IFACE)%IWC; IF(IW<1) CYCLE; WC => WALL(IW)
-      IF (WC%BOUNDARY_TYPE==NULL_BOUNDARY         .OR. &
-          WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY .OR. &
-          WC%BOUNDARY_TYPE==PERIODIC_BOUNDARY ) CYCLE
-      I     = REGFACE_Z(IFACE)%IJK(IAXIS)
-      J     = REGFACE_Z(IFACE)%IJK(JAXIS)
-      K     = REGFACE_Z(IFACE)%IJK(KAXIS)
-      DO_LO = REGFACE_Z(IFACE)%DO_LO_IND
-      DO_HI = REGFACE_Z(IFACE)%DO_HI_IND
-      ! Unknowns on related cells:
-      IND_LOC(LOW_IND) = CCVAR(I,J  ,K,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= CCVAR(I,J+1,K,CC_UNKZ) - UNKZ_IND(NM_START)
-      RHOZZ = FY(I,J,K,N)*WORK_V(I,J,K)
-      AF = DX(I)*DZ(K)
-      IF (DO_LO) THEN
-            CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ),RHOZZ*AF)
-      ENDIF
-      IF (DO_HI) THEN
-            CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J+1,K,CC_UNKZ),-RHOZZ*AF)
-      ENDIF
-   ENDDO
-
-   ! KAXIS faces:
-   X1AXIS = KAXIS
-   REGFACE_Z => CC_REGFACE_KAXIS_Z
-   DO IFACE=1,MESHES(NM)%CC_NREGFACE_Z(X1AXIS)
-      IW = REGFACE_Z(IFACE)%IWC; IF(IW<1) CYCLE; WC => WALL(IW)
-      IF (WC%BOUNDARY_TYPE==NULL_BOUNDARY         .OR. &
-          WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY .OR. &
-          WC%BOUNDARY_TYPE==PERIODIC_BOUNDARY ) CYCLE
-      I     = REGFACE_Z(IFACE)%IJK(IAXIS)
-      J     = REGFACE_Z(IFACE)%IJK(JAXIS)
-      K     = REGFACE_Z(IFACE)%IJK(KAXIS)
-      DO_LO = REGFACE_Z(IFACE)%DO_LO_IND
-      DO_HI = REGFACE_Z(IFACE)%DO_HI_IND
-      ! Unknowns on related cells:
-      IND_LOC(LOW_IND) = CCVAR(I,J,K  ,CC_UNKZ) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= CCVAR(I,J,K+1,CC_UNKZ) - UNKZ_IND(NM_START)
-      RHOZZ = FZ(I,J,K,N)*WORK_W(I,J,K)
-      AF = DX(I)*DY(J)
-      IF (DO_LO) THEN
-            CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ),RHOZZ*AF)
-      ENDIF
-      IF (DO_HI) THEN
-            CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K+1,CC_UNKZ),-RHOZZ*AF)
-      ENDIF
-   ENDDO
-
-   ! Boundary Regular faces connecting gasphase-gasphase or gasphase- cut-cells:
-   IFACE_LOOP_RCF1: DO IFACE=1,MESHES(NM)%CC_NRCFACE_Z
-
-      IW=MESHES(NM)%RC_FACE(IFACE)%IWC
-      WC=>WALL(IW); IF ( WC%BOUNDARY_TYPE==NULL_BOUNDARY ) CYCLE IFACE_LOOP_RCF1
-      B1 => BOUNDARY_PROP1(WC%B1_INDEX)
-      BC => BOUNDARY_COORD(WC%BC_INDEX)
-
-      I      = MESHES(NM)%RC_FACE(IFACE)%IJK(IAXIS)
-      J      = MESHES(NM)%RC_FACE(IFACE)%IJK(JAXIS)
-      K      = MESHES(NM)%RC_FACE(IFACE)%IJK(KAXIS)
-      X1AXIS = MESHES(NM)%RC_FACE(IFACE)%IJK(KAXIS+1)
-
-      ! Unknowns on related cells:
-      IND(LOW_IND)  = MESHES(NM)%RC_FACE(IFACE)%UNKZ(LOW_IND)
-      IND(HIGH_IND) = MESHES(NM)%RC_FACE(IFACE)%UNKZ(HIGH_IND)
-
-      IND_LOC(LOW_IND) = IND(LOW_IND) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-      IND_LOC(HIGH_IND)= IND(HIGH_IND)- UNKZ_IND(NM_START)
-
-      ! Row ind(1),ind(2):
-      LOCROW_1 = LOW_IND
-      LOCROW_2 = HIGH_IND
-
-      IOR = BC%IOR
-      ! This expression is such that when sign of IOR is -1 -> use Low Side cell  -> ILOC=1,
-      !                              when sign of IOR is  1 -> use High Side cell -> ILOC=2.
-      ILOC = 1 + (SIGN(1,IOR)+1) / 2
-      ! First (rho hs)_i,j,k:
-      SELECT CASE(X1AXIS)
-      CASE(IAXIS)
-         AF = DY(J)*DZ(K)
-         VELC = WORK_U(I,J,K)
-      CASE(JAXIS)
-         AF = DX(I)*DZ(K)
-         VELC = WORK_V(I,J,K)
-      CASE(KAXIS)
-         AF = DX(I)*DY(J)
-         VELC = WORK_W(I,J,K)
-      END SELECT
-      FN_ZZ           = B1%RHO_F*B1%ZZ_F(N) ! These have been Flux limited in wall.f90
-      SELECT CASE(WC%BOUNDARY_TYPE)
-         CASE DEFAULT
-            ! Already filled in previous X1AXIS select case.
-         CASE(SOLID_BOUNDARY)
-            IF (PREDICTOR) VELC = -SIGN(1._EB,REAL(IOR,EB))*B1%U_NORMAL_S
-            IF (CORRECTOR) VELC = -SIGN(1._EB,REAL(IOR,EB))*B1%U_NORMAL
-         CASE(INTERPOLATED_BOUNDARY)
-            VELC = UVW_SAVE(IW)
-      END SELECT
-      ! Mesh interface: same face value on both meshes.
-      IF (WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
-         SELECT CASE(X1AXIS)
-            CASE(IAXIS); FN_ZZ = FX(I,J,K,N)
-            CASE(JAXIS); FN_ZZ = FY(I,J,K,N)
-            CASE(KAXIS); FN_ZZ = FZ(I,J,K,N)
-         END SELECT
-         CALL GET_CCIFACE_SCALAR_LIM(X1AXIS,I,J,K,N,IW,PRFCT,FN_ZZ)
-      ENDIF
-
-      FCT = REAL(3-2*ILOC,EB)
-         CALL ADD_FV_L2_SCALAR_RHS(IND(ILOC),FCT*FN_ZZ*VELC*AF)
-
-   ENDDO IFACE_LOOP_RCF1
-
-   ! Now Boundary Gasphase CUT_FACES:
-   ICF_LOOP1: DO ICF = 1,MESHES(NM)%N_CUTFACE_MESH
-      IF ( MESHES(NM)%CUT_FACE(ICF)%STATUS /= CC_GASPHASE ) CYCLE ICF_LOOP1
-      IW=MESHES(NM)%CUT_FACE(ICF)%IWC
-      WC=>WALL(IW); IF (WC%BOUNDARY_TYPE==NULL_BOUNDARY ) CYCLE ICF_LOOP1
-      B1 => BOUNDARY_PROP1(WC%B1_INDEX)
-      BC    => BOUNDARY_COORD(WC%BC_INDEX)
-      IOR = BC%IOR
-      FN_ZZ           = B1%RHO_F*B1%ZZ_F(N) ! These have been Flux limited in wall.f90
-      IF (WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
-         I = CUT_FACE(ICF)%IJK(IAXIS); J = CUT_FACE(ICF)%IJK(JAXIS); K = CUT_FACE(ICF)%IJK(KAXIS)
-         X1AXIS = CUT_FACE(ICF)%IJK(KAXIS+1)
-         SELECT CASE(X1AXIS)
-            CASE(IAXIS); FN_ZZ = FX(I,J,K,N)
-            CASE(JAXIS); FN_ZZ = FY(I,J,K,N)
-            CASE(KAXIS); FN_ZZ = FZ(I,J,K,N)
-         END SELECT
-         CALL GET_CCIFACE_SCALAR_LIM(X1AXIS,I,J,K,N,IW,PRFCT,FN_ZZ)
-      ENDIF
-      ! This expression is such that when sign of IOR is -1 -> use Low Side cell  -> ILOC=1,
-      !                              when sign of IOR is  1 -> use High Side cell -> ILOC=2 .
-      ILOC = 1 + (SIGN(1,IOR)+1) / 2
-      FCT  = REAL(3-2*ILOC,EB)
-      DO IFACE=1,CUT_FACE(ICF)%NFACE
-         AF   = CUT_FACE(ICF)%AREA(IFACE)
-         IF(WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
-            VELC = FV%FACE%VEL_SAVE(CUT_FACE(ICF)%FC(IFACE))
+   IF (PREDICTOR) THEN; PRFCT=1._EB; ELSE; PRFCT=0._EB; ENDIF
+   DO IF_=1,FV%FACE%N
+      ! A mesh-interface RC face is internal to one CV. Each mesh visits its own copy and
+      ! deposits that member's one-sided flux; the two signs are opposite and cancel in
+      ! the cross-mesh sum.
+      ! Internal RC faces are one side of a mesh-interface CV. Internal cut faces on a wall
+      ! are the same one-sided deposit the old cut-face loop kept; a gas cut face with no
+      ! wall still drops out below.
+      IF (FV%FACE%ROLE(IF_)/=CC_FACE_ROLE_EXTERNAL .AND. FV%FACE%FTYPE(IF_)/=CC_FTYPE_RCGAS .AND. &
+          FV%FACE%FTYPE(IF_)/=CC_FTYPE_CFGAS) CYCLE
+      SELECT CASE(FV%FACE%FTYPE(IF_))
+      CASE(CC_FTYPE_RGGAS)
+         IREG=FV%FACE%SRC_IREG(IF_)
+         IF (IREG<1) CYCLE
+         AX=FV%FACE%X1AXIS(IF_)
+         CALL EX_REG_IJK(AX,IREG,I,J,K,IW,DO_LO,DO_HI)
+         IF (IW<1) CYCLE
+         IF (WALL(IW)%BOUNDARY_TYPE==NULL_BOUNDARY) CYCLE
+         IF (WALL(IW)%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) CYCLE
+         IF (WALL(IW)%BOUNDARY_TYPE==PERIODIC_BOUNDARY) CYCLE
+         CALL EX_REG_FLUX(N,AX,I,J,K,RHOZZ,AF)
+         CALL EX_HIGH(AX,I,J,K,IH,JH,KH)
+         IF (DO_LO) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(I,J,K,CC_UNKZ),RHOZZ*AF)
+         IF (DO_HI) CALL ADD_FV_L2_SCALAR_RHS(CCVAR(IH,JH,KH,CC_UNKZ),-RHOZZ*AF)
+      CASE(CC_FTYPE_RCGAS)
+         IRC=FV%FACE%SRC_IRC(IF_)
+         IF (IRC<1 .OR. IRC>MESHES(NM)%CC_NRCFACE_Z) CYCLE
+         IW=RC_FACE(IRC)%IWC
+         IF (IW<1) CYCLE
+         IF (WALL(IW)%BOUNDARY_TYPE==NULL_BOUNDARY) CYCLE
+         WC=>WALL(IW); B1=>BOUNDARY_PROP1(WC%B1_INDEX); BC=>BOUNDARY_COORD(WC%BC_INDEX)
+         I=RC_FACE(IRC)%IJK(IAXIS); J=RC_FACE(IRC)%IJK(JAXIS); K=RC_FACE(IRC)%IJK(KAXIS)
+         AX=RC_FACE(IRC)%IJK(KAXIS+1)
+         IOR=BC%IOR
+         ILOC=1+(SIGN(1,IOR)+1)/2
+         FCT=REAL(3-2*ILOC,EB)
+         CALL EX_SIDE_IUNK(NM,IF_,AX,ILOC,IRC,0,0,IUNK)
+         ! Mesh-interface copy: same Cartesian flux as the other mesh's regular face,
+         ! with this member's outward sign, so the pair sums to zero.
+         IF (FV%FACE%ROLE(IF_)==CC_FACE_ROLE_INTERNAL .AND. WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
+            CALL EX_REG_FLUX(N,AX,I,J,K,RHOZZ,AF)
+            CALL ADD_FV_L2_SCALAR_RHS(IUNK,FCT*RHOZZ*AF)
          ELSE
-            VELC = PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VEL) + &
-                   (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,IFACE,CC_FV_MOM_VELS)
+            CALL EX_WALL_STATE(AX,I,J,K,IW,WC,B1,PRFCT,N,AF,VELC,FN)
+            CALL ADD_FV_L2_SCALAR_RHS(IUNK,FCT*FN*VELC*AF)
          ENDIF
-         ! Unknowns on related cells:
-         IND_LOC(ILOC) = MESHES(NM)%CUT_FACE(ICF)%UNKZ(ILOC,IFACE) - UNKZ_IND(NM_START) ! All row indexes must refer to ind_loc.
-         ! First (rho hs)_i,j,k:
-         IF (CUT_FACE(ICF)%CELL_LIST(1,ILOC,IFACE) == CC_FTYPE_CFGAS) THEN
-               CALL ADD_FV_L2_SCALAR_RHS(MESHES(NM)%CUT_FACE(ICF)%UNKZ(ILOC,IFACE),FCT*FN_ZZ*VELC*AF)
+      CASE(CC_FTYPE_CFGAS)
+         ICF=FV%FACE%SRC_ICF(IF_); JCF=FV%FACE%SRC_JCF(IF_)
+         IF (ICF<1 .OR. ICF>MESHES(NM)%N_CUTFACE_MESH) CYCLE
+         IF (CUT_FACE(ICF)%STATUS/=CC_GASPHASE) CYCLE
+         IW=CUT_FACE(ICF)%IWC
+         IF (IW<1) CYCLE
+         ! Two FV rows share a thin cut piece. The wall loop fluxes each, so the piece
+         ! would be deposited twice. Keep the row CUT_FACE%FC names; it uses this same
+         ! wall velocity and CUT_FACE%AREA.
+         IF (CC_GRID_WALL_IS_THIN_BARRIER(NM,IW)) THEN
+            IF (CUT_FACE(ICF)%FC(JCF)/=IF_) CYCLE
          ENDIF
-      ENDDO ! IFACE
-
-   ENDDO ICF_LOOP1
-
-   ! INBOUNDARY cut-faces, loop on CFACE to add BC defined at SOLID phase:
-   DO ICF=INTERNAL_CFACE_CELLS_LB+1,INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS
-      CFA  => CFACE(ICF)
-      B1 => BOUNDARY_PROP1(CFA%B1_INDEX)
-      IND1 = CFA%CUT_FACE_IND1;                         IND2 = CFA%CUT_FACE_IND2
-      ICC  = CUT_FACE(IND1)%CELL_LIST(2,LOW_IND,IND2);  JCC  = CUT_FACE(IND1)%CELL_LIST(3,LOW_IND,IND2)
-      IF (PREDICTOR) THEN
-         VELC = B1%U_NORMAL
-      ELSE
-         VELC = B1%U_NORMAL_S
-      ENDIF
-      IF (VELC>0._EB) THEN
-         RHO_Z = GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
-      ELSE
-         RHO_Z = B1%RHO_F*B1%ZZ_F(N)
-      ENDIF
-         CALL ADD_FV_L2_SCALAR_RHS(CUT_CELL(ICC)%UNKZ(JCC),RHO_Z*VELC*CFA%AREA)
+         IF (WALL(IW)%BOUNDARY_TYPE==NULL_BOUNDARY) CYCLE
+         WC=>WALL(IW); B1=>BOUNDARY_PROP1(WC%B1_INDEX); BC=>BOUNDARY_COORD(WC%BC_INDEX)
+         I=CUT_FACE(ICF)%IJK(IAXIS); J=CUT_FACE(ICF)%IJK(JAXIS); K=CUT_FACE(ICF)%IJK(KAXIS)
+         AX=CUT_FACE(ICF)%IJK(KAXIS+1)
+         FN=B1%RHO_F*B1%ZZ_F(N)
+         IF (WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
+            CALL EX_CART_FLUX(AX,I,J,K,N,FN)
+            CALL GET_CCIFACE_SCALAR_LIM(AX,I,J,K,N,IW,PRFCT,FN)
+            VELC=FV%FACE%VEL_SAVE(CUT_FACE(ICF)%FC(JCF))
+         ELSE
+            VELC=PRFCT*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VEL) + &
+                 (1._EB-PRFCT)*CC_FV_CUTFACE_MOM(NM,ICF,JCF,CC_FV_MOM_VELS)
+         ENDIF
+         IOR=BC%IOR
+         ILOC=1+(SIGN(1,IOR)+1)/2
+         FCT=REAL(3-2*ILOC,EB)
+         IF (CUT_FACE(ICF)%CELL_LIST(1,ILOC,JCF)/=CC_FTYPE_CFGAS) CYCLE
+         AF=CUT_FACE(ICF)%AREA(JCF)
+         CALL EX_SIDE_IUNK(NM,IF_,AX,ILOC,0,ICF,JCF,IUNK)
+         CALL ADD_FV_L2_SCALAR_RHS(IUNK,FCT*FN*VELC*AF)
+      CASE(CC_FTYPE_CFINB)
+         ICF=FV%FACE%SRC_ICF(IF_); JCF=FV%FACE%SRC_JCF(IF_)
+         IF (ICF<1 .OR. ICF>MESHES(NM)%N_CUTFACE_MESH) CYCLE
+         ICFA=CUT_FACE(ICF)%CFACE_INDEX(JCF)
+         IF (ICFA<INTERNAL_CFACE_CELLS_LB+1) CYCLE
+         IF (ICFA>INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS) CYCLE
+         CFA=>CFACE(ICFA); B1=>BOUNDARY_PROP1(CFA%B1_INDEX)
+         ICC=CUT_FACE(ICF)%CELL_LIST(2,LOW_IND,JCF); JCC=CUT_FACE(ICF)%CELL_LIST(3,LOW_IND,JCF)
+         IF (PREDICTOR) THEN; VELC=B1%U_NORMAL; ELSE; VELC=B1%U_NORMAL_S; ENDIF
+         IF (VELC>0._EB) THEN
+            RHO_Z=GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)*GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
+         ELSE
+            RHO_Z=B1%RHO_F*B1%ZZ_F(N)
+         ENDIF
+         CALL EX_SIDE_IUNK(NM,IF_,0,LOW_IND,0,0,0,IUNK)
+         IF (IUNK<1) IUNK=CUT_CELL(ICC)%UNKZ(JCC)
+         CALL ADD_FV_L2_SCALAR_RHS(IUNK,RHO_Z*VELC*CFA%AREA)
+      END SELECT
    ENDDO
-
-   ! Then add diffusive fluxes through domain boundaries:
-   ! Defined in CC_DIVERGENCE_PART_1.
-
 ENDDO MESH_LOOP_DBND
-
 RETURN
 END SUBROUTINE GET_ADVDIFFVECTOR_SCALAR_3D
+
+
+SUBROUTINE EX_REG_IJK(AX,IREG,I,J,K,IW,DO_LO,DO_HI)
+INTEGER, INTENT(IN) :: AX,IREG
+INTEGER, INTENT(OUT) :: I,J,K,IW
+LOGICAL, INTENT(OUT) :: DO_LO,DO_HI
+I=0; J=0; K=0; IW=0; DO_LO=.FALSE.; DO_HI=.FALSE.
+SELECT CASE(AX)
+CASE(IAXIS)
+   I=CC_REGFACE_IAXIS_Z(IREG)%IJK(IAXIS); J=CC_REGFACE_IAXIS_Z(IREG)%IJK(JAXIS)
+   K=CC_REGFACE_IAXIS_Z(IREG)%IJK(KAXIS); IW=CC_REGFACE_IAXIS_Z(IREG)%IWC
+   DO_LO=CC_REGFACE_IAXIS_Z(IREG)%DO_LO_IND; DO_HI=CC_REGFACE_IAXIS_Z(IREG)%DO_HI_IND
+CASE(JAXIS)
+   I=CC_REGFACE_JAXIS_Z(IREG)%IJK(IAXIS); J=CC_REGFACE_JAXIS_Z(IREG)%IJK(JAXIS)
+   K=CC_REGFACE_JAXIS_Z(IREG)%IJK(KAXIS); IW=CC_REGFACE_JAXIS_Z(IREG)%IWC
+   DO_LO=CC_REGFACE_JAXIS_Z(IREG)%DO_LO_IND; DO_HI=CC_REGFACE_JAXIS_Z(IREG)%DO_HI_IND
+CASE(KAXIS)
+   I=CC_REGFACE_KAXIS_Z(IREG)%IJK(IAXIS); J=CC_REGFACE_KAXIS_Z(IREG)%IJK(JAXIS)
+   K=CC_REGFACE_KAXIS_Z(IREG)%IJK(KAXIS); IW=CC_REGFACE_KAXIS_Z(IREG)%IWC
+   DO_LO=CC_REGFACE_KAXIS_Z(IREG)%DO_LO_IND; DO_HI=CC_REGFACE_KAXIS_Z(IREG)%DO_HI_IND
+END SELECT
+END SUBROUTINE EX_REG_IJK
+
+INTEGER FUNCTION EX_REG_FC(AX,IREG)
+INTEGER, INTENT(IN) :: AX,IREG
+EX_REG_FC=0
+SELECT CASE(AX)
+CASE(IAXIS); EX_REG_FC=CC_REGFACE_IAXIS_Z(IREG)%FC
+CASE(JAXIS); EX_REG_FC=CC_REGFACE_JAXIS_Z(IREG)%FC
+CASE(KAXIS); EX_REG_FC=CC_REGFACE_KAXIS_Z(IREG)%FC
+END SELECT
+END FUNCTION EX_REG_FC
+
+SUBROUTINE EX_REG_FLUX(N,AX,I,J,K,RHOZZ,AF)
+! I-axis only: the cylindrical radius sits on that flux. J and K do not.
+INTEGER, INTENT(IN) :: N,AX,I,J,K
+REAL(EB), INTENT(OUT) :: RHOZZ,AF
+RHOZZ=0._EB; AF=0._EB
+SELECT CASE(AX)
+CASE(IAXIS); RHOZZ=FX(I,J,K,N)*WORK_U(I,J,K)*R(I); AF=DY(J)*DZ(K)
+CASE(JAXIS); RHOZZ=FY(I,J,K,N)*WORK_V(I,J,K); AF=DX(I)*DZ(K)
+CASE(KAXIS); RHOZZ=FZ(I,J,K,N)*WORK_W(I,J,K); AF=DX(I)*DY(J)
+END SELECT
+END SUBROUTINE EX_REG_FLUX
+
+SUBROUTINE EX_HIGH(AX,I,J,K,IH,JH,KH)
+INTEGER, INTENT(IN) :: AX,I,J,K
+INTEGER, INTENT(OUT) :: IH,JH,KH
+IH=I; JH=J; KH=K
+SELECT CASE(AX)
+CASE(IAXIS); IH=I+1
+CASE(JAXIS); JH=J+1
+CASE(KAXIS); KH=K+1
+END SELECT
+END SUBROUTINE EX_HIGH
+
+SUBROUTINE EX_AREA_VEL(AX,I,J,K,AF,VEL)
+INTEGER, INTENT(IN) :: AX,I,J,K
+REAL(EB), INTENT(OUT) :: AF,VEL
+AF=0._EB; VEL=0._EB
+SELECT CASE(AX)
+CASE(IAXIS); AF=DY(J)*DZ(K); VEL=WORK_U(I,J,K)
+CASE(JAXIS); AF=DX(I)*DZ(K); VEL=WORK_V(I,J,K)
+CASE(KAXIS); AF=DX(I)*DY(J); VEL=WORK_W(I,J,K)
+END SELECT
+END SUBROUTINE EX_AREA_VEL
+
+SUBROUTINE EX_OFF(AX,I,J,K,OFF,IS,JS,KS)
+INTEGER, INTENT(IN) :: AX,I,J,K,OFF
+INTEGER, INTENT(OUT) :: IS,JS,KS
+IS=I; JS=J; KS=K
+SELECT CASE(AX)
+CASE(IAXIS); IS=I+OFF
+CASE(JAXIS); JS=J+OFF
+CASE(KAXIS); KS=K+OFF
+END SELECT
+END SUBROUTINE EX_OFF
+
+SUBROUTINE EX_LIMIT(NM,AX,I,J,K,IRC,ICF,JCF,VEL,RHOP,ZZP,PRFCT,N,FN)
+! Four-point stencil in increasing-index order. Velocity is the signed component.
+! A cut face initializes the two center densities to -1, as the polygon loop did.
+! Pointer dummies keep the Cartesian lower bound, which includes the ghost layer.
+INTEGER, INTENT(IN) :: NM,AX,I,J,K,IRC,ICF,JCF,N
+REAL(EB), INTENT(IN) :: VEL,PRFCT
+REAL(EB), POINTER, INTENT(IN) :: RHOP(:,:,:),ZZP(:,:,:,:)
+REAL(EB), INTENT(OUT) :: FN
+REAL(EB) :: SIDE(-2:1),RHOV(-2:1),ZZN
+INTEGER :: ISIDE,IS,JS,KS,ICC,JCC
+DO ISIDE=-2,1
+   CALL EX_OFF(AX,I,J,K,1+ISIDE,IS,JS,KS)
+   RHOV(ISIDE)=RHOP(IS,JS,KS)
+ENDDO
+IF (ICF>0) RHOV(-1:0)=-1._EB
+ZZN=0._EB
+DO ISIDE=-1,0
+   CALL EX_OFF(AX,I,J,K,1+ISIDE,IS,JS,KS)
+   IF (IRC>0) THEN
+      SELECT CASE(RC_FACE(IRC)%CELL_LIST(1,ISIDE+2))
+      CASE(CC_FTYPE_RGGAS)
+         ZZN=ZZP(IS,JS,KS,N)
+      CASE(CC_FTYPE_CFGAS)
+         ICC=RC_FACE(IRC)%CELL_LIST(2,ISIDE+2); JCC=RC_FACE(IRC)%CELL_LIST(3,ISIDE+2)
+         RHOV(ISIDE)=GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
+         ZZN=GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
+      END SELECT
+   ENDIF
+   IF (ICF>0) THEN
+      IF (CUT_FACE(ICF)%CELL_LIST(1,ISIDE+2,JCF)==CC_FTYPE_CFGAS) THEN
+         ICC=CUT_FACE(ICF)%CELL_LIST(2,ISIDE+2,JCF); JCC=CUT_FACE(ICF)%CELL_LIST(3,ISIDE+2,JCF)
+         RHOV(ISIDE)=GET_CUTCELL_RHOP(NM,ICC,JCC,PRFCT)
+         ZZN=GET_CUTCELL_ZZP(NM,ICC,JCC,N,PRFCT)
+      ENDIF
+   ENDIF
+   SIDE(ISIDE)=RHOV(ISIDE)*ZZN
+ENDDO
+CALL EX_OFF(AX,I,J,K,-1,IS,JS,KS)
+IF (CELL(CELL_INDEX(IS,JS,KS))%SOLID .OR. CCVAR(IS,JS,KS,CC_CGSC)==CC_SOLID) THEN
+   SIDE(-2)=SIDE(-1)
+ELSE
+   SIDE(-2)=RHOV(-2)*ZZP(IS,JS,KS,N)
+ENDIF
+CALL EX_OFF(AX,I,J,K,2,IS,JS,KS)
+IF (CELL(CELL_INDEX(IS,JS,KS))%SOLID .OR. CCVAR(IS,JS,KS,CC_CGSC)==CC_SOLID) THEN
+   SIDE(1)=SIDE(0)
+ELSE
+   SIDE(1)=RHOV(1)*ZZP(IS,JS,KS,N)
+ENDIF
+Z_TEMP(0:3,1,1)=SIDE(-2:1)
+U_TEMP(1,1,1)=VEL
+CALL GET_SCALAR_FACE_VALUE(U_TEMP,Z_TEMP,F_TEMP,1,1,1,1,1,1,1,I_FLUX_LIMITER)
+FN=F_TEMP(1,1,1)
+END SUBROUTINE EX_LIMIT
+
+SUBROUTINE EX_CART_FLUX(AX,I,J,K,N,FN)
+INTEGER, INTENT(IN) :: AX,I,J,K,N
+REAL(EB), INTENT(OUT) :: FN
+FN=0._EB
+SELECT CASE(AX)
+CASE(IAXIS); FN=FX(I,J,K,N)
+CASE(JAXIS); FN=FY(I,J,K,N)
+CASE(KAXIS); FN=FZ(I,J,K,N)
+END SELECT
+END SUBROUTINE EX_CART_FLUX
+
+SUBROUTINE EX_WALL_STATE(AX,I,J,K,IW,WC,B1,PRFCT,N,AF,VEL,FN)
+INTEGER, INTENT(IN) :: AX,I,J,K,IW,N
+REAL(EB), INTENT(IN) :: PRFCT
+TYPE(WALL_TYPE), POINTER, INTENT(IN) :: WC
+TYPE(BOUNDARY_PROP1_TYPE), POINTER, INTENT(IN) :: B1
+REAL(EB), INTENT(OUT) :: AF,VEL,FN
+INTEGER :: IOR
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+BC=>BOUNDARY_COORD(WC%BC_INDEX)
+IOR=BC%IOR
+CALL EX_AREA_VEL(AX,I,J,K,AF,VEL)
+FN=B1%RHO_F*B1%ZZ_F(N)
+IF (WC%BOUNDARY_TYPE==SOLID_BOUNDARY) THEN
+   IF (PREDICTOR) VEL=-SIGN(1._EB,REAL(IOR,EB))*B1%U_NORMAL_S
+   IF (CORRECTOR) VEL=-SIGN(1._EB,REAL(IOR,EB))*B1%U_NORMAL
+ENDIF
+IF (WC%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) THEN
+   VEL=UVW_SAVE(IW)
+   CALL EX_CART_FLUX(AX,I,J,K,N,FN)
+   CALL GET_CCIFACE_SCALAR_LIM(AX,I,J,K,N,IW,PRFCT,FN)
+ENDIF
+END SUBROUTINE EX_WALL_STATE
+
+SUBROUTINE EX_SIDE_IUNK(NM,IF_,AX,ISIDE,IRC,ICF,JCF,IUNK)
+! Scalar row of one face side, from the face row. NVEC(axis) >= 0 means the owner CV is
+! the low side. AX < 1 is an in-boundary face: the gas side is the owner. A seam or orphan
+! row has no CV; the cell list is that same side and is not RC_FACE%UNKZ or CUT_FACE%UNKZ.
+INTEGER, INTENT(IN) :: NM,IF_,AX,ISIDE,IRC,ICF,JCF
+INTEGER, INTENT(OUT) :: IUNK
+INTEGER :: OWN,NBR,II,JJ,KK,ICC,JCC
+TYPE(CC_FV_TYPE), POINTER :: FV
+FV=>MESHES(NM)%FV
+CALL GET_FV_GLOBAL_UNKZ(FV%FACE%OWNER_CV_NM(IF_),FV%FACE%OWNER_CV(IF_),OWN)
+CALL GET_FV_GLOBAL_UNKZ(FV%FACE%NBR_CV_NM(IF_),FV%FACE%NBR_CV(IF_),NBR)
+IF (AX<1) THEN
+   IUNK=OWN
+ELSEIF (FV%FACE%NVEC(AX,IF_)>=0._EB) THEN
+   IF (ISIDE==LOW_IND) THEN; IUNK=OWN; ELSE; IUNK=NBR; ENDIF
+ELSE
+   IF (ISIDE==LOW_IND) THEN; IUNK=NBR; ELSE; IUNK=OWN; ENDIF
+ENDIF
+IF (IUNK>=1) RETURN
+IUNK=0
+IF (IRC>0) THEN
+   SELECT CASE(RC_FACE(IRC)%CELL_LIST(1,ISIDE))
+   CASE(CC_FTYPE_RGGAS)
+      II=RC_FACE(IRC)%CELL_LIST(2,ISIDE); JJ=RC_FACE(IRC)%CELL_LIST(3,ISIDE)
+      KK=RC_FACE(IRC)%CELL_LIST(4,ISIDE)
+      IUNK=CCVAR(II,JJ,KK,CC_UNKZ)
+   CASE(CC_FTYPE_CFGAS)
+      ICC=RC_FACE(IRC)%CELL_LIST(2,ISIDE); JCC=RC_FACE(IRC)%CELL_LIST(3,ISIDE)
+      IUNK=CUT_CELL(ICC)%UNKZ(JCC)
+   END SELECT
+ENDIF
+IF (IUNK<1 .AND. ICF>0) THEN
+   IF (CUT_FACE(ICF)%CELL_LIST(1,ISIDE,JCF)==CC_FTYPE_CFGAS) THEN
+      ICC=CUT_FACE(ICF)%CELL_LIST(2,ISIDE,JCF); JCC=CUT_FACE(ICF)%CELL_LIST(3,ISIDE,JCF)
+      IUNK=CUT_CELL(ICC)%UNKZ(JCC)
+   ENDIF
+ENDIF
+END SUBROUTINE EX_SIDE_IUNK
 
 ! ----------------------- CC_RESCALE_OMESH_STAGGERED_TO_CUTFACE --------------------------
 SUBROUTINE CC_RESCALE_OMESH_STAGGERED_TO_CUTFACE(NM,APPLY_TO_ESTIMATED_VARIABLES)
