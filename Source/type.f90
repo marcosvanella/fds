@@ -1439,6 +1439,7 @@ TYPE CC_GCELL_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MIN_DFDIAM !< (1:N) selected merge normalized face-distance metric.
    LOGICAL, ALLOCATABLE, DIMENSION(:) :: ABSORBED !< (1:N) child already absorbed; setup-only occupancy.
    LOGICAL, ALLOCATABLE, DIMENSION(:) :: CLAIMED  !< (1:N) CV root claimed this proposal round; setup-only occupancy.
+   INTEGER, ALLOCATABLE, DIMENSION(:) :: ROW_Z !< (1:N) owner CV scalar row; 0 when that CV has none.
 END TYPE CC_GCELL_TYPE
 
 !> \brief Mesh-owned CV storage in SoA form.
@@ -1510,6 +1511,9 @@ TYPE CC_FACE_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: IJK_FACE    !< (IAXIS:KAXIS,1:N) Cartesian face locator for axis faces.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: NBR_IJK     !< (IAXIS:KAXIS,1:N) outside Cartesian cell for FV/structured coupling.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKF        !< (1:N) link number. The only copy.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKZ_OWN, UNKZ_NBR !< (1:N) scalar row of the owner and neighbor CV.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: UNKH_OWN, UNKH_NBR !< (1:N) pressure row of the owner and neighbor CV.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: ZONE_OWN, ZONE_NBR !< (1:N) pressure zone of the owner and neighbor CV.
    ! --- geometry ---
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: AREA        !< (1:N) face area.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: FLUX_AREA   !< (1:N) legacy-exact area used by identity-scope flux operators.

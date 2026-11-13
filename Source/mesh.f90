@@ -295,6 +295,7 @@ TYPE MESH_TYPE
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: H_REG !< (I,J,K) of regular pressure unknowns, grouped by zone.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: H_CUT !< Cut-cell indexes of each zone, in cut-cell order.
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: TH_PIECE !< (ICC,JCC) of every cut piece with a GCELL, in ICC/JCC order.
+   LOGICAL, ALLOCATABLE, DIMENSION(:) :: FV_ROW !< Scalar rows of this mesh carried by an owned CV.
 
    ! Array with boundary cut-face areas pes cut-cell, for use in cut-cell blocking.
    TYPE(CC_INBCF_AREA_TYPE), ALLOCATABLE, DIMENSION(:,:,:) :: INBCF_AREA
