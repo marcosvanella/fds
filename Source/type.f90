@@ -1075,7 +1075,6 @@ TYPE OMESH_TYPE
    ! PKG112 receive store: one row per received cut-face piece (NICF_R(2)), unpack slot order.
    REAL(EB), ALLOCATABLE, DIMENSION(:) :: CFHALO_VEL, CFHALO_VELS, CFHALO_VEL_LNK, CFHALO_FN !< (1:NICF_R(2)).
    INTEGER, ALLOCATABLE, DIMENSION(:) :: CFHALO_ROW0 !< Copy ICF -> first row; 0 = not received.
-   INTEGER, ALLOCATABLE, DIMENSION(:) :: UNKZ_CT_S, UNKZ_CC_S, UNKZ_CT_R, UNKZ_CC_R
    INTEGER, ALLOCATABLE, DIMENSION(:,:,:) :: MUNKH,GSCH,EWC_TYPE
 
    ! Face variables data (velocities):
