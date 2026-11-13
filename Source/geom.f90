@@ -19295,31 +19295,37 @@ IF (M%FV%FACE%OWNER_CV_NM(IF_)==NM .AND. OC>=1 .AND. OC<=M%FV%CV%N) &
 END SUBROUTINE CC_GRID_FACE_OWNER_POINT
 
 
-SUBROUTINE CC_GRID_SEAM_EXCHANGE(NW,NS,SBUF,DEST,NR,RBUF)
-! One message per neighboring process. Record SBUF(:,I) goes to rank DEST(I); RBUF(:,1:NR) holds what the
-! neighbors sent here. Every rank with a neighbor mesh on another rank posts its receives, even with nothing to send.
+SUBROUTINE CC_GRID_SEAM_EXCHANGE(NW,NS,SBUF,DEST,NR,RBUF,PEERS)
+! One message per peer. SBUF(:,I) goes to rank DEST(I); RBUF(:,1:NR) is what those peers sent here.
+! PEERS, when passed, replaces the neighbor ranks and is symmetric. Every peer posts, even to send nothing.
 USE MPI_F08
 INTEGER, INTENT(IN) :: NW,NS,DEST(:)
 REAL(EB), INTENT(IN) :: SBUF(:,:)
 INTEGER, INTENT(OUT) :: NR
 REAL(EB), ALLOCATABLE, INTENT(OUT) :: RBUF(:,:)
+INTEGER, INTENT(IN), OPTIONAL :: PEERS(:)
 INTEGER, PARAMETER :: TAGN=27021,TAGR=27023
 INTEGER :: NM,IN,IR,IP,I,NP,NREQ,IERR
 INTEGER, ALLOCATABLE :: PEER(:),IPEER(:),NOUT(:),NIN(:),POS(:)
 REAL(EB), ALLOCATABLE :: SB(:,:)
 TYPE(MPI_REQUEST), ALLOCATABLE :: REQ(:)
-! The other ranks that hold a neighbor of a mesh on this rank, each once.
-ALLOCATE(PEER(SUM(MESHES(LOWER_MESH_INDEX:UPPER_MESH_INDEX)%N_NEIGHBORING_MESHES)))
-NP = 0
-DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-   DO IN=1,MESHES(NM)%N_NEIGHBORING_MESHES
-      IR = PROCESS(MESHES(NM)%NEIGHBORING_MESH(IN))
-      IF (IR==MY_RANK .OR. ANY(PEER(1:NP)==IR)) CYCLE
-      NP = NP+1
-      PEER(NP) = IR
+IF (PRESENT(PEERS)) THEN
+   NP = SIZE(PEERS)
+   ALLOCATE(PEER(NP))
+   PEER = PEERS
+ELSE
+   ALLOCATE(PEER(SUM(MESHES(LOWER_MESH_INDEX:UPPER_MESH_INDEX)%N_NEIGHBORING_MESHES)))
+   NP = 0
+   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+      DO IN=1,MESHES(NM)%N_NEIGHBORING_MESHES
+         IR = PROCESS(MESHES(NM)%NEIGHBORING_MESH(IN))
+         IF (IR==MY_RANK .OR. ANY(PEER(1:NP)==IR)) CYCLE
+         NP = NP+1
+         PEER(NP) = IR
+      ENDDO
    ENDDO
-ENDDO
-! Records grouped by peer, in their order. A record for a rank that is not a neighbor is a caller error.
+ENDIF
+! Records grouped by peer, in their order. A record for a rank that is not a peer is a caller error.
 ALLOCATE(IPEER(NS),NOUT(NP),NIN(NP),POS(NP+1),REQ(2*NP))
 NOUT = 0
 DO I=1,NS
