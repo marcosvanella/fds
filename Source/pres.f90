@@ -1124,7 +1124,6 @@ CONTAINS
 SUBROUTINE ULMAT_SOLVER_SETUP(NM)
 
 USE COMPLEX_GEOMETRY, ONLY : CC_GASPHASE,CC_CGSC
-USE CC_SCALARS, ONLY : GET_H_CUTFACES
 USE MEMORY_FUNCTIONS, ONLY : CHKMEMERR
 #ifdef WITH_HYPRE
 USE HYPRE_INTERFACE
@@ -1353,7 +1352,6 @@ ENDDO ZONE_MESH_LOOP_2
 ! 3.b Build REGFACE_H, RCF_H arrays. These face arrays are defined per mesh and axis and have
 !     an integer field PRES_ZONE that provides the pressure zone the face is immersed in.
 CALL ULMAT_GET_H_REGFACES(NM)
-IF(CC_IBM) CALL GET_H_CUTFACES(ONE_NM=NM)
 
 ! Define Pardiso solver control parameters:
 CALL ULMAT_DEFINE_IPARM
@@ -3004,7 +3002,7 @@ USE GLOBAL_CONSTANTS
 USE MESH_POINTERS
 USE COMPLEX_GEOMETRY, ONLY : CALL_FOR_GLMAT, CC_CGSC,CC_FGSC, CC_UNKH, CC_NCVARS, CC_IDCC, &
                              NM_START,CALL_FROM_GLMAT_SETUP
-USE CC_SCALARS, ONLY :   GET_H_CUTFACES, GET_BOUNDFACE_GEOM_INFO_H, ADD_INPLACE_NNZ_H_WHLDOM, &
+USE CC_SCALARS, ONLY :   GET_BOUNDFACE_GEOM_INFO_H, ADD_INPLACE_NNZ_H_WHLDOM, &
                          COPY_CC_MUNKH_TO_UNKH, COPY_CC_UNKH_TO_HS
 
 #ifdef WITH_MKL
@@ -3671,9 +3669,6 @@ CASE(3)
    CALL GET_H_REGFACES
 
    ! 3. WALL faces have already been populated.
-
-   ! 4. CC_GASPHASE cut-faces:
-   IF(CC_IBM) CALL GET_H_CUTFACES
 
    ! 5. Exchange information at block boundaries for RC_FACE, CUT_FACE
    ! fields on each mesh:
