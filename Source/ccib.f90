@@ -146,6 +146,7 @@ TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
 ! Baroclininc torque linking variables.
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: F_LINK,A_LINK
 
+PUBLIC :: CC_CVCHEM_ROLE,CC_CVCHEM_FROM_OWNER,CC_CVCHEM_TO_OWNER,TH_NSLOT,GET_CUTCELL_RSUM
 PUBLIC :: FACE_SIDE_UNKH,ADD_CUTCELL_D_PBAR_DT, ADD_LINKEDCELL_D_PBAR_DT,ADD_CUTCELL_PSUM,ADD_LINKEDCELL_PSUM,&
           ADD_INPLACE_NNZ_H_WHLDOM,CALL_FOR_GLMAT,CALL_FROM_GLMAT_SETUP,&
           CCCOMPUTE_RADIATION,CC_DIVERGENCE_PART_1,CC_VEL_FACE_TO_SOLID_NODE,CC_BAROCLINIC_CORRECTION,&
@@ -204,6 +205,10 @@ INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SSLOT,TH_SDEST,TH_RSLOT,TH_RDEST,
 !< TH_SROW: global row of each slot this process touches, increasing (TH_ROW_SLOT). FV_L2_FZ_REMOTE(1,slot): species
 !< right-hand side partials of rows owned on another process (END_FV_L2_SCALAR_RHS sends them to the owner).
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SROW
+!< Combustion per CV (CC_SET_CVCHEM_LISTS): TH_CVM(slot), the row's CV has more than one member; TH_CVMST(:,slot), its
+!< master (mesh, 1 cut or 2 regular, ICC,JCC,0 or I,J,K) when the CV is owned here, 0 otherwise.
+LOGICAL, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_CVM
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_CVMST
 !< The same slots serve the RHOZZ rows; TH_OSLOT(IROW) is the slot of this process's solve row IROW (RZ_Z), 0 if none.
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_OSLOT
 !< Per mesh, the members of its link groups that it holds, in one global order (axis, x, y, z): M(1)=1-3 (Cartesian
@@ -1283,6 +1288,84 @@ ROW_MESH = LO
 END FUNCTION ROW_MESH
 
 END SUBROUTINE CC_SET_THERMO_ROWS
+
+
+SUBROUTINE CC_SET_CVCHEM_LISTS
+! Combustion per CV (CV_KEEP, CV_COMBUSTION in fire.f90). TH_CVM(slot): the row's CV has more than one member; a row
+! owned on another process has its master there and a member here. TH_CVMST: the master of each owned one. Per mesh,
+! CVC_REG and CVC_CUT: the members held here, the master flagged.
+INTEGER :: NM,L,ICC,IG,ICV,N,R
+TYPE(MESH_TYPE), POINTER :: M
+ALLOCATE(TH_CVM(MAX(1,TH_NSLOT)),TH_CVMST(5,MAX(1,TH_NSLOT))); TH_CVM = .FALSE.; TH_CVMST = 0
+TH_CVM(TH_SSLOT) = .TRUE.
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   DO L=1,SIZE(M%TH_OCV,2)
+      ICV = M%TH_OCV(1,L)
+      IF (M%FV%CV%N_MEMBER(ICV)<2) CYCLE
+      TH_CVM(M%TH_OCV(2,L)) = .TRUE.
+      IG = M%FV%CV%OWNER_GCELL(ICV)
+      IF (M%FV%GCELL%CELL_TYPE(IG)==CC_GCELL_CUT) THEN
+         TH_CVMST(:,M%TH_OCV(2,L)) = (/NM,1,M%FV%GCELL%ICC(IG),M%FV%GCELL%JCC(IG),0/)
+      ELSE
+         TH_CVMST(:,M%TH_OCV(2,L)) = (/NM,2,M%FV%GCELL%IJK(IAXIS:KAXIS,IG)/)
+      ENDIF
+   ENDDO
+ENDDO
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   ALLOCATE(M%CVC_REG(5,SIZE(M%TH_REG,2)),M%CVC_CUT(4,SIZE(M%TH_CUT,2)))
+   N = 0
+   DO L=1,SIZE(M%TH_REG,2)
+      R = CC_CVCHEM_ROLE(NM,2,M%TH_REG(IAXIS,L),M%TH_REG(JAXIS,L),M%TH_REG(KAXIS,L))
+      IF (R==0) CYCLE
+      N = N+1; M%CVC_REG(:,N) = (/M%TH_REG(:,L),MERGE(1,0,R>0)/)
+   ENDDO
+   M%CVC_REG = M%CVC_REG(:,1:N)
+   N = 0
+   DO ICC=1,M%N_CUTCELL_MESH
+      DO L=M%TH_CPTR(ICC),M%TH_CPTR(ICC+1)-1
+         R = CC_CVCHEM_ROLE(NM,1,ICC,M%TH_CUT(1,L),0)
+         IF (R==0) CYCLE
+         N = N+1; M%CVC_CUT(:,N) = (/ICC,M%TH_CUT(1,L),M%TH_CUT(2,L),MERGE(1,0,R>0)/)
+      ENDDO
+   ENDDO
+   M%CVC_CUT = M%CVC_CUT(:,1:N)
+ENDDO
+END SUBROUTINE CC_SET_CVCHEM_LISTS
+
+
+INTEGER FUNCTION CC_CVCHEM_ROLE(NM,CTYPE,A,B,C)
+! Role of a regular cell (CTYPE 2, I,J,K) or cut piece (CTYPE 1, ICC,JCC,0) of mesh NM in combustion per CV: 0 not in a
+! CV with more than one member (or no row), -1 another member of one, the row's slot for its master.
+INTEGER, INTENT(IN) :: NM,CTYPE,A,B,C
+INTEGER :: IUNK,IS
+CC_CVCHEM_ROLE = 0
+IF (CTYPE==2) THEN
+   IUNK = MESHES(NM)%CCVAR(A,B,C,CC_UNKZ)
+ELSE
+   IUNK = MESHES(NM)%CUT_CELL(A)%UNKZ(B)
+ENDIF
+IF (IUNK<1) RETURN
+IS = TH_ROW_SLOT(IUNK)
+IF (.NOT.TH_CVM(IS)) RETURN
+CC_CVCHEM_ROLE = -1
+IF (ALL(TH_CVMST(:,IS)==(/NM,CTYPE,A,B,C/))) CC_CVCHEM_ROLE = IS
+END FUNCTION CC_CVCHEM_ROLE
+
+
+SUBROUTINE CC_CVCHEM_TO_OWNER(R)
+! Partial sums R(:,slot) of the members held here added into the owner's slot of each row.
+REAL(EB), INTENT(INOUT) :: R(:,:)
+CALL SCALAR_ROWS_TO_OWNER(R,TH_SSLOT,TH_SDEST,TH_RSLOT)
+END SUBROUTINE CC_CVCHEM_TO_OWNER
+
+
+SUBROUTINE CC_CVCHEM_FROM_OWNER(R)
+! The per-row combustion results R(:,slot) of the owner to every process holding a member of the row.
+REAL(EB), INTENT(INOUT) :: R(:,:)
+CALL SCALAR_ROWS_FROM_OWNER(R,TH_RSLOT,TH_RDEST,TH_BSLOT)
+END SUBROUTINE CC_CVCHEM_FROM_OWNER
 
 
 INTEGER FUNCTION TH_ROW_SLOT(IROW)
@@ -7843,6 +7926,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
 ENDDO
 CALL CC_SET_CFL_ROWS
 CALL CC_SET_THERMO_ROWS
+CALL CC_SET_CVCHEM_LISTS
 CALL CC_SET_DENSITY_LISTS
 IF (GET_CUTCELLS_VERBOSE .AND. MY_RANK==0) THEN
    CALL CPU_TIME(TDEL)

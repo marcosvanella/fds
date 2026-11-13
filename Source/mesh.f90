@@ -294,6 +294,8 @@ TYPE MESH_TYPE
    INTEGER, ALLOCATABLE, DIMENSION(:) :: H_RPTR,H_CPTR !< H_REG(:,H_RPTR(IPZ):H_RPTR(IPZ+1)-1) and H_CUT of zone IPZ.
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: H_REG !< (I,J,K) of regular pressure unknowns, grouped by zone.
    INTEGER, ALLOCATABLE, DIMENSION(:) :: H_CUT !< Cut-cell indexes of each zone, in cut-cell order.
+   INTEGER, ALLOCATABLE, DIMENSION(:,:) :: CVC_REG,CVC_CUT !< Combustion per CV: the members held here of CVs with
+                                              !< members > 1, (I,J,K,slot,master) and (ICC,JCC,slot,master); master 1 or 0.
    INTEGER, ALLOCATABLE, DIMENSION(:,:) :: TH_PIECE !< (ICC,JCC) of every cut piece with a GCELL, in ICC/JCC order.
    LOGICAL, ALLOCATABLE, DIMENSION(:) :: FV_ROW !< Scalar rows of this mesh carried by an owned CV.
 
