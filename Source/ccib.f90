@@ -19821,8 +19821,9 @@ END SUBROUTINE GET_GASPHASE_CUTFACES_DATA
 ! ---------------------------- GET_RCFACES_H ------------------------------------
 
 SUBROUTINE GET_RCFACES_H(NM)
-! RC faces of the pressure matrix (RCF_H): the RC faces of the FV FACE rows, in row order, except those on an open wall
-! and, with ULMAT, on an interpolated one (CC_PROJECT_VELOCITY gives those the boundary form).
+! RC faces of the pressure matrix (RCF_H): the RC faces of the FV FACE rows, in row order, except those on a wall cell
+! other than an interpolated one under UGLMAT (CC_PROJECT_VELOCITY gives open walls, and interpolated ones under ULMAT,
+! the boundary form; solid, mirror and null walls, OBST faces included, keep their wall velocity).
 INTEGER, INTENT(IN) :: NM
 INTEGER :: IF_,IRC,IWC
 TYPE(MESH_TYPE), POINTER :: M
@@ -19836,8 +19837,7 @@ DO IF_=1,M%FV%FACE%N
    IRC = M%FV%FACE%SRC_IRC(IF_)
    IWC = M%RC_FACE(IRC)%IWC
    IF (IWC>0) THEN
-      IF (M%WALL(IWC)%BOUNDARY_TYPE==OPEN_BOUNDARY) CYCLE
-      IF (PRES_FLAG==ULMAT_FLAG .AND. M%WALL(IWC)%BOUNDARY_TYPE==INTERPOLATED_BOUNDARY) CYCLE
+      IF (PRES_FLAG==ULMAT_FLAG .OR. M%WALL(IWC)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY) CYCLE
    ENDIF
    M%CC_NRCFACE_H = M%CC_NRCFACE_H+1
    M%RCF_H(M%CC_NRCFACE_H) = IRC
