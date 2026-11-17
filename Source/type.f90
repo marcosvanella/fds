@@ -1550,6 +1550,12 @@ TYPE CC_SKEW_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)   :: C    !< (0:N_TOTAL_SCALARS,0:N) t.g_f on the positive axis; column 0 is 0.
 END TYPE CC_SKEW_TYPE
 
+!> \brief Per-piece momentum (CC_O3E) of a mesh, set once by CC_O3E_SETUP: NB band pieces (gas pieces not regular).
+
+TYPE CC_O3E_TYPE
+   INTEGER :: NB
+END TYPE CC_O3E_TYPE
+
 !> \brief Mesh-owned finite-volume container for the unstructured active region.
 
 TYPE CC_FV_TYPE
@@ -1557,6 +1563,7 @@ TYPE CC_FV_TYPE
    TYPE(CC_CV_TYPE)    :: CV
    TYPE(CC_FACE_TYPE)  :: FACE
    TYPE(CC_SKEW_TYPE)  :: SK
+   TYPE(CC_O3E_TYPE)   :: O3
 END TYPE CC_FV_TYPE
 
 !> \brief Phase-5 CV merge proposal SoA (ALLGATHER).
