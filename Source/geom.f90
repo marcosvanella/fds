@@ -5530,6 +5530,7 @@ PUBLIC :: GET_CFACE_INDEX, POINT_IN_CFACE, RANDOM_CFACE_XYZ, SET_CVS_3D, &
           CC_CV_GET_SOLVER_KEY, CC_CV_CELL_IS_CV_MASTER, CC_GRID_SET_CV_CANON_XYZ_TOL, CC_CV_CANON_XYZ_TOL, &
           CC_GRID_WALL_IS_THIN_BARRIER, CC_GRID_APPEND_REGFACE_TAIL, CC_GRID_APPEND_SEAM_RCFACE
 PUBLIC :: CC_GRID_SEAM_EXCHANGE
+PUBLIC :: CC_CORNER_WEIGHT
 PUBLIC :: DELTA_INT, DELTA_VERT, DIST_THRES, FDS_AREA_GEOM, INDEX_UNDEFINED, INT_N_EXT_PTS, INT_P_IND, &
           INT_TMP_IND, INT_VEL_IND, INT_RHO_IND, INT_H_IND, INT_RSUM_IND, INT_MU_IND, INT_MUDNS_IND, &
           INT_RHO0_IND, INT_WCEN_IND, INT_VELS_IND, MAX_INTERP_POINTS, NQT2C, N_CUTCELLS_PROC, &
@@ -29541,6 +29542,87 @@ RETURN
 END SUBROUTINE REALLOCATE_SEG_CELL
 
 END SUBROUTINE GET_CARTCELL_CUTFACES
+
+! --------------------------- CC_BALL_SOLID_FRACTION ----------------------------
+
+PURE REAL(EB) FUNCTION CC_BALL_SOLID_FRACTION(NM,XC,R)
+
+! Solid volume fraction of the ball of radius R about XC (in the gas), from the INBOUNDARY cut-face polygons of the
+! cells and guard cells of mesh NM whose box meets the ball's bounding box (uniform grid). The vertices of a polygon
+! are counter-clockwise about its normal into the gas, built or blocked, so the normal is taken from them. Per
+! polygon its solid angle OM and area AR inside the ball are sums over its edges, and the solid volume is
+! (R^3 SUM sgn(h)OM - SUM h AR)/3, with 3 ATAN2 per edge by the difference identities, and sgn(0)=0: an edge or a
+! polygon seen edge-on adds nothing.
+
+INTEGER, INTENT(IN) :: NM
+REAL(EB), INTENT(IN) :: XC(IAXIS:KAXIS),R
+INTEGER :: I,J,K,JCF,NP,IE,IA,IB
+REAL(EB) :: N(IAXIS:KAXIS),A(IAXIS:KAXIS),D(IAXIS:KAXIS),H,RT2,GR,L,P,SP,TA,TB,TR,TAC,TBC,SA,SB,DPC,OUT,OM,AR,OS,HA
+
+OS = 0._EB; HA = 0._EB
+ASSOCIATE(MM=>MESHES(NM))
+DO K=CEILING((XC(KAXIS)-R-MM%ZS)*MM%RDZETA),FLOOR((XC(KAXIS)+R-MM%ZS)*MM%RDZETA)+1
+DO J=CEILING((XC(JAXIS)-R-MM%YS)*MM%RDETA),FLOOR((XC(JAXIS)+R-MM%YS)*MM%RDETA)+1
+DO I=CEILING((XC(IAXIS)-R-MM%XS)*MM%RDXI),FLOOR((XC(IAXIS)+R-MM%XS)*MM%RDXI)+1
+   IF (MM%CCVAR(I,J,K,CC_IDCF)<1) CYCLE
+   ASSOCIATE(CF=>MM%CUT_FACE(MM%CCVAR(I,J,K,CC_IDCF)))
+   DO JCF=1,CF%NFACE
+      ! Shared by the edges: the unit normal (fan about vertex 1), the height of XC, the disc's squared radius.
+      NP = CF%CFELEM(1,JCF)
+      N = 0._EB
+      DO IE=3,NP
+         A = CF%XYZVERT(:,CF%CFELEM(IE,JCF))-CF%XYZVERT(:,CF%CFELEM(2,JCF))
+         D = CF%XYZVERT(:,CF%CFELEM(IE+1,JCF))-CF%XYZVERT(:,CF%CFELEM(2,JCF))
+         N = N+(/A(JAXIS)*D(KAXIS)-A(KAXIS)*D(JAXIS),A(KAXIS)*D(IAXIS)-A(IAXIS)*D(KAXIS),A(IAXIS)*D(JAXIS)-A(JAXIS)*D(IAXIS)/)
+      ENDDO
+      N  = N/NORM2(N)
+      H  = DOT_PRODUCT(XC-CF%XYZVERT(:,CF%CFELEM(2,JCF)),N)
+      RT2= MAX(R*R-H*H,0._EB)
+      GR = 1._EB-ABS(H)/SQRT(RT2+H*H) ! 1-|h|/R, 0 if the ball does not reach the plane.
+      OM = 0._EB; AR = 0._EB
+      DO IE=1,NP
+         IA = CF%CFELEM(IE+1,JCF); IB = CF%CFELEM(MOD(IE,NP)+2,JCF)
+         A  = CF%XYZVERT(:,IA)-XC
+         D  = CF%XYZVERT(:,IB)-CF%XYZVERT(:,IA)
+         L  = NORM2(D)
+         TA = DOT_PRODUCT(A,D)/L; TB = TA+L ! Abscissae of the edge's ends from the foot of XC on its line.
+         P  = (A(IAXIS)*(D(JAXIS)*N(KAXIS)-D(KAXIS)*N(JAXIS))+A(JAXIS)*(D(KAXIS)*N(IAXIS)-D(IAXIS)*N(KAXIS)) &
+              +A(KAXIS)*(D(IAXIS)*N(JAXIS)-D(JAXIS)*N(IAXIS)))/L ! Signed distance of the foot of XC from the line.
+         SP = MERGE(SIGN(1._EB,P),0._EB,P/=0._EB)
+         TR = SQRT(MAX(RT2-P*P,0._EB)); TAC = MIN(MAX(TA,-TR),TR); TBC = MIN(MAX(TB,-TR),TR)
+         SA = SQRT(P*P+H*H+TAC*TAC); SB = SQRT(P*P+H*H+TBC*TBC)
+         DPC= ATAN2(ABS(P)*(TBC-TAC),P*P+TAC*TBC)   ! Angle of the edge inside the disc,
+         OUT= ATAN2(ABS(P)*L,P*P+TA*TB)-DPC         ! and outside it.
+         OM = OM+SP*(DPC-ATAN2(ABS(H*P)*(TBC*SA-TAC*SB),P*P*SA*SB+H*H*TAC*TBC)+GR*OUT)
+         AR = AR+0.5_EB*(P*(TBC-TAC)+RT2*SP*OUT)
+      ENDDO
+      OS = OS+MERGE(SIGN(1._EB,H),0._EB,H/=0._EB)*OM
+      HA = HA+H*AR
+   ENDDO
+   END ASSOCIATE
+ENDDO
+ENDDO
+ENDDO
+END ASSOCIATE
+CC_BALL_SOLID_FRACTION = (OS-HA/R**3)/(4._EB*PI)
+
+END FUNCTION CC_BALL_SOLID_FRACTION
+
+! ------------------------------ CC_CORNER_WEIGHT -------------------------------
+
+PURE REAL(EB) FUNCTION CC_CORNER_WEIGHT(NM,XF,XW)
+
+! Corner weight of a wall entry, piece centroid XF and the entry's wall point XW: from the solid fraction of the ball
+! about their midpoint through both; 0 on a flat wall (5/32), 1 at the corner face of an aligned sharp edge.
+
+INTEGER, INTENT(IN) :: NM
+REAL(EB), INTENT(IN) :: XF(IAXIS:KAXIS),XW(IAXIS:KAXIS)
+REAL(EB) :: XC(IAXIS:KAXIS)
+
+XC = 0.5_EB*(XF+XW)
+CC_CORNER_WEIGHT = MIN(1._EB,MAX(0._EB,2._EB-2._EB*CC_BALL_SOLID_FRACTION(NM,XC,NORM2(XF-XW))/(5._EB/32._EB)))
+
+END FUNCTION CC_CORNER_WEIGHT
 
 
 ! ------------------------ GET_CLOSED_POLYLINES ---------------------------------
