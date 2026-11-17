@@ -4901,6 +4901,7 @@ ENDDO
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL O3E_BUILD_EDGES(NM,C(NM)%NP,BAND,EK)
    CALL O3E_BUILD_ARMS(NM,BAND,EK)
+   CALL O3E_BUILD_ROT(NM,EK)
 ENDDO
 END SUBROUTINE CC_O3E_SETUP
 
@@ -4909,7 +4910,8 @@ SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK)
 ! The band of mesh NM and its gas edges (design 3.1, A.3.1). A piece is regular when it is whole, its two cells are
 ! plain (NP false) and its gas edges are regular, that is have four such pieces. The band is the gas pieces of the
 ! mesh that are not regular (on the interface plane the lower mesh's). Each gas edge of the band is made once, by its
-! first band arm: EK its key (direction, low cell), EP its arms as FACE rows (-1: a face without one).
+! first band arm: EK its key (direction, low cell) and 1 if it is regular, EP its arms as FACE rows (-1: a face without
+! one).
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: NP(0:,0:,0:)
 LOGICAL, ALLOCATABLE, INTENT(OUT) :: BAND(:)
@@ -4918,9 +4920,10 @@ TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
 INTEGER :: IF_,Q,QQ,NE,AX,N(3),P4(4),K4(4)
 INTEGER, ALLOCATABLE :: EP(:,:)
+LOGICAL, ALLOCATABLE :: RG(:,:)
 
 F => MESHES(NM)%FV%FACE; O => MESHES(NM)%FV%O3
-ALLOCATE(BAND(F%N)); BAND = .FALSE.
+ALLOCATE(BAND(F%N),RG(4,F%N)); BAND = .FALSE.; RG = .TRUE.
 DO IF_=1,F%N_INT
    IF (ALL(F%KIND(IF_)/=(/CC_FACE_KIND_GAS,CC_FACE_KIND_COUPLING,CC_FACE_KIND_REMOTE/))) CYCLE
    IF (F%KIND(IF_)==CC_FACE_KIND_REMOTE .AND. F%NBR_CV_NM(IF_)<NM) CYCLE
@@ -4930,12 +4933,13 @@ DO IF_=1,F%N_INT
       IF (P4(1)==0) CYCLE
       DO QQ=1,4
          CALL O3E_ARM(K4,QQ,AX,N)
-         BAND(IF_) = BAND(IF_) .OR. .NOT.PLAIN(P4(QQ),AX,N)
+         RG(Q,IF_) = RG(Q,IF_) .AND. PLAIN(P4(QQ),AX,N)
       ENDDO
+      BAND(IF_) = BAND(IF_) .OR. .NOT.RG(Q,IF_)
    ENDDO
 ENDDO
 O%NB = COUNT(BAND)
-ALLOCATE(EK(4,4*O%NB),EP(4,4*O%NB))
+ALLOCATE(EK(5,4*O%NB),EP(4,4*O%NB))
 NE = 0
 DO IF_=1,F%N_INT
    IF (.NOT.BAND(IF_)) CYCLE
@@ -4943,7 +4947,7 @@ DO IF_=1,F%N_INT
       CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4)
       IF (P4(1)==0) CYCLE
       IF (ANY(P4(1:Q-1)>0 .AND. BAND(MAX(P4(1:Q-1),1)))) CYCLE
-      NE = NE+1; EK(:,NE) = K4; EP(:,NE) = P4
+      NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,RG(Q,IF_))/); EP(:,NE) = P4
    ENDDO
 ENDDO
 O%NE = NE
@@ -5095,6 +5099,78 @@ ENDIF
 END FUNCTION CENTROID
 
 END SUBROUTINE O3E_BUILD_ARMS
+
+
+SUBROUTINE O3E_BUILD_ROT(NM,EK)
+! Weights of the rotational term (A.4.1 to A.4.3). Per arm of each gas edge the piece's shares A |x_f - x_c| in its two
+! cells c, each scaled with MIN(1, V_c / S), S the sum of those of the cell's gas pieces of that axis (design 13.1), and
+! its mass M_f, the two shares unscaled. The corner masses s_k = (share of the b-arm)(share of the c-arm)/V_c of the four
+! cells around the edge give the transport weights TW = al/s_e and the distribution weights al/M_f; 0.5 on a regular
+! edge. A piece is arm Q of at most one edge: slot Q of a band piece holds that edge's product in Q and its weight.
+INTEGER, INTENT(IN) :: NM,EK(:,:)
+TYPE(MESH_TYPE), POINTER :: M
+TYPE(CC_O3E_TYPE), POINTER :: O
+INTEGER :: E,Q,AX,N(3),NL(3),NH(3)
+REAL(EB) :: A,AW,XF,DL,DH,D(2),XL(4),XH(4),SH(2,4),V(2,4),MF(4),S(4),AL(4)
+
+M => MESHES(NM); O => M%FV%O3
+ALLOCATE(O%TW(O%NE,4),O%PS(O%NB,4),O%PW(O%NB,4),O%Q(0:2*O%NE),O%ROT(O%NB))
+O%PS = 0; O%PW = 0._EB; O%Q = 0._EB
+DO E=1,O%NE
+   DO Q=1,4
+      CALL O3E_ARM(EK(:,E),Q,AX,N)
+      SELECT CASE(AX)
+         CASE(IAXIS); XF = M%X(N(IAXIS)); AW = M%DY(N(JAXIS))*M%DZ(N(KAXIS)); D = M%DX(N(IAXIS):N(IAXIS)+1)
+         CASE(JAXIS); XF = M%Y(N(JAXIS)); AW = M%DX(N(IAXIS))*M%DZ(N(KAXIS)); D = M%DY(N(JAXIS):N(JAXIS)+1)
+         CASE(KAXIS); XF = M%Z(N(KAXIS)); AW = M%DX(N(IAXIS))*M%DY(N(JAXIS)); D = M%DZ(N(KAXIS):N(KAXIS)+1)
+      END SELECT
+      A = AW
+      IF (M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX)==CC_CUTCFE) A = M%FV%FACE%AREA(O%IX(O%EP(E,Q)))
+      NL = N; NL(AX) = N(AX)-1; NH = N; NH(AX) = N(AX)+1
+      XL = CELL(N); XH = CELL(NH); DL = XF-XL(AX); DH = XH(AX)-XF
+      SH(:,Q) = A*(/DL*MIN(1._EB,XL(4)/(GAS_AREA(NL)*(D(1)-DL)+GAS_AREA(N)*DL)), &
+                    DH*MIN(1._EB,XH(4)/(GAS_AREA(N)*DH+GAS_AREA(NH)*(D(2)-DH)))/)
+      V(:,Q) = (/XL(4),XH(4)/); MF(Q) = A*(DL+DH)
+   ENDDO
+   S = (/SH(1,1)*SH(1,3)/V(1,1),SH(2,1)*SH(1,4)/V(2,1),SH(1,2)*SH(2,3)/V(1,2),SH(2,2)*SH(2,4)/V(2,2)/)
+   AL = (/S(1)+S(2),S(3)+S(4),S(1)+S(3),S(2)+S(4)/)
+   O%TW(E,:) = MERGE(0.5_EB,AL/SUM(S),EK(5,E)==1)
+   AL = MERGE(0.5_EB,AL/MF,EK(5,E)==1)
+   DO Q=1,4
+      IF (O%EP(E,Q)>O%NB) CYCLE
+      O%PS(O%EP(E,Q),Q) = E+O%NE*((Q-1)/2); O%PW(O%EP(E,Q),Q) = AL(Q)
+   ENDDO
+ENDDO
+
+CONTAINS
+
+FUNCTION CELL(NC) RESULT(XV)
+! Centroid and volume of the gas cell NC: its cut cell, or the Cartesian cell.
+INTEGER, INTENT(IN) :: NC(3)
+REAL(EB) :: XV(4)
+IF (M%CCVAR(NC(IAXIS),NC(JAXIS),NC(KAXIS),CC_CGSC)==CC_CUTCFE) THEN
+   ASSOCIATE (CC=>M%CUT_CELL(M%CCVAR(NC(IAXIS),NC(JAXIS),NC(KAXIS),CC_IDCC)))
+   XV = (/CC%XYZCEN(IAXIS:KAXIS,1),CC%VOLUME(1)/)
+   END ASSOCIATE
+ELSE
+   XV = (/M%XC(NC(IAXIS)),M%YC(NC(JAXIS)),M%ZC(NC(KAXIS)),M%DX(NC(IAXIS))*M%DY(NC(JAXIS))*M%DZ(NC(KAXIS))/)
+ENDIF
+END FUNCTION CELL
+
+REAL(EB) FUNCTION GAS_AREA(NF)
+! Gas area of the Cartesian face (AX;NF): AW whole, the sum of its pieces cut, 0 solid.
+INTEGER, INTENT(IN) :: NF(3)
+GAS_AREA = 0._EB
+SELECT CASE(M%FCVAR(NF(IAXIS),NF(JAXIS),NF(KAXIS),CC_FGSC,AX))
+   CASE(CC_GASPHASE); GAS_AREA = AW
+   CASE(CC_CUTCFE)
+      ASSOCIATE (CF=>M%CUT_FACE(M%FCVAR(NF(IAXIS),NF(JAXIS),NF(KAXIS),CC_IDCF,AX)))
+      GAS_AREA = SUM(CF%AREA(1:CF%NFACE))
+      END ASSOCIATE
+END SELECT
+END FUNCTION GAS_AREA
+
+END SUBROUTINE O3E_BUILD_ROT
 
 
 SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK)
@@ -14851,12 +14927,13 @@ END SUBROUTINE CC_VELOCITY_FLUX
 
 SUBROUTINE CC_O3E_FORCE_A(NM)
 ! Per stage (PREDICTOR), after the copy of FVX, FVY, FVZ onto FN: the O3e force of the band pieces of mesh NM.
-! K0: the stage's velocity of every row, gathered by source. K1: vorticity and strain at the gas edges (A.3.3).
+! K0: the stage's velocity of every row, gathered by source. K1: vorticity and strain at the gas edges (A.3.3) and
+! the products -OM T_c, OM T_b (A.4.3) into Q. K2: omega x u of each band piece, gathered from its edges' products.
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
-INTEGER :: I,L
-INTEGER, POINTER, CONTIGUOUS :: IX(:),EP(:,:),ENB(:,:)
-REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),OM(:),ST(:)
+INTEGER :: I,L,NE
+INTEGER, POINTER, CONTIGUOUS :: IX(:),EP(:,:),ENB(:,:),PS(:,:)
+REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),OM(:),ST(:),TW(:,:),Q(:),PW(:,:),ROT(:)
 REAL(EB) :: DCB,DBC
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
@@ -14881,11 +14958,18 @@ DO L=0,4,4
    ENDDO
 ENDDO
 EP => M%FV%O3%EP; ENB => M%FV%O3%ENB; WA => M%FV%O3%WA; RD => M%FV%O3%RD; OM => M%FV%O3%OM; ST => M%FV%O3%ST
-DO I=1,M%FV%O3%NE
+TW => M%FV%O3%TW; Q => M%FV%O3%Q; NE = M%FV%O3%NE
+DO I=1,NE
    DCB = (UP(EP(I,4))+WA(I,4)*(UP(ENB(I,4))-UP(EP(I,4)))-UP(EP(I,3))-WA(I,3)*(UP(ENB(I,3))-UP(EP(I,3))))*RD(I,1)
    DBC = (UP(EP(I,2))+WA(I,2)*(UP(ENB(I,2))-UP(EP(I,2)))-UP(EP(I,1))-WA(I,1)*(UP(ENB(I,1))-UP(EP(I,1))))*RD(I,2)
+   Q(I) = (DBC-DCB)*(TW(I,3)*UP(EP(I,3))+TW(I,4)*UP(EP(I,4)))
+   Q(NE+I) = (DCB-DBC)*(TW(I,1)*UP(EP(I,1))+TW(I,2)*UP(EP(I,2)))
    OM(I) = DCB-DBC
    ST(I) = DCB+DBC
+ENDDO
+PS => M%FV%O3%PS; PW => M%FV%O3%PW; ROT => M%FV%O3%ROT
+DO I=1,M%FV%O3%NB
+   ROT(I) = PW(I,1)*Q(PS(I,1))+PW(I,2)*Q(PS(I,2))+PW(I,3)*Q(PS(I,3))+PW(I,4)*Q(PS(I,4))
 ENDDO
 END SUBROUTINE CC_O3E_FORCE_A
 

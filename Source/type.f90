@@ -1562,6 +1562,10 @@ TYPE CC_O3E_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1) (A.3.3).
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP       !< (0:NV) the stage's velocity of each row; UP(0)=0, a wall at rest.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity and shear strain at the gas edges.
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW,PW    !< (1:NE,4) transport weights (A.4.2); (1:NB,4) distribution weight
+                                                     !< of the edge where the band piece is arm Q (0: none).
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: PS       !< (1:NB,4) the product of that edge in Q (0: none).
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: Q,ROT    !< (0:2*NE) products QB (1:NE), QC (NE+1:), Q(0)=0; (1:NB) omega x u.
 END TYPE CC_O3E_TYPE
 
 !> \brief Mesh-owned finite-volume container for the unstructured active region.
