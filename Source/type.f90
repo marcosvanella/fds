@@ -309,6 +309,8 @@ TYPE BOUNDARY_PROP1_TYPE
    REAL(EB) :: AREA=0._EB            !< Face area (m2)
    REAL(EB) :: HEAT_TRANS_COEF=0._EB !< Heat transfer coefficient (W/m2/K)
    REAL(EB) :: Q_CON_F=0._EB         !< Convective heat flux at surface (W/m2)
+   REAL(EB) :: Q_CON_SUM=0._EB       !< CC_O3E: convective heat the gas gave a thermally thick CFACE since its update (J/m2)
+   REAL(EB) :: Q_CON_GHOST=0._EB     !< CC_O3E: that heat's flux over KODXF in the solid's front ghost difference (K)
    REAL(EB) :: Q_RAD_IN=0._EB        !< Incoming radiative flux (W/m2)
    REAL(EB) :: Q_RAD_OUT=0._EB       !< Outgoing radiative flux (W/m2)
    REAL(EB) :: EMISSIVITY=1._EB      !< Surface emissivity

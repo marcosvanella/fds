@@ -213,6 +213,19 @@ INTEGER, SAVE :: TH_NSLOT=0
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: TH_DIV,TH_RTRM,TH_VOL,TH_ORTRM
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_OCOEFF
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SSLOT,TH_SDEST,TH_RSLOT,TH_RDEST,TH_BSLOT
+!< CC_O3E, the CFACEs of this process with a scalar row (CC_SET_WALL_ROWS): TH_W(:,L) = (mesh, BOUNDARY_PROP1 index,
+!< slot, FACE row), TH_WA(L) their area times AREA_ADJUST; over a thermally thick solid 1:TH_WN(1), other heat fluxes
+!< that follow the gas temperature to TH_WN(2), given ones to TH_WN(3). TH_WQ(:,L), over a thermally thick solid: the
+!< flux of the last corrector stage and Q_CON_SUM when it ended. TH_WZ: the CFACEs whose SURF fixes the mass fractions,
+!< TH_WCZ their stage's species coefficient. Per slot: TH_WK(0:1,) the CV's sums of A h and A CZ, then (0:NS,) its
+!< temperature and mass fraction changes; TH_WT the owner's temperature and density; TH_WS1(0:NS,) the CV's effective
+!< face sums of the last corrector stage. TH_WOWN: the slots owned here with a CFACE. TH_DT: the stage's time step.
+INTEGER, SAVE :: TH_WN(3)=0
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_W
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WOWN,TH_WZ
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_WQ,TH_WK,TH_WT,TH_WS1
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WA,TH_WCZ
+REAL(EB), SAVE :: TH_DT=0._EB
 !< TH_SROW: global row of each slot this process touches, increasing (TH_ROW_SLOT). FV_L2_FZ_REMOTE(1,slot): species
 !< right-hand side partials of rows owned on another process (END_FV_L2_SCALAR_RHS sends them to the owner).
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SROW
@@ -1288,6 +1301,8 @@ ALLOCATE(TH_DIV(MAX(1,S)),TH_RTRM(MAX(1,S)),TH_VOL(MAX(1,S)),TH_ORTRM(MAX(1,S)),
          TH_OCOEFF(MAX(1,N_TRACKED_SPECIES),MAX(1,S)),FV_L2_DVOL_FACE(MAX(1,S)), &
          FV_L2_DEL_RHO_D_DEL_Z_FACE(MAX(1,N_TRACKED_SPECIES),MAX(1,S)),FV_L2_FZ_REMOTE(1,MAX(1,S)))
 FV_L2_DVOL_FACE = 0._EB; FV_L2_DEL_RHO_D_DEL_Z_FACE = 0._EB
+ALLOCATE(TH_WK(0:N_TRACKED_SPECIES,MAX(1,S)),TH_WT(2,MAX(1,S)),TH_WS1(0:N_TRACKED_SPECIES,MAX(1,S)))
+TH_WK = 0._EB; TH_WS1 = 0._EB
 
 CONTAINS
 
@@ -1324,6 +1339,120 @@ ROW_MESH = LO
 END FUNCTION ROW_MESH
 
 END SUBROUTINE CC_SET_THERMO_ROWS
+
+
+SUBROUTINE CC_SET_WALL_ROWS
+! CC_O3E: the CFACEs of this process that bound a scalar row (TH_W, TH_WA, TH_WN, TH_WOWN) and the inverse distance of
+! each, B1%RDN = 1/(2 delta_j):
+!    1/delta_j = MAX over the CFACEs l of its CV of MAX(n_j.n_l,0)/d_l   (CC_WALL_RDW)
+! n the flow normals BC%NVEC, d_l the distance from the CV's centroid XBAR_CV to the polygon of l (O3E_NEAR). The owner
+! sends the centroid to the processes holding a member; they send their (n_l,1/d_l) to the owner's process, which
+! answers 1/delta_j. A CFACE with no area has no plane and is left out. A centroid on a polygon (d_l = 0) has no
+! finite distance: the run stops.
+INTEGER :: NM,IF_,ICFA,IS,L,K,N,NL,NR,NB,IPASS,POS(3)
+INTEGER, ALLOCATABLE :: SL(:),DST(:),SD(:),PTR(:),NXT(:),ORD(:)
+REAL(EB), ALLOCATABLE :: XC(:,:),NV(:,:),RL(:),RD(:),SB(:,:),RB(:,:)
+LOGICAL, ALLOCATABLE :: ZL(:)
+TYPE(MESH_TYPE), POINTER :: M
+TYPE(CFACE_TYPE), POINTER :: CFA
+
+ALLOCATE(XC(IAXIS:KAXIS,MAX(1,TH_NSLOT))); XC = 0._EB
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   DO L=1,SIZE(M%TH_OCV,2)
+      XC(:,M%TH_OCV(2,L)) = M%FV%CV%XBAR_CV(:,M%TH_OCV(1,L))
+   ENDDO
+ENDDO
+CALL SCALAR_ROWS_FROM_OWNER(XC,TH_RSLOT,TH_RDEST,TH_BSLOT)
+
+! The CFACEs by class, counted, then listed with slot, normal and distance.
+POS = 0
+DO IPASS=1,2
+   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+      M => MESHES(NM)
+      DO IF_=1,M%FV%FACE%N_INT
+         IF (M%FV%FACE%FTYPE(IF_)/=CC_FTYPE_CFINB .OR. M%FV%FACE%ROLE(IF_)/=CC_FACE_ROLE_EXTERNAL) CYCLE
+         IF (M%FV%FACE%SRC_ICF(IF_)>M%N_CUTFACE_MESH .OR. M%FV%FACE%AREA(IF_)<=TWO_EPSILON_EB) CYCLE
+         IS = M%TH_FSLOT(1,IF_); IF (IS<1) CYCLE
+         ICFA = M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_))%CFACE_INDEX(M%FV%FACE%SRC_JCF(IF_))
+         IF (ICFA<=M%INTERNAL_CFACE_CELLS_LB .OR. ICFA>M%INTERNAL_CFACE_CELLS_LB+M%N_INTERNAL_CFACE_CELLS) CYCLE
+         CFA => M%CFACE(ICFA)
+         SELECT CASE(SURFACE(CFA%SURF_INDEX)%THERMAL_BC_INDEX)
+            CASE(THERMALLY_THICK);       K = 1
+            CASE(SPECIFIED_TEMPERATURE); K = 2
+            CASE DEFAULT;                K = 3
+         END SELECT
+         POS(K) = POS(K)+1
+         IF (IPASS==1) CYCLE
+         L = POS(K)
+         TH_W(:,L) = (/NM,CFA%B1_INDEX,IS,IF_/); SL(L) = IS
+         ZL(L) = SURFACE(CFA%SURF_INDEX)%SPECIES_BC_INDEX==SPECIFIED_MASS_FRACTION .AND. N_TRACKED_SPECIES>1
+         TH_WA(L) = M%FV%FACE%FLUX_AREA(IF_)*M%BOUNDARY_PROP1(CFA%B1_INDEX)%AREA_ADJUST
+         NV(:,L) = M%BOUNDARY_COORD(CFA%BC_INDEX)%NVEC
+         RL(L) = O3E_NEAR(M,IF_,XC(:,IS))
+      ENDDO
+   ENDDO
+   IF (IPASS==2) EXIT
+   TH_WN = (/POS(1),POS(1)+POS(2),SUM(POS)/); NL = TH_WN(3)
+   POS = (/0,TH_WN(1),TH_WN(2)/)
+   ALLOCATE(TH_W(4,NL),TH_WA(NL),TH_WQ(2,TH_WN(1)),SL(NL),NV(3,NL),RL(NL),ZL(NL)); TH_WQ = 0._EB
+ENDDO
+TH_WZ = PACK((/(L,L=1,NL)/),ZL); ALLOCATE(TH_WCZ(SIZE(TH_WZ)))
+N = COUNT(RL<=0._EB)
+IF (N>0) THEN
+   L = FINDLOC(RL<=0._EB,.TRUE.,1)
+   WRITE(LU_ERR,'(A,I0,A,3ES13.5)') 'ERROR: CC_O3E: ',N,' CFACE(s) at zero distance from their CV''s centroid, one at ', &
+                                    XC(:,SL(L))
+   STOP_STATUS = SETUP_STOP
+ENDIF
+WHERE (RL>0._EB) RL = 1._EB/RL
+
+! A CV owned on another process: (row, n, 1/d, rank, L) of its CFACEs here to the owner's process.
+ALLOCATE(DST(MAX(1,TH_NSLOT))); DST = -2; DST(TH_SSLOT) = TH_SDEST
+N = COUNT(DST(SL)>=0)
+ALLOCATE(SB(7,MAX(1,N)),SD(MAX(1,N))); N = 0
+DO L=1,NL
+   IF (DST(SL(L))<0) CYCLE
+   N = N+1; SD(N) = DST(SL(L))
+   SB(:,N) = (/REAL(TH_SROW(SL(L)),EB),NV(:,L),RL(L),REAL(MY_RANK,EB),REAL(L,EB)/)
+ENDDO
+CALL CC_GRID_SEAM_EXCHANGE(7,N,SB,SD,NR,RB)
+SL = (/SL,(TH_ROW_SLOT(NINT(RB(1,K))),K=1,NR)/); RL = (/RL,RB(5,1:NR)/)
+NV = RESHAPE((/NV,RB(2:4,1:NR)/),(/3,NL+NR/))
+
+! Every CV's CFACEs together (counting sort by slot), the distances; the members' answers.
+N = NL+NR
+ALLOCATE(PTR(TH_NSLOT+1),ORD(N),RD(N)); PTR = 0
+DO K=1,N
+   PTR(SL(K)+1) = PTR(SL(K)+1)+1
+ENDDO
+PTR(1) = 1
+DO IS=1,TH_NSLOT
+   PTR(IS+1) = PTR(IS+1)+PTR(IS)
+ENDDO
+NXT = PTR(1:TH_NSLOT)
+DO K=1,N
+   ORD(NXT(SL(K))) = K; NXT(SL(K)) = NXT(SL(K))+1
+ENDDO
+DO IS=1,TH_NSLOT
+   ASSOCIATE (O=>ORD(PTR(IS):PTR(IS+1)-1))
+      RD(O) = CC_WALL_RDW(NV(:,O),RL(O))
+   END ASSOCIATE
+ENDDO
+DO L=1,NL
+   MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))%RDN = 0.5_EB*RD(L)
+ENDDO
+TH_WOWN = PACK((/(IS,IS=1,TH_NSLOT)/),DST(1:TH_NSLOT)<0 .AND. PTR(2:TH_NSLOT+1)>PTR(1:TH_NSLOT))
+DEALLOCATE(SB,SD); ALLOCATE(SB(2,MAX(1,NR)),SD(MAX(1,NR)))
+DO K=1,NR
+   SB(:,K) = (/RB(7,K),RD(NL+K)/); SD(K) = NINT(RB(6,K))
+ENDDO
+CALL CC_GRID_SEAM_EXCHANGE(2,NR,SB,SD,NB,RB)
+DO K=1,NB
+   L = NINT(RB(1,K))
+   MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))%RDN = 0.5_EB*RB(2,K)
+ENDDO
+END SUBROUTINE CC_SET_WALL_ROWS
 
 
 SUBROUTINE CC_SET_CVCHEM_LISTS
@@ -5733,6 +5862,19 @@ END ASSOCIATE
 END FUNCTION O3E_NEAR
 
 
+PURE FUNCTION CC_WALL_RDW(NV,RL) RESULT(RD)
+! The inverse wall distance, seen from one point, of each CFACE j of a set: RD_j = MAX over l of MAX(n_j.n_l,0) RL_l,
+! n the flow normals BC%NVEC, RL_l the inverse distance from the point to the polygon of l (O3E_NEAR). It is the
+! plane's distance where the point stands over its CFACE and the edge's around a convex edge; no floor, no cap.
+REAL(EB), INTENT(IN) :: NV(:,:),RL(:)
+REAL(EB) :: RD(SIZE(RL))
+INTEGER :: J
+DO J=1,SIZE(RL)
+   RD(J) = MAXVAL(MAX(MATMUL(NV(:,J),NV),0._EB)*RL)
+ENDDO
+END FUNCTION CC_WALL_RDW
+
+
 LOGICAL FUNCTION O3E_SLIP(M,ICF)
 ! The CFACE ICF of mesh M is free slip (its SURF sucks or is FREE_SLIP, and not NO_SLIP): it has no wall law, and a wall
 ! edge's arm on it no gradient.
@@ -9352,12 +9494,13 @@ IF (GET_CUTCELLS_VERBOSE .AND. MY_RANK==0) THEN
    CALL CPU_TIME(TNOW)
    WRITE(LU_ERR,'(A,F8.3,A)') ' Executing SET_CC_MATVEC_DATA. Time taken : ',TNOW-TDEL,' sec.'
 ENDIF
-CALL SET_CFACES_P1_RDN               ! Set inverse DXN for CFACES, uses cell linking information.
+IF (.NOT.CC_O3E) CALL SET_CFACES_P1_RDN ! Set inverse DXN for CFACES, uses cell linking information.
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL CC_SET_MOMENTUM_FACE_LISTS(NM)
 ENDDO
 CALL CC_SET_CFL_ROWS
 CALL CC_SET_THERMO_ROWS
+IF (CC_O3E) CALL CC_SET_WALL_ROWS
 CALL CC_SET_CVCHEM_LISTS
 CALL CC_SET_DENSITY_LISTS
 CALL CC_SET_CF_HALO_LISTS
@@ -10319,7 +10462,7 @@ CALL POINT_TO_MESH(NM)
 M=>MESHES(NM)
 FV=>M%FV
 
-RDT = 1._EB/DT
+RDT = 1._EB/DT; TH_DT = DT
 
 SELECT CASE(PREDICTOR)
    CASE(.TRUE.)
@@ -11649,7 +11792,7 @@ DO IF_=1,FV%FACE%N_INT
       IF (ICFA > INTERNAL_CFACE_CELLS_LB+N_INTERNAL_CFACE_CELLS) CYCLE
       CFA => CFACE(ICFA)
       B1 => BOUNDARY_PROP1(CFA%B1_INDEX)
-      CALL CC_FV_ADD_CONDUCTION_FACE(NM,IF_,-B1%AREA_ADJUST*B1%Q_CON_F)
+      IF (.NOT.CC_O3E) CALL CC_FV_ADD_CONDUCTION_FACE(NM,IF_,-B1%AREA_ADJUST*B1%Q_CON_F)
    CASE(CC_FTYPE_RGGAS)
       IF (FV%FACE%SRC_IREG(IF_) < 1) CYCLE
       IW = FV%FACE%IWC(IF_)
@@ -22903,6 +23046,7 @@ TYPE(CC_FV_TYPE), POINTER :: FV
 
 IF (.NOT.CC_IBM) RETURN
 TH_DIV=0._EB; TH_RTRM=0._EB; TH_VOL=0._EB; TH_ORTRM=0._EB; TH_OCOEFF=0._EB
+IF (CC_O3E) CALL CC_WALL_HEAT_FLUX(1)
 
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    MFV=>MESHES(NM)
@@ -22975,6 +23119,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          VSUM=VSUM+VOL
       ENDDO
       TH_ORTRM(IS)=RTRMVOL/VSUM
+      TH_WT(:,IS)=(/TMP_CELL,RHO_CELL/)
       R_H_G_CELL=KSUM/VSUM
       IF (CONSTANT_SPECIFIC_HEAT_RATIO) CYCLE
       DO N=1,N_TRACKED_SPECIES
@@ -22987,13 +23132,14 @@ ENDDO
 
 ! Rows shared with other processes: partial sums to the owner's process, which returns the finished rows.
 NS=N_TRACKED_SPECIES
-ALLOCATE(SB(4+NS,MAX(1,SIZE(TH_SSLOT))))
+ALLOCATE(SB(6+NS,MAX(1,SIZE(TH_SSLOT))))
 DO L=1,SIZE(TH_SSLOT)
    IS=TH_SSLOT(L)
    SB(1:4,L)=(/TH_DIV(IS),FV_L2_DVOL_FACE(IS),TH_RTRM(IS),TH_VOL(IS)/)
    SB(5:4+NS,L)=FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)
+   SB(5+NS:6+NS,L)=TH_WK(0:1,IS)
 ENDDO
-CALL CC_GRID_SEAM_EXCHANGE(4+NS,SIZE(TH_SSLOT),SB,TH_SDEST,NR,RB)
+CALL CC_GRID_SEAM_EXCHANGE(6+NS,SIZE(TH_SSLOT),SB,TH_SDEST,NR,RB)
 DO L=1,NR
    IS=TH_RSLOT(L)
    TH_DIV(IS)=TH_DIV(IS)+RB(1,L)
@@ -23001,7 +23147,9 @@ DO L=1,NR
    TH_RTRM(IS)=TH_RTRM(IS)+RB(3,L)
    TH_VOL(IS)=TH_VOL(IS)+RB(4,L)
    FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)=FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)+RB(5:4+NS,L)
+   TH_WK(0:1,IS)=TH_WK(0:1,IS)+RB(5+NS:6+NS,L)
 ENDDO
+IF (CC_O3E) CALL CC_WALL_HEAT_FLUX(2)
 
 DO IS=1,TH_NSLOT
    IF (TH_VOL(IS)<=TWO_EPSILON_EB) CYCLE
@@ -23014,18 +23162,21 @@ DO IS=1,TH_NSLOT
 ENDDO
 
 DEALLOCATE(SB)
-ALLOCATE(SB(3+NS,MAX(1,NR)))
+ALLOCATE(SB(4+2*NS,MAX(1,NR)))
 DO L=1,NR
    IS=TH_RSLOT(L)
    SB(1:3,L)=(/TH_DIV(IS),TH_RTRM(IS),TH_VOL(IS)/)
    SB(4:3+NS,L)=FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)
+   SB(4+NS:4+2*NS,L)=TH_WK(0:NS,IS)
 ENDDO
-CALL CC_GRID_SEAM_EXCHANGE(3+NS,NR,SB,TH_RDEST,NB,RB)
+CALL CC_GRID_SEAM_EXCHANGE(4+2*NS,NR,SB,TH_RDEST,NB,RB)
 DO L=1,NB
    IS=TH_BSLOT(L)
    TH_DIV(IS)=RB(1,L); TH_RTRM(IS)=RB(2,L); TH_VOL(IS)=RB(3,L)
    FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)=RB(4:3+NS,L)
+   TH_WK(0:NS,IS)=RB(4+NS:4+2*NS,L)
 ENDDO
+IF (CC_O3E) CALL CC_WALL_HEAT_FLUX(3)
 
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    MFV=>MESHES(NM)
@@ -23089,6 +23240,89 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    ENDDO
 ENDDO
 END SUBROUTINE FINALIZE_FV_L2_THERMODYNAMIC_ROWS
+
+
+SUBROUTINE CC_WALL_HEAT_FLUX(PASS)
+! CC_O3E: the convective heat of the CFACEs (CC_SET_WALL_ROWS), point-implicit per CV; one flux for the gas and the
+! solid. FINALIZE_FV_L2_THERMODYNAMIC_ROWS calls pass 1 before the face sums go to the owners, pass 2 when they are
+! complete there and pass 3 when the finished rows are back.
+! 1: a CFACE adds -A q to its CV's face sum S, q = h (T_G - T_F) where the flux follows the gas temperature, else
+!    Q_CON_F, and A h to K.
+! 2: per owned CV the temperature change dT of the wall term, ROS2 with the diagonal Jacobian -K T RTRM/V, gamma =
+!    1+1/SQRT(2), F = gamma DT T RTRM: dT = F (S - C S1)/(V + F K) and S <- S - K dT, that is S/den + (1-1/den) C S1,
+!    den = 1 + F K/V. The corrector forms the next step's first stage (C = 0) and keeps S1 = S; the predictor forms the
+!    second (C = 2). A steady state (S = 0) stays one.
+! 3: a CFACE's flux q = h (T_G + dT - T_F) to Q_CON_F: what the gas and the solid see. Over a thermally thick solid the
+!    step's heat DT (q1 + q2)/2, q1 the corrector's and q2 the predictor's flux, adds to Q_CON_SUM, which
+!    SOLID_HEAT_TRANSFER takes as a given flux at its next update.
+! Species, where the SURF fixes the mass fractions and the wall blows: the coefficient CZ = 2 RDN MAX(RHO_D_F), one for
+! all species so that their fluxes still sum to zero, and the same three passes with the face sums S_N
+! (FV_L2_DEL_RHO_D_DEL_Z_FACE), K = sum A CZ, rho V and F = gamma DT; pass 3 adds CZ dZ_N to the CFACE's DIFF_FLUX.
+INTEGER, INTENT(IN) :: PASS
+INTEGER :: L,IS,K,NS
+REAL(EB) :: C,G,KZ
+REAL(EB), PARAMETER :: GAMMA_W=1._EB+1._EB/SQRT(2._EB)
+TYPE(BOUNDARY_PROP1_TYPE), POINTER :: BW
+
+NS = N_TRACKED_SPECIES
+SELECT CASE(PASS)
+CASE(1)
+   TH_WK = 0._EB
+   DO L=1,TH_WN(2)
+      BW => MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L)); IS = TH_W(3,L)
+      FV_L2_DVOL_FACE(IS) = FV_L2_DVOL_FACE(IS)-TH_WA(L)*BW%HEAT_TRANS_COEF*(BW%TMP_G-BW%TMP_F)
+      TH_WK(0,IS) = TH_WK(0,IS)+TH_WA(L)*BW%HEAT_TRANS_COEF
+   ENDDO
+   DO K=1,SIZE(TH_WZ)
+      L = TH_WZ(K); BW => MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L)); IS = TH_W(3,L)
+      TH_WCZ(K) = MERGE(2._EB*MAXVAL(BW%RHO_D_F(1:NS))*BW%RDN,0._EB,BW%U_NORMAL_S<0._EB)
+      TH_WK(1,IS) = TH_WK(1,IS)+MESHES(TH_W(1,L))%FV%FACE%FLUX_AREA(TH_W(4,L))*TH_WCZ(K)
+   ENDDO
+   DO L=TH_WN(2)+1,TH_WN(3)
+      IS = TH_W(3,L)
+      FV_L2_DVOL_FACE(IS) = FV_L2_DVOL_FACE(IS)-TH_WA(L)*MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))%Q_CON_F
+   ENDDO
+CASE(2)
+   C = MERGE(2._EB,0._EB,PREDICTOR)
+   DO L=1,SIZE(TH_WOWN)
+      IS = TH_WOWN(L)
+      G = GAMMA_W*TH_DT*TH_WT(1,IS)*TH_ORTRM(IS)
+      G = G*(FV_L2_DVOL_FACE(IS)-C*TH_WS1(0,IS))/(TH_VOL(IS)+G*TH_WK(0,IS))
+      FV_L2_DVOL_FACE(IS) = FV_L2_DVOL_FACE(IS)-TH_WK(0,IS)*G
+      TH_WK(0,IS) = G
+      KZ = TH_WK(1,IS)
+      G = GAMMA_W*TH_DT/(TH_WT(2,IS)*TH_VOL(IS)+GAMMA_W*TH_DT*KZ)
+      TH_WK(1:NS,IS) = G*(FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)-C*TH_WS1(1:NS,IS))
+      FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS) = FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)-KZ*TH_WK(1:NS,IS)
+   ENDDO
+   IF (CORRECTOR) THEN
+      TH_WS1(0,TH_WOWN) = FV_L2_DVOL_FACE(TH_WOWN)
+      TH_WS1(1:NS,TH_WOWN) = FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,TH_WOWN)
+   ENDIF
+CASE(3)
+   DO L=1,TH_WN(2)
+      BW => MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))
+      BW%Q_CON_F = BW%HEAT_TRANS_COEF*(BW%TMP_G-BW%TMP_F+TH_WK(0,TH_W(3,L)))
+   ENDDO
+   DO K=1,SIZE(TH_WZ)
+      L = TH_WZ(K)
+      ASSOCIATE (DF=>MESHES(TH_W(1,L))%FV%FACE%DIFF_FLUX(1:NS,TH_W(4,L)))
+         DF = DF+TH_WCZ(K)*TH_WK(1:NS,TH_W(3,L))
+      END ASSOCIATE
+   ENDDO
+   IF (PREDICTOR) THEN
+      DO L=1,TH_WN(1)
+         BW => MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))
+         BW%Q_CON_SUM = TH_WQ(2,L)+0.5_EB*TH_DT*(TH_WQ(1,L)+BW%Q_CON_F)
+      ENDDO
+   ELSE
+      DO L=1,TH_WN(1)
+         BW => MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))
+         TH_WQ(:,L) = (/BW%Q_CON_F,BW%Q_CON_SUM/)
+      ENDDO
+   ENDIF
+END SELECT
+END SUBROUTINE CC_WALL_HEAT_FLUX
 
 
 SUBROUTINE SCALAR_ROWS_TO_OWNER(Q,SSLOT,SDEST,RSLOT,PEERS)
