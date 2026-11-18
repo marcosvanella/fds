@@ -1556,18 +1556,20 @@ END TYPE CC_SKEW_TYPE
 TYPE CC_O3E_TYPE
    INTEGER :: NB=0,NV=0,NE=0,NG=0                    !< Band rows 1:NB, velocity rows 1:NV, edges 1:NE: gas edges 1:NG,
                                                      !< then wall edges (fewer than four pieces, a gas corner).
-   INTEGER :: KP(0:12)=0                             !< Rows KP(G-1)+1:KP(G) of group G: band (G=1:4), support (5:8) by
+   INTEGER :: KP(0:13)=0                             !< Rows KP(G-1)+1:KP(G) of group G: band (G=1:4), support (5:8) by
                                                      !< source (cut pieces' VEL, U, V, W); 9:11 guard faces held nowhere;
-                                                     !< 12 wall points of moving walls (PERIODIC_TEST 31:37), set once.
+                                                     !< 12 wall points of moving walls (PERIODIC_TEST 31:37), set once;
+                                                     !< 13 walls of SURFs with a velocity, gathered per stage from UWC:
+                                                     !< the edges' wall points (to NV), then the CVs' Gauss sums.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IX       !< (1:NV) FACE row of a cut piece, flat U, V, W index of a face.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP,ENB   !< (1:NE,4) row of each arm (0: a wall at rest) and of its partner
                                                      !< (0: none).
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1) of the arms.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RDP      !< (1:NE,2) the same of the four pieces' own points.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP       !< (0:NV) the stage's velocity of each row; UP(0)=0, a wall at rest;
-                                                     !< then the moving walls' constants of the CVs' Gauss sums.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity and shear stress at the edges (ST=0 at a wall
-                                                     !< edge, unused).
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP       !< (0:KP(13)) the stage's velocity of each row; UP(0)=0, a wall at
+                                                     !< rest; then the test fields' constants of the CVs' Gauss sums.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity at the edges; (1:NG) shear stress at the gas
+                                                     !< edges (a wall edge has none).
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW,PW    !< (1:NE,4) transport weights; (1:NB,4) distribution weight
                                                      !< of the edge where the band piece is arm Q (0: none).
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: PS       !< (1:NB,4) the product of that edge in Q (0: none).
@@ -1599,6 +1601,10 @@ TYPE CC_O3E_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MUC      !< (0:3*NC) the CVs' viscosity, by axis as TN; MUC(0)=0.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: KW,UH,UB,FNE !< (1:NB) the stage's wall coefficient, explicit state, u (the
                                                      !< corrector's), effective force.
+   INTEGER :: NWC=0                                  !< Wall cells.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WCC,WCP,WCJ,WRP,WRA,WRJ
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WCA,WRW
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WCN,SW
 END TYPE CC_O3E_TYPE
 
 !> \brief Mesh-owned finite-volume container for the unstructured active region.
