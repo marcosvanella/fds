@@ -1559,24 +1559,24 @@ TYPE CC_O3E_TYPE
                                                      !< source (cut pieces' VEL, U, V, W); 9:11 guard faces held nowhere;
                                                      !< 12 wall points of moving walls (PERIODIC_TEST 31:37), set once.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IX       !< (1:NV) FACE row of a cut piece, flat U, V, W index of a face.
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP,ENB   !< (1:NE,4) row of each arm (A.1) and of its partner (0: none).
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1) (A.3.3).
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP,ENB   !< (1:NE,4) row of each arm and of its partner (0: none).
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1).
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP       !< (0:NV) the stage's velocity of each row; UP(0)=0, a wall at rest;
                                                      !< then the moving walls' constants of the CVs' Gauss sums.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity and shear stress at the gas edges.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW,PW    !< (1:NE,4) transport weights (A.4.2); (1:NB,4) distribution weight
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW,PW    !< (1:NE,4) transport weights; (1:NB,4) distribution weight
                                                      !< of the edge where the band piece is arm Q (0: none).
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: PS       !< (1:NB,4) the product of that edge in Q (0: none).
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: Q,F      !< (0:2*NE) products QB (1:NE), QC (NE+1:), Q(0)=0; (1:NB) the force.
    INTEGER :: NC=0                                   !< CVs of the band pieces' cells.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: ECL,LH,NIX !< (1:NE,4) cells around a gas edge, flat in MU; (1:NB,2) the two
                                                      !< cells of a band piece, flat in RHO; its two CVs' slots in TN.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: EMW,NW   !< (1:NE,4) their weights for mu_e (12.3); (1:NB,2) TN's weights.
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: EMW,NW   !< (1:NE,4) their weights for mu_e; (1:NB,2) TN's weights.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: VPTR,VED,MPTR,MIX,GPTR,GIX !< CSR: lateral stress of a band piece (edges);
                                                      !< members of a CV (cells, flat); Gauss sums of a CV by axis (rows).
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VW,MW,GW,TN !< Their weights; (0:3*NC) tau_aa of each CV by axis, TN(0)=0.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CFV      !< BOUNDARY_PROP1 index of each CFACE whose SURF has a velocity.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NJ,TJ    !< (1:SIZE(CFV),3) its normal n into the gas; its jet vector T (7.3).
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NJ,TJ    !< (1:SIZE(CFV),3) its normal n into the gas; its jet vector T.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: UWC      !< (0:SIZE(CFV),3) the stage's wall velocity w n + MAX(w,0) T; row 0 is 0.
 END TYPE CC_O3E_TYPE
 
@@ -1590,7 +1590,7 @@ TYPE CC_FV_TYPE
    TYPE(CC_O3E_TYPE)   :: O3
 END TYPE CC_FV_TYPE
 
-!> \brief Phase-5 CV merge proposal SoA (ALLGATHER).
+!> \brief CV merge proposal SoA (ALLGATHER).
 
 TYPE CC_CV_PROPOSAL_BUFFER_TYPE
    INTEGER, ALLOCATABLE, DIMENSION(:)   :: CHILD_NM,CHILD_IG,CHILD_ICC,CHILD_JCC

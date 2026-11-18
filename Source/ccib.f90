@@ -135,7 +135,7 @@ REAL(EB), PARAMETER :: DISPXY(1:2,1) = RESHAPE((/ -PI/2._EB, -PI/2._EB /),(/2,1/
 REAL(EB), PARAMETER :: DISPL  = PI
 REAL(EB) :: ROTANG, ROTMAT(2,2), TROTMAT(2,2)
 
-! PERIODIC_TEST=31..37, the verification cases of the cut-cell momentum (O3E_TEST_*). Constants of P0's cases.
+! PERIODIC_TEST=31..37, the verification cases of the cut-cell momentum (O3E_TEST_*), and their constants.
 REAL(EB), PARAMETER :: O3E_OMEGA=0.2_EB, O3E_R1=0.5_EB, O3E_R2=1._EB, O3E_RSPLIT=0.75_EB ! Turning rate, spheres or cylinders, split
 REAL(EB), PARAMETER :: O3E_CEN3(IAXIS:KAXIS)=(/0.013_EB,0.027_EB,-0.019_EB/)           ! 3D centre; 2D: origin
 REAL(EB), PARAMETER :: O3E_AX3(IAXIS:KAXIS)=(/1._EB,2._EB,2._EB/)/3._EB                ! 3D axis; 2D: y
@@ -4851,7 +4851,7 @@ END SUBROUTINE PINV3
 
 
 SUBROUTINE O3E_BUILD_CFV(NM)
-! The CFACEs of mesh NM whose SURF has a velocity (VEL, VOLUME_FLOW, a mass flux, an HVAC node or a leak; design 7.3, 7.4):
+! The CFACEs of mesh NM whose SURF has a velocity (VEL, VOLUME_FLOW, a mass flux, an HVAC node or a leak):
 ! CFV their BOUNDARY_PROP1 slots, NJ their normals n into the gas and, with the SURF's jet direction d (UVW),
 ! TJ = (d - (d.n) n)/(d.n), else 0. Walls at rest are not listed. A face with d.n <= 0 cannot blow along d: stop.
 INTEGER, INTENT(IN) :: NM
@@ -4945,7 +4945,7 @@ END SUBROUTINE CC_O3E_SETUP
 
 
 SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK)
-! The band of mesh NM and its gas edges (design 3.1, A.3.1). A piece is regular when it is whole, its two cells are
+! The band of mesh NM and its gas edges. A piece is regular when it is whole, its two cells are
 ! plain (NP false) and its gas edges are regular, that is have four such pieces. The band is the gas pieces of the
 ! mesh that are not regular (on the interface plane the lower mesh's). Each gas edge of the band is made once, by its
 ! first band arm: EK its key (direction, low cell) and 1 if it is regular, EP its arms as FACE rows (-1: a face without
@@ -5011,10 +5011,10 @@ END SUBROUTINE O3E_BUILD_EDGES
 
 
 SUBROUTINE O3E_BUILD_ARMS(NM,BAND,EK)
-! Per arm of each gas edge (A.3.2): a whole piece is at the mid-point of the edge's gas segment (WA=0); a cut piece
+! Per arm of each gas edge: a whole piece is at the mid-point of the edge's gas segment (WA=0); a cut piece
 ! takes the next piece of its grid plane along the edge, on the side of the mid-point, as partner ENB with weight WA,
 ! or no move (WA=0) if that piece's centroid is short of the mid-point, or, where there is no such piece, the wall
-! point at the end of the gas segment (ENB=0). Then the reciprocal distances RD (A.3.3), and the velocity rows: each
+! point at the end of the gas segment (ENB=0). Then the reciprocal distances RD, and the velocity rows: each
 ! piece once, the band first, by group (TYPE CC_O3E_TYPE) in memory order.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: BAND(:)
@@ -5137,12 +5137,12 @@ END SUBROUTINE O3E_BUILD_ARMS
 
 
 SUBROUTINE O3E_BUILD_ROT(NM,EK)
-! Weights of the rotational term (A.4.1 to A.4.3). Per arm of each gas edge the piece's shares A |x_f - x_c| in its two
-! cells c, each scaled with MIN(1, V_c / S), S the sum of those of the cell's gas pieces of that axis (design 13.1), and
+! Weights of the rotational term. Per arm of each gas edge the piece's shares A |x_f - x_c| in its two
+! cells c, each scaled with MIN(1, V_c / S), S the sum of those of the cell's gas pieces of that axis, and
 ! its mass M_f, the two shares unscaled. The corner masses s_k = (share of the b-arm)(share of the c-arm)/V_c of the four
 ! cells around the edge give the transport weights TW = al/s_e and the distribution weights al/M_f; 0.5 on a regular
 ! edge. A piece is arm Q of at most one edge: slot Q of a band piece holds that edge's product in Q and its weight.
-! The viscosity at the edge (design 12.3): the four cells ECL around it interpolated along b in the rows c- and c+,
+! The viscosity at the edge: the four cells ECL around it interpolated along b in the rows c- and c+,
 ! then along c, to the edge's line, with the weights EMW (each in [0,1]); 1/4 each on a regular edge (FDS's MUX).
 INTEGER, INTENT(IN) :: NM,EK(:,:)
 TYPE(MESH_TYPE), POINTER :: M
@@ -5217,11 +5217,11 @@ END SUBROUTINE O3E_BUILD_ROT
 
 
 SUBROUTINE O3E_BUILD_VISC(NM,NP,BAND)
-! Lists of the viscous term (A.5 with design 11.1; 2.2). The CV of each cell of a band piece: the plain cell, or FDS's
+! Lists of the viscous term. The CV of each cell of a band piece: the plain cell, or FDS's
 ! CV (members, FACE_LIST); its gas pieces (velocity row, axis, side, area) give its halves, its Gauss sums by axis and
-! its members' weights for mu_c and D. Per band piece the lateral stress as weights of edge stresses (A.5.2: the edge
+! its members' weights for mu_c and D. Per band piece the lateral stress as weights of edge stresses (the edge
 ! at the half's end of each piece of the CV, else at its other end, else the mean of the CV's edges of that direction,
-! else nothing) and the normal stress as weights of its two CVs' tau_aa (A.5.3), all times 2: K3 divides by the sum of
+! else nothing) and the normal stress as weights of its two CVs' tau_aa, all times 2: CC_O3E_FORCE_A divides by the sum of
 ! the densities of the piece's two cells. Where the wall moves (PERIODIC_TEST 31:37) the CFACEs of a CV add one constant
 ! per axis to its Gauss sum, appended to UP.
 INTEGER, INTENT(IN) :: NM
@@ -5347,7 +5347,7 @@ IF (NV>O%NV) THEN
    ALLOCATE(UP(0:NV)); UP(0:O%NV) = O%UP; UP(O%NV+1:NV) = PACK(UW,UW/=0._EB); CALL MOVE_ALLOC(UP,O%UP)
 ENDIF
 
-! Per band piece (axis A, CVs P, Q): the halves it takes with 11.1's fractions f_P, f_Q; the normal stress.
+! Per band piece (axis A, CVs P, Q): the halves it takes with the fractions f_P, f_Q; the normal stress.
 ALLOCATE(O%VPTR(O%NB+1),O%NIX(O%NB,2),O%NW(O%NB,2),VE(8*O%NB),VV(8*O%NB))
 O%NW = 0._EB; K = 0
 DO I=1,O%NB
@@ -5399,7 +5399,7 @@ ROW = RW(OFF(AX+1)+O3E_FLAT(M,NF,AX))
 END FUNCTION ROW
 
 SUBROUTINE HALF(R,S,WH)
-! Adds WH times the lateral stress of the half S of CV R in the axis A (A.5.2) to the band piece's list.
+! Adds WH times the lateral stress of the half S of CV R in the axis A to the band piece's list.
 INTEGER, INTENT(IN) :: R,S
 REAL(EB), INTENT(IN) :: WH
 INTEGER :: J,JJ,L,E,N2
@@ -5446,7 +5446,7 @@ END SUBROUTINE O3E_BUILD_VISC
 
 
 SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK)
-! The gas edge (A.3.1) at which the piece of FACE row IF_ is arm Q (A.1): its key EK (direction T, low cell N) and
+! The gas edge at which the piece of FACE row IF_ is arm Q: its key EK (direction T, low cell N) and
 ! arms P4, each the piece of its Cartesian face that spans the same segments of the edge (O3E_ROW); P4=0 if a side has
 ! none: no gas edge.
 TYPE(MESH_TYPE), INTENT(IN) :: M
@@ -5472,7 +5472,7 @@ END SUBROUTINE O3E_EDGE
 
 
 SUBROUTINE O3E_ARM(EK,Q,AX,N)
-! Normal AX and low cell N of the piece of arm Q (A.1) of the edge with key EK (direction T, low cell).
+! Normal AX and low cell N of the piece of arm Q of the edge with key EK (direction T, low cell).
 INTEGER, INTENT(IN) :: EK(4),Q
 INTEGER, INTENT(OUT) :: AX,N(3)
 INTEGER :: B
@@ -5529,7 +5529,7 @@ END FUNCTION O3E_ROW
 
 
 SUBROUTINE O3E_SEG(M,IF_,Q,C1,C2,S,XV)
-! Gas segment of the piece of FACE row IF_ on the grid edge where it is arm Q (A.1), from the cut-edge topology of its
+! Gas segment of the piece of FACE row IF_ on the grid edge where it is arm Q, from the cut-edge topology of its
 ! polygon's sides (CUT_FACE CEDGES, EDGE_LIST; CUT_EDGE): the segments C1:C2 of that edge's CUT_EDGE it spans, 0 for
 ! the whole edge (C1>C2: no side there), its extent S along the edge and a vertex XV on it. A whole piece: C1=C2=0.
 TYPE(MESH_TYPE), INTENT(IN) :: M
@@ -15212,10 +15212,10 @@ END SUBROUTINE CC_VELOCITY_FLUX
 
 SUBROUTINE CC_O3E_FORCE_A(NM)
 ! Per stage (PREDICTOR), after the copy of FVX, FVY, FVZ onto FN: the O3e force of the band pieces of mesh NM.
-! K0: the stage's velocity of every row, gathered by source. K1: vorticity and shear stress at the gas edges (A.3.3,
-! design 12.3) and the products -OM T_c, OM T_b (A.4.3) into Q. K3: per CV its viscosity, divergence and Gauss
-! gradient, its tau_aa of each axis into TN. K2 and K3: omega x u of each band piece, gathered from its edges'
-! products, less its lateral and normal stress over its density (A.5, design 2.2).
+! In order: the stage's velocity of every row, gathered by source; the vorticity and shear stress at the gas edges
+! and the products -OM T_c, OM T_b into Q; per CV its viscosity, divergence and Gauss gradient, its tau_aa of each
+! axis into TN; omega x u of each band piece, gathered from its edges' products, less its lateral and normal stress
+! over its density.
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: I,K,L,NE,NC
@@ -15369,7 +15369,7 @@ END SUBROUTINE CC_O3E_FORCE_B
 
 
 SUBROUTINE CC_O3E_WALL_VELOCITY(NM)
-! Per stage, the wall velocity of the CFACEs of CFV of mesh NM (design 7.3): UWC = w n + MAX(w,0) T, w the speed into the
+! Per stage, the wall velocity of the CFACEs of CFV of mesh NM: UWC = w n + MAX(w,0) T, w the speed into the
 ! gas as head has set and ramped it, HVAC included, at the stage's time level as CUTFACE_VELOCITIES takes it: -U_NORMAL
 ! in the predictor (T_n), -U_NORMAL_S in the corrector (T_n+1).
 INTEGER, INTENT(IN) :: NM

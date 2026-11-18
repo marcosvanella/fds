@@ -705,7 +705,7 @@ REAL(EB), PARAMETER :: DEFAULT_VOLFRAC_LINK = 0.5_EB
 REAL(EB) :: CCVOL_LINK=0.95_EB
 LOGICAL  :: GET_CUTCELLS_VERBOSE=.FALSE.
 LOGICAL  :: CC_CV_H_PER_MEMBER=.TRUE.
-LOGICAL  :: CC_O3E=.FALSE.   ! per-piece momentum (R2)
+LOGICAL  :: CC_O3E=.FALSE.   ! per-piece cut-cell momentum
 INTEGER  :: CC_O3E_STAB=1    ! 1: state redistribution; 2: linking; 0: none (verification only)
 ! Cross-mesh row reduce phase for main.f90 BEGIN/FINALIZE_FV_L2_ROWS(MODE).
 INTEGER, PARAMETER :: CC_FV_L2_THERMO=1, CC_FV_L2_CFLVN=2

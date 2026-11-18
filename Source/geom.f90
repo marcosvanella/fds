@@ -5377,7 +5377,7 @@ INTEGER, SAVE :: ILO_CELL,IHI_CELL,JLO_CELL,JHI_CELL,KLO_CELL,KHI_CELL
 INTEGER, SAVE :: ILO_FACE,IHI_FACE,JLO_FACE,JHI_FACE,KLO_FACE,KHI_FACE
 INTEGER, SAVE :: NXB, NYB, NZB
 
-! Remote-only Phase-5 occupancy. Local GCELLs use CC_GCELL_TYPE%ABSORBED/%CLAIMED;
+! Remote-only agglomeration occupancy. Local GCELLs use CC_GCELL_TYPE%ABSORBED/%CLAIMED;
 ! these lists are consulted only when IG cannot be resolved on this rank.
 INTEGER, SAVE :: N_REMOTE_ABS = 0, N_REMOTE_CLAIM = 0
 INTEGER, ALLOCATABLE, DIMENSION(:)    :: REMOTE_ABS_NM, REMOTE_ABS_CELL_TYPE, REMOTE_ABS_ICC, REMOTE_ABS_JCC
@@ -7927,7 +7927,7 @@ ENDIF
 
 ! Construction is unconditional. Blocking is CVS-neutral.
 
-! Phase 1 now reuses the shared raw cut-cell build path.
+! Raw cut cells, from the shared build path.
 CALL CC_GRID_BUILD_RAW_CUTCELLS(ISTR,IEND,JSTR,JEND,KSTR,KEND,CC_COMPUTE_MESH,GEOM_ZMAX_AUX, &
                                 TNOW,CPUTIME_START_MESH,GEOM_AREA_SURF_OLD,GEOM_AREA_SURF_NEW, &
                                 FIRST_CALL_ARG,FIRST_CALL_ARG2)
@@ -7981,13 +7981,13 @@ CALL CC_GRID_UPDATE_INBOUNDARY_AREA_ADJUST(GEOM_AREA_SURF_OLD,GEOM_AREA_SURF_NEW
 CALL SET_GC_CUTCELLS_3D
 IF(PERIODIC_TEST/=105) CALL GET_EXT_INB_CUTFACES_TO_CFACE
 
-! Phase 3: build mesh-owned GCELL map from frozen cut-cell data.
+! Mesh-owned GCELL map from the frozen cut-cell data.
 CALL CC_GRID_BUILD_GCELLS
 
-! Phase 4: identity CV map, one control volume per GCELL.
+! Identity CV map, one control volume per GCELL.
 CALL CC_GRID_BUILD_IDENTITY_CVS
 
-! Phase 5 builds the FV aggregation map without mutating the legacy CUT_CELL geometry.
+! FV aggregation map, built without mutating the legacy CUT_CELL geometry.
 CALL CC_GRID_EVALUATE_CV_MERGE_CANDIDATES
 IF (STOP_STATUS==SETUP_STOP) THEN
    IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
@@ -7999,7 +7999,7 @@ IF (STOP_STATUS==SETUP_STOP) THEN
    RETURN
 ENDIF
 
-! Phase 5b: local CV->GCELL membership CSR, after agglomeration has frozen GCELL_TO_CV.
+! Local CV->GCELL membership CSR, after agglomeration has frozen GCELL_TO_CV.
 CALL CC_GRID_BUILD_CV_MEMBER_LISTS
 IF (STOP_STATUS==SETUP_STOP) THEN
    IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
@@ -8011,16 +8011,16 @@ IF (STOP_STATUS==SETUP_STOP) THEN
    RETURN
 ENDIF
 
-! Phase 6: build the finite-volume FACE topology on the frozen CV map (external + intra-CV faces).
+! Finite-volume FACE topology on the frozen CV map (external + intra-CV faces).
 CALL CC_GRID_BUILD_FACES
 IF (STOP_STATUS==SETUP_STOP) THEN
    IF (GET_CUTCELLS_VERBOSE) CLOSE(LU_SETCC)
    RETURN
 ENDIF
 
-! Phase 7: dump the per-CV setup map for the partition-invariance regression.
+! Dump of the per-CV setup map, for the partition-invariance check.
 IF (GET_CUTCELLS_VERBOSE) CALL CC_GRID_DUMP_CV_MAP
-! Verbose: cut pieces with no active CV (pieces in OBST-solid cells), per mesh. The obst_geom gate suite reads it.
+! Verbose: cut pieces with no active CV (pieces in OBST-solid cells), per mesh.
 IF (GET_CUTCELLS_VERBOSE) THEN
    DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       N_INACTIVE = 0
@@ -14690,7 +14690,7 @@ CASE(CC_GCELL_CUT)
    ENDIF
 
    CC_GEOM => M_GEOM%CUT_CELL(GEOM_ICC)
-   ! Guard cut-cell remote-owner data is populated by Phase 2d SET_GC_CUTCELLS_3D.
+   ! Guard cut-cell remote-owner data is populated by SET_GC_CUTCELLS_3D.
    IF (CC_GEOM%N_NOMICC < 1 .OR. .NOT.ALLOCATED(CC_GEOM%NOMICC)) RETURN
 
    VOL_GEOM = CC_GEOM%VOLUME(GEOM_JCC)
@@ -18345,7 +18345,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    ALLOCATE(M%FV%CV%N_MEMBER(1:M%FV%CV%N))
    ! Count members-per-CV from the same GCELL merge records the apply path
    ! consumes. At identity time those records are empty, so this is the floor
-   ! of 2; Phase 5 reallocates after it recounts the accepted proposals.
+   ! of 2; the agglomeration reallocates after it recounts the accepted proposals.
    MAX_MEMBERS = 1
    ALLOCATE(OWNER_MEMBER_COUNT(1:M%FV%CV%N))
    OWNER_MEMBER_COUNT = 1
