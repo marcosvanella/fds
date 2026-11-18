@@ -5014,8 +5014,9 @@ SUBROUTINE O3E_BUILD_ARMS(NM,BAND,EK)
 ! Per arm of each gas edge: a whole piece is at the mid-point of the edge's gas segment (WA=0); a cut piece
 ! takes the next piece of its grid plane along the edge, on the side of the mid-point, as partner ENB with weight WA,
 ! or no move (WA=0) if that piece's centroid is short of the mid-point, or, where there is no such piece, the wall
-! point at the end of the gas segment (ENB=0). Then the reciprocal distances RD, and the velocity rows: each
-! piece once, the band first, by group (TYPE CC_O3E_TYPE) in memory order.
+! point at the end of the gas segment (ENB=0). Then the reciprocal distances RD of the arms (the strain) and RDP of
+! the four pieces' own points (the vorticity), and the velocity rows: each piece once, the band first, by group (TYPE
+! CC_O3E_TYPE) in memory order.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: BAND(:)
 INTEGER, INTENT(IN) :: EK(:,:)
@@ -5023,12 +5024,12 @@ TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
 INTEGER :: E,Q,T,AQ,RQ,P,C1,C2,NR,I,N(3),NQ(3)
-REAL(EB) :: S(2),XE(3),TE,D,XF(3),X2(3),X(4)
+REAL(EB) :: S(2),XE(3),TE,D,XF(3),X2(3),X(4),XP(4)
 REAL(EB), ALLOCATABLE :: R(:,:),UW(:)
 INTEGER, ALLOCATABLE :: ORD(:),RN(:)
 
 M => MESHES(NM); F => M%FV%FACE; O => M%FV%O3
-ALLOCATE(R(4,O%NB+8*O%NE),UW(O%NB+8*O%NE),O%ENB(O%NE,4),O%WA(O%NE,4),O%RD(O%NE,2))
+ALLOCATE(R(4,O%NB+8*O%NE),UW(O%NB+8*O%NE),O%ENB(O%NE,4),O%WA(O%NE,4),O%RD(O%NE,2),O%RDP(O%NE,2))
 O%ENB = 0; O%WA = 0._EB; NR = 0
 DO P=1,F%N_INT
    IF (BAND(P)) CALL ADD_ROW(P,F%X1AXIS(P),F%IJK_FACE(:,P),I)
@@ -5048,7 +5049,7 @@ DO E=1,O%NE
       CALL O3E_ARM(EK(:,E),Q,AQ,NQ); RQ = 6-T-AQ
       P = O%EP(E,Q)
       XF = CENTROID(P,NQ)
-      X(Q) = XF(RQ)
+      X(Q) = XF(RQ); XP(Q) = X(Q)
       CALL ADD_ROW(P,AQ,NQ,O%EP(E,Q))
       IF (P<1) CYCLE
       IF (F%FTYPE(P)/=CC_FTYPE_CFGAS) CYCLE
@@ -5070,6 +5071,7 @@ DO E=1,O%NE
       X(Q) = XF(RQ)+O%WA(E,Q)*(X2(RQ)-XF(RQ))
    ENDDO
    O%RD(E,:) = (/1._EB/(X(4)-X(3)),1._EB/(X(2)-X(1))/)
+   O%RDP(E,:) = (/1._EB/(XP(4)-XP(3)),1._EB/(XP(2)-XP(1))/)
 ENDDO
 
 ! Number the rows: sort the entries by group and source index, one row per distinct entry.
@@ -15212,18 +15214,18 @@ END SUBROUTINE CC_VELOCITY_FLUX
 
 SUBROUTINE CC_O3E_FORCE_A(NM)
 ! Per stage (PREDICTOR), after the copy of FVX, FVY, FVZ onto FN: the O3e force of the band pieces of mesh NM.
-! In order: the stage's velocity of every row, gathered by source; the vorticity and shear stress at the gas edges
-! and the products -OM T_c, OM T_b into Q; per CV its viscosity, divergence and Gauss gradient, its tau_aa of each
-! axis into TN; omega x u of each band piece, gathered from its edges' products, less its lateral and normal stress
-! over its density.
+! In order: the stage's velocity of every row, gathered by source; at the gas edges the vorticity OM from the four
+! pieces' own values, the shear stress ST from the arms and the products -OM T_c, OM T_b into Q; per CV its
+! viscosity, divergence and Gauss gradient, its tau_aa of each axis into TN; omega x u of each band piece, gathered
+! from its edges' products, less its lateral and normal stress over its density.
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: I,K,L,NE,NC
 INTEGER, POINTER, CONTIGUOUS :: IX(:),EP(:,:),ENB(:,:),PS(:,:),ECL(:,:),MPTR(:),MIX(:),GPTR(:),GIX(:),NIX(:,:), &
                                 VPTR(:),VED(:),LH(:,:)
-REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),OM(:),ST(:),TW(:,:),Q(:),PW(:,:),F(:), &
+REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),RDP(:,:),OM(:),ST(:),TW(:,:),Q(:),PW(:,:),F(:), &
                                  EMW(:,:),MU1(:),DP1(:),RH1(:),MW(:),GW(:),TN(:),NW(:,:),VW(:)
-REAL(EB) :: DCB,DBC,MC,DC,G(3),S
+REAL(EB) :: DCB,DBC,MC,DC,G(3),S,OME
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
 CALL CC_O3E_WALL_VELOCITY(NM)
@@ -15251,13 +15253,14 @@ DO L=0,4,4
    ENDDO
 ENDDO
 EP => M%FV%O3%EP; ENB => M%FV%O3%ENB; WA => M%FV%O3%WA; RD => M%FV%O3%RD; OM => M%FV%O3%OM; ST => M%FV%O3%ST
-TW => M%FV%O3%TW; Q => M%FV%O3%Q; NE = M%FV%O3%NE; ECL => M%FV%O3%ECL; EMW => M%FV%O3%EMW
+RDP => M%FV%O3%RDP; TW => M%FV%O3%TW; Q => M%FV%O3%Q; NE = M%FV%O3%NE; ECL => M%FV%O3%ECL; EMW => M%FV%O3%EMW
 DO I=1,NE
    DCB = (UP(EP(I,4))+WA(I,4)*(UP(ENB(I,4))-UP(EP(I,4)))-UP(EP(I,3))-WA(I,3)*(UP(ENB(I,3))-UP(EP(I,3))))*RD(I,1)
    DBC = (UP(EP(I,2))+WA(I,2)*(UP(ENB(I,2))-UP(EP(I,2)))-UP(EP(I,1))-WA(I,1)*(UP(ENB(I,1))-UP(EP(I,1))))*RD(I,2)
-   Q(I) = (DBC-DCB)*(TW(I,3)*UP(EP(I,3))+TW(I,4)*UP(EP(I,4)))
-   Q(NE+I) = (DCB-DBC)*(TW(I,1)*UP(EP(I,1))+TW(I,2)*UP(EP(I,2)))
-   OM(I) = DCB-DBC
+   OME = (UP(EP(I,4))-UP(EP(I,3)))*RDP(I,1)-(UP(EP(I,2))-UP(EP(I,1)))*RDP(I,2)
+   Q(I) = -OME*(TW(I,3)*UP(EP(I,3))+TW(I,4)*UP(EP(I,4)))
+   Q(NE+I) = OME*(TW(I,1)*UP(EP(I,1))+TW(I,2)*UP(EP(I,2)))
+   OM(I) = OME
    ST(I) = (EMW(I,1)*MU1(ECL(I,1))+EMW(I,2)*MU1(ECL(I,2))+EMW(I,3)*MU1(ECL(I,3))+EMW(I,4)*MU1(ECL(I,4)))*(DCB+DBC)
 ENDDO
 MPTR => M%FV%O3%MPTR; MIX => M%FV%O3%MIX; MW => M%FV%O3%MW; GPTR => M%FV%O3%GPTR; GIX => M%FV%O3%GIX; GW => M%FV%O3%GW

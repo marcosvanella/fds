@@ -1560,7 +1560,8 @@ TYPE CC_O3E_TYPE
                                                      !< 12 wall points of moving walls (PERIODIC_TEST 31:37), set once.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IX       !< (1:NV) FACE row of a cut piece, flat U, V, W index of a face.
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP,ENB   !< (1:NE,4) row of each arm and of its partner (0: none).
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1).
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1) of the arms.
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RDP      !< (1:NE,2) the same of the four pieces' own points.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP       !< (0:NV) the stage's velocity of each row; UP(0)=0, a wall at rest;
                                                      !< then the moving walls' constants of the CVs' Gauss sums.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity and shear stress at the gas edges.
