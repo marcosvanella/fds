@@ -1,0 +1,36 @@
+&HEAD CHID='geom_burner_obst', TITLE='Complex Geometry: burner aligned with the grid, OBST.' /
+
+# A 0.6 m x 0.6 m x 0.1 m burner of 360 kW (HRRPUA 1000 kW/m2 on its top face) floats in open air, propane, 0.05 m cells.
+# Aligned burner made of an OBST: the reference.
+# 18 points on the burner axis (from 0.075 m above the burner top face, up to 1.925 m) give the mean temperature and velocity (t > 5 s), and
+# a 3D slice of the heat release rate per unit volume gives the flame height. Utilities/Python/scripts/geom_burner_plume.py
+# reads geom_burner_obst_line.csv and the slice file.
+&MESH XB=-1.000,0.000,-1.000,0.000,-0.550,0.950, IJK=20,20,30, MULT_ID='M' /
+&MULT ID='M', DX=1.0, DY=1.0, DZ=1.5, I_UPPER=1, J_UPPER=1, K_UPPER=1 /
+
+&MISC RND_SEED=101, STRATIFICATION=.FALSE. /
+&TIME T_END=15. /
+&DUMP DT_DEVC=1., DT_SLCF=0.5, SMOKE3D=.FALSE. /
+&PRES SOLVER='UGLMAT' /
+
+&REAC FUEL='PROPANE', SOOT_YIELD=0.02 /
+
+&SURF ID='FIRE', HRRPUA=1000, COLOR='RED' /
+
+&OBST XB=-0.3,0.3,-0.3,0.3,-0.05,0.05, SURF_IDS='FIRE','INERT','INERT' /
+
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='YMIN', SURF_ID='OPEN' /
+&VENT MB='YMAX', SURF_ID='OPEN' /
+&VENT MB='ZMIN', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+
+&DEVC XB=0.00000,0.00000,0.00000,0.00000,0.07500,1.92500, POINTS=18, QUANTITY='TEMPERATURE', ID='T', STATISTICS_START=5. /
+&DEVC XB=0.00000,0.00000,0.00000,0.00000,0.07500,1.92500, POINTS=18, QUANTITY='U-VELOCITY', ID='U', STATISTICS_START=5. /
+&DEVC XB=0.00000,0.00000,0.00000,0.00000,0.07500,1.92500, POINTS=18, QUANTITY='V-VELOCITY', ID='V', STATISTICS_START=5. /
+&DEVC XB=0.00000,0.00000,0.00000,0.00000,0.07500,1.92500, POINTS=18, QUANTITY='W-VELOCITY', ID='W', STATISTICS_START=5. /
+
+&SLCF QUANTITY='HRRPUV', XB=-0.8,0.8,-0.8,0.8,-0.1,2.45, CELL_CENTERED=.TRUE. /
+
+&TAIL /

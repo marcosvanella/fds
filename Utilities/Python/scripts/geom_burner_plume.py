@@ -131,8 +131,8 @@ for chid in decks:
    except OSError:
       pass
 
-for k, (fname, ylabel, ymax) in enumerate((('geom_burner_temperature', 'Mean temperature on the axis ($^\\circ$C)', 1000),
-                                            ('geom_burner_velocity', 'Mean velocity along the axis (m/s)', 8))):
+for k, (fname, ylabel, ymax) in enumerate((('geom_burner_temperature', 'Mean temperature on the axis ($^\\circ$C)', 1500),
+                                            ('geom_burner_velocity', 'Mean velocity along the axis (m/s)', 11))):
    fig = None
    for chid, (label, axis, style) in decks.items():
       if chid not in res:
@@ -140,7 +140,7 @@ for k, (fname, ylabel, ymax) in enumerate((('geom_burner_temperature', 'Mean tem
       kw = dict(x_data=ZP, y_data=res[chid][k], marker_style=style, data_label=label, figure_handle=fig)
       if fig is None:
          kw.update(revision_label=version_string, x_min=0, x_max=2, y_min=0, y_max=ymax,
-                   x_label='Distance above the burner (m)', y_label=ylabel)
+                   x_label='Distance above the burner (m)', y_label=ylabel, legend_location='upper left')
       fig = fdsplotlib.plot_to_fig(**kw)
    plt.savefig(plotdir + fname + '.pdf', format='pdf')
    plt.close()
@@ -148,14 +148,15 @@ for k, (fname, ylabel, ymax) in enumerate((('geom_burner_temperature', 'Mean tem
 # Flame height and heat release in the slice, one point per deck
 names = [c for c in decks if c in res and res[c][2] is not None]
 if names:
-   for fname, idx, ylabel, ymax in (('geom_burner_flame_height', 0, 'Flame height (m)', 3), ('geom_burner_heat_release', 1, 'Heat release in the slice (kW)', 500)):
+   for fname, idx, ylabel, ymax in (('geom_burner_flame_height', 0, 'Flame height (m)', 4), ('geom_burner_heat_release', 1, 'Heat release in the slice (kW)', 600)):
       fig = None
       for k, c in enumerate(names):
          kw = dict(x_data=np.array([k + 1.]), y_data=np.array([res[c][2][idx]]), marker_style=decks[c][2][:2], data_label=decks[c][0],
                    figure_handle=fig)
          if fig is None:
             kw.update(revision_label=version_string, x_min=0.5, x_max=len(names) + 0.5, y_min=0, y_max=ymax, y_label=ylabel,
-                      x_label='Deck', xticks=list(range(1, len(names) + 1)))
+                      xticks=list(range(1, len(names) + 1)), legend_location='upper left')
          fig = fdsplotlib.plot_to_fig(**kw)
+      fig.axes[0].set_xticklabels(['OBST', 'GEOM', 'GEOM 3D', 'stair 3D'][:len(names)])
       plt.savefig(plotdir + fname + '.pdf', format='pdf')
       plt.close()

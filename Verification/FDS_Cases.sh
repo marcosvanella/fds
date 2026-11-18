@@ -210,6 +210,19 @@ $QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N48.fds
 $QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N96_ref.fds
 $QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N96.fds
 
+$QFDS -d Complex_Geometry geom_hvac_supply_obst.fds
+$QFDS -d Complex_Geometry geom_hvac_supply_0deg_ref.fds
+$QFDS -d Complex_Geometry geom_hvac_supply_15deg_ref.fds
+$QFDS -d Complex_Geometry geom_hvac_supply_30deg_ref.fds
+$QFDS -d Complex_Geometry geom_hvac_supply_45deg_ref.fds
+$QFDS -d Complex_Geometry geom_hvac_supply_3d_ref.fds
+$QFDS -d Complex_Geometry geom_hvac_supply_30deg_stair.fds
+$QFDS -d Complex_Geometry geom_hvac_supply_3d_stair.fds
+$QFDS -p 8 -d Complex_Geometry geom_burner_obst.fds
+$QFDS -p 8 -d Complex_Geometry geom_burner_0deg_ref.fds
+$QFDS -p 18 -d Complex_Geometry geom_burner_3d_ref.fds
+$QFDS -p 18 -d Complex_Geometry geom_burner_3d_stair.fds
+
 #$QFDS -d Complex_Geometry zero_thick_roof.fds
 $QFDS -d Complex_Geometry cone_1mesh.fds
 $QFDS -d Complex_Geometry geom_mass_file_test.fds

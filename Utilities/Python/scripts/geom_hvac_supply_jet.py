@@ -107,11 +107,11 @@ for chid in decks:
       pass
 
 # Figure 1: angle between the jet and the face normal (mean over the three planes) against the turn angle.
-series = [('OBST, aligned', ['geom_hvac_supply_obst'], 'ko', None),
-          ('GEOM, turned about vertical axis', ['geom_hvac_supply_0deg_ref', 'geom_hvac_supply_15deg_ref', 'geom_hvac_supply_30deg_ref',
+series = [('GEOM, turned about vertical axis', ['geom_hvac_supply_0deg_ref', 'geom_hvac_supply_15deg_ref', 'geom_hvac_supply_30deg_ref',
                                                 'geom_hvac_supply_45deg_ref'], 'rs-', None),
           ('GEOM, 60 deg about (-1,1,1)', ['geom_hvac_supply_3d_ref'], 'rs', None),
-          ('stair-stepped OBST', ['geom_hvac_supply_30deg_stair', 'geom_hvac_supply_3d_stair'], 'bo--', None)]
+          ('stair-stepped OBST', ['geom_hvac_supply_30deg_stair', 'geom_hvac_supply_3d_stair'], 'bo--', None),
+          ('OBST, aligned', ['geom_hvac_supply_obst'], 'ko', None)]
 fig = None
 for label, names, style, _ in series:
    names = [c for c in names if c in res]
@@ -120,7 +120,7 @@ for label, names, style, _ in series:
    kw = dict(x_data=np.array([decks[c][1] for c in names]), y_data=np.array([np.mean(res[c][1]) for c in names]), marker_style=style,
              data_label=label, figure_handle=fig)
    if fig is None:
-      kw.update(revision_label=version_string, x_min=-5, x_max=65, y_min=0, y_max=45,
+      kw.update(revision_label=version_string, x_min=-5, x_max=65, y_min=0, y_max=60, legend_location='upper left',
                 x_label='Turn angle of the box (deg)', y_label='Angle between jet and face normal (deg)')
    fig = fdsplotlib.plot_to_fig(**kw)
 plt.savefig(plotdir + 'geom_hvac_supply_angle.pdf', format='pdf')
@@ -137,7 +137,7 @@ for chid, (label, turn, R, kind) in decks.items():
    kw = dict(x_data=np.array(DIST), y_data=res[chid][0], marker_style=styles[chid], data_label=label, figure_handle=fig)
    if fig is None:
       kw.update(revision_label=version_string, x_min=0.25, x_max=2.25, y_min=0, y_max=1,
-                x_label='Distance from the face (m)', y_label='Momentum flux $J_n/J_0$', legend_location='lower left')
+                x_label='Distance from the face (m)', y_label='Momentum flux $J_n/J_0$', legend_location='outside', legend_expand=1.7)
    fig = fdsplotlib.plot_to_fig(**kw)
 plt.savefig(plotdir + 'geom_hvac_supply_momentum.pdf', format='pdf')
 plt.close()

@@ -7987,6 +7987,101 @@ moving walls are present; its level is that of the round-off error when the sche
 The comparison of the two schemes is the comparison of the two curves in each figure.
 
 
+\subsection{Bodies Turned Against the Grid: HVAC Supply Box and Burner}
+\label{sec:geom_turned_bodies}
+
+The flows of the previous subsection have exact solutions. The two cases here do not: a box that blows air into a room and a burner that
+burns propane in open air are turned against the grid and the result is compared with the flow of the same body aligned with the grid.
+Turning a body, and gravity with it, does not change the physics, so the jet of the supply box should leave along the normal of its supply face with the momentum
+flux of the aligned box, and the plume of the burner should rise along the turned vertical with the temperature and velocity of the aligned plume.
+The cases run in the default large eddy simulation mode and use the pressure solver \ct{UGLMAT}.
+The bodies are \ct{GEOM}s turned with \ct{&MOVE}.
+For each turn there is a second deck in which the turned body is built from stair-stepped \ct{OBST}s.
+The decks of the \ct{GEOM}s end in \ct{_ref}, and the decks of the stair-stepped bodies in \ct{_stair}.
+The decks of the aligned bodies made of an \ct{OBST} (\ct{geom_hvac_supply_obst}, \ct{geom_burner_obst}) are the reference.
+
+\paragraph{Supply box.}
+A room 10~m $\times$ 10~m $\times$ 6~m with 0.2~m cells has an open vent at the wall $y=10$~m.
+A box 3.0~m $\times$ 2.4~m $\times$ 0.4~m, centered at $(7.1,5,2)$~m, supplies 5~m$^3$/s through one of its small faces
+(0.96~m$^2$, $U_0=5.2$~m/s, \ct{VEL}$=-5.2$ on the \ct{SURF}), so that $J_0=\rho U_0^2 A_0$ is the momentum flux of the supplied air.
+The box is turned by 0, 15, 30 and 45 degrees about the vertical axis through its center, and by 60 degrees about the axis $(-1,1,1)$, which turns the face normal
+$\mathbf{n}$ to $(-2,-1,2)/3$ so that the jet leaves 42 degrees upward.
+The decks are named \ct{geom_hvac_supply_<turn>_ref}, with \ct{<turn>} $=$ \ct{0deg}, \ct{15deg}, \ct{30deg}, \ct{45deg}, and \ct{3d}.
+In the stair-stepped decks (\ct{geom_hvac_supply_30deg_stair} and \ct{geom_hvac_supply_3d_stair}) every grid cell whose center lies in the turned box is an \ct{OBST}, and
+the exposed cell faces nearest to the supply plane of the box blow, with the velocity that gives the same 5~m$^3$/s.
+Line devices record the mean velocity from 10~s to 30~s on planes normal to $\mathbf{n}$, 0.5, 1 and 2~m from the center of the supply face, in four rows
+0.2~m apart ($\pm0.1$ and $\pm0.3$~m) along the short side of the face, each 5~m long along its long side.
+The script \ct{Utilities/Python/scripts/geom_hvac_supply_jet.py} computes on each plane the momentum flux along the normal, $J_n=\rho\sum u_n^2\,\Delta A$, as a fraction
+of $J_0$, and the angle between the jet and the normal,
+$\arctan\left(\sqrt{J_{t1}^2+J_{t2}^2}/J_n\right)$, $J_{t}=\rho\sum u_n u_t\,\Delta A$, where $u_t$ is the velocity along the long side ($t1$) or the short side ($t2$) of the face.
+Each deck runs on one process in 10 to 27 minutes; the decks with a \ct{GEOM} turned against the grid take longest.
+
+\begin{figure}[ht]
+\begin{center}
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_hvac_supply_angle.pdf}\\
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_hvac_supply_momentum.pdf}
+\end{center}
+\caption[Jet of a supply box turned against the grid]{Jet of a supply box turned against the grid.
+(Top) Angle between the jet and the face normal, mean over the three planes, against the turn angle of the box. The 60 degree points turn the box about the axis $(-1,1,1)$, the others about the vertical axis.
+(Bottom) Momentum flux of the jet along the face normal, as a fraction of the momentum flux of the supplied air, against the distance from the face.}
+\label{fig:geom_hvac_supply}
+\end{figure}
+
+\paragraph{Burner.}
+A burner 0.6~m $\times$ 0.6~m $\times$ 0.1~m releases 360~kW of propane (\ct{HRRPUA}$=1000$~kW/m$^2$ on its top face) in open air, with 0.05~m cells.
+The burner is aligned with the grid (decks \ct{geom_burner_obst} and \ct{geom_burner_0deg_ref}) or turned by 60 degrees about the axis $(-1,1,1)$ about its center
+(\ct{geom_burner_3d_ref}), with gravity turned with it (\ct{GVEC}) so that the plume rises along $\mathbf{a}=(1,2,2)/3$.
+In the stair-stepped deck \ct{geom_burner_3d_stair} the \ct{HRRPUA} of the burning cell faces is scaled so that the burner still releases 360~kW.
+The aligned decks use a domain 2~m $\times$ 2~m $\times$ 3~m on 8 meshes, the turned decks a domain 2.7~m $\times$ 3.3~m $\times$ 3.3~m on 18 meshes, so their run times are not comparable;
+the aligned decks run in about 12 to 14 minutes, the turned decks in about 15 minutes.
+The run lasts 15~s. Eighteen points on the axis through the center of the burner, from 0.075~m to 1.925~m above its top face, record the mean temperature and the mean velocity along $\mathbf{a}$
+from 5~s to 15~s.
+A 3D slice of the heat release rate per unit volume, averaged over the same time, gives the flame height, the distance from the base of the burner below which 95~\%
+of the heat release lies, and the heat release rate in the slice.
+The script \ct{Utilities/Python/scripts/geom_burner_plume.py} draws the profiles and the two scalar measures.
+
+\begin{figure}[ht]
+\begin{center}
+\begin{tabular*}{\textwidth}{c@{\extracolsep{\fill}}c}
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_burner_temperature.pdf} &
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_burner_velocity.pdf} \\
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_burner_flame_height.pdf} &
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_burner_heat_release.pdf} \\
+\end{tabular*}
+\end{center}
+\caption[Plume of a burner turned against the grid]{Plume of a burner turned against the grid.
+(Top left) Mean temperature and (top right) mean velocity along the axis of the burner, against the distance above the burner.
+(Bottom left) Flame height and (bottom right) heat release rate in the slice, one value per deck.}
+\label{fig:geom_burner}
+\end{figure}
+
+\paragraph{Reading the figures.}
+The simulations are turbulent, so a difference between two decks is meaningful only when it exceeds the spread between runs that differ in the random seed of the initial noise
+(\ct{RND_SEED}).
+Three seeds of the aligned supply box (\ct{geom_hvac_supply_obst}) differ by less than $0.002\,J_0$ and 0.2 degrees, and three seeds of the box turned by 30 degrees
+(\ct{geom_hvac_supply_30deg_ref}) by less than $0.03\,J_0$ and 0.7 degrees.
+Three seeds of the aligned burner (\ct{geom_burner_obst}) differ by up to 36$^\circ$C and 0.24~m/s in the rms difference of the profiles on the axis, by 1.24 to 1.80~m in the flame height
+and by 316 to 371~kW in the heat release rate of the slice; the flame height of one run therefore says little.
+The decks of the figures are run with one seed.
+
+For the supply box, a turned \ct{GEOM} that treats its supply face correctly gives an angle near zero and a momentum flux equal to that of the aligned \ct{OBST}, at every turn angle.
+With the cut-cell momentum used before the per-piece scheme (the decks ending in \ct{_ref}), the aligned \ct{GEOM} gives the correct direction, with 15 to 20 \% less
+momentum flux than the aligned \ct{OBST}.
+The jet of the box turned by 15 and 30 degrees leaves 16 and 20 degrees off the face normal, that of the box turned by 45 degrees 6 to 8 degrees off,
+and that of the box turned about $(-1,1,1)$ 30 to 48 degrees off, with 0.25, 0.15 and 0.06 $J_0$ at 0.5, 1 and 2~m against 0.60, 0.57 and 0.57 $J_0$ for the aligned \ct{OBST}.
+The turned \ct{GEOM} decks also need about twice as many time steps as the aligned decks (1520 to 2190 against 870 to 930).
+The stair-stepped box turned about $(-1,1,1)$ gives the correct direction (1 degree) but only 0.29, 0.22 and 0.13 $J_0$; the stair-stepped box turned by 30 degrees
+about the vertical axis gives a jet 16 degrees off the face normal, because the faces of its steps look along the grid axes.
+These values are those of the reference scheme at the time of writing.
+
+For the burner the aligned \ct{GEOM} gives a flame height (1.84~m against 1.78~m) and heat release rate like those of the aligned \ct{OBST}, but its profiles on the axis differ by more than the seed spread:
+an rms difference of 69$^\circ$C and 0.49~m/s, with a temperature 78$^\circ$C and a velocity 0.64~m/s higher above 1~m.
+The turned burners, \ct{GEOM} and stair-stepped, depart further from the aligned \ct{OBST}: their flame height is about 1~m against 1.8~m, and the rms differences of the profiles are 109$^\circ$C and 0.36~m/s
+for the \ct{GEOM}, 77$^\circ$C and 0.42~m/s for the stair-stepped burner, with a temperature above 1~m lower by 131$^\circ$C and 74$^\circ$C.
+Turning the plume against the grid changes the solution for the stair-stepped body as well, because the plume no longer follows a grid axis;
+the turned \ct{GEOM} is therefore compared with both the aligned \ct{OBST} and its stair-stepped twin.
+These values are those of the reference scheme at the time of writing.
+
 \subsection{Poiseuille Flow in Channel Created by Two GEOMs}
 
 \label{sec:poiseuille_cc}
