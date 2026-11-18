@@ -2605,6 +2605,15 @@ READ_GEOM_LOOP: DO N=1,N_GEOMETRY
             CALL SHUTDOWN(MESSAGE)
             RETURN
          ENDIF UNSUPPORTED_SURF_FIELD
+         IF (ANY(ABS(SURFACE(G%SURFS(I))%VEL_T)>TWENTY_EPSILON_EB)) THEN
+            WRITE(MESSAGE,'(5A)') 'ERROR: GEOM ',TRIM(ID),', SURF ',TRIM(SURFACE(G%SURFS(I))%ID), &
+                                  ': VEL_T is not for a GEOM. Give the direction of the jet with UVW.'
+            CALL SHUTDOWN(MESSAGE) ; RETURN
+         ENDIF
+         IF (ALL(SURFACE(G%SURFS(I))%UVW>-1.E12_EB) .AND. .NOT.CC_O3E) THEN
+            WRITE(MESSAGE,'(5A)') 'ERROR: GEOM ',TRIM(ID),', SURF ',TRIM(SURFACE(G%SURFS(I))%ID),': UVW requires CC_O3E.'
+            CALL SHUTDOWN(MESSAGE) ; RETURN
+         ENDIF
          ! Others..
       ENDDO
 

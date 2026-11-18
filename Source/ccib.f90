@@ -4850,6 +4850,42 @@ ENDDO
 END SUBROUTINE PINV3
 
 
+SUBROUTINE O3E_BUILD_CFV(NM)
+! The CFACEs of mesh NM whose SURF has a velocity (VEL, VOLUME_FLOW, a mass flux, an HVAC node or a leak; design 7.3, 7.4):
+! CFV their BOUNDARY_PROP1 slots, NJ their normals n into the gas and, with the SURF's jet direction d (UVW),
+! TJ = (d - (d.n) n)/(d.n), else 0. Walls at rest are not listed. A face with d.n <= 0 cannot blow along d: stop.
+INTEGER, INTENT(IN) :: NM
+TYPE(MESH_TYPE), POINTER :: M
+TYPE(CC_O3E_TYPE), POINTER :: O
+TYPE(SURFACE_TYPE), POINTER :: SF
+TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
+INTEGER :: ICF,I,N
+INTEGER, ALLOCATABLE :: IX(:)
+REAL(EB) :: DN
+
+M => MESHES(NM); O => M%FV%O3
+ALLOCATE(IX(M%N_EXTERNAL_CFACE_CELLS+M%N_INTWALL_CFACE_CELLS+M%N_INTERNAL_CFACE_CELLS)); N = 0
+DO ICF=1,SIZE(IX)
+   SF => SURFACE(M%CFACE(ICF)%SURF_INDEX)
+   IF (M%CFACE(ICF)%BOUNDARY_TYPE/=SOLID_BOUNDARY .OR. (SF%SPECIES_BC_INDEX==NO_MASS_FLUX .AND. ALL(SF%LEAK_PATH<1))) CYCLE
+   N = N+1; IX(N) = ICF
+ENDDO
+ALLOCATE(O%CFV(N),O%NJ(N,3),O%TJ(N,3),O%UWC(0:N,3)); O%TJ = 0._EB; O%UWC = 0._EB
+DO I=1,N
+   SF => SURFACE(M%CFACE(IX(I))%SURF_INDEX); BC => M%BOUNDARY_COORD(M%CFACE(IX(I))%BC_INDEX)
+   O%CFV(I) = M%CFACE(IX(I))%B1_INDEX; O%NJ(I,:) = BC%NVEC
+   IF (.NOT.ALL(SF%UVW>-1.E12_EB)) CYCLE
+   DN = DOT_PRODUCT(SF%UVW,BC%NVEC)
+   IF (DN<=0._EB) THEN
+      WRITE(LU_ERR,'(3A,3F12.4,A)') 'ERROR: SURF ',TRIM(SF%ID),' has a face at',BC%X,BC%Y,BC%Z, &
+                                    ' that looks away from its UVW. Split the SURF so that each part faces its jet.'
+      STOP_STATUS = SETUP_STOP; RETURN
+   ENDIF
+   O%TJ(I,:) = (SF%UVW-DN*BC%NVEC)/DN
+ENDDO
+END SUBROUTINE O3E_BUILD_CFV
+
+
 SUBROUTINE CC_O3E_SETUP
 ! Per-piece momentum (CC_O3E): the band lists of each mesh (FV%O3), built once. First the cells that are not plain,
 ! cut or in a CV of several members, in the mesh and its first guard layer: there from the mesh across.
@@ -4899,6 +4935,7 @@ DO N=1,NR
    IJK = NINT(RB(2:4,N)); C(NINT(RB(1,N)))%NP(IJK(1),IJK(2),IJK(3)) = .TRUE.
 ENDDO
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   CALL O3E_BUILD_CFV(NM)
    CALL O3E_BUILD_EDGES(NM,C(NM)%NP,BAND,EK)
    CALL O3E_BUILD_ARMS(NM,BAND,EK)
    CALL O3E_BUILD_ROT(NM,EK)
@@ -15189,6 +15226,7 @@ REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),O
 REAL(EB) :: DCB,DBC,MC,DC,G(3),S
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
+CALL CC_O3E_WALL_VELOCITY(NM)
 IF (PREDICTOR) THEN
    VC => M%FV%FACE%VEL; U1(1:SIZE(M%U)) => M%U; V1(1:SIZE(M%V)) => M%V; W1(1:SIZE(M%W)) => M%W
    DP1(1:SIZE(M%D)) => M%D; RH1(1:SIZE(M%RHO)) => M%RHO
@@ -15328,6 +15366,29 @@ SUBROUTINE CC_O3E_FORCE_B(NM)
 INTEGER, INTENT(IN) :: NM
 IF (MESHES(NM)%FV%O3%NB==0) RETURN
 END SUBROUTINE CC_O3E_FORCE_B
+
+
+SUBROUTINE CC_O3E_WALL_VELOCITY(NM)
+! Per stage, the wall velocity of the CFACEs of CFV of mesh NM (design 7.3): UWC = w n + MAX(w,0) T, w the speed into the
+! gas as head has set and ramped it, HVAC included, at the stage's time level as CUTFACE_VELOCITIES takes it: -U_NORMAL
+! in the predictor (T_n), -U_NORMAL_S in the corrector (T_n+1).
+INTEGER, INTENT(IN) :: NM
+INTEGER :: I
+INTEGER, POINTER, CONTIGUOUS :: CFV(:)
+REAL(EB), POINTER, CONTIGUOUS :: NJ(:,:),TJ(:,:),UWC(:,:)
+REAL(EB), POINTER :: UN(:)
+REAL(EB) :: W
+CFV => MESHES(NM)%FV%O3%CFV; NJ => MESHES(NM)%FV%O3%NJ; TJ => MESHES(NM)%FV%O3%TJ; UWC => MESHES(NM)%FV%O3%UWC
+IF (PREDICTOR) THEN
+   UN => MESHES(NM)%BOUNDARY_PROP1%U_NORMAL
+ELSE
+   UN => MESHES(NM)%BOUNDARY_PROP1%U_NORMAL_S
+ENDIF
+DO I=1,SIZE(CFV)
+   W = -UN(CFV(I))
+   UWC(I,:) = W*NJ(I,:)+MAX(W,0._EB)*TJ(I,:)
+ENDDO
+END SUBROUTINE CC_O3E_WALL_VELOCITY
 
 
 ! ! ---------------------------- DEBUG_WAIT ---------------------------------------

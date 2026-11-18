@@ -943,6 +943,7 @@ TYPE SURFACE_TYPE
    INTEGER, DIMENSION(3) :: RGB
    REAL(EB) :: TRANSPARENCY
    REAL(EB), DIMENSION(2) :: VEL_T,EMBER_GENERATION_HEIGHT=-1._EB
+   REAL(EB), DIMENSION(3) :: UVW=-1.E12_EB  !< Jet direction (unit vector) of a GEOM surface with CC_O3E; -1.E12: none
    INTEGER, DIMENSION(2) :: LEAK_PATH,DUCT_PATH
    INTEGER :: THERMAL_BC_INDEX,NPPC,SPECIES_BC_INDEX,VELOCITY_BC_INDEX,SURF_TYPE,N_CELLS_INI,N_CELLS_MAX=0, &
               PART_INDEX,PROP_INDEX=-1,RAMP_T_I_INDEX=-1,RAMP_H_FIXED_INDEX=-1,RAMP_H_FIXED_B_INDEX=-1
@@ -1574,6 +1575,9 @@ TYPE CC_O3E_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: VPTR,VED,MPTR,MIX,GPTR,GIX !< CSR: lateral stress of a band piece (edges);
                                                      !< members of a CV (cells, flat); Gauss sums of a CV by axis (rows).
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VW,MW,GW,TN !< Their weights; (0:3*NC) tau_aa of each CV by axis, TN(0)=0.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CFV      !< BOUNDARY_PROP1 index of each CFACE whose SURF has a velocity.
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NJ,TJ    !< (1:SIZE(CFV),3) its normal n into the gas; its jet vector T (7.3).
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: UWC      !< (0:SIZE(CFV),3) the stage's wall velocity w n + MAX(w,0) T; row 0 is 0.
 END TYPE CC_O3E_TYPE
 
 !> \brief Mesh-owned finite-volume container for the unstructured active region.
