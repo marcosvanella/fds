@@ -1895,7 +1895,7 @@ CUTCELL_DO : DO L=1,SIZE(MESHES(NM)%CFL_CUT,2)
          MURDN   = MU_TMP * BOUNDARY_PROP1(CFACE(ICFA)%B1_INDEX)%RDN
          ! Outflow through the wall (suction), as the gas faces add theirs; a blowing wall's inflow leaves through them.
          UVWA(IROW) = UVWA(IROW) + MAX(0._EB,VELN*AF)
-         MURA(IROW) = MURA(IROW) + MURDN * AF
+         IF (.NOT.CC_O3E) MURA(IROW) = MURA(IROW) + MURDN * AF  ! CC_O3E: the wall terms are point-implicit
       END SELECT
    ENDDO IFC_LOOP
    ! Divergence:
