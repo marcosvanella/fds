@@ -1,0 +1,19 @@
+&HEAD CHID='geom_rigid_rotation_3d_N21_ref', TITLE='Complex Geometry: exact flow 31, rigid rotation between two concentric GEOM spheres, N=21, reference with the previous cut-cell momentum.' /
+
+# PERIODIC_TEST=31: initial velocity and wall velocity from the exact solution; the face velocities and their exact values are
+# written to geom_rigid_rotation_3d_N21_ref_mms_m1_s<step>.csv at MMS_TIMER (see Utilities/Python/scripts/geom_exact_flows_error.py).
+&MESH IJK=21,21,21, XB=-1.05,1.05,-1.05,1.05,-1.05,1.05 /
+&TIME T_END=10 /
+&MISC PERIODIC_TEST=31, SIMULATION_MODE='DNS', NOISE=.FALSE., STRATIFICATION=.FALSE., GVEC=0.,0.,0., TMPA=20. /
+&PRES SOLVER='UGLMAT' /
+&RADI RADIATION=.FALSE. /
+&DUMP MMS_TIMER=9.999, NFRAMES=10, DIAGNOSTICS_INTERVAL=1000 /
+
+&SPEC ID='GAS', BACKGROUND=.TRUE., MW=28.97, VISCOSITY=0.00602158108 /
+&SURF ID='IN',  COLOR='RED' /
+&SURF ID='OUT', COLOR='BLUE' /
+
+&GEOM ID='INNER', SURF_ID='IN', SPHERE_ORIGIN=0.013,0.027,-0.019, SPHERE_RADIUS=0.5, N_LEVELS=3 /
+&GEOM ID='OUTER', SURF_ID='OUT', BINARY_FILE='geom_sphere_cavity.bin' /
+
+&TAIL /

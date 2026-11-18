@@ -61,6 +61,7 @@ Assal
 Aubin
 Avanc
 Axisymmetric
+azimuthal
 BBr
 BCl
 BDP
@@ -186,6 +187,8 @@ CONDUCTIVITY
 COORD
 COR
 CORRCOEF
+Couette
+couette
 COV
 CP
 CPUA

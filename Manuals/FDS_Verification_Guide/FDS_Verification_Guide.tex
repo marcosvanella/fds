@@ -7848,6 +7848,145 @@ For \ct{OBST} and grid aligned stress method where the momentum equations are so
 
 
 
+\subsection{Exact Flows at GEOM Boundaries: Cut-cell Momentum}
+\label{sec:geom_exact_flows}
+
+The rotated-cube cases above verify a manufactured solution around a cube turned against the grid.
+This section verifies the velocity of the flow next to a \ct{GEOM} wall against exact solutions of the incompressible
+momentum equations in which the wall is not aligned with the grid.
+Seven flows are used, selected with \ct{&MISC PERIODIC_TEST=31} to \ct{37}.
+Each is run twice on every grid, with the per-piece cut-cell momentum scheme (\ct{&MISC CC_O3E=.TRUE.}) and with the
+reference scheme, the cut-cell momentum treatment used before the per-piece scheme.
+The name of the reference deck ends in \ct{_ref}; the two decks of a pair differ only in the \ct{CC_O3E} flag.
+
+Two geometries are used.
+The \emph{spheres} are two concentric \ct{GEOM} spheres of radius $R_1=0.5$ m and $R_2=1$ m, centered at
+$\mathbf{x}_c=(0.013,0.027,-0.019)$ m so that no wall is symmetric to the grid planes, in a cube of side 2.1 m.
+The inner bodies are \ct{GEOM} primitives (\ct{SPHERE_ORIGIN}, \ct{CYLINDER_ORIGIN}).
+The outer walls are cavities, built from facets: an inverted icosphere of 5120 facets in 3D, and in 2D (annulus and channel) extruded concave polygons, with 128 facets per half circle in the annulus.
+The gas lies between the spheres and the turning axis is $\mathbf{a}=(1,2,2)/3$.
+The \emph{annulus} is the two-dimensional version: two concentric \ct{GEOM} cylinders of the same radii about the
+origin of a square of side 3 m, one cell thick in $y$, with the turning axis along $y$.
+The \emph{channel} is a \ct{GEOM} frame of half width $h=1$ m and length 12 m, turned by $\theta=30^\circ$
+from the grid, in a square of side 12.5 m (two-dimensional).
+The exact solutions, the wall speeds $U_w$ used to normalize the errors, and the decks are in
+Table~\ref{tab:geom_exact_flows_cases}.
+With $\Omega=0.2$ rad/s, $\mathbf{r}=\mathbf{x}-\mathbf{x}_c$, $r=|\mathbf{r}-(\mathbf{a}\cdot\mathbf{r})\mathbf{a}|$ in the
+annulus and $r=|\mathbf{r}|$ on the spheres, and $s=-x\sin\theta+z\cos\theta$ across the channel:
+\begin{align}
+\mathbf{u}_{31}&=\Omega\,\mathbf{a}\times\mathbf{r} &&\text{rigid rotation, both walls turn} \label{eq:exact31}\\
+\mathbf{u}_{32}&=\Omega\,\frac{R_1^3\,(R_2^3/r^3-1)}{R_2^3-R_1^3}\;\mathbf{a}\times\mathbf{r}
+   &&\text{Stokes flow between spheres, inner sphere turning, outer at rest} \label{eq:exact32}\\
+\mathbf{u}_{33}&=\Omega\,\frac{R_2^2\,(1-R_1^2/r^2)}{R_2^2-R_1^2}\;\mathbf{a}\times\mathbf{r}
+   &&\text{circular Couette flow, outer cylinder turning, inner at rest} \label{eq:exact33}\\
+\mathbf{u}_{34}&=\left(1-\frac{s^2}{h^2}\right)\mathbf{e}_\parallel
+   &&\text{Poiseuille flow in the turned channel} \label{eq:exact34}\\
+\mathbf{u}_{35}&=\mathbf{u}_0,\quad |\mathbf{u}_0|=0.2\ \text{m/s}
+   &&\text{uniform flow, the walls move with the fluid} \label{eq:exact35}\\
+\mathbf{u}_{36}&=\frac{e^{Vh/\nu}-e^{Vs/\nu}}{e^{Vh/\nu}-e^{-Vh/\nu}}\,\mathbf{e}_\parallel+V\,\mathbf{e}_\perp
+   &&\text{channel with a blowing and a sucking wall, } V=1\ \text{m/s} \label{eq:exact36}\\
+\mathbf{u}_{37}&=\Omega\,\left[1+0.3\sin\left(\frac{8\pi t}{T}\right)\right]\mathbf{a}\times\mathbf{r}
+   &&\text{oscillating rigid rotation, } T=T_{END} \label{eq:exact37}
+\end{align}
+where $\mathbf{e}_\parallel=(\cos\theta,0,\sin\theta)$ and $\mathbf{e}_\perp=(-\sin\theta,0,\cos\theta)$.
+For \ct{PERIODIC_TEST=37} a body force per unit mass $\dot\Omega\,\mathbf{a}\times\mathbf{r}$ is added so that
+Eq.~\eqref{eq:exact37} is a solution (the walls follow the rotation).
+The azimuthal flows of the cylinders, Eqs.~\eqref{eq:exact33} and \eqref{eq:exact37}, and the channel and uniform flows are exact
+solutions of the Navier--Stokes equations at any viscosity.
+Equation~\eqref{eq:exact32} is the exact solution of the Stokes problem; at the viscosity of the decks the difference to the
+Navier--Stokes solution is not quantified here.
+Equation~\eqref{eq:exact34} is an exact steady solution: the end walls blow and suck the parabolic profile, and the pressure
+gradient that holds it is set by the pressure solver.
+
+\begin{table}[ht]
+\caption[Exact cut-cell flow cases]{Exact cut-cell flow cases. $N$ is the number of cells across the domain
+(the number of cells per metre for the channel). $\nu$ is the kinematic viscosity, $T_{END}$ the end time, $U_w$ the wall speed
+used to normalize the error. Decks: \ct{Complex_Geometry/geom_<name>_N<N>.fds} and \ct{..._N<N>_ref.fds}.}
+\label{tab:geom_exact_flows_cases}
+\centering
+\small
+\begin{tabular}{cp{2.1in}llccc}
+\toprule
+\ct{PERIODIC_TEST} & \ct{<name>} & Geometry & $N$ & $\nu$ (m$^2$/s) & $T_{END}$ (s) & $U_w$ (m/s) \\
+\midrule
+31 & \ct{rigid_rotation_3d}      & spheres  & 21, 42     & 0.005   & 10  & 0.1 \\
+32 & \ct{couette_3d}   & spheres  & 21, 42     & 0.005   & 40  & 0.1 \\
+33 & \ct{couette_2d}    & annulus  & 24, 48, 96 & 0.001   & 100 & 0.2 \\
+34 & \ct{poiseuille_2d_30deg} & channel  & 4, 8, 16   & 1.5E-5  & 6   & 1 \\
+35 & \ct{uniform_flow_2d}    & annulus  & 24, 48, 96 & 0.01    & 20  & 0.2 \\
+36 & \ct{blowing_channel_2d_30deg}      & channel  & 4, 8, 16   & 0.2     & 1   & 1 \\
+37 & \ct{oscillating_rotation_2d}     & annulus  & 24, 48, 96 & 0.01    & 20  & 0.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Set-up.}
+The flow is isothermal and laminar (\ct{SIMULATION_MODE='DNS'}) with the pressure solver \ct{UGLMAT}.
+Except for case 32, which starts at rest, the initial velocity is the exact solution, and the velocity of every \ct{GEOM}
+wall is set to the exact solution at the wall.
+The viscosity is constant.
+The error is therefore the drift of the discrete solution away from an exact state, not a spin-up.
+At the time given by \ct{MMS_TIMER} (set to 1 ms before $T_{END}$) FDS writes, for every gas velocity face and for every gas piece of a cut face,
+its location, area, computed normal velocity $u_n$ and exact normal velocity $u_{n,ex}$ at the face center or the piece centroid
+to the file \ct{CHID_mms_m<mesh>_s<step>.csv}.
+The script \ct{Utilities/Python/scripts/geom_exact_flows_error.py} reads these files and computes
+\begin{equation}
+   \epsilon_1 = \frac{1}{U_w}\;\frac{\sum_f A_f\,|u_{n,f}-u_{n,ex,f}|}{\sum_f A_f}
+\end{equation}
+over all faces and pieces, $A_f$ being the area.
+It plots $\epsilon_1$ against the grid spacing $\Delta x$ for the two schemes with the lines $O(\Delta x)$ and $O(\Delta x^2)$ for reference.
+The spherical Couette flow with $N=42$ is run on $2\times2\times2$ meshes and 8 processes, all other decks on one mesh and one
+process.
+The per-piece scheme does not yet support several meshes in this case, so the $N=42$ point of case 32 is missing for that scheme and its deck is not yet in \ct{FDS_Cases.sh}.
+The sphere walls of the cases 31 and 32 are read from the file \ct{Complex_Geometry/geom_sphere_cavity.bin} (\ct{BINARY_FILE}), a binary \ct{GEOM} file written by FDS from the inverted icosphere.
+
+\begin{figure}[ht]
+\begin{center}
+\begin{tabular*}{\textwidth}{c@{\extracolsep{\fill}}c}
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_rigid_rotation_3d_convergence.pdf} &
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_couette_3d_convergence.pdf} \\
+\end{tabular*}
+\end{center}
+\caption[Exact flows between spheres, \ct{PERIODIC_TEST}=31, 32]{Error of the normal face velocity between two \ct{GEOM} spheres as a function of grid spacing.
+(Left) rigid rotation, \ct{PERIODIC_TEST=31}, $t=10$ s. (Right) spherical Couette flow, \ct{PERIODIC_TEST=32}, $t=40$ s.}
+\label{fig:geom_exact_flows_spheres}
+\end{figure}
+
+\begin{figure}[ht]
+\begin{center}
+\begin{tabular*}{\textwidth}{c@{\extracolsep{\fill}}c}
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_couette_2d_convergence.pdf} &
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_oscillating_rotation_2d_convergence.pdf} \\
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_uniform_flow_2d_convergence.pdf} & \\
+\end{tabular*}
+\end{center}
+\caption[Exact flows in an annulus, \ct{PERIODIC_TEST}=33, 35, 37]{Error of the normal face velocity between two \ct{GEOM} cylinders as a function of grid spacing.
+(Top left) circular Couette flow, \ct{PERIODIC_TEST=33}, $t=100$ s. (Top right) oscillating rigid rotation, \ct{PERIODIC_TEST=37}, $t=20$ s.
+(Bottom) uniform flow, \ct{PERIODIC_TEST=35}, $t=20$ s.}
+\label{fig:geom_exact_flows_annulus}
+\end{figure}
+
+\begin{figure}[ht]
+\begin{center}
+\begin{tabular*}{\textwidth}{c@{\extracolsep{\fill}}c}
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_poiseuille_2d_30deg_convergence.pdf} &
+\includegraphics[height=2.2in]{../FDS_Verification_Guide/SCRIPT_FIGURES/geom_blowing_channel_2d_30deg_convergence.pdf} \\
+\end{tabular*}
+\end{center}
+\caption[Exact flows in a turned channel, \ct{PERIODIC_TEST}=34, 36]{Error of the normal face velocity in a channel turned by $30^\circ$ as a function of grid spacing.
+(Left) Poiseuille flow, \ct{PERIODIC_TEST=34}, $t=6$ s. (Right) channel with a blowing and a sucking wall, \ct{PERIODIC_TEST=36}, $t=1$ s.}
+\label{fig:geom_exact_flows_channel}
+\end{figure}
+
+\paragraph{Reading the figures.}
+A curve that is parallel to the $O(\Delta x^2)$ line shows that the velocity next to the \ct{GEOM} wall converges with second order,
+a curve parallel to the $O(\Delta x)$ line with first order, and a curve that does not fall with $\Delta x$ shows an error that does not
+come from the discretization.
+The error of the uniform flow, case 35, is a test of whether a state that is exact for any wall position stays exact when cut cells and
+moving walls are present; its level is that of the round-off error when the scheme preserves the state.
+The comparison of the two schemes is the comparison of the two curves in each figure.
+
+
 \subsection{Poiseuille Flow in Channel Created by Two GEOMs}
 
 \label{sec:poiseuille_cc}

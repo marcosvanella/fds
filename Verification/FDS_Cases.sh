@@ -171,6 +171,45 @@ $QFDS -d Complex_Geometry rotated_cube_45deg_128_stm.fds
 $QFDS -d Complex_Geometry rotated_cube_45deg_256_stm.fds
 $QFDS -o 2 -d Complex_Geometry rotated_cube_45deg_320_stm.fds
 
+$QFDS -d Complex_Geometry geom_rigid_rotation_3d_N21_ref.fds
+$QFDS -d Complex_Geometry geom_rigid_rotation_3d_N21.fds
+$QFDS -d Complex_Geometry geom_rigid_rotation_3d_N42_ref.fds
+$QFDS -d Complex_Geometry geom_rigid_rotation_3d_N42.fds
+$QFDS -d Complex_Geometry geom_couette_3d_N21_ref.fds
+$QFDS -d Complex_Geometry geom_couette_3d_N21.fds
+$QFDS -p 8 -d Complex_Geometry geom_couette_3d_N42_ref.fds
+#$QFDS -p 8 -d Complex_Geometry geom_couette_3d_N42.fds   # multi-mesh run of the per-piece scheme: enable when supported
+$QFDS -d Complex_Geometry geom_couette_2d_N24_ref.fds
+$QFDS -d Complex_Geometry geom_couette_2d_N24.fds
+$QFDS -d Complex_Geometry geom_couette_2d_N48_ref.fds
+$QFDS -d Complex_Geometry geom_couette_2d_N48.fds
+$QFDS -d Complex_Geometry geom_couette_2d_N96_ref.fds
+$QFDS -d Complex_Geometry geom_couette_2d_N96.fds
+$QFDS -d Complex_Geometry geom_poiseuille_2d_30deg_N4_ref.fds
+$QFDS -d Complex_Geometry geom_poiseuille_2d_30deg_N4.fds
+$QFDS -d Complex_Geometry geom_poiseuille_2d_30deg_N8_ref.fds
+$QFDS -d Complex_Geometry geom_poiseuille_2d_30deg_N8.fds
+$QFDS -d Complex_Geometry geom_poiseuille_2d_30deg_N16_ref.fds
+$QFDS -d Complex_Geometry geom_poiseuille_2d_30deg_N16.fds
+$QFDS -d Complex_Geometry geom_uniform_flow_2d_N24_ref.fds
+$QFDS -d Complex_Geometry geom_uniform_flow_2d_N24.fds
+$QFDS -d Complex_Geometry geom_uniform_flow_2d_N48_ref.fds
+$QFDS -d Complex_Geometry geom_uniform_flow_2d_N48.fds
+$QFDS -d Complex_Geometry geom_uniform_flow_2d_N96_ref.fds
+$QFDS -d Complex_Geometry geom_uniform_flow_2d_N96.fds
+$QFDS -d Complex_Geometry geom_blowing_channel_2d_30deg_N4_ref.fds
+$QFDS -d Complex_Geometry geom_blowing_channel_2d_30deg_N4.fds
+$QFDS -d Complex_Geometry geom_blowing_channel_2d_30deg_N8_ref.fds
+$QFDS -d Complex_Geometry geom_blowing_channel_2d_30deg_N8.fds
+$QFDS -d Complex_Geometry geom_blowing_channel_2d_30deg_N16_ref.fds
+$QFDS -d Complex_Geometry geom_blowing_channel_2d_30deg_N16.fds
+$QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N24_ref.fds
+$QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N24.fds
+$QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N48_ref.fds
+$QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N48.fds
+$QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N96_ref.fds
+$QFDS -d Complex_Geometry geom_oscillating_rotation_2d_N96.fds
+
 #$QFDS -d Complex_Geometry zero_thick_roof.fds
 $QFDS -d Complex_Geometry cone_1mesh.fds
 $QFDS -d Complex_Geometry geom_mass_file_test.fds

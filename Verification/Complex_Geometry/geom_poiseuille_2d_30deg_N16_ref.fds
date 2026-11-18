@@ -1,0 +1,38 @@
+&HEAD CHID='geom_poiseuille_2d_30deg_N16_ref', TITLE='Complex Geometry: exact flow 34, plane Poiseuille flow in a GEOM channel turned 30 degrees, N=16, reference with the previous cut-cell momentum.' /
+
+# PERIODIC_TEST=34: initial velocity and wall velocity from the exact solution; the face velocities and their exact values are
+# written to geom_poiseuille_2d_30deg_N16_ref_mms_m1_s<step>.csv at MMS_TIMER (see Utilities/Python/scripts/geom_exact_flows_error.py).
+&MESH IJK=200,1,200, XB=-6.25,6.25,-0.1,0.1,-6.25,6.25 /
+&TIME T_END=6 /
+&MISC PERIODIC_TEST=34, SIMULATION_MODE='DNS', NOISE=.FALSE., STRATIFICATION=.FALSE., GVEC=0.,0.,0., TMPA=20. /
+&PRES SOLVER='UGLMAT' /
+&RADI RADIATION=.FALSE. /
+&DUMP MMS_TIMER=5.999, NFRAMES=10, DIAGNOSTICS_INTERVAL=1000 /
+
+&SPEC ID='GAS', BACKGROUND=.TRUE., MW=28.97, CONDUCTIVITY=1.0, SPECIFIC_HEAT=1.0, VISCOSITY=1.8e-05 /
+&SURF ID='COLD', TMP_FRONT=20.0, COLOR='BLUE' /
+
+&GEOM ID='WALL_UP', SURF_ID='COLD',
+      VERTS=-13.6602540,-0.2000000,3.6602540,
+            3.6602540,-0.2000000,13.6602540,
+            8.6602540,-0.2000000,5.0000000,
+            5.1961524,-0.2000000,3.0000000,
+            4.6961524,-0.2000000,3.8660254,
+            -5.6961524,-0.2000000,-2.1339746,
+            -5.1961524,-0.2000000,-3.0000000,
+            -8.6602540,-0.2000000,-5.0000000,
+      POLY=1,2,3,4,5,6,7,8,
+      EXTRUDE=0.4 /
+&GEOM ID='WALL_LO', SURF_ID='COLD',
+      VERTS=-8.6602540,-0.2000000,-5.0000000,
+            -5.1961524,-0.2000000,-3.0000000,
+            -4.6961524,-0.2000000,-3.8660254,
+            5.6961524,-0.2000000,2.1339746,
+            5.1961524,-0.2000000,3.0000000,
+            8.6602540,-0.2000000,5.0000000,
+            13.6602540,-0.2000000,-3.6602540,
+            -3.6602540,-0.2000000,-13.6602540,
+      POLY=1,2,3,4,5,6,7,8,
+      EXTRUDE=0.4 /
+
+&TAIL /

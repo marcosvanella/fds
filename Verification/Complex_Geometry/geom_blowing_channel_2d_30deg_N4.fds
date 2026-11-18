@@ -1,0 +1,38 @@
+&HEAD CHID='geom_blowing_channel_2d_30deg_N4', TITLE='Complex Geometry: exact flow 36, channel turned 30 degrees with a blowing and a sucking GEOM wall, N=4.' /
+
+# PERIODIC_TEST=36: initial velocity and wall velocity from the exact solution; the face velocities and their exact values are
+# written to geom_blowing_channel_2d_30deg_N4_mms_m1_s<step>.csv at MMS_TIMER (see Utilities/Python/scripts/geom_exact_flows_error.py).
+&MESH IJK=50,1,50, XB=-6.25,6.25,-0.1,0.1,-6.25,6.25 /
+&TIME T_END=1 /
+&MISC PERIODIC_TEST=36, SIMULATION_MODE='DNS', NOISE=.FALSE., STRATIFICATION=.FALSE., GVEC=0.,0.,0., TMPA=20., CC_O3E=.TRUE. /
+&PRES SOLVER='UGLMAT' /
+&RADI RADIATION=.FALSE. /
+&DUMP MMS_TIMER=0.999, NFRAMES=10, DIAGNOSTICS_INTERVAL=1000 /
+
+&SPEC ID='GAS', BACKGROUND=.TRUE., MW=28.97, CONDUCTIVITY=1.0, SPECIFIC_HEAT=1.0, VISCOSITY=0.2408632432 /
+&SURF ID='COLD', TMP_FRONT=20.0, COLOR='BLUE' /
+
+&GEOM ID='WALL_UP', SURF_ID='COLD',
+      VERTS=-13.6602540,-0.2000000,3.6602540,
+            3.6602540,-0.2000000,13.6602540,
+            8.6602540,-0.2000000,5.0000000,
+            5.1961524,-0.2000000,3.0000000,
+            4.6961524,-0.2000000,3.8660254,
+            -5.6961524,-0.2000000,-2.1339746,
+            -5.1961524,-0.2000000,-3.0000000,
+            -8.6602540,-0.2000000,-5.0000000,
+      POLY=1,2,3,4,5,6,7,8,
+      EXTRUDE=0.4 /
+&GEOM ID='WALL_LO', SURF_ID='COLD',
+      VERTS=-8.6602540,-0.2000000,-5.0000000,
+            -5.1961524,-0.2000000,-3.0000000,
+            -4.6961524,-0.2000000,-3.8660254,
+            5.6961524,-0.2000000,2.1339746,
+            5.1961524,-0.2000000,3.0000000,
+            8.6602540,-0.2000000,5.0000000,
+            13.6602540,-0.2000000,-3.6602540,
+            -3.6602540,-0.2000000,-13.6602540,
+      POLY=1,2,3,4,5,6,7,8,
+      EXTRUDE=0.4 /
+
+&TAIL /
