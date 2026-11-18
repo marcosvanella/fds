@@ -14852,12 +14852,12 @@ IF (CC_GRID_CV_OCC_FLAG_READY(NM,IG)) THEN
 ENDIF
 IF (CC_GRID_CV_IS_ABSORBED(NM,CELL_TYPE,IJK,ICC,JCC,VOLUME,XYZCEN,FOUND_GEOM)) RETURN
 IF (.NOT.ALLOCATED(REMOTE_ABS_NM)) THEN
-   WRITE(LU_ERR,'(A)') 'ERROR: Phase 5 CV remote ABSORBED list is not allocated.'
+   WRITE(LU_ERR,'(A)') 'ERROR: CV agglomeration remote ABSORBED list is not allocated.'
    STOP_STATUS = SETUP_STOP
    RETURN
 ENDIF
 IF (N_REMOTE_ABS >= SIZE(REMOTE_ABS_NM)) THEN
-   WRITE(LU_ERR,'(A,2I10)') 'ERROR: Phase 5 CV remote ABSORBED buffer overflow:',N_REMOTE_ABS,SIZE(REMOTE_ABS_NM)
+   WRITE(LU_ERR,'(A,2I10)') 'ERROR: CV agglomeration remote ABSORBED buffer overflow:',N_REMOTE_ABS,SIZE(REMOTE_ABS_NM)
    STOP_STATUS = SETUP_STOP
    RETURN
 ENDIF
@@ -14892,12 +14892,12 @@ IF (CC_GRID_CV_OCC_FLAG_READY(NM,IG)) THEN
 ENDIF
 IF (CC_GRID_CV_IS_CLAIMED(NM,CELL_TYPE,IJK,ICC,JCC,VOLUME,XYZCEN,FOUND_GEOM)) RETURN
 IF (.NOT.ALLOCATED(REMOTE_CLAIM_NM)) THEN
-   WRITE(LU_ERR,'(A)') 'ERROR: Phase 5 CV remote CLAIMED list is not allocated.'
+   WRITE(LU_ERR,'(A)') 'ERROR: CV agglomeration remote CLAIMED list is not allocated.'
    STOP_STATUS = SETUP_STOP
    RETURN
 ENDIF
 IF (N_REMOTE_CLAIM >= SIZE(REMOTE_CLAIM_NM)) THEN
-   WRITE(LU_ERR,'(A,2I10)') 'ERROR: Phase 5 CV remote CLAIMED buffer overflow:',N_REMOTE_CLAIM,SIZE(REMOTE_CLAIM_NM)
+   WRITE(LU_ERR,'(A,2I10)') 'ERROR: CV agglomeration remote CLAIMED buffer overflow:',N_REMOTE_CLAIM,SIZE(REMOTE_CLAIM_NM)
    STOP_STATUS = SETUP_STOP
    RETURN
 ENDIF
@@ -17197,7 +17197,7 @@ DO
          IF (.NOT.FOUND) CYCLE
 
          IF (N_PROPOSAL >= N_CHILD) THEN
-            WRITE(LU_ERR,'(A,2I10)') 'ERROR: Phase 5 CV proposal buffer too small:',N_PROPOSAL,N_CHILD
+            WRITE(LU_ERR,'(A,2I10)') 'ERROR: CV agglomeration proposal buffer too small:',N_PROPOSAL,N_CHILD
             STOP_STATUS = SETUP_STOP
             EXIT
          ENDIF
@@ -17378,7 +17378,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    MAX_MEMBERS = MAX(2, MAXVAL(OWNER_MEMBER_COUNT))
    CALL CC_GRID_ENSURE_CV_MEMBER_CAPACITY(MM,MAX_MEMBERS)
    IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,2I10)') &
-      '   Phase 5 CV MEMBER_* first extent / max members-per-CV =',NM,MAX_MEMBERS
+      '   CV agglomeration MEMBER_* first extent / max members-per-CV =',NM,MAX_MEMBERS
    DEALLOCATE(OWNER_MEMBER_COUNT)
 ENDDO
 
@@ -17492,11 +17492,12 @@ DO IPROPOSAL=1,N_PROPOSAL
 ENDDO
 
 IF (GET_CUTCELLS_VERBOSE) THEN
-   WRITE(LU_SETCC,'(A,5I10)') '   Phase 5 CV pairs owner_rows, inactive_children, missing_master, local_master, remote_master =', &
-                              N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER,N_LOCAL_MASTER,N_REMOTE_MASTER
-   WRITE(LU_SETCC,'(A,2I10)') '   Phase 5 missing masters local, remote =', &
+   WRITE(LU_SETCC,'(A,5I10)') &
+      '   CV agglomeration pairs owner_rows, inactive_children, missing_master, local_master, remote_master =', &
+      N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER,N_LOCAL_MASTER,N_REMOTE_MASTER
+   WRITE(LU_SETCC,'(A,2I10)') '   CV agglomeration missing masters local, remote =', &
                               N_MISSING_LOCAL_MASTER,N_MISSING_REMOTE_MASTER
-   WRITE(LU_SETCC,'(A,2I10)') '   Phase 5 missing masters cut, regular =', &
+   WRITE(LU_SETCC,'(A,2I10)') '   CV agglomeration missing masters cut, regular =', &
                               N_MISSING_CUT_MASTER,N_MISSING_REG_MASTER
 ENDIF
 IBUF=(/N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER,N_LOCAL_MASTER,N_REMOTE_MASTER, &
@@ -17511,14 +17512,15 @@ N_MISSING_LOCAL_MASTER=IBUF(6)
 N_MISSING_REMOTE_MASTER=IBUF(7)
 IF (N_MISSING_MASTER>0 .OR. N_OWNER_PAIR/=N_PROPOSAL_GLOBAL .OR. N_CHILD_INACTIVE/=N_PROPOSAL_GLOBAL) THEN
    IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,4I10)') &
-      '   Phase 5 ownership reconciliation FAIL proposals/owners/children/missing =', &
+      '   CV agglomeration ownership reconciliation FAIL proposals/owners/children/missing =', &
       N_PROPOSAL_GLOBAL,N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER
    IF (MY_RANK==0) WRITE(LU_ERR,'(A,4I10)') &
       'ERROR: SET_CVS_3D cross-rank CV ownership reconciliation failed: proposals/owners/children/missing =', &
       N_PROPOSAL_GLOBAL,N_OWNER_PAIR,N_CHILD_INACTIVE,N_MISSING_MASTER
    STOP_STATUS=SETUP_STOP
 ELSE
-   IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,I10)') '   Phase 5 ownership reconciliation PASS proposals =',N_PROPOSAL_GLOBAL
+   IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,I10)') &
+      '   CV agglomeration ownership reconciliation PASS proposals =',N_PROPOSAL_GLOBAL
 ENDIF
 IF (GET_CUTCELLS_VERBOSE) FLUSH(LU_SETCC)
 
@@ -17576,7 +17578,7 @@ IF (ALLOCATED(M%FV%CV%N_MEMBER)) THEN
 ENDIF
 IF (SLOT < 1 .OR. SLOT > MAX_ALLOC) THEN
    WRITE(LU_ERR,'(A,4I10)') &
-      'ERROR: Phase 5 CV MEMBER_* write exceeds allocated first extent: icv,slot,extent,n_member =', &
+      'ERROR: CV agglomeration MEMBER_* write exceeds allocated first extent: icv,slot,extent,n_member =', &
       OWNER_ICV,SLOT,MAX_ALLOC,N_MEMBER_NOW
    STOP_STATUS = SETUP_STOP
    RETURN
@@ -19560,7 +19562,7 @@ N_AMBIGUOUS_GLOBAL = N_AMBIGUOUS
 IF (N_MPI_PROCESSES>1) &
    CALL MPI_ALLREDUCE(N_AMBIGUOUS,N_AMBIGUOUS_GLOBAL,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,IERR)
 IF (N_AMBIGUOUS_GLOBAL>0) THEN
-   IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,I10)') '   Phase 6 ambiguous remote face rows =',N_AMBIGUOUS_GLOBAL
+   IF (GET_CUTCELLS_VERBOSE) WRITE(LU_SETCC,'(A,I10)') '   FV face build ambiguous remote face rows =',N_AMBIGUOUS_GLOBAL
    IF (MY_RANK==0) WRITE(LU_ERR,'(A,I0)') &
       'ERROR: SET_CVS_3D remote FACE reconciliation is not one-to-one; ambiguous rows = ',N_AMBIGUOUS_GLOBAL
    STOP_STATUS = SETUP_STOP
