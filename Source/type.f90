@@ -1554,17 +1554,20 @@ END TYPE CC_SKEW_TYPE
 !> \brief Per-piece momentum (CC_O3E) of a mesh, set once by CC_O3E_SETUP: NB band pieces (gas pieces not regular).
 
 TYPE CC_O3E_TYPE
-   INTEGER :: NB=0,NV=0,NE=0                         !< Band rows 1:NB, velocity rows 1:NV, gas edges 1:NE.
+   INTEGER :: NB=0,NV=0,NE=0,NG=0                    !< Band rows 1:NB, velocity rows 1:NV, edges 1:NE: gas edges 1:NG,
+                                                     !< then wall edges (fewer than four pieces, a gas corner).
    INTEGER :: KP(0:12)=0                             !< Rows KP(G-1)+1:KP(G) of group G: band (G=1:4), support (5:8) by
                                                      !< source (cut pieces' VEL, U, V, W); 9:11 guard faces held nowhere;
                                                      !< 12 wall points of moving walls (PERIODIC_TEST 31:37), set once.
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IX       !< (1:NV) FACE row of a cut piece, flat U, V, W index of a face.
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP,ENB   !< (1:NE,4) row of each arm and of its partner (0: none).
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP,ENB   !< (1:NE,4) row of each arm (0: a wall at rest) and of its partner
+                                                     !< (0: none).
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1) of the arms.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RDP      !< (1:NE,2) the same of the four pieces' own points.
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP       !< (0:NV) the stage's velocity of each row; UP(0)=0, a wall at rest;
                                                      !< then the moving walls' constants of the CVs' Gauss sums.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity and shear stress at the gas edges.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity and shear stress at the edges (ST=0 at a wall
+                                                     !< edge, unused).
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW,PW    !< (1:NE,4) transport weights; (1:NB,4) distribution weight
                                                      !< of the edge where the band piece is arm Q (0: none).
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: PS       !< (1:NB,4) the product of that edge in Q (0: none).

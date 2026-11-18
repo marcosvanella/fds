@@ -4899,7 +4899,7 @@ TYPE(BOUNDARY_COORD_TYPE), POINTER :: BC
 INTEGER :: NM,IF_,IW,NS,NR,N,IJK(3)
 LOGICAL, ALLOCATABLE :: BAND(:)
 INTEGER, ALLOCATABLE :: EK(:,:),DEST(:)
-REAL(EB), ALLOCATABLE :: SB(:,:),RB(:,:)
+REAL(EB), ALLOCATABLE :: SB(:,:),RB(:,:),EW(:,:)
 ALLOCATE(C(LOWER_MESH_INDEX:UPPER_MESH_INDEX))
 N = 0
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
@@ -4936,29 +4936,31 @@ DO N=1,NR
 ENDDO
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL O3E_BUILD_CFV(NM)
-   CALL O3E_BUILD_EDGES(NM,C(NM)%NP,BAND,EK)
-   CALL O3E_BUILD_ARMS(NM,BAND,EK)
-   CALL O3E_BUILD_ROT(NM,EK)
+   CALL O3E_BUILD_EDGES(NM,C(NM)%NP,BAND,EK,EW)
+   CALL O3E_BUILD_ARMS(NM,BAND,EK,EW)
+   CALL O3E_BUILD_ROT(NM,EK,EW)
    CALL O3E_BUILD_VISC(NM,C(NM)%NP,BAND)
 ENDDO
 END SUBROUTINE CC_O3E_SETUP
 
 
-SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK)
-! The band of mesh NM and its gas edges. A piece is regular when it is whole, its two cells are
-! plain (NP false) and its gas edges are regular, that is have four such pieces. The band is the gas pieces of the
-! mesh that are not regular (on the interface plane the lower mesh's). Each gas edge of the band is made once, by its
-! first band arm: EK its key (direction, low cell) and 1 if it is regular, EP its arms as FACE rows (-1: a face without
-! one).
+SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK,EW)
+! The band of mesh NM and its edges (O3E_EDGE). A piece is regular when it is whole, its two cells are plain (NP false)
+! and its edges are regular, that is gas edges of four such pieces. The band is the gas pieces of the mesh that are not
+! regular (on the interface plane the lower mesh's), so every piece of a wall edge. Each edge of the band is made once,
+! by its first band arm: EK its key (direction, low cell) and 1 if it is regular, EP its arms as FACE rows (-1: a face
+! without one, 0: none), EW its arms' factors and gaps and its point (O3E_EDGE). The gas edges first: rows 1:NG.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: NP(0:,0:,0:)
 LOGICAL, ALLOCATABLE, INTENT(OUT) :: BAND(:)
 INTEGER, ALLOCATABLE, INTENT(OUT) :: EK(:,:)
+REAL(EB), ALLOCATABLE, INTENT(OUT) :: EW(:,:)
 TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
 INTEGER :: IF_,Q,QQ,NE,AX,N(3),P4(4),K4(4)
-INTEGER, ALLOCATABLE :: EP(:,:)
+INTEGER, ALLOCATABLE :: EP(:,:),ORD(:)
 LOGICAL, ALLOCATABLE :: RG(:,:)
+REAL(EB) :: W9(9)
 
 F => MESHES(NM)%FV%FACE; O => MESHES(NM)%FV%O3
 ALLOCATE(BAND(F%N),RG(4,F%N)); BAND = .FALSE.; RG = .TRUE.
@@ -4967,30 +4969,33 @@ DO IF_=1,F%N_INT
    IF (F%KIND(IF_)==CC_FACE_KIND_REMOTE .AND. F%NBR_CV_NM(IF_)<NM) CYCLE
    BAND(IF_) = .NOT.PLAIN(IF_,F%X1AXIS(IF_),F%IJK_FACE(:,IF_))
    DO Q=1,4
-      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4)
-      IF (P4(1)==0) CYCLE
+      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W9)
+      IF (ALL(P4==0)) CYCLE
       DO QQ=1,4
          CALL O3E_ARM(K4,QQ,AX,N)
-         RG(Q,IF_) = RG(Q,IF_) .AND. PLAIN(P4(QQ),AX,N)
+         RG(Q,IF_) = RG(Q,IF_) .AND. P4(QQ)/=0 .AND. PLAIN(P4(QQ),AX,N)
       ENDDO
       BAND(IF_) = BAND(IF_) .OR. .NOT.RG(Q,IF_)
    ENDDO
 ENDDO
 O%NB = COUNT(BAND)
-ALLOCATE(EK(5,4*O%NB),EP(4,4*O%NB))
+ALLOCATE(EK(5,4*O%NB),EP(4,4*O%NB),EW(9,4*O%NB))
 NE = 0
 DO IF_=1,F%N_INT
    IF (.NOT.BAND(IF_)) CYCLE
    DO Q=1,4
-      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4)
-      IF (P4(1)==0) CYCLE
+      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W9)
+      IF (ALL(P4==0)) CYCLE
       IF (ANY(P4(1:Q-1)>0 .AND. BAND(MAX(P4(1:Q-1),1)))) CYCLE
-      NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,RG(Q,IF_))/); EP(:,NE) = P4
+      NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,RG(Q,IF_))/); EP(:,NE) = P4; EW(:,NE) = W9
    ENDDO
 ENDDO
-O%NE = NE
-EK = EK(:,1:NE)
-O%EP = TRANSPOSE(EP(:,1:NE))
+O%NE = NE; O%NG = COUNT(ALL(EP(:,1:NE)/=0,DIM=1))
+ALLOCATE(ORD(NE))
+ORD(1:O%NG) = PACK((/(Q,Q=1,NE)/),ALL(EP(:,1:NE)/=0,DIM=1))
+ORD(O%NG+1:NE) = PACK((/(Q,Q=1,NE)/),ANY(EP(:,1:NE)==0,DIM=1))
+EK = EK(:,ORD); EW = EW(:,ORD)
+O%EP = TRANSPOSE(EP(:,ORD))
 DEALLOCATE(EP)
 
 CONTAINS
@@ -5010,16 +5015,18 @@ END FUNCTION PLAIN
 END SUBROUTINE O3E_BUILD_EDGES
 
 
-SUBROUTINE O3E_BUILD_ARMS(NM,BAND,EK)
+SUBROUTINE O3E_BUILD_ARMS(NM,BAND,EK,EW)
 ! Per arm of each gas edge: a whole piece is at the mid-point of the edge's gas segment (WA=0); a cut piece
-! takes the next piece of its grid plane along the edge, on the side of the mid-point, as partner ENB with weight WA,
-! or no move (WA=0) if that piece's centroid is short of the mid-point, or, where there is no such piece, the wall
-! point at the end of the gas segment (ENB=0). Then the reciprocal distances RD of the arms (the strain) and RDP of
-! the four pieces' own points (the vorticity), and the velocity rows: each piece once, the band first, by group (TYPE
-! CC_O3E_TYPE) in memory order.
+! takes the next piece of its grid plane along the edge, on the side of the mid-point, as partner ENB with weight WA, at
+! most 1 (a partner short of the mid-point gives its own value), or, where there is no such piece, the wall point at the
+! end of the gas segment (ENB=0). Then the reciprocal distances RD of the arms (the strain) and RDP of the four pieces'
+! own points (the vorticity). A wall edge has RDP only (RD=0, no strain): a slot without a piece takes the wall's
+! velocity at the edge's point (row 0: a wall at rest) at the edge, or where the near piece across the edge begins.
+! Then the velocity rows: each piece once, the band first, by group (TYPE CC_O3E_TYPE) in memory order.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: BAND(:)
 INTEGER, INTENT(IN) :: EK(:,:)
+REAL(EB), INTENT(IN) :: EW(:,:)
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
@@ -5034,7 +5041,7 @@ O%ENB = 0; O%WA = 0._EB; NR = 0
 DO P=1,F%N_INT
    IF (BAND(P)) CALL ADD_ROW(P,F%X1AXIS(P),F%IJK_FACE(:,P),I)
 ENDDO
-DO E=1,O%NE
+DO E=1,O%NG
    T = EK(1,E)
    S = 0._EB; XE = 0._EB
    DO Q=1,4
@@ -5055,10 +5062,9 @@ DO E=1,O%NE
       IF (F%FTYPE(P)/=CC_FTYPE_CFGAS) CYCLE
       D = TE-XF(T)
       N = NQ; N(T) = N(T)+MERGE(1,-1,D>0._EB)
-      P = O3E_ROW(M,AQ,N,0,0,0)
+      P = O3E_ROW(M,AQ,N)
       IF (P/=0) THEN
          X2 = CENTROID(P,N)
-         IF ((X2(T)-TE)*D<0._EB) CYCLE
          CALL ADD_ROW(P,AQ,N,O%ENB(E,Q))
       ELSE
          X2 = XE; X2(T) = MERGE(S(2),S(1),D>0._EB)
@@ -5067,10 +5073,30 @@ DO E=1,O%NE
             UW(NR) = O3E_TEST_WALL_COMPONENT(X2(IAXIS),X2(JAXIS),X2(KAXIS),AQ)
          ENDIF
       ENDIF
-      O%WA(E,Q) = D/(X2(T)-XF(T))
+      O%WA(E,Q) = MIN(1._EB,D/(X2(T)-XF(T)))
       X(Q) = XF(RQ)+O%WA(E,Q)*(X2(RQ)-XF(RQ))
    ENDDO
    O%RD(E,:) = (/1._EB/(X(4)-X(3)),1._EB/(X(2)-X(1))/)
+   O%RDP(E,:) = (/1._EB/(XP(4)-XP(3)),1._EB/(XP(2)-XP(1))/)
+ENDDO
+DO E=O%NG+1,O%NE
+   T = EK(1,E)
+   XE = (/M%X(EK(1+IAXIS,E)),M%Y(EK(1+JAXIS,E)),M%Z(EK(1+KAXIS,E))/); XE(T) = EW(9,E)
+   DO Q=1,4
+      CALL O3E_ARM(EK(:,E),Q,AQ,NQ); RQ = 6-T-AQ
+      P = O%EP(E,Q)
+      IF (P/=0) THEN
+         XF = CENTROID(P,NQ); XP(Q) = XF(RQ)
+         CALL ADD_ROW(P,AQ,NQ,O%EP(E,Q))
+         CYCLE
+      ENDIF
+      XP(Q) = XE(RQ)+REAL(2*MODULO(Q,2)-1,EB)*EW(3+Q+2*MODULO(Q,2),E)   ! the gap of the slot across
+      IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN   ! a moving wall: its velocity at the edge's point
+         NR = NR+1; R(:,NR) = REAL((/12,E,Q,0/),EB); O%EP(E,Q) = NR
+         UW(NR) = O3E_TEST_WALL_COMPONENT(XE(IAXIS),XE(JAXIS),XE(KAXIS),AQ)
+      ENDIF
+   ENDDO
+   O%RD(E,:) = 0._EB
    O%RDP(E,:) = (/1._EB/(XP(4)-XP(3)),1._EB/(XP(2)-XP(1))/)
 ENDDO
 
@@ -5099,8 +5125,8 @@ DO I=1,NR
    O%IX(RN(I)) = O3E_FLAT(M,NINT(R(4:2:-1,I)),MOD(NINT(R(1,I))-2,4)+1)
 ENDDO
 DO Q=1,4
-   O%EP(:,Q) = RN(O%EP(:,Q))
    DO E=1,O%NE
+      IF (O%EP(E,Q)>0) O%EP(E,Q) = RN(O%EP(E,Q))
       IF (O%ENB(E,Q)>0) O%ENB(E,Q) = RN(O%ENB(E,Q))
    ENDDO
 ENDDO
@@ -5138,15 +5164,17 @@ END FUNCTION CENTROID
 END SUBROUTINE O3E_BUILD_ARMS
 
 
-SUBROUTINE O3E_BUILD_ROT(NM,EK)
-! Weights of the rotational term. Per arm of each gas edge the piece's shares A |x_f - x_c| in its two
-! cells c, each scaled with MIN(1, V_c / S), S the sum of those of the cell's gas pieces of that axis, and
-! its mass M_f, the two shares unscaled. The corner masses s_k = (share of the b-arm)(share of the c-arm)/V_c of the four
-! cells around the edge give the transport weights TW = al/s_e and the distribution weights al/M_f; 0.5 on a regular
-! edge. A piece is arm Q of at most one edge: slot Q of a band piece holds that edge's product in Q and its weight.
+SUBROUTINE O3E_BUILD_ROT(NM,EK,EW)
+! Weights of the rotational term. Per arm of each edge the piece's shares A |x_f - x_c| in its two cells c, each scaled
+! with MIN(1, V_c / S), S the sum of those of the cell's gas pieces of that axis, and with the arm's factor EW (a near
+! piece's 1 - 2 gap/h; 0 a slot without a piece: no shares), and its mass M_f, the two shares unscaled. The corner
+! masses s_k = (share of the b-arm)(share of the c-arm)/V_c of the four cells around the edge give the transport weights
+! TW = al/s_e and the distribution weights al/M_f; 0.5 on a regular edge. A piece is arm Q of at most one edge: slot Q
+! of a band piece holds that edge's product in Q and its weight.
 ! The viscosity at the edge: the four cells ECL around it interpolated along b in the rows c- and c+,
 ! then along c, to the edge's line, with the weights EMW (each in [0,1]); 1/4 each on a regular edge (FDS's MUX).
 INTEGER, INTENT(IN) :: NM,EK(:,:)
+REAL(EB), INTENT(IN) :: EW(:,:)
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_O3E_TYPE), POINTER :: O
 INTEGER :: E,Q,AX,B,C,N(3),NL(3),NH(3)
@@ -5164,11 +5192,13 @@ DO E=1,O%NE
          CASE(KAXIS); XF = M%Z(N(KAXIS)); AW = M%DX(N(IAXIS))*M%DY(N(JAXIS)); D = M%DZ(N(KAXIS):N(KAXIS)+1)
       END SELECT
       A = AW
-      IF (M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX)==CC_CUTCFE) A = M%FV%FACE%AREA(O%IX(O%EP(E,Q)))
+      IF (M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX)==CC_CUTCFE .AND. EW(Q,E)>0._EB) &
+         A = M%FV%FACE%AREA(O%IX(O%EP(E,Q)))
       NL = N; NL(AX) = N(AX)-1; NH = N; NH(AX) = N(AX)+1
       XL = CELL(N); XH = CELL(NH); DL = XF-XL(AX); DH = XH(AX)-XF
-      SH(:,Q) = A*(/DL*MIN(1._EB,XL(4)/(GAS_AREA(NL)*(D(1)-DL)+GAS_AREA(N)*DL)), &
-                    DH*MIN(1._EB,XH(4)/(GAS_AREA(N)*DH+GAS_AREA(NH)*(D(2)-DH)))/)
+      SH(:,Q) = 0._EB
+      IF (EW(Q,E)>0._EB) SH(:,Q) = EW(Q,E)*A*(/DL*MIN(1._EB,XL(4)/(GAS_AREA(NL)*(D(1)-DL)+GAS_AREA(N)*DL)), &
+                                               DH*MIN(1._EB,XH(4)/(GAS_AREA(N)*DH+GAS_AREA(NH)*(D(2)-DH)))/)
       V(:,Q) = (/XL(4),XH(4)/); MF(Q) = A*(DL+DH); X0(Q) = XF
       IF (Q>2) CYCLE                                 ! arms 1, 2: the cells n, n+e_b and n+e_c, n+e_b+e_c
       XC(:,2*Q-1) = XL(1:3); XC(:,2*Q) = XH(1:3); O%ECL(E,2*Q-1:2*Q) = (/O3E_FLAT(M,N,0),O3E_FLAT(M,NH,0)/)
@@ -5180,10 +5210,9 @@ DO E=1,O%NE
    S = (/SH(1,1)*SH(1,3)/V(1,1),SH(2,1)*SH(1,4)/V(2,1),SH(1,2)*SH(2,3)/V(1,2),SH(2,2)*SH(2,4)/V(2,2)/)
    AL = (/S(1)+S(2),S(3)+S(4),S(1)+S(3),S(2)+S(4)/)
    O%TW(E,:) = MERGE(0.5_EB,AL/SUM(S),EK(5,E)==1)
-   AL = MERGE(0.5_EB,AL/MF,EK(5,E)==1)
    DO Q=1,4
-      IF (O%EP(E,Q)>O%NB) CYCLE
-      O%PS(O%EP(E,Q),Q) = E+O%NE*((Q-1)/2); O%PW(O%EP(E,Q),Q) = AL(Q)
+      IF (O%EP(E,Q)<1 .OR. O%EP(E,Q)>O%NB) CYCLE
+      O%PS(O%EP(E,Q),Q) = E+O%NE*((Q-1)/2); O%PW(O%EP(E,Q),Q) = MERGE(0.5_EB,AL(Q)/MF(Q),EK(5,E)==1)
    ENDDO
 ENDDO
 
@@ -5246,7 +5275,7 @@ DO I=0,7
    RW(OFF(MOD(I,4)+1)+O%IX(O%KP(I)+1:O%KP(I+1))) = (/(J,J=O%KP(I)+1,O%KP(I+1))/)
 ENDDO
 DO Q=1,4
-   SE(O%EP(:,Q),Q) = (/(E,E=1,O%NE)/)
+   SE(O%EP(1:O%NG,Q),Q) = (/(E,E=1,O%NG)/)
 ENDDO
 
 ! The CVs of the band pieces' two cells: a plain cell is its own (CS: 0 and the cell), else FDS's CV of this mesh (CS:
@@ -5447,30 +5476,120 @@ END SUBROUTINE ADD
 END SUBROUTINE O3E_BUILD_VISC
 
 
-SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK)
-! The gas edge at which the piece of FACE row IF_ is arm Q: its key EK (direction T, low cell N) and
-! arms P4, each the piece of its Cartesian face that spans the same segments of the edge (O3E_ROW); P4=0 if a side has
-! none: no gas edge.
+SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK,EW)
+! The edge at which the piece of FACE row IF_ is arm Q: its key EK (direction T, low cell N), its arms P4 (O3E_SLOT; 0:
+! none) and EW: per arm the factor of its corner masses (1-4) and its gap (5-8), and the edge's point along T (9). A gas
+! edge has in each slot a piece at the edge, over the same segments of it. A wall edge lacks one to three of them and
+! has an arm of normal b and one of normal c: a slot without a piece at the edge takes its near piece unless the slot
+! across the edge has a piece at the edge (a thin wall between); its point is the middle of its segments or, with near
+! pieces only, of their nearest points. P4=0: no edge (a slot with a piece at the edge over other segments), or IF_ is
+! not arm Q.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_,Q
 INTEGER, INTENT(OUT) :: P4(4),EK(4)
-INTEGER :: AX,T,B,C,C1,C2,QQ,AQ,NQ(3)
-REAL(EB) :: S(2),XV(3)
-P4 = 0
-CALL O3E_SEG(M,IF_,Q,C1,C2,S,XV)
-IF (C1>C2) RETURN
+REAL(EB), INTENT(OUT) :: EW(9)
+INTEGER :: AX,T,B,C,C1,C2,QQ,K(4)
+REAL(EB) :: S(2,4),SV(2),XV(3)
+LOGICAL :: AT
+P4 = 0; EW = 0._EB
+CALL O3E_SEG(M,IF_,Q,C1,C2,SV,XV)
+AT = C1<=C2
 AX = M%FV%FACE%X1AXIS(IF_)
 T = MERGE(MODULO(AX+1,3),MODULO(AX,3),Q<3)+1; B = MODULO(T,3)+1; C = 6-T-B
 EK(1) = T; EK(2:4) = M%FV%FACE%IJK_FACE(:,IF_)
 IF (M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS) EK(2:4) = M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
 IF (Q==2) EK(1+C) = EK(1+C)-1
 IF (Q==4) EK(1+B) = EK(1+B)-1
+CALL O3E_SLOT(M,EK,Q,C1,C2,P4(Q),K(Q),EW(Q),EW(4+Q),S(:,Q))
+IF (.NOT.AT .AND. P4(Q)/=IF_) THEN
+   P4 = 0; RETURN
+ENDIF
 DO QQ=1,4
-   CALL O3E_ARM(EK,QQ,AQ,NQ)
-   P4(QQ) = O3E_ROW(M,AQ,NQ,QQ,C1,C2)
+   IF (QQ/=Q) CALL O3E_SLOT(M,EK,QQ,C1,C2,P4(QQ),K(QQ),EW(QQ),EW(4+QQ),S(:,QQ))
 ENDDO
-IF (ANY(P4==0)) P4 = 0
+IF (ANY(K<0)) THEN
+   P4 = 0; RETURN
+ENDIF
+IF (ALL(K==1)) RETURN
+DO QQ=1,4
+   IF (K(QQ)/=2 .OR. K(QQ-1+2*MODULO(QQ,2))/=1) CYCLE
+   P4(QQ) = 0; K(QQ) = 0; EW(QQ) = 0._EB; EW(4+QQ) = 0._EB
+ENDDO
+IF (ALL(P4(1:2)==0) .OR. ALL(P4(3:4)==0) .OR. P4(Q)==0) THEN
+   P4 = 0; RETURN
+ENDIF
+IF (ANY(K==1)) THEN
+   QQ = FINDLOC(K,1,1)
+   EW(9) = 0.5_EB*(S(1,QQ)+S(2,QQ))
+ELSE
+   EW(9) = 0.5_EB*(MINVAL(S(1,:),MASK=K==2)+MAXVAL(S(2,:),MASK=K==2))
+ENDIF
 END SUBROUTINE O3E_EDGE
+
+
+SUBROUTINE O3E_SLOT(M,EK,Q,C1,C2,P,K,W,G,S)
+! Slot Q of the edge with key EK, for the segments C1:C2 of the edge (C1>C2: not known yet; the first piece at the edge
+! sets them). K=1: P the piece of the slot's Cartesian face at the edge over C1:C2 (a side on the edge's line), W=1 and
+! S its extent along the edge. K=-1: a piece at the edge over other segments. Else no piece of the face is at the
+! edge, and K=2: P the piece nearest to the edge's line, its gap G (the smallest distance of its vertices from the line,
+! in its plane) below half the cell size H across, W = 1 - 2 G/H and S the extent of its nearest vertices along the
+! edge; K=0: none (P=0, W=0).
+TYPE(MESH_TYPE), INTENT(IN) :: M
+INTEGER, INTENT(IN) :: EK(4),Q
+INTEGER, INTENT(INOUT) :: C1,C2
+INTEGER, INTENT(OUT) :: P,K
+REAL(EB), INTENT(OUT) :: W,G,S(2)
+INTEGER :: AX,T,R,JCF,D1,D2,NV,N(3)
+REAL(EB) :: SV(2),XV(3),XL,H,GM
+REAL(EB), ALLOCATABLE :: DV(:),XT(:)
+CALL O3E_ARM(EK,Q,AX,N)
+T = EK(1); R = 6-T-AX
+P = 0; K = 0; W = 0._EB; G = 0._EB; S = 0._EB
+SELECT CASE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX))
+CASE(CC_GASPHASE)
+   IF (C1>C2) THEN
+      C1 = 0; C2 = 0
+   ENDIF
+   K = -1
+   IF (C2/=0) RETURN
+   P = O3E_ROW(M,AX,N); K = 1; W = 1._EB
+   SELECT CASE(T)
+      CASE(IAXIS); S = M%X(N(IAXIS)-1:N(IAXIS))
+      CASE(JAXIS); S = M%Y(N(JAXIS)-1:N(JAXIS))
+      CASE(KAXIS); S = M%Z(N(KAXIS)-1:N(KAXIS))
+   END SELECT
+CASE(CC_CUTCFE)
+   ASSOCIATE (CF=>M%CUT_FACE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDCF,AX)))
+   DO JCF=1,CF%NFACE
+      CALL O3E_SEG(M,CF%FC(JCF),Q,D1,D2,SV,XV)
+      IF (D1>D2) CYCLE
+      IF (C1>C2) THEN
+         C1 = D1; C2 = D2
+      ENDIF
+      K = -1
+      IF (D1/=C1 .OR. D2/=C2) CYCLE
+      P = CF%FC(JCF); K = 1; W = 1._EB; S = SV
+      RETURN
+   ENDDO
+   IF (K<0) RETURN
+   SELECT CASE(R)
+      CASE(IAXIS); XL = M%X(EK(1+IAXIS)); H = M%DX(N(IAXIS))
+      CASE(JAXIS); XL = M%Y(EK(1+JAXIS)); H = M%DY(N(JAXIS))
+      CASE(KAXIS); XL = M%Z(EK(1+KAXIS)); H = M%DZ(N(KAXIS))
+   END SELECT
+   GM = 0.5_EB*H
+   DO JCF=1,CF%NFACE
+      NV = CF%CFELEM(1,JCF)
+      DV = REAL(2*(N(R)-EK(1+R))-1,EB)*(CF%XYZVERT(R,CF%CFELEM(2:NV+1,JCF))-XL)
+      IF (MAX(MINVAL(DV),0._EB)>=GM) CYCLE
+      XT = CF%XYZVERT(T,CF%CFELEM(2:NV+1,JCF))
+      GM = MAX(MINVAL(DV),0._EB)
+      P = CF%FC(JCF); K = 2; G = GM; W = 1._EB-2._EB*G/H
+      S = (/MINVAL(XT,MASK=DV==MINVAL(DV)),MAXVAL(XT,MASK=DV==MINVAL(DV))/)
+   ENDDO
+   END ASSOCIATE
+END SELECT
+END SUBROUTINE O3E_SLOT
 
 
 SUBROUTINE O3E_ARM(EK,Q,AX,N)
@@ -5502,30 +5621,20 @@ O3E_FLAT = 1+L(1)+D(1)*(L(2)+D(2)*L(3))
 END FUNCTION O3E_FLAT
 
 
-INTEGER FUNCTION O3E_ROW(M,AX,N,Q,C1,C2) RESULT(IF_)
-! FACE row of the gas piece at the Cartesian face (AX;N) that spans segments C1:C2 of the grid edge where it is arm Q
-! (Q=0: the first piece); -1 for a whole gas face without a FACE row, 0 for none.
+INTEGER FUNCTION O3E_ROW(M,AX,N) RESULT(IF_)
+! FACE row of the gas piece at the Cartesian face (AX;N), of a cut face the first piece; -1 for a whole gas face without a
+! FACE row, 0 for none.
 TYPE(MESH_TYPE), INTENT(IN) :: M
-INTEGER, INTENT(IN) :: AX,N(3),Q,C1,C2
-INTEGER :: ICF,JCF,D1,D2
-REAL(EB) :: S(2),XV(3)
+INTEGER, INTENT(IN) :: AX,N(3)
 IF_ = 0
 SELECT CASE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX))
 CASE(CC_GASPHASE)
-   IF (C2/=0) RETURN
    IF_ = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FROW,AX)    ! at a seam also a tail RC row: the band's row first
    IF (IF_==0 .AND. M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDRC,AX)>0) &
       IF_ = M%RC_FACE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDRC,AX))%FC
    IF (IF_==0) IF_ = -1
 CASE(CC_CUTCFE)
-   ICF = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDCF,AX)
-   DO JCF=1,M%CUT_FACE(ICF)%NFACE
-      IF_ = M%CUT_FACE(ICF)%FC(JCF)
-      IF (Q==0) RETURN
-      CALL O3E_SEG(M,IF_,Q,D1,D2,S,XV)
-      IF (D1==C1 .AND. D2==C2) RETURN
-   ENDDO
-   IF_ = 0
+   IF_ = M%CUT_FACE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDCF,AX))%FC(1)
 END SELECT
 END FUNCTION O3E_ROW
 
@@ -15214,8 +15323,8 @@ END SUBROUTINE CC_VELOCITY_FLUX
 
 SUBROUTINE CC_O3E_FORCE_A(NM)
 ! Per stage (PREDICTOR), after the copy of FVX, FVY, FVZ onto FN: the O3e force of the band pieces of mesh NM.
-! In order: the stage's velocity of every row, gathered by source; at the gas edges the vorticity OM from the four
-! pieces' own values, the shear stress ST from the arms and the products -OM T_c, OM T_b into Q; per CV its
+! In order: the stage's velocity of every row, gathered by source; at the edges the vorticity OM from the four
+! arms' own values, the shear stress ST from the arms (0 at a wall edge) and the products -OM T_c, OM T_b into Q; per CV its
 ! viscosity, divergence and Gauss gradient, its tau_aa of each axis into TN; omega x u of each band piece, gathered
 ! from its edges' products, less its lateral and normal stress over its density.
 INTEGER, INTENT(IN) :: NM
