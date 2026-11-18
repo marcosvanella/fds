@@ -9,7 +9,7 @@ MODULE CC_SCALARS
 USE COMPLEX_GEOMETRY, ONLY: GEOMEPS,LOOSEPS,GEOFCT,NGUARD,CCGUARD,CC_GASPHASE,CC_CUTCFE,CC_SOLID, &
      CC_INBOUNDARY,CC_UNDEFINED,CC_VGSC,CC_EGSC,CC_IDCE, &
      CC_GCELL_CUT,CC_GCELL_REG, &
-     CC_FGSC,CC_IDCF,CC_IDRC,CC_FROW,CC_CGSC,CC_IDCC,CC_UNKZ,CC_UNKH,CC_ETYPE_RGGAS,CC_VTYPE_VGAS,CC_VTYPE_VINB, &
+     CC_FGSC,CC_IDCF,CC_IDRC,CC_FROW,CC_CGSC,CC_IDCC,CC_UNKZ,CC_UNKH,CC_ETYPE_RGGAS, &
      CC_ETYPE_CFGAS,CC_FTYPE_RGGAS,CC_FTYPE_CFGAS,CC_FTYPE_CFINB,CC_FTYPE_SVERT,CC_FTYPE_RCGAS, &
      CC_FTYPE_CCGAS,CC_ETYPE_SCINB,CC_ETYPE_RCGAS,CC_ETYPE_EP,CC_MATVEC_DEFINED,NM_START, &
      CALL_FOR_GLMAT,CALL_FROM_GLMAT_SETUP,N_REQ12,N_REQ112,N_REQ115,N_REQ13,REQ112,REQ115,REQ12,REQ13, &
@@ -4949,7 +4949,8 @@ SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK,EW)
 ! and its edges are regular, that is gas edges of four such pieces. The band is the gas pieces of the mesh that are not
 ! regular (on the interface plane the lower mesh's), so every piece of a wall edge. Each edge of the band is made once,
 ! by its first band arm: EK its key (direction, low cell) and 1 if it is regular, EP its arms as FACE rows (-1: a face
-! without one, 0: none), EW its arms' factors and gaps and its point (O3E_EDGE). The gas edges first: rows 1:NG.
+! without one, 0: none), EW its arms' factors and gaps, its point and its segment (O3E_EDGE). The gas edges first:
+! rows 1:NG.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: NP(0:,0:,0:)
 LOGICAL, ALLOCATABLE, INTENT(OUT) :: BAND(:)
@@ -4960,7 +4961,7 @@ TYPE(CC_O3E_TYPE), POINTER :: O
 INTEGER :: IF_,Q,QQ,NE,AX,N(3),P4(4),K4(4)
 INTEGER, ALLOCATABLE :: EP(:,:),ORD(:)
 LOGICAL, ALLOCATABLE :: RG(:,:)
-REAL(EB) :: W9(9)
+REAL(EB) :: W11(11)
 
 F => MESHES(NM)%FV%FACE; O => MESHES(NM)%FV%O3
 ALLOCATE(BAND(F%N),RG(4,F%N)); BAND = .FALSE.; RG = .TRUE.
@@ -4969,7 +4970,7 @@ DO IF_=1,F%N_INT
    IF (F%KIND(IF_)==CC_FACE_KIND_REMOTE .AND. F%NBR_CV_NM(IF_)<NM) CYCLE
    BAND(IF_) = .NOT.PLAIN(IF_,F%X1AXIS(IF_),F%IJK_FACE(:,IF_))
    DO Q=1,4
-      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W9)
+      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W11)
       IF (ALL(P4==0)) CYCLE
       DO QQ=1,4
          CALL O3E_ARM(K4,QQ,AX,N)
@@ -4979,15 +4980,15 @@ DO IF_=1,F%N_INT
    ENDDO
 ENDDO
 O%NB = COUNT(BAND)
-ALLOCATE(EK(5,4*O%NB),EP(4,4*O%NB),EW(9,4*O%NB))
+ALLOCATE(EK(5,4*O%NB),EP(4,4*O%NB),EW(11,4*O%NB))
 NE = 0
 DO IF_=1,F%N_INT
    IF (.NOT.BAND(IF_)) CYCLE
    DO Q=1,4
-      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W9)
+      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W11)
       IF (ALL(P4==0)) CYCLE
       IF (ANY(P4(1:Q-1)>0 .AND. BAND(MAX(P4(1:Q-1),1)))) CYCLE
-      NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,RG(Q,IF_))/); EP(:,NE) = P4; EW(:,NE) = W9
+      NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,RG(Q,IF_))/); EP(:,NE) = P4; EW(:,NE) = W11
    ENDDO
 ENDDO
 O%NE = NE; O%NG = COUNT(ALL(EP(:,1:NE)/=0,DIM=1))
@@ -5033,7 +5034,7 @@ REAL(EB), INTENT(IN) :: EW(:,:)
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
-INTEGER :: E,Q,T,AQ,RQ,P,C1,C2,NR,I,J,K,L,ICF,IF_,NJ,NW,N(3),NQ(3),KEY(4),HJ(4)
+INTEGER :: E,Q,T,AQ,RQ,P,NR,I,J,K,L,ICF,IF_,NJ,NW,N(3),NQ(3),KEY(4),HJ(4)
 REAL(EB) :: S(2),XE(3),TE,D,XF(3),X2(3),X(4),XP(4),AT,AS,PH(2),SA(4),SF(4),HW(4)
 REAL(EB), ALLOCATABLE :: R(:,:),UW(:),CAT(:),CAS(:)
 INTEGER, ALLOCATABLE :: ORD(:),RN(:),SL(:),WC(:),SQ(:),RE(:),RS(:)
@@ -5075,15 +5076,7 @@ DO P=1,F%N_INT
 ENDDO
 DO E=1,O%NG
    T = EK(1,E)
-   S = 0._EB; XE = 0._EB
-   DO Q=1,4
-      P = O%EP(E,Q)
-      IF (P<1) CYCLE
-      IF (F%FTYPE(P)/=CC_FTYPE_CFGAS) CYCLE
-      CALL O3E_SEG(M,P,Q,C1,C2,S,XE)
-      EXIT
-   ENDDO
-   TE = 0.5_EB*(S(1)+S(2))
+   XE = (/M%X(EK(1+IAXIS,E)),M%Y(EK(1+JAXIS,E)),M%Z(EK(1+KAXIS,E))/); S = EW(10:11,E); TE = EW(9,E)
    DO Q=1,4
       CALL O3E_ARM(EK(:,E),Q,AQ,NQ); RQ = 6-T-AQ
       P = O%EP(E,Q)
@@ -5750,39 +5743,32 @@ END FUNCTION O3E_SLIP
 
 SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK,EW)
 ! The edge at which the piece of FACE row IF_ is arm Q: its key EK (direction T, low cell N), its arms P4 (O3E_SLOT; 0:
-! none) and EW: per arm the factor of its corner masses (1-4) and its gap (5-8), and the edge's point along T (9). A gas
-! edge has in each slot a piece at the edge, over the same segments of it. A wall edge lacks one to three of them and
-! has an arm of normal b and one of normal c: a slot without a piece at the edge takes its near piece unless the slot
-! across the edge has a piece at the edge (a thin wall between); its point is the middle of its segments or, with near
-! pieces only, of their nearest points. P4=0: no edge (a slot with a piece at the edge over other segments), or IF_ is
-! not arm Q.
+! none) and EW: per arm the factor of its corner masses (1-4) and its gap (5-8), the edge's point along T (9) and its
+! segment along T (10:11). A gas edge has in each slot a piece at the edge, whatever their extents along the edge. A
+! wall edge lacks one to three of them and has an arm of normal b and one of normal c: a slot without a piece at the edge
+! takes its near piece unless the slot across the edge has a piece at the edge (a thin wall between). The segment is the
+! common part of the extents of the pieces at the edge, or their hull if they have none; with near pieces only, the
+! hull of their nearest points. The point is its middle. P4=0: no edge, or IF_ is a cut piece that is not slot Q's.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_,Q
 INTEGER, INTENT(OUT) :: P4(4),EK(4)
-REAL(EB), INTENT(OUT) :: EW(9)
-INTEGER :: AX,T,B,C,C1,C2,QQ,K(4)
-REAL(EB) :: S(2,4),SV(2),XV(3)
-LOGICAL :: AT
+REAL(EB), INTENT(OUT) :: EW(11)
+INTEGER :: AX,T,B,C,QQ,K(4)
+REAL(EB) :: S(2,4)
 P4 = 0; EW = 0._EB
-CALL O3E_SEG(M,IF_,Q,C1,C2,SV,XV)
-AT = C1<=C2
 AX = M%FV%FACE%X1AXIS(IF_)
 T = MERGE(MODULO(AX+1,3),MODULO(AX,3),Q<3)+1; B = MODULO(T,3)+1; C = 6-T-B
 EK(1) = T; EK(2:4) = M%FV%FACE%IJK_FACE(:,IF_)
 IF (M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS) EK(2:4) = M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
 IF (Q==2) EK(1+C) = EK(1+C)-1
 IF (Q==4) EK(1+B) = EK(1+B)-1
-CALL O3E_SLOT(M,EK,Q,C1,C2,P4(Q),K(Q),EW(Q),EW(4+Q),S(:,Q))
-IF (.NOT.AT .AND. P4(Q)/=IF_) THEN
+CALL O3E_SLOT(M,EK,Q,P4(Q),K(Q),EW(Q),EW(4+Q),S(:,Q))
+IF (P4(Q)/=IF_ .AND. M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS) THEN
    P4 = 0; RETURN
 ENDIF
 DO QQ=1,4
-   IF (QQ/=Q) CALL O3E_SLOT(M,EK,QQ,C1,C2,P4(QQ),K(QQ),EW(QQ),EW(4+QQ),S(:,QQ))
+   IF (QQ/=Q) CALL O3E_SLOT(M,EK,QQ,P4(QQ),K(QQ),EW(QQ),EW(4+QQ),S(:,QQ))
 ENDDO
-IF (ANY(K<0)) THEN
-   P4 = 0; RETURN
-ENDIF
-IF (ALL(K==1)) RETURN
 DO QQ=1,4
    IF (K(QQ)/=2 .OR. K(QQ-1+2*MODULO(QQ,2))/=1) CYCLE
    P4(QQ) = 0; K(QQ) = 0; EW(QQ) = 0._EB; EW(4+QQ) = 0._EB
@@ -5791,39 +5777,33 @@ IF (ALL(P4(1:2)==0) .OR. ALL(P4(3:4)==0) .OR. P4(Q)==0) THEN
    P4 = 0; RETURN
 ENDIF
 IF (ANY(K==1)) THEN
-   QQ = FINDLOC(K,1,1)
-   EW(9) = 0.5_EB*(S(1,QQ)+S(2,QQ))
+   EW(10:11) = (/MAXVAL(S(1,:),MASK=K==1),MINVAL(S(2,:),MASK=K==1)/)
+   IF (EW(11)<=EW(10)) EW(10:11) = (/MINVAL(S(1,:),MASK=K==1),MAXVAL(S(2,:),MASK=K==1)/)
 ELSE
-   EW(9) = 0.5_EB*(MINVAL(S(1,:),MASK=K==2)+MAXVAL(S(2,:),MASK=K==2))
+   EW(10:11) = (/MINVAL(S(1,:),MASK=K==2),MAXVAL(S(2,:),MASK=K==2)/)
 ENDIF
+EW(9) = 0.5_EB*(EW(10)+EW(11))
 END SUBROUTINE O3E_EDGE
 
 
-SUBROUTINE O3E_SLOT(M,EK,Q,C1,C2,P,K,W,G,S)
-! Slot Q of the edge with key EK, for the segments C1:C2 of the edge (C1>C2: not known yet; the first piece at the edge
-! sets them). K=1: P the piece of the slot's Cartesian face at the edge over C1:C2 (a side on the edge's line), W=1 and
-! S its extent along the edge. K=-1: a piece at the edge over other segments. Else no piece of the face is at the
+SUBROUTINE O3E_SLOT(M,EK,Q,P,K,W,G,S)
+! Slot Q of the edge with key EK. K=1: P the piece of the slot's Cartesian face at the edge (the face if whole, else its
+! first piece with a side on the edge's line), W=1 and S its extent along the edge. Else no piece of the face is at the
 ! edge, and K=2: P the piece nearest to the edge's line, its gap G (the smallest distance of its vertices from the line,
 ! in its plane) below half the cell size H across, W = 1 - 2 G/H and S the extent of its nearest vertices along the
 ! edge; K=0: none (P=0, W=0).
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: EK(4),Q
-INTEGER, INTENT(INOUT) :: C1,C2
 INTEGER, INTENT(OUT) :: P,K
 REAL(EB), INTENT(OUT) :: W,G,S(2)
-INTEGER :: AX,T,R,JCF,D1,D2,NV,N(3)
-REAL(EB) :: SV(2),XV(3),XL,H,GM
+INTEGER :: AX,T,R,JCF,NV,N(3)
+REAL(EB) :: XL,H,GM
 REAL(EB), ALLOCATABLE :: DV(:),XT(:)
 CALL O3E_ARM(EK,Q,AX,N)
 T = EK(1); R = 6-T-AX
 P = 0; K = 0; W = 0._EB; G = 0._EB; S = 0._EB
 SELECT CASE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX))
 CASE(CC_GASPHASE)
-   IF (C1>C2) THEN
-      C1 = 0; C2 = 0
-   ENDIF
-   K = -1
-   IF (C2/=0) RETURN
    P = O3E_ROW(M,AX,N); K = 1; W = 1._EB
    SELECT CASE(T)
       CASE(IAXIS); S = M%X(N(IAXIS)-1:N(IAXIS))
@@ -5833,17 +5813,11 @@ CASE(CC_GASPHASE)
 CASE(CC_CUTCFE)
    ASSOCIATE (CF=>M%CUT_FACE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDCF,AX)))
    DO JCF=1,CF%NFACE
-      CALL O3E_SEG(M,CF%FC(JCF),Q,D1,D2,SV,XV)
-      IF (D1>D2) CYCLE
-      IF (C1>C2) THEN
-         C1 = D1; C2 = D2
-      ENDIF
-      K = -1
-      IF (D1/=C1 .OR. D2/=C2) CYCLE
-      P = CF%FC(JCF); K = 1; W = 1._EB; S = SV
+      CALL O3E_SEG(M,CF%FC(JCF),Q,S)
+      IF (S(1)>S(2)) CYCLE
+      P = CF%FC(JCF); K = 1; W = 1._EB
       RETURN
    ENDDO
-   IF (K<0) RETURN
    SELECT CASE(R)
       CASE(IAXIS); XL = M%X(EK(1+IAXIS)); H = M%DX(N(IAXIS))
       CASE(JAXIS); XL = M%Y(EK(1+JAXIS)); H = M%DY(N(JAXIS))
@@ -5911,20 +5885,16 @@ END SELECT
 END FUNCTION O3E_ROW
 
 
-SUBROUTINE O3E_SEG(M,IF_,Q,C1,C2,S,XV)
-! Gas segment of the piece of FACE row IF_ on the grid edge where it is arm Q, from the cut-edge topology of its
-! polygon's sides (CUT_FACE CEDGES, EDGE_LIST; CUT_EDGE): the segments C1:C2 of that edge's CUT_EDGE it spans, 0 for
-! the whole edge (C1>C2: no side there), its extent S along the edge and a vertex XV on it. A whole piece: C1=C2=0.
+SUBROUTINE O3E_SEG(M,IF_,Q,S)
+! Extent S along the grid edge where the cut piece of FACE row IF_ is arm Q of its polygon's sides on that edge, from the
+! cut-edge topology of its sides (CUT_FACE CEDGES, EDGE_LIST; CUT_EDGE); S(1)>S(2): no side there.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_,Q
-INTEGER, INTENT(OUT) :: C1,C2
-REAL(EB), INTENT(INOUT) :: S(2),XV(3)
-INTEGER :: AX,T,CP,LOHI,NP,IV,IE,JC,V2
-C1 = 0; C2 = 0
-IF (M%FV%FACE%FTYPE(IF_)/=CC_FTYPE_CFGAS) RETURN
+REAL(EB), INTENT(OUT) :: S(2)
+INTEGER :: AX,T,CP,LOHI,NP,IV,IE,V1,V2
 AX = M%FV%FACE%X1AXIS(IF_)
 T = MERGE(MODULO(AX+1,3),MODULO(AX,3),Q<3)+1; CP = 6-AX-T; LOHI = LOW_IND+MOD(Q,2)
-C1 = HUGE(1); C2 = -1; S = (/HUGE(1._EB),-HUGE(1._EB)/)
+S = (/HUGE(1._EB),-HUGE(1._EB)/)
 ASSOCIATE (CF=>M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_)),JCF=>M%FV%FACE%SRC_JCF(IF_))
 NP = CF%CEDGES(1,JCF)
 DO IV=1,NP
@@ -5932,19 +5902,15 @@ DO IV=1,NP
    SELECT CASE(CF%EDGE_LIST(1,IE))
    CASE(CC_ETYPE_RGGAS)
       IF (CF%EDGE_LIST(2,IE)/=LOHI .OR. CF%EDGE_LIST(3,IE)/=CP) CYCLE
-      JC = 0
    CASE(CC_ETYPE_CFGAS)
       ASSOCIATE (CE=>M%CUT_EDGE(CF%EDGE_LIST(2,IE)))
       IF (CE%IJK(KAXIS+1)/=T .OR. CE%IJK(CP)/=CF%IJK(CP)+LOHI-HIGH_IND) CYCLE
-      JC = CF%EDGE_LIST(3,IE)
-      IF (ALL(CE%VERT_LIST(1,CE%CEELEM(1:2,JC))==CC_VTYPE_VGAS .OR. CE%VERT_LIST(1,CE%CEELEM(1:2,JC))==CC_VTYPE_VINB)) JC = 0
       END ASSOCIATE
    CASE DEFAULT
       CYCLE
    END SELECT
-   C1 = MIN(C1,JC); C2 = MAX(C2,JC)
-   XV = CF%XYZVERT(:,CF%CFELEM(IV+1,JCF)); V2 = CF%CFELEM(MOD(IV,NP)+2,JCF)
-   S = (/MIN(S(1),XV(T),CF%XYZVERT(T,V2)),MAX(S(2),XV(T),CF%XYZVERT(T,V2))/)
+   V1 = CF%CFELEM(IV+1,JCF); V2 = CF%CFELEM(MOD(IV,NP)+2,JCF)
+   S = (/MIN(S(1),CF%XYZVERT(T,V1),CF%XYZVERT(T,V2)),MAX(S(2),CF%XYZVERT(T,V1),CF%XYZVERT(T,V2))/)
 ENDDO
 END ASSOCIATE
 END SUBROUTINE O3E_SEG
