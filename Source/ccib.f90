@@ -139,7 +139,8 @@ REAL(EB) :: ROTANG, ROTMAT(2,2), TROTMAT(2,2)
 REAL(EB), PARAMETER :: O3E_OMEGA=0.2_EB, O3E_R1=0.5_EB, O3E_R2=1._EB, O3E_RSPLIT=0.75_EB ! Turning rate, spheres or cylinders, split
 REAL(EB), PARAMETER :: O3E_CEN3(IAXIS:KAXIS)=(/0.013_EB,0.027_EB,-0.019_EB/)           ! 3D centre; 2D: origin
 REAL(EB), PARAMETER :: O3E_AX3(IAXIS:KAXIS)=(/1._EB,2._EB,2._EB/)/3._EB                ! 3D axis; 2D: y
-REAL(EB), PARAMETER :: O3E_UNI3(IAXIS:KAXIS)=0.2_EB*(/0.6_EB,0.3_EB,0.74_EB/)/SQRT(0.9976_EB) ! Case 35, 3D
+REAL(EB), PARAMETER :: O3E_SU3=SQRT(0.9976_EB)                                         ! Case 35: norm of its direction
+REAL(EB), PARAMETER :: O3E_UNI3(IAXIS:KAXIS)=0.2_EB*(/0.6_EB,0.3_EB,0.74_EB/)/O3E_SU3    ! Case 35, 3D
 REAL(EB), PARAMETER :: O3E_ANG=PI/6._EB, O3E_HW=1._EB, O3E_VB=1._EB, O3E_NU36=0.2_EB   ! Channel (34, 36): angle, half-width, V, nu
 REAL(EB) :: O3E_TEST_TIME=0._EB ! Time level of the velocities the hooks work on
 
