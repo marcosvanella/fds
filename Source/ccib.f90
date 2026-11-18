@@ -4902,6 +4902,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    CALL O3E_BUILD_EDGES(NM,C(NM)%NP,BAND,EK)
    CALL O3E_BUILD_ARMS(NM,BAND,EK)
    CALL O3E_BUILD_ROT(NM,EK)
+   CALL O3E_BUILD_VISC(NM,C(NM)%NP,BAND)
 ENDDO
 END SUBROUTINE CC_O3E_SETUP
 
@@ -5056,10 +5057,7 @@ DO I=1,NR
    IF (R(1,I)>8.5_EB) CYCLE
    O%IX(RN(I)) = NINT(R(2,I))
    IF (MOD(NINT(R(1,I)),4)==1) CYCLE
-   AQ = MOD(NINT(R(1,I))-2,4)+1                     ! a face's place in U, V or W: their normal index starts at -1
-   N = NINT(R(4:2:-1,I)); N(AQ) = N(AQ)+1
-   NQ = (/M%IBP1,M%JBP1,M%KBP1/)+1; NQ(AQ) = NQ(AQ)+1
-   O%IX(RN(I)) = 1+N(1)+NQ(1)*(N(2)+NQ(2)*N(3))
+   O%IX(RN(I)) = O3E_FLAT(M,NINT(R(4:2:-1,I)),MOD(NINT(R(1,I))-2,4)+1)
 ENDDO
 DO Q=1,4
    O%EP(:,Q) = RN(O%EP(:,Q))
@@ -5107,14 +5105,16 @@ SUBROUTINE O3E_BUILD_ROT(NM,EK)
 ! its mass M_f, the two shares unscaled. The corner masses s_k = (share of the b-arm)(share of the c-arm)/V_c of the four
 ! cells around the edge give the transport weights TW = al/s_e and the distribution weights al/M_f; 0.5 on a regular
 ! edge. A piece is arm Q of at most one edge: slot Q of a band piece holds that edge's product in Q and its weight.
+! The viscosity at the edge (design 12.3): the four cells ECL around it interpolated along b in the rows c- and c+,
+! then along c, to the edge's line, with the weights EMW (each in [0,1]); 1/4 each on a regular edge (FDS's MUX).
 INTEGER, INTENT(IN) :: NM,EK(:,:)
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_O3E_TYPE), POINTER :: O
-INTEGER :: E,Q,AX,N(3),NL(3),NH(3)
-REAL(EB) :: A,AW,XF,DL,DH,D(2),XL(4),XH(4),SH(2,4),V(2,4),MF(4),S(4),AL(4)
+INTEGER :: E,Q,AX,B,C,N(3),NL(3),NH(3)
+REAL(EB) :: A,AW,XF,DL,DH,D(2),XL(4),XH(4),SH(2,4),V(2,4),MF(4),S(4),AL(4),XC(3,4),X0(4),WL,WU,WZ
 
 M => MESHES(NM); O => M%FV%O3
-ALLOCATE(O%TW(O%NE,4),O%PS(O%NB,4),O%PW(O%NB,4),O%Q(0:2*O%NE),O%ROT(O%NB))
+ALLOCATE(O%TW(O%NE,4),O%PS(O%NB,4),O%PW(O%NB,4),O%Q(0:2*O%NE),O%F(O%NB),O%ECL(O%NE,4),O%EMW(O%NE,4))
 O%PS = 0; O%PW = 0._EB; O%Q = 0._EB
 DO E=1,O%NE
    DO Q=1,4
@@ -5130,8 +5130,14 @@ DO E=1,O%NE
       XL = CELL(N); XH = CELL(NH); DL = XF-XL(AX); DH = XH(AX)-XF
       SH(:,Q) = A*(/DL*MIN(1._EB,XL(4)/(GAS_AREA(NL)*(D(1)-DL)+GAS_AREA(N)*DL)), &
                     DH*MIN(1._EB,XH(4)/(GAS_AREA(N)*DH+GAS_AREA(NH)*(D(2)-DH)))/)
-      V(:,Q) = (/XL(4),XH(4)/); MF(Q) = A*(DL+DH)
+      V(:,Q) = (/XL(4),XH(4)/); MF(Q) = A*(DL+DH); X0(Q) = XF
+      IF (Q>2) CYCLE                                 ! arms 1, 2: the cells n, n+e_b and n+e_c, n+e_b+e_c
+      XC(:,2*Q-1) = XL(1:3); XC(:,2*Q) = XH(1:3); O%ECL(E,2*Q-1:2*Q) = (/O3E_FLAT(M,N,0),O3E_FLAT(M,NH,0)/)
    ENDDO
+   B = MODULO(EK(1,E),3)+1; C = 6-EK(1,E)-B
+   WL = (XC(B,2)-X0(1))/(XC(B,2)-XC(B,1)); WU = (XC(B,4)-X0(1))/(XC(B,4)-XC(B,3))
+   WZ = (WU*XC(C,3)+(1._EB-WU)*XC(C,4)-X0(3))/(WU*XC(C,3)+(1._EB-WU)*XC(C,4)-WL*XC(C,1)-(1._EB-WL)*XC(C,2))
+   O%EMW(E,:) = MERGE(0.25_EB,(/WL*WZ,(1._EB-WL)*WZ,WU*(1._EB-WZ),(1._EB-WU)*(1._EB-WZ)/),EK(5,E)==1)
    S = (/SH(1,1)*SH(1,3)/V(1,1),SH(2,1)*SH(1,4)/V(2,1),SH(1,2)*SH(2,3)/V(1,2),SH(2,2)*SH(2,4)/V(2,2)/)
    AL = (/S(1)+S(2),S(3)+S(4),S(1)+S(3),S(2)+S(4)/)
    O%TW(E,:) = MERGE(0.5_EB,AL/SUM(S),EK(5,E)==1)
@@ -5173,6 +5179,235 @@ END FUNCTION GAS_AREA
 END SUBROUTINE O3E_BUILD_ROT
 
 
+SUBROUTINE O3E_BUILD_VISC(NM,NP,BAND)
+! Lists of the viscous term (A.5 with design 11.1; 2.2). The CV of each cell of a band piece: the plain cell, or FDS's
+! CV (members, FACE_LIST); its gas pieces (velocity row, axis, side, area) give its halves, its Gauss sums by axis and
+! its members' weights for mu_c and D. Per band piece the lateral stress as weights of edge stresses (A.5.2: the edge
+! at the half's end of each piece of the CV, else at its other end, else the mean of the CV's edges of that direction,
+! else nothing) and the normal stress as weights of its two CVs' tau_aa (A.5.3), all times 2: K3 divides by the sum of
+! the densities of the piece's two cells. Where the wall moves (PERIODIC_TEST 31:37) the CFACEs of a CV add one constant
+! per axis to its Gauss sum, appended to UP.
+INTEGER, INTENT(IN) :: NM
+LOGICAL, INTENT(IN) :: NP(0:,0:,0:),BAND(:)
+TYPE(MESH_TYPE), POINTER :: M
+TYPE(CC_FACE_TYPE), POINTER :: F
+TYPE(CC_O3E_TYPE), POINTER :: O
+INTEGER :: I,J,K,R,P,Q,E,S,A,IF_,IW,NC,NV,OFF(4),N(3),NL(3)
+REAL(EB) :: AP,FP,FQ,MP,MQ
+INTEGER, ALLOCATABLE :: RW(:),SE(:,:),LCV(:),LCP(:,:,:),CS(:,:),PC(:,:),BX(:),PP(:),PR(:),PX(:),PD(:),PO(:),MK(:), &
+                        MC(:),TE(:),VE(:)
+REAL(EB), ALLOCATABLE :: BA(:),VR(:),AS(:,:,:),PAR(:),UW(:,:),VV(:),UP(:)
+LOGICAL, ALLOCATABLE :: TWO(:,:)
+
+M => MESHES(NM); F => M%FV%FACE; O => M%FV%O3
+! The velocity row of a cut piece by FACE row, of a face by its place in U, V, W; the edge of each slot of a row.
+OFF = (/0,F%N,F%N+SIZE(M%U),F%N+SIZE(M%U)+SIZE(M%V)/)
+ALLOCATE(RW(OFF(4)+SIZE(M%W)),SE(0:O%NV,4),MK(O%NE),MC(O%NE),TE(O%NE)); RW = 0; SE = 0; MK = 0; MC = 0
+DO I=0,7
+   RW(OFF(MOD(I,4)+1)+O%IX(O%KP(I)+1:O%KP(I+1))) = (/(J,J=O%KP(I)+1,O%KP(I+1))/)
+ENDDO
+DO Q=1,4
+   SE(O%EP(:,Q),Q) = (/(E,E=1,O%NE)/)
+ENDDO
+
+! The CVs of the band pieces' two cells: a plain cell is its own (CS: 0 and the cell), else FDS's CV of this mesh (CS:
+! its index), else none (0: a CV of another mesh).
+ALLOCATE(LCV(M%FV%CV%N),LCP(0:M%IBP1,0:M%JBP1,0:M%KBP1),CS(4,2*O%NB),PC(O%NB,2),BX(O%NB),BA(O%NB),O%LH(O%NB,2))
+LCV = 0; LCP = 0; PC = 0; NC = 0
+DO IF_=1,F%N_INT
+   IF (.NOT.BAND(IF_)) CYCLE
+   A = F%X1AXIS(IF_); N = KEY(IF_); I = ROW(IF_,A,N); BX(I) = A; BA(I) = F%AREA(IF_)
+   DO S=1,2
+      NL = N; NL(A) = N(A)+S-1; O%LH(I,S) = O3E_FLAT(M,NL,-1)
+      IF (.NOT.NP(NL(1),NL(2),NL(3))) THEN
+         IF (LCP(NL(1),NL(2),NL(3))==0) THEN
+            NC = NC+1; LCP(NL(1),NL(2),NL(3)) = NC; CS(:,NC) = (/0,NL/)
+         ENDIF
+         PC(I,S) = LCP(NL(1),NL(2),NL(3))
+         CYCLE
+      ENDIF
+      IF ((S==1).EQV.(F%NVEC(A,IF_)>0._EB)) THEN
+         P = F%OWNER_CV(IF_); IF (F%OWNER_CV_NM(IF_)/=NM) CYCLE
+      ELSE
+         P = F%NBR_CV(IF_); IF (F%NBR_CV_NM(IF_)/=NM .OR. P<1) CYCLE
+      ENDIF
+      IF (LCV(P)==0) THEN
+         NC = NC+1; LCV(P) = NC; CS(:,NC) = (/P,0,0,0/)
+      ENDIF
+      PC(I,S) = LCV(P)
+   ENDDO
+ENDDO
+
+! The gas pieces of each CV: of a plain cell its six faces but walls; of FDS's CV its outer FACE rows of gas (PO: the CV
+! on the other side, if of this mesh), and its CFACEs' constant UW where the wall moves.
+I = 6*NC; IF (ALLOCATED(M%FV%CV%FACE_LIST)) I = I+SIZE(M%FV%CV%FACE_LIST)
+ALLOCATE(PP(NC+1),PR(I),PX(I),PD(I),PO(I),PAR(I),VR(0:NC),AS(0:NC,3,0:1),UW(3,NC),TWO(0:NC,3))
+VR(0) = 1._EB; AS = 1._EB; AS(1:NC,:,:) = 0._EB; UW = 0._EB; J = 0
+DO R=1,NC
+   PP(R) = J+1
+   IF (CS(1,R)==0) THEN
+      NL = CS(2:4,R); VR(R) = M%DX(NL(1))*M%DY(NL(2))*M%DZ(NL(3))
+      DO A=1,3
+         DO S=0,1
+            IW = M%CELL(M%CELL_INDEX(NL(1),NL(2),NL(3)))%WALL_INDEX((2*S-1)*A)
+            IF (IW>0) THEN
+               IF (M%WALL(IW)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY) CYCLE
+            ENDIF
+            N = NL; N(A) = NL(A)-1+S
+            J = J+1; PR(J) = ROW(0,A,N); PX(J) = A; PD(J) = S
+            PAR(J) = VR(R)/MERGE(M%DX(NL(1)),MERGE(M%DY(NL(2)),M%DZ(NL(3)),A==JAXIS),A==IAXIS)
+         ENDDO
+      ENDDO
+   ELSE
+      P = CS(1,R); VR(R) = M%FV%CV%VOLUME(P)
+      DO K=M%FV%CV%FACE_PTR(P),M%FV%CV%FACE_PTR(P+1)-1
+         IF_ = M%FV%CV%FACE_LIST(K)
+         IF (F%ROLE(IF_)==CC_FACE_ROLE_INTERNAL) CYCLE
+         IF (F%KIND(IF_)==CC_FACE_KIND_WALL .AND. PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) UW(:,R) = UW(:,R) + &
+            F%AREA(IF_)*F%NVEC(:,IF_)*O3E_TEST_WALL_VELOCITY(F%XYZCEN(IAXIS,IF_),F%XYZCEN(JAXIS,IF_),F%XYZCEN(KAXIS,IF_))/VR(R)
+         IF (ALL(F%KIND(IF_)/=(/CC_FACE_KIND_GAS,CC_FACE_KIND_COUPLING,CC_FACE_KIND_REMOTE/))) CYCLE
+         A = F%X1AXIS(IF_); J = J+1; PR(J) = ROW(IF_,A,KEY(IF_)); PX(J) = A; PAR(J) = F%AREA(IF_)
+         IF (F%OWNER_CV_NM(IF_)==NM .AND. F%OWNER_CV(IF_)==P) THEN
+            PO(J) = MERGE(F%NBR_CV(IF_),0,F%NBR_CV_NM(IF_)==NM); PD(J) = MERGE(1,0,F%NVEC(A,IF_)>0._EB)
+         ELSE
+            PO(J) = MERGE(F%OWNER_CV(IF_),0,F%OWNER_CV_NM(IF_)==NM); PD(J) = MERGE(0,1,F%NVEC(A,IF_)>0._EB)
+         ENDIF
+      ENDDO
+   ENDIF
+   DO K=PP(R),J
+      AS(R,PX(K),PD(K)) = AS(R,PX(K),PD(K))+PAR(K)
+   ENDDO
+ENDDO
+PP(NC+1) = J+1
+TWO = AS(:,:,0)>0._EB .AND. AS(:,:,1)>0._EB
+
+! Per CV and axis the Gauss sum (rows, sig A/V), then the moving wall's constant; per CV its members (cells, V_g/V).
+I = SIZE(PR)+3*NC; J = 0; IF (ALLOCATED(M%FV%CV%MEMBER_LIST)) J = SIZE(M%FV%CV%MEMBER_LIST)
+ALLOCATE(O%GPTR(3*NC+1),O%GIX(I),O%GW(I),O%MPTR(NC+1),O%MIX(NC+J),O%MW(NC+J),O%TN(0:3*NC))
+O%TN = 0._EB; O%NC = NC; NV = O%NV; K = 0; I = 0
+DO R=1,NC
+   DO A=1,3
+      O%GPTR(3*R+A-3) = K+1
+      DO J=PP(R),PP(R+1)-1
+         IF (PX(J)/=A .OR. PR(J)==0) CYCLE
+         K = K+1; O%GIX(K) = PR(J); O%GW(K) = REAL(2*PD(J)-1,EB)*PAR(J)/VR(R)
+      ENDDO
+      IF (UW(A,R)==0._EB) CYCLE
+      K = K+1; NV = NV+1; O%GIX(K) = NV; O%GW(K) = 1._EB
+   ENDDO
+   O%MPTR(R) = I+1
+   IF (CS(1,R)==0) THEN
+      I = I+1; O%MIX(I) = O3E_FLAT(M,CS(2:4,R),0); O%MW(I) = 1._EB
+      CYCLE
+   ENDIF
+   DO J=M%FV%CV%MEMBER_PTR(CS(1,R)),M%FV%CV%MEMBER_PTR(CS(1,R)+1)-1
+      I = I+1; O%MIX(I) = O3E_FLAT(M,M%FV%GCELL%IJK(:,M%FV%CV%MEMBER_LIST(J)),0)
+      O%MW(I) = M%FV%GCELL%VOLUME(M%FV%CV%MEMBER_LIST(J))/VR(R)
+   ENDDO
+ENDDO
+O%GPTR(3*NC+1) = K+1; O%MPTR(NC+1) = I+1; O%GIX = O%GIX(1:K); O%GW = O%GW(1:K); O%MIX = O%MIX(1:I); O%MW = O%MW(1:I)
+IF (NV>O%NV) THEN
+   ALLOCATE(UP(0:NV)); UP(0:O%NV) = O%UP; UP(O%NV+1:NV) = PACK(UW,UW/=0._EB); CALL MOVE_ALLOC(UP,O%UP)
+ENDIF
+
+! Per band piece (axis A, CVs P, Q): the halves it takes with 11.1's fractions f_P, f_Q; the normal stress.
+ALLOCATE(O%VPTR(O%NB+1),O%NIX(O%NB,2),O%NW(O%NB,2),VE(8*O%NB),VV(8*O%NB))
+O%NW = 0._EB; K = 0
+DO I=1,O%NB
+   O%VPTR(I) = K+1; A = BX(I); P = PC(I,1); Q = PC(I,2)
+   O%NIX(I,:) = MERGE(PC(I,:)+NC*(A-1),0,PC(I,:)>0)
+   IF (P==Q) THEN
+      CALL HALF(P,0,1._EB); CALL HALF(P,1,1._EB)
+      O%NW(I,1) = 2._EB*(AS(P,A,1)-AS(P,A,0))/VR(P)
+   ELSE
+      AP = BA(I)
+      IF (MIN(CS(1,MAX(P,1)),CS(1,MAX(Q,1)),P,Q)>0) AP = SUM(PAR(PP(P):PP(P+1)-1),MASK= &
+         PX(PP(P):PP(P+1)-1)==A .AND. PD(PP(P):PP(P+1)-1)==1 .AND. PO(PP(P):PP(P+1)-1)==CS(1,Q))
+      FP = AP/AS(P,A,1); MP = FP*MERGE(0.5_EB,1._EB,TWO(P,A))*VR(P)
+      FQ = AP/AS(Q,A,0); MQ = FQ*MERGE(0.5_EB,1._EB,TWO(Q,A))*VR(Q)
+      IF (TWO(P,A)) THEN
+         CALL HALF(P,1,2._EB*MP/(MP+MQ))
+      ELSE
+         CALL HALF(P,0,MP/(MP+MQ)); CALL HALF(P,1,MP/(MP+MQ))
+      ENDIF
+      IF (TWO(Q,A)) THEN
+         CALL HALF(Q,0,2._EB*MQ/(MP+MQ))
+      ELSE
+         CALL HALF(Q,0,MQ/(MP+MQ)); CALL HALF(Q,1,MQ/(MP+MQ))
+      ENDIF
+      O%NW(I,:) = (/-FP*MERGE(AS(P,A,0)+AS(P,A,1),0._EB,TWO(P,A)),FQ*MERGE(AS(Q,A,0)+AS(Q,A,1),0._EB,TWO(Q,A))/)/(MP+MQ)
+   ENDIF
+   MK(VE(O%VPTR(I):K)) = 0
+ENDDO
+O%VPTR(O%NB+1) = K+1; O%VED = VE(1:K); O%VW = VV(1:K)
+
+CONTAINS
+
+FUNCTION KEY(IF_) RESULT(NK)
+! Low cell of the Cartesian face of FACE row IF_.
+INTEGER, INTENT(IN) :: IF_
+INTEGER :: NK(3)
+NK = F%IJK_FACE(:,IF_)
+IF (F%FTYPE(IF_)==CC_FTYPE_CFGAS) NK = M%CUT_FACE(F%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
+END FUNCTION KEY
+
+INTEGER FUNCTION ROW(IF_,AX,NF)
+! Velocity row of the piece of FACE row IF_ (cut), else of the face (AX;NF); 0 if it has none.
+INTEGER, INTENT(IN) :: IF_,AX,NF(:)
+IF (IF_>0) THEN
+   ROW = RW(IF_)
+   IF (F%FTYPE(IF_)==CC_FTYPE_CFGAS) RETURN
+ENDIF
+ROW = RW(OFF(AX+1)+O3E_FLAT(M,NF,AX))
+END FUNCTION ROW
+
+SUBROUTINE HALF(R,S,WH)
+! Adds WH times the lateral stress of the half S of CV R in the axis A (A.5.2) to the band piece's list.
+INTEGER, INTENT(IN) :: R,S
+REAL(EB), INTENT(IN) :: WH
+INTEGER :: J,JJ,L,E,N2
+IF (R==0) RETURN
+DO J=PP(R),PP(R+1)-1
+   IF (PX(J)==A) CYCLE
+   L = MERGE(2,4,A==MODULO(PX(J),3)+1)-S              ! the slot of the edge at the piece's end S in A
+   E = SE(PR(J),L)
+   IF (E==0) E = SE(PR(J),L+2*S-1)
+   IF (E>0) THEN
+      CALL ADD(E,WH*REAL(2*PD(J)-1,EB)*PAR(J)/VR(R))
+      CYCLE
+   ENDIF
+   N2 = 0
+   DO JJ=PP(R),PP(R+1)-1
+      IF (PX(JJ)==6-A-PX(J)) CYCLE
+      L = MERGE(1,3,6-A-PX(J)==MODULO(PX(JJ)+1,3)+1)
+      DO E=L,L+1
+         IF (SE(PR(JJ),E)==0) CYCLE
+         IF (MC(SE(PR(JJ),E))>0) CYCLE
+         N2 = N2+1; TE(N2) = SE(PR(JJ),E); MC(TE(N2)) = 1
+      ENDDO
+   ENDDO
+   DO E=1,N2
+      CALL ADD(TE(E),WH*REAL(2*PD(J)-1,EB)*PAR(J)/(VR(R)*N2)); MC(TE(E)) = 0
+   ENDDO
+ENDDO
+END SUBROUTINE HALF
+
+SUBROUTINE ADD(E,WE)
+! Adds the weight WE of edge E to the band piece's list.
+INTEGER, INTENT(IN) :: E
+REAL(EB), INTENT(IN) :: WE
+IF (MK(E)==0) THEN
+   IF (K==SIZE(VE)) THEN
+      VE = [VE,VE]; VV = [VV,VV]
+   ENDIF
+   K = K+1; MK(E) = K; VE(K) = E; VV(K) = 0._EB
+ENDIF
+VV(MK(E)) = VV(MK(E))+WE
+END SUBROUTINE ADD
+
+END SUBROUTINE O3E_BUILD_VISC
+
+
 SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK)
 ! The gas edge (A.3.1) at which the piece of FACE row IF_ is arm Q (A.1): its key EK (direction T, low cell N) and
 ! arms P4, each the piece of its Cartesian face that spans the same segments of the edge (O3E_ROW); P4=0 if a side has
@@ -5212,6 +5447,22 @@ IF (Q==4) N(B) = N(B)+1
 END SUBROUTINE O3E_ARM
 
 
+INTEGER FUNCTION O3E_FLAT(M,N,AX)
+! Flat index of the cell N in MU, D (AX=0) or in RHO, RHOS (AX=-1: from -1 to IBP1+1), or of the face (AX;N) in U, V or
+! W, whose normal index starts at -1.
+TYPE(MESH_TYPE), INTENT(IN) :: M
+INTEGER, INTENT(IN) :: N(:),AX
+INTEGER :: L(3),D(3)
+L = N; D = (/M%IBP1,M%JBP1,M%KBP1/)+1
+IF (AX>0) THEN
+   L(AX) = L(AX)+1; D(AX) = D(AX)+1
+ELSEIF (AX<0) THEN
+   L = L+1; D = D+2
+ENDIF
+O3E_FLAT = 1+L(1)+D(1)*(L(2)+D(2)*L(3))
+END FUNCTION O3E_FLAT
+
+
 INTEGER FUNCTION O3E_ROW(M,AX,N,Q,C1,C2) RESULT(IF_)
 ! FACE row of the gas piece at the Cartesian face (AX;N) that spans segments C1:C2 of the grid edge where it is arm Q
 ! (Q=0: the first piece); -1 for a whole gas face without a FACE row, 0 for none.
@@ -5223,12 +5474,9 @@ IF_ = 0
 SELECT CASE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX))
 CASE(CC_GASPHASE)
    IF (C2/=0) RETURN
-   IF_ = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDRC,AX)
-   IF (IF_>0) THEN
-      IF_ = M%RC_FACE(IF_)%FC
-   ELSE
-      IF_ = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FROW,AX)
-   ENDIF
+   IF_ = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FROW,AX)    ! at a seam also a tail RC row: the band's row first
+   IF (IF_==0 .AND. M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDRC,AX)>0) &
+      IF_ = M%RC_FACE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDRC,AX))%FC
    IF (IF_==0) IF_ = -1
 CASE(CC_CUTCFE)
    ICF = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDCF,AX)
@@ -14927,21 +15175,28 @@ END SUBROUTINE CC_VELOCITY_FLUX
 
 SUBROUTINE CC_O3E_FORCE_A(NM)
 ! Per stage (PREDICTOR), after the copy of FVX, FVY, FVZ onto FN: the O3e force of the band pieces of mesh NM.
-! K0: the stage's velocity of every row, gathered by source. K1: vorticity and strain at the gas edges (A.3.3) and
-! the products -OM T_c, OM T_b (A.4.3) into Q. K2: omega x u of each band piece, gathered from its edges' products.
+! K0: the stage's velocity of every row, gathered by source. K1: vorticity and shear stress at the gas edges (A.3.3,
+! design 12.3) and the products -OM T_c, OM T_b (A.4.3) into Q. K3: per CV its viscosity, divergence and Gauss
+! gradient, its tau_aa of each axis into TN. K2 and K3: omega x u of each band piece, gathered from its edges'
+! products, less its lateral and normal stress over its density (A.5, design 2.2).
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
-INTEGER :: I,L,NE
-INTEGER, POINTER, CONTIGUOUS :: IX(:),EP(:,:),ENB(:,:),PS(:,:)
-REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),OM(:),ST(:),TW(:,:),Q(:),PW(:,:),ROT(:)
-REAL(EB) :: DCB,DBC
+INTEGER :: I,K,L,NE,NC
+INTEGER, POINTER, CONTIGUOUS :: IX(:),EP(:,:),ENB(:,:),PS(:,:),ECL(:,:),MPTR(:),MIX(:),GPTR(:),GIX(:),NIX(:,:), &
+                                VPTR(:),VED(:),LH(:,:)
+REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),OM(:),ST(:),TW(:,:),Q(:),PW(:,:),F(:), &
+                                 EMW(:,:),MU1(:),DP1(:),RH1(:),MW(:),GW(:),TN(:),NW(:,:),VW(:)
+REAL(EB) :: DCB,DBC,MC,DC,G(3),S
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
 IF (PREDICTOR) THEN
    VC => M%FV%FACE%VEL; U1(1:SIZE(M%U)) => M%U; V1(1:SIZE(M%V)) => M%V; W1(1:SIZE(M%W)) => M%W
+   DP1(1:SIZE(M%D)) => M%D; RH1(1:SIZE(M%RHO)) => M%RHO
 ELSE
    VC => M%FV%FACE%VELS; U1(1:SIZE(M%US)) => M%US; V1(1:SIZE(M%VS)) => M%VS; W1(1:SIZE(M%WS)) => M%WS
+   DP1(1:SIZE(M%DS)) => M%DS; RH1(1:SIZE(M%RHOS)) => M%RHOS
 ENDIF
+MU1(1:SIZE(M%MU)) => M%MU
 UP => M%FV%O3%UP; IX => M%FV%O3%IX
 DO L=0,4,4
    DO I=M%FV%O3%KP(L)+1,M%FV%O3%KP(L+1)
@@ -14958,18 +15213,39 @@ DO L=0,4,4
    ENDDO
 ENDDO
 EP => M%FV%O3%EP; ENB => M%FV%O3%ENB; WA => M%FV%O3%WA; RD => M%FV%O3%RD; OM => M%FV%O3%OM; ST => M%FV%O3%ST
-TW => M%FV%O3%TW; Q => M%FV%O3%Q; NE = M%FV%O3%NE
+TW => M%FV%O3%TW; Q => M%FV%O3%Q; NE = M%FV%O3%NE; ECL => M%FV%O3%ECL; EMW => M%FV%O3%EMW
 DO I=1,NE
    DCB = (UP(EP(I,4))+WA(I,4)*(UP(ENB(I,4))-UP(EP(I,4)))-UP(EP(I,3))-WA(I,3)*(UP(ENB(I,3))-UP(EP(I,3))))*RD(I,1)
    DBC = (UP(EP(I,2))+WA(I,2)*(UP(ENB(I,2))-UP(EP(I,2)))-UP(EP(I,1))-WA(I,1)*(UP(ENB(I,1))-UP(EP(I,1))))*RD(I,2)
    Q(I) = (DBC-DCB)*(TW(I,3)*UP(EP(I,3))+TW(I,4)*UP(EP(I,4)))
    Q(NE+I) = (DCB-DBC)*(TW(I,1)*UP(EP(I,1))+TW(I,2)*UP(EP(I,2)))
    OM(I) = DCB-DBC
-   ST(I) = DCB+DBC
+   ST(I) = (EMW(I,1)*MU1(ECL(I,1))+EMW(I,2)*MU1(ECL(I,2))+EMW(I,3)*MU1(ECL(I,3))+EMW(I,4)*MU1(ECL(I,4)))*(DCB+DBC)
 ENDDO
-PS => M%FV%O3%PS; PW => M%FV%O3%PW; ROT => M%FV%O3%ROT
+MPTR => M%FV%O3%MPTR; MIX => M%FV%O3%MIX; MW => M%FV%O3%MW; GPTR => M%FV%O3%GPTR; GIX => M%FV%O3%GIX; GW => M%FV%O3%GW
+TN => M%FV%O3%TN; NC = M%FV%O3%NC
+DO I=1,NC
+   MC = 0._EB; DC = 0._EB
+   DO K=MPTR(I),MPTR(I+1)-1
+      MC = MC+MW(K)*MU1(MIX(K)); DC = DC+MW(K)*DP1(MIX(K))
+   ENDDO
+   DO L=1,3
+      G(L) = 0._EB
+      DO K=GPTR(3*I+L-3),GPTR(3*I+L-2)-1
+         G(L) = G(L)+GW(K)*UP(GIX(K))
+      ENDDO
+   ENDDO
+   TN(I) = MC*(FOTH*DC-2._EB*(G(2)+G(3))); TN(NC+I) = MC*(FOTH*DC-2._EB*(G(1)+G(3)))
+   TN(2*NC+I) = MC*(FOTH*DC-2._EB*(G(1)+G(2)))
+ENDDO
+PS => M%FV%O3%PS; PW => M%FV%O3%PW; F => M%FV%O3%F; NIX => M%FV%O3%NIX; NW => M%FV%O3%NW; VPTR => M%FV%O3%VPTR
+VED => M%FV%O3%VED; VW => M%FV%O3%VW; LH => M%FV%O3%LH
 DO I=1,M%FV%O3%NB
-   ROT(I) = PW(I,1)*Q(PS(I,1))+PW(I,2)*Q(PS(I,2))+PW(I,3)*Q(PS(I,3))+PW(I,4)*Q(PS(I,4))
+   S = NW(I,1)*TN(NIX(I,1))+NW(I,2)*TN(NIX(I,2))
+   DO K=VPTR(I),VPTR(I+1)-1
+      S = S+VW(K)*ST(VED(K))
+   ENDDO
+   F(I) = PW(I,1)*Q(PS(I,1))+PW(I,2)*Q(PS(I,2))+PW(I,3)*Q(PS(I,3))+PW(I,4)*Q(PS(I,4))-S/(RH1(LH(I,1))+RH1(LH(I,2)))
 ENDDO
 END SUBROUTINE CC_O3E_FORCE_A
 
