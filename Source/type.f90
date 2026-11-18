@@ -309,8 +309,8 @@ TYPE BOUNDARY_PROP1_TYPE
    REAL(EB) :: AREA=0._EB            !< Face area (m2)
    REAL(EB) :: HEAT_TRANS_COEF=0._EB !< Heat transfer coefficient (W/m2/K)
    REAL(EB) :: Q_CON_F=0._EB         !< Convective heat flux at surface (W/m2)
-   REAL(EB) :: Q_CON_SUM=0._EB       !< CC_O3E: convective heat the gas gave a thermally thick CFACE since its update (J/m2)
-   REAL(EB) :: Q_CON_GHOST=0._EB     !< CC_O3E: that heat's flux over KODXF in the solid's front ghost difference (K)
+   REAL(EB) :: Q_CON_SUM=0._EB       !< CC_O3E: convective heat from the gas since the last solid update (J/m2)
+   REAL(EB) :: Q_CON_GHOST=0._EB     !< CC_O3E: part of the solid's front ghost temperature due to that heat (K)
    REAL(EB) :: Q_RAD_IN=0._EB        !< Incoming radiative flux (W/m2)
    REAL(EB) :: Q_RAD_OUT=0._EB       !< Outgoing radiative flux (W/m2)
    REAL(EB) :: EMISSIVITY=1._EB      !< Surface emissivity
@@ -1553,60 +1553,82 @@ TYPE CC_SKEW_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:)   :: C    !< (0:N_TOTAL_SCALARS,0:N) t.g_f on the positive axis; column 0 is 0.
 END TYPE CC_SKEW_TYPE
 
-!> \brief Per-piece momentum (CC_O3E) of a mesh, set once by CC_O3E_SETUP: NB band pieces (gas pieces not regular).
+!> \brief Lists and work arrays of the cut-cell momentum (CC_O3E) of a mesh, built once by CC_O3E_SETUP.
 
 TYPE CC_O3E_TYPE
-   INTEGER :: NB=0,NV=0,NE=0,NG=0                    !< Band rows 1:NB, velocity rows 1:NV, edges 1:NE: gas edges 1:NG,
-                                                     !< then wall edges (fewer than four pieces, a gas corner).
-   INTEGER :: KP(0:13)=0                             !< Rows KP(G-1)+1:KP(G) of group G: band (G=1:4), support (5:8) by
-                                                     !< source (cut pieces' VEL, U, V, W); 9:11 guard faces held nowhere;
-                                                     !< 12 wall points of moving walls (PERIODIC_TEST 31:37), set once;
-                                                     !< 13 walls of SURFs with a velocity, gathered per stage from UWC:
-                                                     !< the edges' wall points (to NV), then the CVs' Gauss sums.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IX       !< (1:NV) FACE row of a cut piece, flat U, V, W index of a face.
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP,ENB   !< (1:NE,4) row of each arm (0: a wall at rest) and of its partner
-                                                     !< (0: none).
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA,RD    !< (1:NE,4) arm weights; (1:NE,2) 1/(X4-X3), 1/(X2-X1) of the arms.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RDP      !< (1:NE,2) the same of the four pieces' own points.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP       !< (0:KP(13)) the stage's velocity of each row; UP(0)=0, a wall at
-                                                     !< rest; then the test fields' constants of the CVs' Gauss sums.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM,ST    !< (1:NE) vorticity at the edges; (1:NG) shear stress at the gas
-                                                     !< edges (a wall edge has none).
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW,PW    !< (1:NE,4) transport weights; (1:NB,4) distribution weight
-                                                     !< of the edge where the band piece is arm Q (0: none).
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: PS       !< (1:NB,4) the product of that edge in Q (0: none).
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: Q,F      !< (0:2*NE) products QB (1:NE), QC (NE+1:), Q(0)=0; (1:NB) the force.
-   INTEGER :: NC=0                                   !< CVs of the band pieces' cells.
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: ECL,LH,NIX !< (1:NE,4) cells around a gas edge, flat in MU; (1:NB,2) the two
-                                                     !< cells of a band piece, flat in RHO; its two CVs' slots in TN.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: EMW,NW   !< (1:NE,4) their weights for mu_e; (1:NB,2) TN's weights.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: VPTR,VED,MPTR,MIX,GPTR,GIX !< CSR: lateral stress of a band piece (edges);
-                                                     !< members of a CV (cells, flat); Gauss sums of a CV by axis (rows).
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VW,MW,GW,TN !< Their weights; (0:3*NC) tau_aa of each CV by axis, TN(0)=0.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CFV      !< BOUNDARY_PROP1 index of each CFACE whose SURF has a velocity.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NJ,TJ    !< (1:SIZE(CFV),3) its normal n into the gas; its jet vector T.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: UWC      !< (0:SIZE(CFV),3) the stage's wall velocity w n + MAX(w,0) T; row 0 is 0.
-   ! The wall law of a band piece by its two CVs (slots as NIX): WK = 2 sum share A_j RDW_j / mass over the CFACEs j of
-   ! the CV, WKU the same with each term times the wall's velocity along the piece; the inflow term KIN = sum share A_j
-   ! MAX(w_j,0) / mass and BIN the same times the wall's velocity. Moving walls (CFV): the band rows WPB, their axes WPA
-   ! and CSR WPTR of entries: CFV slot WCF, CV WS (1,2), 2 share A_j RDW_j / mass WKE, share A_j / mass WQE.
-   INTEGER :: NST=0                                  !< Rows of the stiff list.
-   REAL(EB) :: DT=0._EB                              !< The time step of the stage's force and explicit state.
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WK,WKU   !< (1:NB,2) see above; test fields: WKU and KIN, BIN set once.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: KIN,BIN  !< (1:NB) see above.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WPB,WPA,WPTR,WCF,WS !< Moving walls, see above.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WKE,WQE  !< Their weights, see above.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WIN      !< (1:SIZE(CFV)) the stage's inflow speed MAX(n.UWC,0).
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: STF      !< (1:NST) band rows of the stiff list (ROS2).
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: SH       !< (1:NST,2) their two cells, flat in H.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: RDS,DEN  !< (1:NST) 1/distance of the two cells' centroids; 1 + gamma DT KW.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MUC      !< (0:3*NC) the CVs' viscosity, by axis as TN; MUC(0)=0.
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: KW,UH,UB,FNE !< (1:NB) the stage's wall coefficient, explicit state, u (the
-                                                     !< corrector's), effective force.
-   INTEGER :: NWC=0                                  !< Wall cells.
-   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WCC,WCP,WCJ,WRP,WRA,WRJ
-   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WCA,WRW
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WCN,SW
+   INTEGER :: NB=0                                  !< Number of faces of the cut-cell region
+   INTEGER :: NV=0                                  !< Number of velocity values the momentum terms read
+   INTEGER :: NE=0                                  !< Number of cell edges with momentum terms
+   INTEGER :: NG=0                                  !< Number of those edges with gas faces all around; the rest are at a wall
+   INTEGER :: KP(0:13)=0                            !< Last place of each kind of velocity value in the list
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IX      !< Where each velocity value is read: cut-face row, or index in U, V, W
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP      !< The four faces around each edge, as places in the velocity list
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: ENB     !< The face each of them is interpolated with (0: none)
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA      !< Interpolation weights towards that face
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RD      !< Inverse spacings across the edge for the strain (1/m)
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RDP     !< Inverse spacings across the edge for the vorticity (1/m)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP      !< Velocity values of the stage (m/s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM      !< Vorticity at the edges (1/s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: ST      !< Shear stress at the gas edges
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW      !< Weights of the face velocities carried in an edge's rotational term
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: PW      !< Weights of the edge rotational terms a face takes
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: PS      !< Which edge rotational terms a face takes
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: Q       !< Rotational terms at the edges
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: F       !< Momentum force on each face of the cut-cell region (m/s2)
+   INTEGER :: NC=0                                  !< Number of control volumes on the two sides of the faces
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: ECL     !< The four cells around each edge
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: LH      !< The two cells of each face
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: NIX     !< The two control volumes of each face
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: EMW     !< Weights of the four cells' viscosity at the edge
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NW      !< Weights of the two control volumes' normal stress on a face
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: VPTR    !< Start of each face's list of edge shear stresses
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: VED     !< The edges in those lists
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: MPTR    !< Start of each control volume's list of member cells
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: MIX     !< The member cells in those lists
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: GPTR    !< Start of each control volume's velocity-gradient list, by axis
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: GIX     !< The velocity values in those lists
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: VW      !< Weights of the edge shear stresses
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MW      !< Volume fractions of the member cells
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: GW      !< Weights of the velocity-gradient lists (area over volume)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: TN      !< Normal viscous stress of each control volume, by axis
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CFV     !< CFACEs whose SURF blows or sucks
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NJ      !< Their normal, into the gas
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TJ      !< Their jet's tangential direction per unit of normal velocity
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: UWC     !< Their wall velocity, per stage (m/s)
+   INTEGER :: NST=0                                 !< Number of faces that take the implicit step
+   REAL(EB) :: DT=0._EB                             !< Time step of the stage (s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WK      !< Wall-law coefficient of each face, by side
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WKU     !< Its part that multiplies the wall velocity
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: KIN     !< Inflow coefficient of each face (1/s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: BIN     !< Inflow term from the velocity of blowing walls
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WPB     !< Faces next to walls that blow or suck
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WPA     !< Their velocity component
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WPTR    !< Start of each such face's list of moving CFACEs
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WCF     !< The moving CFACEs in those lists
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WS      !< The side of the face each one is on
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WKE     !< Their wall-law weights
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WQE     !< Their inflow weights
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WIN     !< Inflow speed of each moving CFACE, per stage (m/s)
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: STF     !< Faces that take the implicit step
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: SH      !< Their two cells, for the pressure correction
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: RDS     !< Inverse distance between those two cells' centroids (1/m)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: DEN     !< Denominator of the implicit step
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MUC     !< Viscosity of each control volume, by axis (kg/m/s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: KW      !< Wall coefficient of each face, per stage (1/s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UH      !< Explicit velocity of each face, per stage (m/s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UB      !< Velocity at the start of the step, for the corrector (m/s)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: FNE     !< Effective force on each face, for the velocity update (m/s2)
+   INTEGER :: NWC=0                                 !< Number of cut cells with CFACEs that blow or suck
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WCC     !< Those cut cells
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WCP     !< Start of each one's list of moving CFACEs
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WCJ     !< The moving CFACEs in those lists
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WRP     !< Start of each wall-velocity value's list of cells
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WRA     !< Which of the cells' sums each wall-velocity value takes
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WRJ     !< The cells in those lists
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WCA     !< Areas of the moving CFACEs (m2)
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WRW     !< Weights in the wall-velocity lists
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WCN     !< Area vectors of the moving CFACEs (m2)
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: SW      !< Sums of area times wall velocity in each cut cell, per stage
 END TYPE CC_O3E_TYPE
 
 !> \brief Mesh-owned finite-volume container for the unstructured active region.

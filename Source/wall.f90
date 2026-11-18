@@ -1959,7 +1959,7 @@ ELSEIF (PRESENT(CFACE_INDEX)) THEN UNPACK_WALL_PARTICLE
    ELSE
       Q_LIQUID_F = B1%Q_CONDENSE
    ENDIF
-   Q_HAND = B1%Q_CON_SUM/DT_BC  ! CC_O3E: the gas's convective heat since the last update (CC_WALL_HEAT_FLUX)
+   Q_HAND = B1%Q_CON_SUM/DT_BC  ! CC_O3E: the gas's mean convective flux since the last update (CC_WALL_HEAT_FLUX)
    IF (CC_O3E) THEN
       Q_LIQUID_F = Q_LIQUID_F + Q_HAND
       B1%Q_CON_SUM = 0._EB
@@ -2122,7 +2122,7 @@ SUB_TIMESTEP_LOOP: DO
    ELSEIF (PRESENT(THIN_WALL_INDEX)) THEN
       HTCF = B1%HEAT_TRANS_COEF
    ELSEIF (PRESENT(CFACE_INDEX)) THEN
-      HTCF = MERGE(0._EB,B1%HEAT_TRANS_COEF,CC_O3E)
+      HTCF = MERGE(0._EB,B1%HEAT_TRANS_COEF,CC_O3E)  ! CC_O3E: convection comes in as the given flux Q_HAND
    ELSEIF (PRESENT(PARTICLE_INDEX)) THEN
       RADIUS = SF%INNER_RADIUS + SUM(ONE_D%LAYER_THICKNESS(1:ONE_D%N_LAYERS))
       SELECT CASE(SF%GEOMETRY)
@@ -2869,7 +2869,8 @@ SUB_TIMESTEP_LOOP: DO
    KODXF = ONE_D%K_S(0)/DXF
    KODXB = ONE_D%K_S(NWP)/DXB
    IF (CC_O3E .AND. PRESENT(CFACE_INDEX) .AND. .NOT.SF%DIRICHLET_FRONT) THEN
-      ! The old half of the front flux takes the handed flux in place of the previous one: exactly what the gas gave.
+      ! The ghost temperature carries the old half of the front flux: replace the previous handed flux in it by the new
+      ! one, so that the solid gets exactly the heat the gas gave.
       ONE_D%TMP(0) = ONE_D%TMP(0) + Q_HAND/KODXF - B1%Q_CON_GHOST
       B1%Q_CON_GHOST = Q_HAND/KODXF
    ENDIF

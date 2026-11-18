@@ -213,19 +213,18 @@ INTEGER, SAVE :: TH_NSLOT=0
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: TH_DIV,TH_RTRM,TH_VOL,TH_ORTRM
 REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_OCOEFF
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SSLOT,TH_SDEST,TH_RSLOT,TH_RDEST,TH_BSLOT
-!< CC_O3E, the CFACEs of this process with a scalar row (CC_SET_WALL_ROWS): TH_W(:,L) = (mesh, BOUNDARY_PROP1 index,
-!< slot, FACE row), TH_WA(L) their area times AREA_ADJUST; over a thermally thick solid 1:TH_WN(1), other heat fluxes
-!< that follow the gas temperature to TH_WN(2), given ones to TH_WN(3). TH_WQ(:,L), over a thermally thick solid: the
-!< flux of the last corrector stage and Q_CON_SUM when it ended. TH_WZ: the CFACEs whose SURF fixes the mass fractions,
-!< TH_WCZ their stage's species coefficient. Per slot: TH_WK(0:1,) the CV's sums of A h and A CZ, then (0:NS,) its
-!< temperature and mass fraction changes; TH_WT the owner's temperature and density; TH_WS1(0:NS,) the CV's effective
-!< face sums of the last corrector stage. TH_WOWN: the slots owned here with a CFACE. TH_DT: the stage's time step.
-INTEGER, SAVE :: TH_WN(3)=0
-INTEGER, SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_W
-INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WOWN,TH_WZ
-REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_WQ,TH_WK,TH_WT,TH_WS1
-REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WA,TH_WCZ
-REAL(EB), SAVE :: TH_DT=0._EB
+! CC_O3E: the CFACEs of the cut-cell wall heat and mass fluxes, and what the fluxes keep from stage to stage.
+INTEGER, SAVE :: TH_WN(3)=0                             !< Last CFACE of each group: thick solid, follows the gas, given flux
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_W      !< Per CFACE: mesh, boundary index, control volume, face row
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WOWN     !< Control volumes owned here that have a CFACE
+INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WZ       !< CFACEs whose SURF fixes the mass fractions while blowing
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_WQ    !< Over a thick solid: last corrector flux and heat handed over
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_WK    !< Per control volume: wall coefficients, then implicit changes
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_WT    !< Per control volume: the owner's temperature and density
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:,:) :: TH_WS1   !< Per control volume: wall face sums of the last corrector
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WA      !< CFACE area times AREA_ADJUST (m2)
+REAL(EB), SAVE, ALLOCATABLE, DIMENSION(:) :: TH_WCZ     !< Mass transfer coefficient of the CFACEs in TH_WZ, per stage
+REAL(EB), SAVE :: TH_DT=0._EB                           !< Time step of the stage (s)
 !< TH_SROW: global row of each slot this process touches, increasing (TH_ROW_SLOT). FV_L2_FZ_REMOTE(1,slot): species
 !< right-hand side partials of rows owned on another process (END_FV_L2_SCALAR_RHS sends them to the owner).
 INTEGER, SAVE, ALLOCATABLE, DIMENSION(:) :: TH_SROW
@@ -1342,13 +1341,9 @@ END SUBROUTINE CC_SET_THERMO_ROWS
 
 
 SUBROUTINE CC_SET_WALL_ROWS
-! CC_O3E: the CFACEs of this process that bound a scalar row (TH_W, TH_WA, TH_WN, TH_WOWN) and the inverse distance of
-! each, B1%RDN = 1/(2 delta_j):
-!    1/delta_j = MAX over the CFACEs l of its CV of MAX(n_j.n_l,0)/d_l   (CC_WALL_RDW)
-! n the flow normals BC%NVEC, d_l the distance from the CV's centroid XBAR_CV to the polygon of l (O3E_NEAR). The owner
-! sends the centroid to the processes holding a member; they send their (n_l,1/d_l) to the owner's process, which
-! answers 1/delta_j. A CFACE with no area has no plane and is left out. A centroid on a polygon (d_l = 0) has no
-! finite distance: the run stops.
+! Called once at setup with CC_O3E: lists the CFACEs that bound the scalar control volumes of this process and sets
+! the wall distance each uses for its heat and mass transfer (B1%RDN), measured from the control volume's centroid.
+! A control volume spread over several processes is completed by its owner.
 INTEGER :: NM,IF_,ICFA,IS,L,K,N,NL,NR,NB,IPASS,POS(3)
 INTEGER, ALLOCATABLE :: SL(:),DST(:),SD(:),PTR(:),NXT(:),ORD(:)
 REAL(EB), ALLOCATABLE :: XC(:,:),NV(:,:),RL(:),RD(:),SB(:,:),RB(:,:)
@@ -1363,9 +1358,9 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       XC(:,M%TH_OCV(2,L)) = M%FV%CV%XBAR_CV(:,M%TH_OCV(1,L))
    ENDDO
 ENDDO
-CALL SCALAR_ROWS_FROM_OWNER(XC,TH_RSLOT,TH_RDEST,TH_BSLOT)
+CALL SCALAR_ROWS_FROM_OWNER(XC,TH_RSLOT,TH_RDEST,TH_BSLOT)   ! the centroids, to the processes that hold part of each volume
 
-! The CFACEs by class, counted, then listed with slot, normal and distance.
+! Count the CFACEs by thermal condition (thermally thick, fixed temperature, given flux), then list them in that order.
 POS = 0
 DO IPASS=1,2
    DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
@@ -1407,7 +1402,7 @@ IF (N>0) THEN
 ENDIF
 WHERE (RL>0._EB) RL = 1._EB/RL
 
-! A CV owned on another process: (row, n, 1/d, rank, L) of its CFACEs here to the owner's process.
+! A control volume owned by another process: send the normals and inverse distances of its CFACEs here to the owner.
 ALLOCATE(DST(MAX(1,TH_NSLOT))); DST = -2; DST(TH_SSLOT) = TH_SDEST
 N = COUNT(DST(SL)>=0)
 ALLOCATE(SB(7,MAX(1,N)),SD(MAX(1,N))); N = 0
@@ -1420,7 +1415,7 @@ CALL CC_GRID_SEAM_EXCHANGE(7,N,SB,SD,NR,RB)
 SL = (/SL,(TH_ROW_SLOT(NINT(RB(1,K))),K=1,NR)/); RL = (/RL,RB(5,1:NR)/)
 NV = RESHAPE((/NV,RB(2:4,1:NR)/),(/3,NL+NR/))
 
-! Every CV's CFACEs together (counting sort by slot), the distances; the members' answers.
+! Gather the CFACEs of each control volume, compute their wall distances, and send back those of other processes.
 N = NL+NR
 ALLOCATE(PTR(TH_NSLOT+1),ORD(N),RD(N)); PTR = 0
 DO K=1,N
@@ -4981,9 +4976,8 @@ END SUBROUTINE PINV3
 
 
 SUBROUTINE O3E_BUILD_CFV(NM)
-! The CFACEs of mesh NM whose SURF has a velocity (VEL, VOLUME_FLOW, a mass flux, an HVAC node or a leak):
-! CFV their BOUNDARY_PROP1 slots, NJ their normals n into the gas and, with the SURF's jet direction d (UVW),
-! TJ = (d - (d.n) n)/(d.n), else 0. Walls at rest are not listed. A face with d.n <= 0 cannot blow along d: stop.
+! Called by CC_O3E_SETUP: lists the CFACEs of mesh NM whose SURF blows or sucks, with their normal and, where the SURF
+! gives a jet direction (UVW), the tangential part of the jet. Walls at rest are not listed.
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_O3E_TYPE), POINTER :: O
@@ -5017,8 +5011,9 @@ END SUBROUTINE O3E_BUILD_CFV
 
 
 SUBROUTINE CC_O3E_SETUP
-! Per-piece momentum (CC_O3E): the band lists of each mesh (FV%O3), built once. First the cells that are not plain,
-! cut or in a CV of several members, in the mesh and its first guard layer: there from the mesh across.
+! Called once at setup with CC_O3E: builds, for each mesh, the lists of the cut-cell momentum terms (FV%O3). First it
+! marks the cells that are cut or belong to a control volume of several cells, in the mesh and in its first guard
+! layer, whose marks come from the neighbouring mesh.
 TYPE O3E_CELLS_TYPE
    LOGICAL, ALLOCATABLE :: NP(:,:,:)
 END TYPE O3E_CELLS_TYPE
@@ -5044,6 +5039,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
    ENDDO
    N = N+M%N_EXTERNAL_WALL_CELLS
 ENDDO
+! A marked cell next to another mesh is also marked in that mesh's guard layer.
 ALLOCATE(SB(4,MAX(N,1)),DEST(MAX(N,1)))
 NS = 0
 DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
@@ -5075,12 +5071,9 @@ END SUBROUTINE CC_O3E_SETUP
 
 
 SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK,EW)
-! The band of mesh NM and its edges (O3E_EDGE). A piece is regular when it is whole, its two cells are plain (NP false)
-! and its edges are regular, that is gas edges of four such pieces. The band is the gas pieces of the mesh that are not
-! regular (on the interface plane the lower mesh's), so every piece of a wall edge. Each edge of the band is made once,
-! by its first band arm: EK its key (direction, low cell) and 1 if it is regular, EP its arms as FACE rows (-1: a face
-! without one, 0: none), EW its arms' factors and gaps, its point and its segment (O3E_EDGE). The gas edges first:
-! rows 1:NG.
+! Called by CC_O3E_SETUP: picks the faces of the cut-cell region of mesh NM (BAND): gas faces that are cut, next to a
+! marked cell, or at a cell edge where a surrounding face is one of these or is missing. Then lists each cell edge of
+! these faces once, with its four surrounding faces, edges with gas faces all around first.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: NP(0:,0:,0:)
 LOGICAL, ALLOCATABLE, INTENT(OUT) :: BAND(:)
@@ -5117,7 +5110,7 @@ DO IF_=1,F%N_INT
    DO Q=1,4
       CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W11)
       IF (ALL(P4==0)) CYCLE
-      IF (ANY(P4(1:Q-1)>0 .AND. BAND(MAX(P4(1:Q-1),1)))) CYCLE
+      IF (ANY(P4(1:Q-1)>0 .AND. BAND(MAX(P4(1:Q-1),1)))) CYCLE   ! listed once, by its first face in the region
       NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,RG(Q,IF_))/); EP(:,NE) = P4; EW(:,NE) = W11
    ENDDO
 ENDDO
@@ -5132,7 +5125,7 @@ DEALLOCATE(EP)
 CONTAINS
 
 LOGICAL FUNCTION PLAIN(P,AX,NL)
-! The piece P (FACE row; -1 a whole face without one) at the Cartesian face (AX;NL) is whole and between plain cells.
+! True if face P, at the Cartesian face of axis AX and cell NL, is not cut and neither of its two cells is marked.
 INTEGER, INTENT(IN) :: P,AX,NL(3)
 INTEGER :: NH(3)
 PLAIN = .FALSE.
@@ -5147,16 +5140,9 @@ END SUBROUTINE O3E_BUILD_EDGES
 
 
 SUBROUTINE O3E_BUILD_ARMS(NM,BAND,EK,EW)
-! Per arm of each gas edge: a whole piece is at the mid-point of the edge's gas segment (WA=0); a cut piece
-! takes the next piece of its grid plane along the edge, on the side of the mid-point, as partner ENB with weight WA, at
-! most 1 (a partner short of the mid-point gives its own value), or, where there is no such piece, the wall point at the
-! end of the gas segment. Then the reciprocal distances RD of the arms (the strain) and RDP of the four pieces' own points
-! (the vorticity). A wall edge has RDP only (RD=0, no strain): a slot without a piece takes the wall's velocity at the
-! edge's point at the edge, or where the near piece across the edge begins; where the wall is free slip a pair of slots
-! that lacks a piece has no gradient across it: its RDP times 1 - phi, phi the free-slip part of the area of the walls
-! of its empty slots (WALL_ROW; 0 without any). The velocity of a wall point is row 0 (a wall at rest), a test field's
-! (group 12) or, where its wall includes SURFs with a velocity (CFV), a row of group 13 (WALL_ROW).
-! Then the velocity rows: each piece once, the band first, by group (TYPE CC_O3E_TYPE) in memory order.
+! Called by CC_O3E_SETUP: for each cell edge, the weights that take the velocities of its four surrounding faces to the
+! edge, with a wall velocity where a face is missing, and the cut cells whose CFACEs blow or suck. Then numbers the
+! velocity values that the momentum terms read, the faces of the cut-cell region first.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: BAND(:)
 INTEGER, INTENT(IN) :: EK(:,:)
@@ -5172,8 +5158,7 @@ INTEGER, ALLOCATABLE :: ORD(:),RN(:),SL(:),WC(:),SQ(:),RE(:),RS(:)
 M => MESHES(NM); F => M%FV%FACE; O => M%FV%O3
 ALLOCATE(R(4,O%NB+8*O%NE),UW(O%NB+8*O%NE),SQ(O%NB+8*O%NE),O%ENB(O%NE,4),O%WA(O%NE,4),O%RD(O%NE,2),O%RDP(O%NE,2))
 O%ENB = 0; O%WA = 0._EB; NR = 0
-! The CFACEs of each cut cell of this mesh: their area CAT and its free-slip part CAS. A cut cell with CFACEs of CFV of
-! an area is a wall cell (WC: the wall cell of a cut cell, 0 none) with their lists WCP, WCJ, WCA, WCN.
+! The CFACE area of each cut cell and its free-slip part; the cut cells with CFACEs that blow or suck, with those CFACEs.
 ALLOCATE(SL(SIZE(M%BOUNDARY_PROP1)),CAT(0:M%N_CUTCELL_MESH),CAS(0:M%N_CUTCELL_MESH),WC(0:M%N_CUTCELL_MESH), &
          O%WCC(M%N_CUTCELL_MESH),O%WCP(M%N_CUTCELL_MESH+1),O%WCJ(SIZE(O%CFV)),O%WCA(SIZE(O%CFV)),O%WCN(SIZE(O%CFV),3))
 SL = 0; SL(O%CFV) = (/(J,J=1,SIZE(O%CFV))/); CAT = 0._EB; CAS = 0._EB; WC = 0; NW = 0; O%WCP(1) = 1
@@ -5188,7 +5173,7 @@ DO I=1,M%N_CUTCELL_MESH
          IF (ICF<1) CYCLE                                ! a cut face in an OBST has no CFACE
          CAT(I) = CAT(I)+M%CFACE(ICF)%AREA
          IF (O3E_SLIP(M,ICF)) CAS(I) = CAS(I)+M%CFACE(ICF)%AREA
-         IF (SL(M%CFACE(ICF)%B1_INDEX)==0 .OR. M%CFACE(ICF)%AREA<=0._EB) CYCLE   ! no weight in a mean
+         IF (SL(M%CFACE(ICF)%B1_INDEX)==0 .OR. M%CFACE(ICF)%AREA<=0._EB) CYCLE   ! at rest or no area
          IF_ = M%CUT_FACE(CC%FACE_LIST(4,L))%FC(CC%FACE_LIST(5,L))
          O%WCJ(P) = SL(M%CFACE(ICF)%B1_INDEX); O%WCA(P) = M%CFACE(ICF)%AREA; O%WCN(P,:) = F%AREA(IF_)*F%NVEC(:,IF_)
          P = P+1
@@ -5204,6 +5189,7 @@ ALLOCATE(O%SW(NW,6))
 DO P=1,F%N_INT
    IF (BAND(P)) CALL ADD_ROW(P,F%X1AXIS(P),F%IJK_FACE(:,P),I)
 ENDDO
+! Edges with gas faces all around: a cut face's value is interpolated along the edge to the edge's mid-point.
 DO E=1,O%NG
    T = EK(1,E)
    XE = (/M%X(EK(1+IAXIS,E)),M%Y(EK(1+JAXIS,E)),M%Z(EK(1+KAXIS,E))/); S = EW(10:11,E); TE = EW(9,E)
@@ -5217,26 +5203,27 @@ DO E=1,O%NG
       IF (F%FTYPE(P)/=CC_FTYPE_CFGAS) CYCLE
       D = TE-XF(T)
       N = NQ; N(T) = N(T)+MERGE(1,-1,D>0._EB)
-      P = O3E_ROW(M,AQ,N)
+      P = O3E_ROW(M,AQ,N)                                       ! the next face along the edge, towards the mid-point
       IF (P/=0) THEN
          X2 = CENTROID(P,N)
          CALL ADD_ROW(P,AQ,N,O%ENB(E,Q))
       ELSE
-         X2 = XE; X2(T) = MERGE(S(2),S(1),D>0._EB)
+         X2 = XE; X2(T) = MERGE(S(2),S(1),D>0._EB)        ! none: the wall point at the end of the gas segment
          CALL WALL_ROW(E,Q)
-         IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN   ! a moving wall: its velocity at the wall point (C0/WA)
+         IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN   ! verification case: the exact wall velocity there
             NR = NR+1; R(:,NR) = REAL((/12,E,Q,0/),EB); O%ENB(E,Q) = NR
             UW(NR) = O3E_TEST_WALL_COMPONENT(X2(IAXIS),X2(JAXIS),X2(KAXIS),AQ)
-         ELSEIF (NJ>0) THEN                                    ! SURFs with a velocity
+         ELSEIF (NJ>0) THEN                                    ! a wall that blows or sucks
             NR = NR+1; R(:,NR) = REAL(KEY,EB); SQ(NR) = Q; O%ENB(E,Q) = NR
          ENDIF
       ENDIF
-      O%WA(E,Q) = MIN(1._EB,D/(X2(T)-XF(T)))
+      O%WA(E,Q) = MIN(1._EB,D/(X2(T)-XF(T)))                   ! at most 1: no extrapolation
       X(Q) = XF(RQ)+O%WA(E,Q)*(X2(RQ)-XF(RQ))
    ENDDO
    O%RD(E,:) = (/1._EB/(X(4)-X(3)),1._EB/(X(2)-X(1))/)
    O%RDP(E,:) = (/1._EB/(XP(4)-XP(3)),1._EB/(XP(2)-XP(1))/)
 ENDDO
+! Edges at a wall: a missing face takes the wall velocity at the edge; no strain is computed there.
 DO E=O%NG+1,O%NE
    T = EK(1,E)
    XE = (/M%X(EK(1+IAXIS,E)),M%Y(EK(1+JAXIS,E)),M%Z(EK(1+KAXIS,E))/); XE(T) = EW(9,E)
@@ -5249,23 +5236,23 @@ DO E=O%NG+1,O%NE
          CALL ADD_ROW(P,AQ,NQ,O%EP(E,Q))
          CYCLE
       ENDIF
-      XP(Q) = XE(RQ)+REAL(2*MODULO(Q,2)-1,EB)*EW(3+Q+2*MODULO(Q,2),E)   ! the gap of the slot across
+      XP(Q) = XE(RQ)+REAL(2*MODULO(Q,2)-1,EB)*EW(3+Q+2*MODULO(Q,2),E)   ! where the face across begins
       CALL WALL_ROW(E,Q); SA(Q) = AT; SF(Q) = AS
-      IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN   ! a moving wall: its velocity at the edge's point
+      IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN   ! verification case: the exact wall velocity at the edge
          NR = NR+1; R(:,NR) = REAL((/12,E,Q,0/),EB); O%EP(E,Q) = NR
          UW(NR) = O3E_TEST_WALL_COMPONENT(XE(IAXIS),XE(JAXIS),XE(KAXIS),AQ)
-      ELSEIF (NJ>0) THEN                                       ! SURFs with a velocity
+      ELSEIF (NJ>0) THEN                                       ! a wall that blows or sucks
          NR = NR+1; R(:,NR) = REAL(KEY,EB); SQ(NR) = Q; O%EP(E,Q) = NR
       ENDIF
    ENDDO
    O%RD(E,:) = 0._EB
-   PH = 0._EB                                                   ! the free-slip part of the empty slots' walls
+   PH = 0._EB                                                   ! free-slip walls: less gradient across a missing face
    IF (SUM(SA(3:4))>0._EB) PH(1) = SUM(SF(3:4))/SUM(SA(3:4))
    IF (SUM(SA(1:2))>0._EB) PH(2) = SUM(SF(1:2))/SUM(SA(1:2))
    O%RDP(E,:) = (/(1._EB-PH(1))/(XP(4)-XP(3)),(1._EB-PH(2))/(XP(2)-XP(1))/)
 ENDDO
 
-! Number the rows: sort the entries by group and source index, one row per distinct entry.
+! Number the velocity values: sort the entries by kind and index, one value per distinct entry.
 CALL KEY_SORT(R,4,NR,ORD)
 ALLOCATE(RN(NR)); O%NV = 0; O%KP = 0
 DO I=1,NR
@@ -5295,8 +5282,7 @@ DO Q=1,4
       IF (O%ENB(E,Q)>0) O%ENB(E,Q) = RN(O%ENB(E,Q))
    ENDDO
 ENDDO
-! The rows of group 13 so far, of the edges' wall points: per row an edge RE and slot RS of it, the component WRA, and
-! its CSR of wall cells from WALL_ROW.
+! Each wall velocity at an edge is an area mean over the CFACEs of a few cut cells: list the moving ones, with weights.
 L = O%KP(13)-O%KP(12)
 ALLOCATE(RE(L),RS(L),O%WRA(L),O%WRP(L+1)); O%WRP(1) = 1
 DO I=1,NR
@@ -5316,8 +5302,7 @@ DEALLOCATE(R,UW,ORD,RN)
 CONTAINS
 
 SUBROUTINE ADD_ROW(P,AX,NP,IR)
-! Entry IR for the piece of FACE row P (a cut piece: group 1, key P) or the Cartesian face (AX;NP) (group 1+AX, key
-! K,J,I); 4 more outside the band, 3 more again for a guard face outside the mesh's U, V, W (groups 9:11).
+! Adds velocity entry IR for face P, or for the Cartesian face of axis AX and cell NP, keyed by its kind and index.
 INTEGER, INTENT(IN) :: P,AX,NP(3)
 INTEGER, INTENT(OUT) :: IR
 NR = NR+1; IR = NR
@@ -5332,7 +5317,7 @@ IF (ANY(NP<0 .OR. NP>(/M%IBP1,M%JBP1,M%KBP1/)) .AND. R(1,NR)>5.5_EB) R(1,NR) = R
 END SUBROUTINE ADD_ROW
 
 FUNCTION CENTROID(P,NP) RESULT(XC)
-! Centroid of the piece of FACE row P, or of a Cartesian face at NP (P<0) across its normal: the cell centres.
+! Centroid of face P; for P<1 the centre of cell NP, which is the face centre in the two directions across the face.
 INTEGER, INTENT(IN) :: P,NP(3)
 REAL(EB) :: XC(3)
 IF (P>0) THEN
@@ -5343,21 +5328,19 @@ ENDIF
 END FUNCTION CENTROID
 
 SUBROUTINE WALL_ROW(E,Q)
-! The wall of the wall point in slot Q of the edge E and its row of group 13. The wall: the CFACEs of the two cut cells
-! of this mesh on the slot's side of the edge across the arm (the cells of the slot's face) or, where they have no CFACE
-! area (the slot is in the solid), of the four cells around the edge; EC those cells (0: another cell), AT the area of
-! the wall, AS its free-slip part. The row: KEY (13, the edge, the slot's component, the slot or 0 for the four cells),
-! the area mean of UWC over the wall: its NJ wall cells HJ with the weights HW = 1 / AT.
+! The wall seen by the missing face in position Q around edge E: the CFACEs of the face's two cells or, if these have no
+! CFACE area, of the four cells around the edge. Returns the wall's area, its free-slip part, and the cut cells and
+! weights of the area mean of its wall velocity.
 INTEGER, INTENT(IN) :: E,Q
 INTEGER :: A,RA,LL,NC(3),NL(3),EC(4)
 CALL O3E_ARM(EK(:,E),Q,A,NC); RA = 6-EK(1,E)-A
 DO LL=1,4
    NL = NC
-   IF (MOD(LL,2)==0) NL(A) = NC(A)+1                     ! the slot's face's high cell
+   IF (MOD(LL,2)==0) NL(A) = NC(A)+1                     ! the face's high cell
    IF (LL>2) NL(RA) = 2*EK(1+RA,E)+1-NC(RA)              ! the other side of the edge
    EC(LL) = 0
    IF (M%CCVAR(NL(IAXIS),NL(JAXIS),NL(KAXIS),CC_CGSC)==CC_CUTCFE) EC(LL) = M%CCVAR(NL(IAXIS),NL(JAXIS),NL(KAXIS),CC_IDCC)
-   IF (EC(LL)>M%N_CUTCELL_MESH) EC(LL) = 0             ! a cut cell of the guard layer: its CFACEs are another mesh's
+   IF (EC(LL)>M%N_CUTCELL_MESH) EC(LL) = 0             ! a guard-layer cut cell: its CFACEs belong to the other mesh
 ENDDO
 KEY = (/13,E,A,Q/)
 IF (CAT(EC(1))+CAT(EC(2))>0._EB) THEN
@@ -5376,14 +5359,9 @@ END SUBROUTINE O3E_BUILD_ARMS
 
 
 SUBROUTINE O3E_BUILD_ROT(NM,EK,EW)
-! Weights of the rotational term. Per arm of each edge the piece's shares A |x_f - x_c| in its two cells c, each scaled
-! with MIN(1, V_c / S), S the sum of those of the cell's gas pieces of that axis, and with the arm's factor EW (a near
-! piece's 1 - 2 gap/h; 0 a slot without a piece: no shares), and its mass M_f, the two shares unscaled. The corner
-! masses s_k = (share of the b-arm)(share of the c-arm)/V_c of the four cells around the edge give the transport weights
-! TW = al/s_e and the distribution weights al/M_f; 0.5 on a regular edge. A piece is arm Q of at most one edge: slot Q
-! of a band piece holds that edge's product in Q and its weight.
-! The viscosity at the edge: the four cells ECL around it interpolated along b in the rows c- and c+,
-! then along c, to the edge's line, with the weights EMW (each in [0,1]); 1/4 each on a regular edge (FDS's MUX).
+! Called by CC_O3E_SETUP: the weights of the rotational term (vorticity times velocity) at each cell edge, made from
+! the volumes the four faces share in the four cells around the edge so that the term does no work, and the weights
+! that interpolate the viscosity to the edge. On a regular edge both reduce to FDS's averages.
 INTEGER, INTENT(IN) :: NM,EK(:,:)
 REAL(EB), INTENT(IN) :: EW(:,:)
 TYPE(MESH_TYPE), POINTER :: M
@@ -5407,17 +5385,20 @@ DO E=1,O%NE
          A = M%FV%FACE%AREA(O%IX(O%EP(E,Q)))
       NL = N; NL(AX) = N(AX)-1; NH = N; NH(AX) = N(AX)+1
       XL = CELL(N); XH = CELL(NH); DL = XF-XL(AX); DH = XH(AX)-XF
+      ! The face's shares of its two cells' volumes, scaled down where a cell's shares would exceed its volume.
       SH(:,Q) = 0._EB
       IF (EW(Q,E)>0._EB) SH(:,Q) = EW(Q,E)*A*(/DL*MIN(1._EB,XL(4)/(GAS_AREA(NL)*(D(1)-DL)+GAS_AREA(N)*DL)), &
                                                DH*MIN(1._EB,XH(4)/(GAS_AREA(N)*DH+GAS_AREA(NH)*(D(2)-DH)))/)
       V(:,Q) = (/XL(4),XH(4)/); MF(Q) = A*(DL+DH); X0(Q) = XF
-      IF (Q>2) CYCLE                                 ! arms 1, 2: the cells n, n+e_b and n+e_c, n+e_b+e_c
+      IF (Q>2) CYCLE                                 ! the first two faces give the four cells around the edge
       XC(:,2*Q-1) = XL(1:3); XC(:,2*Q) = XH(1:3); O%ECL(E,2*Q-1:2*Q) = (/O3E_FLAT(M,N,0),O3E_FLAT(M,NH,0)/)
    ENDDO
+   ! Viscosity at the edge: interpolate the four cells across one direction, then across the other.
    B = MODULO(EK(1,E),3)+1; C = 6-EK(1,E)-B
    WL = (XC(B,2)-X0(1))/(XC(B,2)-XC(B,1)); WU = (XC(B,4)-X0(1))/(XC(B,4)-XC(B,3))
    WZ = (WU*XC(C,3)+(1._EB-WU)*XC(C,4)-X0(3))/(WU*XC(C,3)+(1._EB-WU)*XC(C,4)-WL*XC(C,1)-(1._EB-WL)*XC(C,2))
    O%EMW(E,:) = MERGE(0.25_EB,(/WL*WZ,(1._EB-WL)*WZ,WU*(1._EB-WZ),(1._EB-WU)*(1._EB-WZ)/),EK(5,E)==1)
+   ! The corner masses of the four cells give the transport and distribution weights.
    S = (/SH(1,1)*SH(1,3)/V(1,1),SH(2,1)*SH(1,4)/V(2,1),SH(1,2)*SH(2,3)/V(1,2),SH(2,2)*SH(2,4)/V(2,2)/)
    AL = (/S(1)+S(2),S(3)+S(4),S(1)+S(3),S(2)+S(4)/)
    O%TW(E,:) = MERGE(0.5_EB,AL/SUM(S),EK(5,E)==1)
@@ -5443,7 +5424,7 @@ ENDIF
 END FUNCTION CELL
 
 REAL(EB) FUNCTION GAS_AREA(NF)
-! Gas area of the Cartesian face (AX;NF): AW whole, the sum of its pieces cut, 0 solid.
+! Gas area of the Cartesian face of axis AX at cell NF: the whole face, the sum of its gas parts if cut, 0 if solid.
 INTEGER, INTENT(IN) :: NF(3)
 GAS_AREA = 0._EB
 SELECT CASE(M%FCVAR(NF(IAXIS),NF(JAXIS),NF(KAXIS),CC_FGSC,AX))
@@ -5459,15 +5440,9 @@ END SUBROUTINE O3E_BUILD_ROT
 
 
 SUBROUTINE O3E_BUILD_VISC(NM,NP,BAND)
-! Lists of the viscous term. The CV of each cell of a band piece: the plain cell, or FDS's
-! CV (members, FACE_LIST); its gas pieces (velocity row, axis, side, area) give its halves, its Gauss sums by axis and
-! its members' weights for mu_c and D. Per band piece the lateral stress as weights of edge stresses (the edge
-! at the half's end of each piece of the CV, else at its other end, else the mean of the CV's edges of that direction,
-! else nothing) and the normal stress as weights of its two CVs' tau_aa, all times 2: CC_O3E_FORCE_A divides by the sum of
-! the densities of the piece's two cells. Where the wall moves the CFACEs of a CV add one row per axis to its Gauss sum:
-! a test field's (PERIODIC_TEST 31:37) a constant appended to UP; those of SURFs with a velocity (CFV) a row of group 13
-! over the CV's wall cells, sum A n_a UWC_a / V, n the polygon's normal out of the gas. Then the wall law from the same
-! CVs and shares (O3E_BUILD_WALL).
+! Called by CC_O3E_SETUP: the lists of the viscous term of the faces of the cut-cell region. Each face takes the shear
+! stresses at nearby cell edges and the normal stresses of the control volumes on its two sides; moving walls add their
+! velocity to the velocity gradients of those control volumes. Then builds the wall law (O3E_BUILD_WALL).
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: NP(0:,0:,0:),BAND(:)
 TYPE(MESH_TYPE), POINTER :: M
@@ -5481,7 +5456,7 @@ REAL(EB), ALLOCATABLE :: BA(:),VR(:),AS(:,:,:),PAR(:),UW(:,:),VV(:),UP(:),SM(:,:
 LOGICAL, ALLOCATABLE :: TWO(:,:),WAX(:,:)
 
 M => MESHES(NM); F => M%FV%FACE; O => M%FV%O3
-! The velocity row of a cut piece by FACE row, of a face by its place in U, V, W; the edge of each slot of a row.
+! Look-up tables: the place of each face in the velocity list, and the gas edges that each listed velocity borders.
 OFF = (/0,F%N,F%N+SIZE(M%U),F%N+SIZE(M%U)+SIZE(M%V)/)
 ALLOCATE(RW(OFF(4)+SIZE(M%W)),SE(0:O%NV,4),MK(O%NE),MC(O%NE),TE(O%NE)); RW = 0; SE = 0; MK = 0; MC = 0
 DO I=0,7
@@ -5491,8 +5466,8 @@ DO Q=1,4
    SE(O%EP(1:O%NG,Q),Q) = (/(E,E=1,O%NG)/)
 ENDDO
 
-! The CVs of the band pieces' two cells: a plain cell is its own (CS: 0 and the cell), else FDS's CV of this mesh (CS:
-! its index), else none (0: a CV of another mesh).
+! The control volumes on the two sides of each face: an unmarked cell is its own, else the control volume of the
+! cut-cell region if this mesh holds it.
 ALLOCATE(LCV(M%FV%CV%N),LCP(0:M%IBP1,0:M%JBP1,0:M%KBP1),CS(4,2*O%NB),PC(O%NB,2),BX(O%NB),BA(O%NB),O%LH(O%NB,2),FR(O%NB))
 LCV = 0; LCP = 0; PC = 0; NC = 0
 DO IF_=1,F%N_INT
@@ -5519,9 +5494,7 @@ DO IF_=1,F%N_INT
    ENDDO
 ENDDO
 
-! The gas pieces of each CV: of a plain cell its six faces but walls; of FDS's CV its outer FACE rows of gas (PO: the CV
-! on the other side, if of this mesh), and its CFACEs' constant UW where the wall moves; its wall cells (CSR QP) QJ, WI
-! the wall cell of a cut cell, WAX whether a wall cell has a CFACE of CFV with n_a /= 0, by axis.
+! The gas faces that bound each control volume, with their area and side, and the cut cells of its moving walls.
 I = 6*NC; IF (ALLOCATED(M%FV%CV%FACE_LIST)) I = I+SIZE(M%FV%CV%FACE_LIST)
 ALLOCATE(PP(NC+1),PR(I),PX(I),PD(I),PO(I),PAR(I),VR(0:NC),AS(0:NC,3,0:1),UW(3,NC),TWO(0:NC,3),QP(NC+1),QJ(I), &
          WI(0:M%N_CUTCELL_MESH),WAX(O%NWC,3))
@@ -5555,7 +5528,7 @@ DO R=1,NC
          L = 0
          IF (F%FTYPE(IF_)==CC_FTYPE_CFINB) &
             L = WI(M%CCVAR(F%IJK_FACE(IAXIS,IF_),F%IJK_FACE(JAXIS,IF_),F%IJK_FACE(KAXIS,IF_),CC_IDCC))
-         IF (L>0) THEN                                   ! a wall cell, once per CV
+         IF (L>0) THEN                                   ! a cut cell with moving CFACEs, listed once
             IF (ALL(QJ(QP(R):NQ)/=L)) THEN
                NQ = NQ+1; QJ(NQ) = L
             ENDIF
@@ -5576,8 +5549,8 @@ ENDDO
 PP(NC+1) = J+1; QP(NC+1) = NQ+1
 TWO = AS(:,:,0)>0._EB .AND. AS(:,:,1)>0._EB
 
-! Per CV and axis the Gauss sum (rows, sig A/V), then the row of group 13 of its wall cells (CSR LP: wall cells LJ,
-! weights LW, column LA of SW) and the test field's constant (numbered after group 13); per CV its members (cells, V_g/V).
+! Per control volume and axis, the Gauss-theorem weights of the velocity derivative along that axis, moving walls
+! included; and the cells over which its viscosity and divergence are averaged.
 I = SIZE(PR)+6*NC; J = 0; IF (ALLOCATED(M%FV%CV%MEMBER_LIST)) J = SIZE(M%FV%CV%MEMBER_LIST)
 ALLOCATE(O%GPTR(3*NC+1),O%GIX(I),O%GW(I),O%MPTR(NC+1),O%MIX(NC+J),O%MW(NC+J),O%TN(0:3*NC),LP(3*NC+1),LA(3*NC), &
          LJ(3*NQ),LW(3*NQ))
@@ -5619,7 +5592,7 @@ IF (O%KP(13)+NV>O%NV) THEN
    CALL MOVE_ALLOC(UP,O%UP)
 ENDIF
 
-! Per band piece (axis A, CVs P, Q): the halves it takes with the fractions f_P, f_Q; the normal stress.
+! Per face: the shear stresses it takes from the control volumes on its two sides, and their normal stresses.
 ALLOCATE(O%VPTR(O%NB+1),O%NIX(O%NB,2),O%NW(O%NB,2),VE(8*O%NB),VV(8*O%NB),SM(O%NB,2))
 O%NW = 0._EB; K = 0
 DO I=1,O%NB
@@ -5656,7 +5629,7 @@ CALL O3E_BUILD_WALL(NM,FR,PC,CS(1,:),SM)
 CONTAINS
 
 FUNCTION KEY(IF_) RESULT(NK)
-! Low cell of the Cartesian face of FACE row IF_.
+! Cell (low side) of the Cartesian face of face IF_.
 INTEGER, INTENT(IN) :: IF_
 INTEGER :: NK(3)
 NK = F%IJK_FACE(:,IF_)
@@ -5664,7 +5637,7 @@ IF (F%FTYPE(IF_)==CC_FTYPE_CFGAS) NK = M%CUT_FACE(F%SRC_ICF(IF_))%IJK(IAXIS:KAXI
 END FUNCTION KEY
 
 INTEGER FUNCTION ROW(IF_,AX,NF)
-! Velocity row of the piece of FACE row IF_ (cut), else of the face (AX;NF); 0 if it has none.
+! Place in the velocity list of face IF_ if it is cut, else of the Cartesian face (AX, NF); 0 if not listed.
 INTEGER, INTENT(IN) :: IF_,AX,NF(:)
 IF (IF_>0) THEN
    ROW = RW(IF_)
@@ -5674,20 +5647,21 @@ ROW = RW(OFF(AX+1)+O3E_FLAT(M,NF,AX))
 END FUNCTION ROW
 
 SUBROUTINE HALF(R,S,WH)
-! Adds WH times the lateral stress of the half S of CV R in the axis A to the band piece's list.
+! Adds WH times the shear-stress divergence over the low (S=0) or high (S=1) half of control volume R to the face's list.
 INTEGER, INTENT(IN) :: R,S
 REAL(EB), INTENT(IN) :: WH
 INTEGER :: J,JJ,L,E,N2
 IF (R==0) RETURN
 DO J=PP(R),PP(R+1)-1
    IF (PX(J)==A) CYCLE
-   L = MERGE(2,4,A==MODULO(PX(J),3)+1)-S              ! the slot of the edge at the piece's end S in A
+   L = MERGE(2,4,A==MODULO(PX(J),3)+1)-S              ! the edge at this side face's end in half S
    E = SE(PR(J),L)
    IF (E==0) E = SE(PR(J),L+2*S-1)
    IF (E>0) THEN
       CALL ADD(E,WH*REAL(2*PD(J)-1,EB)*PAR(J)/VR(R))
       CYCLE
    ENDIF
+   ! Neither end has an edge: the mean over the control volume's edges of that direction.
    N2 = 0
    DO JJ=PP(R),PP(R+1)-1
       IF (PX(JJ)==6-A-PX(J)) CYCLE
@@ -5705,7 +5679,7 @@ ENDDO
 END SUBROUTINE HALF
 
 SUBROUTINE ADD(E,WE)
-! Adds the weight WE of edge E to the band piece's list.
+! Adds weight WE of edge E to the face's list.
 INTEGER, INTENT(IN) :: E
 REAL(EB), INTENT(IN) :: WE
 IF (MK(E)==0) THEN
@@ -5721,15 +5695,9 @@ END SUBROUTINE O3E_BUILD_VISC
 
 
 SUBROUTINE O3E_BUILD_WALL(NM,FR,PC,CVF,SM)
-! The wall law of the band pieces of mesh NM, from O3E_BUILD_VISC: per piece its FACE row FR, its two CVs PC (slots;
-! CVF the FDS CV of a slot, 0 a plain cell, which holds no CFACE) and SM the share over the mass of each. Per CFACE j of
-! the two CVs with a wall law (not O3E_SLIP) the inverse wall distance RDW_j, the largest MAX(n_j.n_l,0)/d_l over the
-! CFACEs l of the two CVs, d_l the distance from the piece's centroid to l's polygon (O3E_NEAR), n the CFACEs' normals
-! into the gas; WK of the CV += 2 SM A_j RDW_j. A CFACE of CFV (its SURF has a velocity) is an entry of the moving walls,
-! read per stage with UWC; under a test field (PERIODIC_TEST 31:37) WKU, KIN and BIN are set here, from the field at the
-! piece's centroid (wall law) and at the CFACE's (inflow term). The stiff list: the pieces whose WK(,1)+WK(,2) exceeds
-! 4/dx^2 (1+1E-9), dx the least spacing of their two cells, with the cells' places in H and the inverse distance of
-! their centroids along the axis, as the projection takes it.
+! Called by O3E_BUILD_VISC: the wall law of the faces of the cut-cell region, a no-slip wall shear from each CFACE of the
+! control volumes on the face's two sides, at its distance from the face; the inflow term of walls that blow; and the
+! faces whose wall term is too stiff for the explicit step, which take the implicit step.
 INTEGER, INTENT(IN) :: NM,FR(:),PC(:,:),CVF(:)
 REAL(EB), INTENT(IN) :: SM(:,:)
 TYPE(MESH_TYPE), POINTER :: M
@@ -5747,8 +5715,7 @@ ALLOCATE(O%WK(O%NB,2),O%WKU(O%NB,2),O%KIN(O%NB),O%BIN(O%NB),O%KW(O%NB),O%UH(O%NB
 O%WK = 0._EB; O%WKU = 0._EB; O%KIN = 0._EB; O%BIN = 0._EB; O%KW = 0._EB; O%UH = 0._EB; O%UB = 0._EB; O%FNE = 0._EB
 O%MUC = 0._EB
 
-! The CFV slot of a CFACE by its BOUNDARY_PROP1 slot (0: a wall at rest). The CFACEs of each CV as FACE rows, but those
-! FDS gives no normal (no area): they have no plane.
+! Which CFACEs move, and the CFACEs of each control volume; those without area have no plane and are left out.
 ALLOCATE(SL(SIZE(M%BOUNDARY_PROP1))); SL = 0
 SL(O%CFV) = (/(J,J=1,SIZE(O%CFV))/)
 NJ = 0; IF (ALLOCATED(M%FV%CV%FACE_LIST)) NJ = SIZE(M%FV%CV%FACE_LIST)
@@ -5764,7 +5731,7 @@ DO R=1,O%NC
 ENDDO
 CP(O%NC+1) = NJ+1
 
-! Per band piece: its CFACEs, their distances, the sums; the entries of moving walls; the stiff list.
+! Per face: the wall-law sums over the CFACEs on its two sides, the entries of moving walls, and the stiffness check.
 NJ = 2*MAXVAL((/0,CP(2:O%NC+1)-CP(1:O%NC)/)); NW = 0
 IF (SIZE(O%CFV)>0 .AND. .NOT.TST) THEN
    DO I=1,O%NB
@@ -5813,6 +5780,7 @@ DO I=1,O%NB
    ENDIF
    N = F%IJK_FACE(:,IF_)
    IF (F%FTYPE(IF_)==CC_FTYPE_CFGAS) N = M%CUT_FACE(F%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
+   ! Stiff if the wall term exceeds that of a whole face half a cell from a wall, in cubic cells of the least spacing.
    NH = N; NH(A) = N(A)+1
    DXM = MIN(M%DX(N(IAXIS)),M%DY(N(JAXIS)),M%DZ(N(KAXIS)),M%DX(NH(IAXIS)),M%DY(NH(JAXIS)),M%DZ(NH(KAXIS)))
    IF (O%WK(I,1)+O%WK(I,2)<=4._EB/DXM**2*(1._EB+1.E-9_EB)) CYCLE
@@ -5835,9 +5803,8 @@ END SUBROUTINE O3E_BUILD_WALL
 
 
 REAL(EB) FUNCTION O3E_NEAR(M,IF_,X)
-! Distance from X to the polygon of the CFACE of FACE row IF_ (convex, in the plane of its own normal NVEC): to the
-! plane where the foot of the perpendicular falls inside the polygon, else to the nearest side. A side of zero length
-! (a vertex repeated) gives the distance to its vertex.
+! Distance from point X to the (convex) CFACE polygon of face IF_: to its plane if the foot of the perpendicular falls
+! inside the polygon, else to its nearest side.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_
 REAL(EB), INTENT(IN) :: X(3)
@@ -5863,9 +5830,8 @@ END FUNCTION O3E_NEAR
 
 
 PURE FUNCTION CC_WALL_RDW(NV,RL) RESULT(RD)
-! The inverse wall distance, seen from one point, of each CFACE j of a set: RD_j = MAX over l of MAX(n_j.n_l,0) RL_l,
-! n the flow normals BC%NVEC, RL_l the inverse distance from the point to the polygon of l (O3E_NEAR). It is the
-! plane's distance where the point stands over its CFACE and the edge's around a convex edge; no floor, no cap.
+! Inverse wall distance of each CFACE of a set, seen from one point: the largest inverse distance from the point to a
+! CFACE of the set, weighted by the cosine of the angle between the two normals (0 if they face apart).
 REAL(EB), INTENT(IN) :: NV(:,:),RL(:)
 REAL(EB) :: RD(SIZE(RL))
 INTEGER :: J
@@ -5876,8 +5842,7 @@ END FUNCTION CC_WALL_RDW
 
 
 LOGICAL FUNCTION O3E_SLIP(M,ICF)
-! The CFACE ICF of mesh M is free slip (its SURF sucks or is FREE_SLIP, and not NO_SLIP): it has no wall law, and a wall
-! edge's arm on it no gradient.
+! True if CFACE ICF of mesh M is free slip: no wall shear, and no velocity gradient across a missing face next to it.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: ICF
 O3E_SLIP = SURFACE(M%CFACE(ICF)%SURF_INDEX)%VELOCITY_BC_INDEX==FREE_SLIP_BC
@@ -5885,13 +5850,9 @@ END FUNCTION O3E_SLIP
 
 
 SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK,EW)
-! The edge at which the piece of FACE row IF_ is arm Q: its key EK (direction T, low cell N), its arms P4 (O3E_SLOT; 0:
-! none) and EW: per arm the factor of its corner masses (1-4) and its gap (5-8), the edge's point along T (9) and its
-! segment along T (10:11). A gas edge has in each slot a piece at the edge, whatever their extents along the edge. A
-! wall edge lacks one to three of them and has an arm of normal b and one of normal c: a slot without a piece at the edge
-! takes its near piece unless the slot across the edge has a piece at the edge (a thin wall between). The segment is the
-! common part of the extents of the pieces at the edge, or their hull if they have none; with near pieces only, the
-! hull of their nearest points. The point is its middle. P4=0: no edge, or IF_ is a cut piece that is not slot Q's.
+! The cell edge at which face IF_ is the surrounding face in position Q: the edge's direction and cell (EK), its four
+! surrounding faces (P4), and per face a weight and its gap to the edge, then the extent of the edge's gas segment and
+! its mid-point (EW). P4 = 0: no such edge, or IF_ is a cut face that is not the one in position Q.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_,Q
 INTEGER, INTENT(OUT) :: P4(4),EK(4)
@@ -5930,11 +5891,9 @@ END SUBROUTINE O3E_EDGE
 
 
 SUBROUTINE O3E_SLOT(M,EK,Q,P,K,W,G,S)
-! Slot Q of the edge with key EK. K=1: P the piece of the slot's Cartesian face at the edge (the face if whole, else its
-! first piece with a side on the edge's line), W=1 and S its extent along the edge. Else no piece of the face is at the
-! edge, and K=2: P the piece nearest to the edge's line, its gap G (the smallest distance of its vertices from the line,
-! in its plane) below half the cell size H across, W = 1 - 2 G/H and S the extent of its nearest vertices along the
-! edge; K=0: none (P=0, W=0).
+! The face P in position Q around the edge EK. K=1: a face that reaches the edge. K=2: the part of a cut face nearest
+! to the edge, less than half a cell away, with a weight W that falls with its gap G. K=0: none. S is its extent along
+! the edge.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: EK(4),Q
 INTEGER, INTENT(OUT) :: P,K
@@ -5982,7 +5941,7 @@ END SUBROUTINE O3E_SLOT
 
 
 SUBROUTINE O3E_ARM(EK,Q,AX,N)
-! Normal AX and low cell N of the piece of arm Q of the edge with key EK (direction T, low cell).
+! Normal axis AX and cell N of the face in position Q around the edge EK (the edge's direction and cell).
 INTEGER, INTENT(IN) :: EK(4),Q
 INTEGER, INTENT(OUT) :: AX,N(3)
 INTEGER :: B
@@ -5995,8 +5954,8 @@ END SUBROUTINE O3E_ARM
 
 
 INTEGER FUNCTION O3E_FLAT(M,N,AX)
-! Flat index of the cell N in MU, D (AX=0) or in RHO, RHOS (AX=-1: from -1 to IBP1+1), or of the face (AX;N) in U, V or
-! W, whose normal index starts at -1.
+! One-dimensional index of cell N in an array shaped like MU (AX=0) or like RHO (AX=-1), or of the face of axis AX at
+! cell N in U, V or W (AX>0).
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: N(:),AX
 INTEGER :: L(3),D(3)
@@ -6011,14 +5970,14 @@ END FUNCTION O3E_FLAT
 
 
 INTEGER FUNCTION O3E_ROW(M,AX,N) RESULT(IF_)
-! FACE row of the gas piece at the Cartesian face (AX;N), of a cut face the first piece; -1 for a whole gas face without a
-! FACE row, 0 for none.
+! Row in FV%FACE of the gas face at the Cartesian face (AX, N), of a cut face its first gas part; -1 for a gas face
+! without a row, 0 for no gas face.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: AX,N(3)
 IF_ = 0
 SELECT CASE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX))
 CASE(CC_GASPHASE)
-   IF_ = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FROW,AX)    ! at a seam also a tail RC row: the band's row first
+   IF_ = M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FROW,AX)    ! its own row first; the RC face's row only if it has none
    IF (IF_==0 .AND. M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDRC,AX)>0) &
       IF_ = M%RC_FACE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDRC,AX))%FC
    IF (IF_==0) IF_ = -1
@@ -6029,8 +5988,8 @@ END FUNCTION O3E_ROW
 
 
 SUBROUTINE O3E_SEG(M,IF_,Q,S)
-! Extent S along the grid edge where the cut piece of FACE row IF_ is arm Q of its polygon's sides on that edge, from the
-! cut-edge topology of its sides (CUT_FACE CEDGES, EDGE_LIST; CUT_EDGE); S(1)>S(2): no side there.
+! Extent S, along the cell edge at which cut face IF_ is in position Q, of the sides of its polygon that lie on that
+! edge, from the cut-face edge lists; S(1)>S(2) if none does.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_,Q
 REAL(EB), INTENT(OUT) :: S(2)
@@ -8059,7 +8018,8 @@ END SUBROUTINE CFACE_PREDICT_NORMAL_VELOCITY
 
 
 PURE SUBROUTINE O3E_TEST_FRAME(X,Y,Z,AX,XP)
-! Axis and position from the centre of the rotation cases: 3D the spheres' (centre, axis), 2D the origin and y.
+! Verification cases: the rotation axis and the position from the centre (3D: the spheres' centre and axis; 2D: the
+! origin and y).
 REAL(EB), INTENT(IN) :: X,Y,Z
 REAL(EB), INTENT(OUT) :: AX(IAXIS:KAXIS),XP(IAXIS:KAXIS)
 AX = (/0._EB,1._EB,0._EB/); XP = (/X,Y,Z/)
@@ -8069,7 +8029,7 @@ ENDIF
 END SUBROUTINE O3E_TEST_FRAME
 
 PURE FUNCTION O3E_TEST_RIGID(AX,XP,OM) RESULT(UR)
-! OM AX x XP.
+! Rigid rotation: the velocity OM AX x XP.
 REAL(EB), INTENT(IN) :: AX(IAXIS:KAXIS),XP(IAXIS:KAXIS),OM
 REAL(EB) :: UR(IAXIS:KAXIS)
 UR = OM*(/AX(JAXIS)*XP(KAXIS)-AX(KAXIS)*XP(JAXIS),AX(KAXIS)*XP(IAXIS)-AX(IAXIS)*XP(KAXIS),&
@@ -8077,7 +8037,8 @@ UR = OM*(/AX(JAXIS)*XP(KAXIS)-AX(KAXIS)*XP(JAXIS),AX(KAXIS)*XP(IAXIS)-AX(IAXIS)*
 END FUNCTION O3E_TEST_RIGID
 
 PURE FUNCTION O3E_TEST_EXACT_VELOCITY(X,Y,Z) RESULT(UE)
-! Exact field at O3E_TEST_TIME: 31, 37 rigid (37 at its speed of the moment); 32 Stokes; 33 A r + B/r; 34, 36 channel; 35 uniform.
+! Exact velocity of the verification case PERIODIC_TEST at O3E_TEST_TIME: 31 rigid rotation, 37 the same at a varying
+! rate, 32 between turning spheres, 33 between turning cylinders, 34 channel, 36 channel with cross flow, 35 uniform.
 REAL(EB), INTENT(IN) :: X,Y,Z
 REAL(EB) :: UE(IAXIS:KAXIS)
 REAL(EB) :: AX(IAXIS:KAXIS),XP(IAXIS:KAXIS),R,YP,PROF,VB,S,C
@@ -8111,7 +8072,8 @@ END SELECT
 END FUNCTION O3E_TEST_EXACT_VELOCITY
 
 PURE FUNCTION O3E_TEST_WALL_VELOCITY(X,Y,Z) RESULT(UW)
-! Wall velocity: the exact field, except 32 (inner turns) and 33 (outer turns), split at O3E_RSPLIT.
+! Wall velocity of the verification cases: the exact field, except in 32 (only the inner sphere turns) and 33 (only
+! the outer cylinder turns), where the radius O3E_RSPLIT tells the two walls apart.
 REAL(EB), INTENT(IN) :: X,Y,Z
 REAL(EB) :: UW(IAXIS:KAXIS)
 REAL(EB) :: AX(IAXIS:KAXIS),XP(IAXIS:KAXIS),R
@@ -8140,8 +8102,8 @@ O3E_TEST_WALL_COMPONENT = UW(AX)
 END FUNCTION O3E_TEST_WALL_COMPONENT
 
 PURE FUNCTION O3E_TEST_WALL_GRADIENT(X,Y,Z,IEC,ICD) RESULT(G)
-! Wall gradient, CC_EDGE_TAU_OMG convention (ICD=1: DWDY,DUDZ,DVDX; 2: DVDZ,DWDX,DUDY): central difference with H=1e-4, exact for
-! linear and quadratic fields, relative error (5H)^2/6 = 4e-8 for the exponential of 36.
+! Gradient of the verification wall velocity at a cell edge, in the order of CC_EDGE_TAU_OMG (ICD=1: DWDY, DUDZ, DVDX;
+! 2: DVDZ, DWDX, DUDY), by a central difference, exact for linear and quadratic fields.
 REAL(EB), INTENT(IN) :: X,Y,Z
 INTEGER, INTENT(IN) :: IEC,ICD
 REAL(EB) :: G
@@ -8172,7 +8134,8 @@ END SELECT
 END FUNCTION O3E_TEST_FACE_CENTRE
 
 SUBROUTINE O3E_TEST_START(NM,T)
-! Start field (32 at rest): exact at Cartesian face centres and piece centroids; a cut face holds its pieces' flux.
+! Verification cases: the initial velocity, exact at face centres and at the centroids of the gas parts of cut faces;
+! a cut face takes the flux of its parts. Case 32 starts at rest.
 INTEGER, INTENT(IN) :: NM
 REAL(EB), INTENT(IN) :: T
 INTEGER :: I,J,K,AX,ICF,JCF,IF_,LO(IAXIS:KAXIS)
@@ -8221,7 +8184,8 @@ ENDIF
 END SUBROUTINE O3E_TEST_START
 
 SUBROUTINE O3E_TEST_FORCE(NM)
-! Case 37: FVX = FVX - (dOmega/dt) AX x (x - CEN) on every face (solid faces are zeroed after it). Assumes POINT_TO_MESH.
+! Case 37: drives the rigid rotation at its varying rate by subtracting its acceleration, (dOmega/dt) AX x (x - CEN),
+! from the force on every face (solid faces are zeroed later). Assumes POINT_TO_MESH.
 INTEGER, INTENT(IN) :: NM
 INTEGER :: I,J,K,AX,LO(IAXIS:KAXIS),HI(IAXIS:KAXIS)
 REAL(EB), POINTER, DIMENSION(:,:,:) :: F
@@ -8244,7 +8208,8 @@ ENDDO
 END SUBROUTINE O3E_TEST_FORCE
 
 SUBROUTINE O3E_TEST_DUMP(NM,NSTEP,T)
-! CSV per mesh: a row per gas face (index 1..N along its axis: seam faces once) and piece: mesh,axis,class,x,y,z,area,vel,exact.
+! Verification cases: writes, per mesh, a CSV file of the computed and exact velocity at each gas face (a face on a mesh
+! boundary once) and at each gas part of a cut face.
 INTEGER, INTENT(IN) :: NM,NSTEP
 REAL(EB), INTENT(IN) :: T
 INTEGER :: LU,I,J,K,AX,ICF,JCF,NI(IAXIS:KAXIS)
@@ -15704,16 +15669,9 @@ END SUBROUTINE CC_VELOCITY_FLUX
 
 
 SUBROUTINE CC_O3E_FORCE_A(NM,DT)
-! Per stage (PREDICTOR), after the copy of FVX, FVY, FVZ onto FN: the O3e force of the band pieces of mesh NM.
-! In order: the stage's velocity of every row, gathered by source, and of the walls' rows of group 13 from UWC (per wall
-! cell its sums SW, then the rows from SW); at the
-! edges the vorticity OM from the four arms' own values and the products -OM T_c, OM T_b into Q, at the gas edges the
-! shear stress ST from the arms; per CV its
-! viscosity (into MUC by axis), divergence and Gauss gradient, its tau_aa of each axis into TN; the moving walls' wall
-! velocities and inflow term from UWC; omega x u of each band piece, gathered from its edges' products, less its
-! lateral and normal stress over its density, plus its wall term KW u - c (c the wall law and the inflow term times the
-! wall's velocity). Then the explicit state UH: u - DT F in the predictor, (u + u* - DT F)/2 in the corrector (u into
-! UB); on the stiff list ROS2's u - DT F/DEN and u + 3/2 (u* - u) + (-DT/2 F - (u* - u))/DEN, DEN = 1 + gamma DT KW.
+! Called per stage by CC_VELOCITY_FLUX after FVX, FVY, FVZ are copied to FN: the force of the cut-cell momentum on the
+! faces of the cut-cell region of mesh NM (rotational, viscous and wall terms), and the velocity it gives without the
+! pressure term, implicit on the faces whose wall term is stiff.
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
 REAL(EB), INTENT(IN) :: DT
@@ -15725,7 +15683,7 @@ REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),R
                                  WKU(:,:),KIN(:),BIN(:),KW(:),WKE(:),WQE(:),UWC(:,:),NJ(:,:),UH(:),UB(:),DEN(:),WIN(:),WRW(:)
 INTEGER, POINTER, CONTIGUOUS :: WCP(:),WCJ(:)
 REAL(EB), POINTER, CONTIGUOUS :: WCA(:),WCN(:,:),SW(:,:)
-REAL(EB), PARAMETER :: GR=1._EB-1._EB/SQRT(2._EB) ! ROS2's gamma
+REAL(EB), PARAMETER :: GR=1._EB-1._EB/SQRT(2._EB) ! gamma of the two-stage Rosenbrock step
 REAL(EB) :: DCB,DBC,MC,DC,G(3),H(3),U(3),S,OME,RS,WQ
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
@@ -15738,6 +15696,7 @@ ELSE
    DP1(1:SIZE(M%DS)) => M%DS; RH1(1:SIZE(M%RHOS)) => M%RHOS
 ENDIF
 MU1(1:SIZE(M%MU)) => M%MU
+! The stage's velocity of every listed face, from the array that holds it.
 UP => M%FV%O3%UP; IX => M%FV%O3%IX
 DO L=0,4,4
    DO I=M%FV%O3%KP(L)+1,M%FV%O3%KP(L+1)
@@ -15753,6 +15712,7 @@ DO L=0,4,4
       UP(I) = W1(IX(I))
    ENDDO
 ENDDO
+! Wall velocities: sums over the moving CFACEs of each cut cell, then the values the edges and control volumes need.
 WCP => M%FV%O3%WCP; WCJ => M%FV%O3%WCJ; WCA => M%FV%O3%WCA; WCN => M%FV%O3%WCN; SW => M%FV%O3%SW; UWC => M%FV%O3%UWC
 DO I=1,M%FV%O3%NWC
    G = 0._EB; H = 0._EB
@@ -15770,6 +15730,7 @@ DO I=1,M%FV%O3%KP(13)-K
    ENDDO
    UP(K+I) = S
 ENDDO
+! At each edge the vorticity and its products with the velocities; at the edges with gas all around, the shear stress.
 EP => M%FV%O3%EP; ENB => M%FV%O3%ENB; WA => M%FV%O3%WA; RD => M%FV%O3%RD; OM => M%FV%O3%OM; ST => M%FV%O3%ST
 RDP => M%FV%O3%RDP; TW => M%FV%O3%TW; Q => M%FV%O3%Q; NE = M%FV%O3%NE; ECL => M%FV%O3%ECL; EMW => M%FV%O3%EMW
 NG = M%FV%O3%NG
@@ -15788,6 +15749,7 @@ DO I=NG+1,NE
    Q(NE+I) = OME*(TW(I,1)*UP(EP(I,1))+TW(I,2)*UP(EP(I,2)))
    OM(I) = OME
 ENDDO
+! Per control volume: viscosity, divergence, velocity derivative along each axis, and normal viscous stresses.
 MPTR => M%FV%O3%MPTR; MIX => M%FV%O3%MIX; MW => M%FV%O3%MW; GPTR => M%FV%O3%GPTR; GIX => M%FV%O3%GIX; GW => M%FV%O3%GW
 TN => M%FV%O3%TN; NC = M%FV%O3%NC; MUC => M%FV%O3%MUC
 DO I=1,NC
@@ -15810,6 +15772,7 @@ VED => M%FV%O3%VED; VW => M%FV%O3%VW; LH => M%FV%O3%LH
 WK => M%FV%O3%WK; WKU => M%FV%O3%WKU; KIN => M%FV%O3%KIN; BIN => M%FV%O3%BIN; KW => M%FV%O3%KW
 WPB => M%FV%O3%WPB; WPA => M%FV%O3%WPA; WPTR => M%FV%O3%WPTR; WCF => M%FV%O3%WCF; WS => M%FV%O3%WS
 WKE => M%FV%O3%WKE; WQE => M%FV%O3%WQE; NJ => M%FV%O3%NJ; WIN => M%FV%O3%WIN
+! Moving walls: the inflow speed, and the wall terms that depend on the wall velocity.
 DO J=1,SIZE(WIN)
    WIN(J) = MAX(NJ(J,IAXIS)*UWC(J,IAXIS)+NJ(J,JAXIS)*UWC(J,JAXIS)+NJ(J,KAXIS)*UWC(J,KAXIS),0._EB)
 ENDDO
@@ -15821,6 +15784,7 @@ DO L=1,SIZE(WPB)
       WKU(I,WS(K)) = WKU(I,WS(K))+WKE(K)*UWC(J,A); KIN(I) = KIN(I)+WQ; BIN(I) = BIN(I)+WQ*UWC(J,A)
    ENDDO
 ENDDO
+! The force on each face: rotational term, minus the viscous stresses over the density, plus the wall term.
 DO I=1,M%FV%O3%NB
    S = NW(I,1)*TN(NIX(I,1))+NW(I,2)*TN(NIX(I,2))
    DO K=VPTR(I),VPTR(I+1)-1
@@ -15831,6 +15795,7 @@ DO I=1,M%FV%O3%NB
    F(I) = PW(I,1)*Q(PS(I,1))+PW(I,2)*Q(PS(I,2))+PW(I,3)*Q(PS(I,3))+PW(I,4)*Q(PS(I,4)) &
           -(S+MUC(NIX(I,1))*WKU(I,1)+MUC(NIX(I,2))*WKU(I,2))/RS+KW(I)*UP(I)-BIN(I)
 ENDDO
+! The velocity without the pressure term; faces with a stiff wall term take the implicit step.
 UH => M%FV%O3%UH; UB => M%FV%O3%UB; STF => M%FV%O3%STF; DEN => M%FV%O3%DEN; M%FV%O3%DT = DT
 IF (PREDICTOR) THEN
    DO I=1,M%FV%O3%NB
@@ -15841,6 +15806,7 @@ IF (PREDICTOR) THEN
       UH(I) = UP(I)-DT*F(I)/DEN(L)
    ENDDO
 ELSE
+   ! Corrector: also the velocity at the start of the step.
    VC => M%FV%FACE%VEL; U1(1:SIZE(M%U)) => M%U; V1(1:SIZE(M%V)) => M%V; W1(1:SIZE(M%W)) => M%W
    DO I=M%FV%O3%KP(0)+1,M%FV%O3%KP(1)
       UB(I) = VC(IX(I))
@@ -15939,10 +15905,9 @@ END SUBROUTINE GET_LINKED_FV
 
 
 SUBROUTINE CC_O3E_FORCE_B(NM)
-! Per stage, before the link means of FN: the effective force FNE of the band pieces of mesh NM from their explicit
-! state UH, (u - UH)/DT in the predictor and (u + u* - 2 UH)/DT in the corrector, DT the one of CC_O3E_FORCE_A; a
-! piece of the stiff list adds (1/DEN - 1) times its pressure gradient of the same stage of the step before (H in the
-! predictor, HS in the corrector).
+! Called per stage by GET_LINKED_FV before the link means of FN: the force on the faces of the cut-cell region of mesh
+! NM that makes FDS's velocity update give the velocity of CC_O3E_FORCE_A. On a face that takes the implicit step it
+! also scales the pressure gradient, taken from the same stage of the previous step.
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: I,L
@@ -15972,9 +15937,8 @@ END SUBROUTINE CC_O3E_FORCE_B
 
 
 SUBROUTINE CC_O3E_WALL_VELOCITY(NM)
-! Per stage, the wall velocity of the CFACEs of CFV of mesh NM: UWC = w n + MAX(w,0) T, w the speed into the
-! gas as head has set and ramped it, HVAC included, at the stage's time level as CUTFACE_VELOCITIES takes it: -U_NORMAL
-! in the predictor (T_n), -U_NORMAL_S in the corrector (T_n+1).
+! Called per stage by CC_O3E_FORCE_A: the wall velocity of the CFACEs of mesh NM that blow or suck, from the normal
+! velocity FDS has set (ramps and HVAC included) at the stage's time level; a blowing jet also gets its tangential part.
 INTEGER, INTENT(IN) :: NM
 INTEGER :: I
 INTEGER, POINTER, CONTIGUOUS :: CFV(:)
@@ -23243,21 +23207,9 @@ END SUBROUTINE FINALIZE_FV_L2_THERMODYNAMIC_ROWS
 
 
 SUBROUTINE CC_WALL_HEAT_FLUX(PASS)
-! CC_O3E: the convective heat of the CFACEs (CC_SET_WALL_ROWS), point-implicit per CV; one flux for the gas and the
-! solid. FINALIZE_FV_L2_THERMODYNAMIC_ROWS calls pass 1 before the face sums go to the owners, pass 2 when they are
-! complete there and pass 3 when the finished rows are back.
-! 1: a CFACE adds -A q to its CV's face sum S, q = h (T_G - T_F) where the flux follows the gas temperature, else
-!    Q_CON_F, and A h to K.
-! 2: per owned CV the temperature change dT of the wall term, ROS2 with the diagonal Jacobian -K T RTRM/V, gamma =
-!    1+1/SQRT(2), F = gamma DT T RTRM: dT = F (S - C S1)/(V + F K) and S <- S - K dT, that is S/den + (1-1/den) C S1,
-!    den = 1 + F K/V. The corrector forms the next step's first stage (C = 0) and keeps S1 = S; the predictor forms the
-!    second (C = 2). A steady state (S = 0) stays one.
-! 3: a CFACE's flux q = h (T_G + dT - T_F) to Q_CON_F: what the gas and the solid see. Over a thermally thick solid the
-!    step's heat DT (q1 + q2)/2, q1 the corrector's and q2 the predictor's flux, adds to Q_CON_SUM, which
-!    SOLID_HEAT_TRANSFER takes as a given flux at its next update.
-! Species, where the SURF fixes the mass fractions and the wall blows: the coefficient CZ = 2 RDN MAX(RHO_D_F), one for
-! all species so that their fluxes still sum to zero, and the same three passes with the face sums S_N
-! (FV_L2_DEL_RHO_D_DEL_Z_FACE), K = sum A CZ, rho V and F = gamma DT; pass 3 adds CZ dZ_N to the CFACE's DIFF_FLUX.
+! Called three times per stage by FINALIZE_FV_L2_THERMODYNAMIC_ROWS with CC_O3E: the convective heat and species fluxes
+! of the CFACEs, implicit per control volume, one flux for both gas and solid. Pass 1 adds them to the face sums, pass 2
+! (owner) solves for the temperature and mass fraction changes, pass 3 sets the fluxes and passes the heat to the solid.
 INTEGER, INTENT(IN) :: PASS
 INTEGER :: L,IS,K,NS
 REAL(EB) :: C,G,KZ
@@ -23273,17 +23225,17 @@ CASE(1)
       FV_L2_DVOL_FACE(IS) = FV_L2_DVOL_FACE(IS)-TH_WA(L)*BW%HEAT_TRANS_COEF*(BW%TMP_G-BW%TMP_F)
       TH_WK(0,IS) = TH_WK(0,IS)+TH_WA(L)*BW%HEAT_TRANS_COEF
    ENDDO
-   DO K=1,SIZE(TH_WZ)
+   DO K=1,SIZE(TH_WZ)                                 ! species: walls that fix the mass fractions, where they blow
       L = TH_WZ(K); BW => MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L)); IS = TH_W(3,L)
       TH_WCZ(K) = MERGE(2._EB*MAXVAL(BW%RHO_D_F(1:NS))*BW%RDN,0._EB,BW%U_NORMAL_S<0._EB)
       TH_WK(1,IS) = TH_WK(1,IS)+MESHES(TH_W(1,L))%FV%FACE%FLUX_AREA(TH_W(4,L))*TH_WCZ(K)
    ENDDO
-   DO L=TH_WN(2)+1,TH_WN(3)
+   DO L=TH_WN(2)+1,TH_WN(3)                           ! given heat fluxes
       IS = TH_W(3,L)
       FV_L2_DVOL_FACE(IS) = FV_L2_DVOL_FACE(IS)-TH_WA(L)*MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))%Q_CON_F
    ENDDO
 CASE(2)
-   C = MERGE(2._EB,0._EB,PREDICTOR)
+   C = MERGE(2._EB,0._EB,PREDICTOR)                   ! the predictor is the second stage of the implicit step
    DO L=1,SIZE(TH_WOWN)
       IS = TH_WOWN(L)
       G = GAMMA_W*TH_DT*TH_WT(1,IS)*TH_ORTRM(IS)
@@ -23295,7 +23247,7 @@ CASE(2)
       TH_WK(1:NS,IS) = G*(FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)-C*TH_WS1(1:NS,IS))
       FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS) = FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,IS)-KZ*TH_WK(1:NS,IS)
    ENDDO
-   IF (CORRECTOR) THEN
+   IF (CORRECTOR) THEN                                ! kept for the next predictor
       TH_WS1(0,TH_WOWN) = FV_L2_DVOL_FACE(TH_WOWN)
       TH_WS1(1:NS,TH_WOWN) = FV_L2_DEL_RHO_D_DEL_Z_FACE(1:NS,TH_WOWN)
    ENDIF
@@ -23310,6 +23262,7 @@ CASE(3)
          DF = DF+TH_WCZ(K)*TH_WK(1:NS,TH_W(3,L))
       END ASSOCIATE
    ENDDO
+   ! Thermally thick solids: the heat of the step, from the mean of its two stages' fluxes, for the solid's next update.
    IF (PREDICTOR) THEN
       DO L=1,TH_WN(1)
          BW => MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))
