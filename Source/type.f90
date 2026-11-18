@@ -1582,6 +1582,23 @@ TYPE CC_O3E_TYPE
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: CFV      !< BOUNDARY_PROP1 index of each CFACE whose SURF has a velocity.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: NJ,TJ    !< (1:SIZE(CFV),3) its normal n into the gas; its jet vector T.
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: UWC      !< (0:SIZE(CFV),3) the stage's wall velocity w n + MAX(w,0) T; row 0 is 0.
+   ! The wall law of a band piece by its two CVs (slots as NIX): WK = 2 sum share A_j RDW_j / mass over the CFACEs j of
+   ! the CV, WKU the same with each term times the wall's velocity along the piece; the inflow term KIN = sum share A_j
+   ! MAX(w_j,0) / mass and BIN the same times the wall's velocity. Moving walls (CFV): the band rows WPB, their axes WPA
+   ! and CSR WPTR of entries: CFV slot WCF, CV WS (1,2), 2 share A_j RDW_j / mass WKE, share A_j / mass WQE.
+   INTEGER :: NST=0                                  !< Rows of the stiff list.
+   REAL(EB) :: DT=0._EB                              !< The time step of the stage's force and explicit state.
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WK,WKU   !< (1:NB,2) see above; test fields: WKU and KIN, BIN set once.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: KIN,BIN  !< (1:NB) see above.
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: WPB,WPA,WPTR,WCF,WS !< Moving walls, see above.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WKE,WQE  !< Their weights, see above.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WIN      !< (1:SIZE(CFV)) the stage's inflow speed MAX(n.UWC,0).
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: STF      !< (1:NST) band rows of the stiff list (ROS2).
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: SH       !< (1:NST,2) their two cells, flat in H.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: RDS,DEN  !< (1:NST) 1/distance of the two cells' centroids; 1 + gamma DT KW.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: MUC      !< (0:3*NC) the CVs' viscosity, by axis as TN; MUC(0)=0.
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: KW,UH,UB,FNE !< (1:NB) the stage's wall coefficient, explicit state, u (the
+                                                     !< corrector's), effective force.
 END TYPE CC_O3E_TYPE
 
 !> \brief Mesh-owned finite-volume container for the unstructured active region.
