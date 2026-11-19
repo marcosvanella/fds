@@ -13764,6 +13764,19 @@ IF (DEBUG_SET_CUTCELLS) THEN
    ENDDO CUTCELL_TEST_LOOP
 ENDIF
 
+! Area fraction of every gas cut face, set before a connecting mesh's copy releases the faces it does not keep.
+DO ICF=1,M%N_CUTFACE_MESH+M%N_GCCUTFACE_MESH
+   CF => M%CUT_FACE(ICF)
+   IF (CF%NFACE==0 .OR. CF%STATUS/=CC_GASPHASE) CYCLE
+   I = CF%IJK(IAXIS); J = CF%IJK(JAXIS); K = CF%IJK(KAXIS)
+   IF (I<0 .OR. I>M%IBP1 .OR. J<0 .OR. J>M%JBP1 .OR. K<0 .OR. K>M%KBP1) CYCLE
+   SELECT CASE(CF%IJK(KAXIS+1))
+   CASE(IAXIS); CF%ALPHA_CF = SUM(CF%AREA(1:CF%NFACE))/(DY(J)*DZ(K))
+   CASE(JAXIS); CF%ALPHA_CF = SUM(CF%AREA(1:CF%NFACE))/(DZ(K)*DX(I))
+   CASE(KAXIS); CF%ALPHA_CF = SUM(CF%AREA(1:CF%NFACE))/(DX(I)*DY(J))
+   END SELECT
+ENDDO
+
 ! Deallocate Gasphase cut-faces and cut-cells inside Connecting meshes:
 IF (PROCESS(NM)/=MY_RANK) THEN
    CALL DEALLOCATE_CUTCF_CONN_MESH(NM)
@@ -13794,9 +13807,9 @@ DO ICF=1,M%N_CUTFACE_MESH+M%N_GCCUTFACE_MESH
       J      = CF%IJK(JAXIS); IF(J<0 .OR. J>M%JBP1) CYCLE
       K      = CF%IJK(KAXIS); IF(K<0 .OR. K>M%KBP1) CYCLE
       SELECT CASE(CF%IJK(KAXIS+1)) ! X1AXIS
-      CASE(IAXIS); CF%ALPHA_CF = SUM(CF%AREA(1:CF%NFACE))/(DY(J)*DZ(K)); IF(I==0 .OR. I==M%IBAR) ICF1=1
-      CASE(JAXIS); CF%ALPHA_CF = SUM(CF%AREA(1:CF%NFACE))/(DZ(K)*DX(I)); IF(J==0 .OR. J==M%JBAR) ICF1=1
-      CASE(KAXIS); CF%ALPHA_CF = SUM(CF%AREA(1:CF%NFACE))/(DX(I)*DY(J)); IF(K==0 .OR. K==M%KBAR) ICF1=1
+      CASE(IAXIS); IF(I==0 .OR. I==M%IBAR) ICF1=1
+      CASE(JAXIS); IF(J==0 .OR. J==M%JBAR) ICF1=1
+      CASE(KAXIS); IF(K==0 .OR. K==M%KBAR) ICF1=1
       END SELECT
    ENDIF
    CALL ALLOC_FACE_STATE_VARS(NM,ICF,CF%NFACE,ICF1)
@@ -18201,7 +18214,8 @@ CONTAINS
 
 SUBROUTINE HALO_LEVELS
 ! HL(NM)%L: 0 on a host of an active cut piece, n on a regular gas cell n faces away, up to the coupling layer
-! CC_FV_GCELL_HALO_LAYERS+1, -1 beyond. Each layer grows inside every mesh and across conforming mesh faces.
+! CC_FV_GCELL_HALO_LAYERS+1, -1 beyond. Each layer grows inside every mesh and across conforming mesh faces, but not
+! across a periodic boundary, on one mesh or between two.
 INTEGER :: NM,ICC,JCC,I,J,K,AX,SGN,LEVEL,IW,NS,NR,N,IJK(IAXIS:KAXIS)
 INTEGER, ALLOCATABLE :: DEST(:)
 REAL(EB), ALLOCATABLE :: SB(:,:),RB(:,:)
@@ -18232,8 +18246,9 @@ DO LEVEL=1,CC_FV_GCELL_HALO_LAYERS+1
       DO IW=1,M%N_EXTERNAL_WALL_CELLS
          IF (M%WALL(IW)%BOUNDARY_TYPE/=INTERPOLATED_BOUNDARY .OR. M%WALL(IW)%BC_INDEX<1) CYCLE
          EWC => M%EXTERNAL_WALL(IW)
-         IF (EWC%NOM<1 .OR. EWC%NOM==NM .OR. EWC%NIC/=1 .OR. ABS(EWC%AREA_RATIO-1._EB)>1.E-10_EB) CYCLE
+         IF (EWC%NOM<1 .OR. EWC%NIC/=1 .OR. ABS(EWC%AREA_RATIO-1._EB)>1.E-10_EB) CYCLE
          BC => M%BOUNDARY_COORD(M%WALL(IW)%BC_INDEX)
+         IF (CC_GRID_IS_PERIODIC_INTERFACE_WALL(NM,EWC%NOM,BC%IOR)) CYCLE
          IF (HL(NM)%L(BC%IIG,BC%JJG,BC%KKG)/=LEVEL-1) CYCLE
          IJK = (/EWC%IIO_MIN,EWC%JJO_MIN,EWC%KKO_MIN/)
          IF (PROCESS(EWC%NOM)==MY_RANK) THEN

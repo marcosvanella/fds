@@ -8100,7 +8100,8 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
    ENDIF
 
    IF (DO_U_GHOST) THEN
-      ! Save velocity components at the ghost cell midpoint
+      ! Velocity at the ghost cell centre, formed as inside the mesh: the mean of the gas velocities of its two
+      ! faces, a cut face's being its Cartesian velocity over its area fraction.
 
       U_GHOST(IW) = 0._EB
       V_GHOST(IW) = 0._EB
@@ -8119,9 +8120,9 @@ EXTERNAL_WALL_LOOP: DO IW=1,MESHES(NM)%N_EXTERNAL_WALL_CELLS
                AV1=1._EB; ICF=M2%FCVAR(IIO,JJO-1,KKO,CC_IDCF,JAXIS); IF(ICF>0) AV1=M2%CUT_FACE(ICF)%ALPHA_CF
                AW =1._EB; ICF=M2%FCVAR(IIO,JJO,KKO  ,CC_IDCF,KAXIS); IF(ICF>0) AW =M2%CUT_FACE(ICF)%ALPHA_CF
                AW1=1._EB; ICF=M2%FCVAR(IIO,JJO,KKO-1,CC_IDCF,KAXIS); IF(ICF>0) AW1=M2%CUT_FACE(ICF)%ALPHA_CF
-               U_GHOST(IW) = U_GHOST(IW) + (OM_UU(IIO,JJO,KKO)*AU+OM_UU(IIO-1,JJO,KKO)*AU1)/(AU+AU1)
-               V_GHOST(IW) = V_GHOST(IW) + (OM_VV(IIO,JJO,KKO)*AV+OM_VV(IIO,JJO-1,KKO)*AV1)/(AV+AV1)
-               W_GHOST(IW) = W_GHOST(IW) + (OM_WW(IIO,JJO,KKO)*AW+OM_WW(IIO,JJO,KKO-1)*AW1)/(AW+AW1)
+               U_GHOST(IW) = U_GHOST(IW) + 0.5_EB*(OM_UU(IIO,JJO,KKO)/AU+OM_UU(IIO-1,JJO,KKO)/AU1)
+               V_GHOST(IW) = V_GHOST(IW) + 0.5_EB*(OM_VV(IIO,JJO,KKO)/AV+OM_VV(IIO,JJO-1,KKO)/AV1)
+               W_GHOST(IW) = W_GHOST(IW) + 0.5_EB*(OM_WW(IIO,JJO,KKO)/AW+OM_WW(IIO,JJO,KKO-1)/AW1)
             ENDDO
          ENDDO
       ENDDO
