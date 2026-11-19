@@ -1630,6 +1630,9 @@ TYPE CC_O3E_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WCN     !< Area vectors of the moving CFACEs (m2)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: SW      !< Sums of area times wall velocity in each cut cell, per stage
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PPTR    !< Start of each face's list of edge rotational terms
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IXF     !< Where each face's force is written: cut-face row, or index in FVX, FVY, FVZ
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: FR      !< Row in FV%FACE of each face of the cut-cell region
+   REAL(EB) :: FT=1._EB                             !< Wall speed factor of PERIODIC_TEST=37 at the last stage
 END TYPE CC_O3E_TYPE
 
 !> \brief Mesh-owned finite-volume container for the unstructured active region.

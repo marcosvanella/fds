@@ -2741,7 +2741,7 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
          CF%FV = CF%FV + CF%FV_B
       ENDDO
    ENDIF
-   CALL CC_NO_FLUX(DT,NM,.TRUE.)
+   IF (.NOT.CC_O3E) CALL CC_NO_FLUX(DT,NM,.TRUE.)
 ENDDO
 
 END SUBROUTINE CC_LINKED_BAROCLINIC_NO_FLUX
@@ -5145,6 +5145,7 @@ ALLOCATE(BAND(F%N)); BAND = .FALSE.; NE = 0
 DO IF_=1,F%N_INT
    IF (ALL(F%KIND(IF_)/=(/CC_FACE_KIND_GAS,CC_FACE_KIND_COUPLING,CC_FACE_KIND_REMOTE/))) CYCLE
    IF (F%KIND(IF_)==CC_FACE_KIND_REMOTE .AND. F%NBR_CV_NM(IF_)<NM) CYCLE
+   IF (TWO_D .AND. F%X1AXIS(IF_)==JAXIS) CYCLE
    BAND(IF_) = .NOT.PLAIN(IF_,F%X1AXIS(IF_),F%IJK_FACE(:,IF_))
    DO Q=1,4
       CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W4)
@@ -5333,7 +5334,7 @@ ENDDO
 DO I=1,13
    O%KP(I) = MAX(O%KP(I),O%KP(I-1))
 ENDDO
-ALLOCATE(O%IX(O%NV),O%UP(0:O%NV),O%OM(O%NE),O%ST(O%NG))
+ALLOCATE(O%IX(O%NV),O%IXF(O%NB),O%UP(0:O%NV),O%OM(O%NE),O%ST(O%NG))
 O%IX = 0; O%UP = 0._EB
 DO I=1,NR
    IF (NINT(R(1,I))==12) O%UP(RN(I)) = UW(I)
@@ -5341,7 +5342,9 @@ DO I=1,NR
    O%IX(RN(I)) = NINT(R(2,I))
    IF (MOD(NINT(R(1,I)),4)==1) CYCLE
    O%IX(RN(I)) = O3E_FLAT(M,NINT(R(4:2:-1,I)),MOD(NINT(R(1,I))-2,4)+1)
+   IF (R(1,I)<4.5_EB) O%IXF(RN(I)) = O3E_FLAT(M,NINT(R(4:2:-1,I)),0)   ! a regular face of the region: FVX is shaped as MU
 ENDDO
+O%IXF(1:O%KP(1)) = O%IX(1:O%KP(1))
 DO Q=1,4
    DO E=1,O%NE
       IF (O%EP(E,Q)>0) O%EP(E,Q) = RN(O%EP(E,Q))
@@ -5715,6 +5718,7 @@ DO I=1,O%NB
 ENDDO
 O%VPTR(O%NB+1) = K+1; O%VED = VE(1:K); O%VW = VV(1:K)
 CALL O3E_BUILD_WALL(NM,FR,PC,CS(1,:),SM)
+CALL MOVE_ALLOC(FR,O%FR)
 
 CONTAINS
 
@@ -6194,6 +6198,9 @@ EK(1) = T; EK(2:4) = M%FV%FACE%IJK_FACE(:,IF_)
 IF (M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS) EK(2:4) = M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
 IF (Q==2) EK(1+C) = EK(1+C)-1
 IF (Q==4) EK(1+B) = EK(1+B)-1
+IF (TWO_D .AND. T/=JAXIS) THEN                       ! in 2D only the edges normal to the plane
+   ALLOCATE(P4(4,0),EW(15,0)); RETURN
+ENDIF
 DO QQ=1,4
    CALL O3E_SLOT(M,EK,QQ,SL(QQ)%P,K(QQ),WG(1,QQ),WG(2,QQ),SL(QQ)%S)
 ENDDO
@@ -8566,6 +8573,37 @@ DO AX=IAXIS,KAXIS
 ENDDO
 END SUBROUTINE O3E_TEST_FORCE
 
+SUBROUTINE O3E_TEST_WALL_RATE(NM)
+! Case 37 with CC_O3E: the wall velocities of the cut-cell momentum, set at setup at the rate of time 0, brought to the
+! rate of the moment.
+INTEGER, INTENT(IN) :: NM
+TYPE(CC_O3E_TYPE), POINTER :: O
+REAL(EB) :: FAC,R
+O => MESHES(NM)%FV%O3
+FAC = 1._EB+0.3_EB*SIN(8._EB*PI*O3E_TEST_TIME/T_END)
+R = FAC/O%FT; O%FT = FAC
+O%UP(O%KP(11)+1:O%KP(12)) = R*O%UP(O%KP(11)+1:O%KP(12))
+O%UP(O%KP(13)+1:) = R*O%UP(O%KP(13)+1:)
+O%WKU = R*O%WKU; O%KIN = R*O%KIN; O%BIN = R*R*O%BIN
+END SUBROUTINE O3E_TEST_WALL_RATE
+
+SUBROUTINE O3E_TEST_BAND_FORCE(NM)
+! Case 37 with CC_O3E: O3E_TEST_FORCE's acceleration at the centroids of the faces of the cut-cell region.
+INTEGER, INTENT(IN) :: NM
+INTEGER :: I,IF_
+REAL(EB) :: OMD,AXV(IAXIS:KAXIS),XP(IAXIS:KAXIS),AC(IAXIS:KAXIS)
+TYPE(CC_FACE_TYPE), POINTER :: F
+TYPE(CC_O3E_TYPE), POINTER :: O
+F => MESHES(NM)%FV%FACE; O => MESHES(NM)%FV%O3
+OMD = O3E_OMEGA*0.3_EB*8._EB*PI/T_END*COS(8._EB*PI*O3E_TEST_TIME/T_END)
+DO I=1,O%NB
+   IF_ = O%FR(I)
+   CALL O3E_TEST_FRAME(F%XYZCEN(IAXIS,IF_),F%XYZCEN(JAXIS,IF_),F%XYZCEN(KAXIS,IF_),AXV,XP)
+   AC = O3E_TEST_RIGID(AXV,XP,OMD)
+   O%F(I) = O%F(I)-AC(F%X1AXIS(IF_))
+ENDDO
+END SUBROUTINE O3E_TEST_BAND_FORCE
+
 SUBROUTINE O3E_TEST_DUMP(NM,NSTEP,T)
 ! Verification cases: writes, per mesh, a CSV file of the computed and exact velocity at each gas face (a face on a mesh
 ! boundary once) and at each gas part of a cut face.
@@ -10210,12 +10248,14 @@ IF (FREEZE_VELOCITY .OR. SOLID_PHASE_ONLY) RETURN
 TNOW = CURRENT_TIME()
 TNOW2= TNOW
 
-! Populate Linked velocity arrays:
-CALL L2_CROSS_SUMS(MERGE(CC_FV_MOM_VELS,CC_FV_MOM_VEL,PREDICTOR))
-DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-   CALL POINT_TO_MESH(NM)
-   CALL GET_LINKED_VELOCITIES(NM,PREDICTOR,CMP_FLG=.TRUE.)
-ENDDO
+! Populate Linked velocity arrays (none with CC_O3E):
+IF (.NOT.CC_O3E) THEN
+   CALL L2_CROSS_SUMS(MERGE(CC_FV_MOM_VELS,CC_FV_MOM_VEL,PREDICTOR))
+   DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+      CALL POINT_TO_MESH(NM)
+      CALL GET_LINKED_VELOCITIES(NM,PREDICTOR,CMP_FLG=.TRUE.)
+   ENDDO
+ENDIF
 
 ! Flux match Cartesian face velocity back to cut-faces:
 CALL CC_VELOCITY_CUTFACES(PREDICTOR)
@@ -15845,6 +15885,11 @@ PRFCT = 0._EB; IF(APPLY_TO_ESTIMATED_VARIABLES) PRFCT=1._EB
 WHERE(FCVAR(0:IBAR,1:JBAR,1:KBAR,CC_FGSC,IAXIS)==CC_SOLID) FVX(0:IBAR,1:JBAR,1:KBAR) = 0._EB
 WHERE(FCVAR(1:IBAR,0:JBAR,1:KBAR,CC_FGSC,JAXIS)==CC_SOLID) FVY(1:IBAR,0:JBAR,1:KBAR) = 0._EB
 WHERE(FCVAR(1:IBAR,1:JBAR,0:KBAR,CC_FGSC,KAXIS)==CC_SOLID) FVZ(1:IBAR,1:JBAR,0:KBAR) = 0._EB
+IF (CC_O3E) THEN                     ! the cut-cell region's own force replaces head's corrections and copy below
+   CALL CC_O3E_FORCE_A(NM,DT)
+   T_USED(14) = T_USED(14) + CURRENT_TIME() - TNOW
+   RETURN
+ENDIF
 ! Correct the gravity terms for RC and cut-faces:
 CUTFACE_LOOP_0 : DO LCF=1,SIZE(MESHES(NM)%CF_GAS)
    ICF=MESHES(NM)%CF_GAS(LCF); CF => CUT_FACE(ICF)
@@ -16004,7 +16049,6 @@ DO LCF=1,SIZE(MESHES(NM)%CF_GAS)
       FV%FACE%FN(IF_)=FVCC
    ENDDO
 ENDDO
-IF (CC_O3E) CALL CC_O3E_FORCE_A(NM,DT)
 
 ELSE CORRECT_GRAV_IF
 
@@ -16047,6 +16091,7 @@ REAL(EB) :: DCB,DBC,MC,DC,G(3),H(3),U(3),S,OME,RS,WQ,QF
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
 CALL CC_O3E_WALL_VELOCITY(NM)
+IF (PERIODIC_TEST==37) CALL O3E_TEST_WALL_RATE(NM)
 IF (PREDICTOR) THEN
    VC => M%FV%FACE%VEL; U1(1:SIZE(M%U)) => M%U; V1(1:SIZE(M%V)) => M%V; W1(1:SIZE(M%W)) => M%W
    DP1(1:SIZE(M%D)) => M%D; RH1(1:SIZE(M%RHO)) => M%RHO
@@ -16157,6 +16202,7 @@ DO I=1,M%FV%O3%NB
    KW(I) = (MUC(NIX(I,1))*WK(I,1)+MUC(NIX(I,2))*WK(I,2))/RS+KIN(I)
    F(I) = QF-(S+MUC(NIX(I,1))*WKU(I,1)+MUC(NIX(I,2))*WKU(I,2))/RS+KW(I)*UP(I)-BIN(I)
 ENDDO
+IF (PERIODIC_TEST==37) CALL O3E_TEST_BAND_FORCE(NM)
 ! The velocity without the pressure term; faces with a stiff wall term take the implicit step.
 UH => M%FV%O3%UH; UB => M%FV%O3%UB; STF => M%FV%O3%STF; DEN => M%FV%O3%DEN; M%FV%O3%DT = DT
 IF (PREDICTOR) THEN
@@ -16208,6 +16254,10 @@ REAL(EB), POINTER, DIMENSION(:,:,:) :: FVXP, FVYP, FVZP
 TYPE(CC_FV_TYPE), POINTER :: FV
 
 CALL POINT_TO_MESH(NM)
+IF (CC_O3E) THEN                     ! per piece: no means over link groups
+   IF (.NOT.DO_BAROCLINIC) CALL CC_O3E_FORCE_B(NM)
+   RETURN
+ENDIF
 FV=>MESHES(NM)%FV
 ALLOCATE(FLINK(0:MESHES(NM)%NUNK_F),ALINK(0:MESHES(NM)%NUNK_F)); FLINK = 0._EB; ALINK = 0._EB
 
@@ -16215,7 +16265,6 @@ IF (DO_BAROCLINIC) THEN
    FVXP => FVX_B; FVYP => FVY_B; FVZP => FVZ_B; KQ = CC_FV_MOM_FN_B
 ELSE
    FVXP => FVX  ; FVYP => FVY  ; FVZP => FVZ  ; KQ = CC_FV_MOM_FN
-   IF (CC_O3E) CALL CC_O3E_FORCE_B(NM)
 ENDIF
 CALL ACCUM_L2_ORDERED_MEAN(NM,KQ,FLINK,ALINK)
 
@@ -16267,15 +16316,16 @@ END SUBROUTINE GET_LINKED_FV
 
 
 SUBROUTINE CC_O3E_FORCE_B(NM)
-! Called per stage by GET_LINKED_FV before the link means of FN: the force on the faces of the cut-cell region of mesh
-! NM that makes FDS's velocity update give the velocity of CC_O3E_FORCE_A. On a face that takes the implicit step it
-! also scales the pressure gradient, taken from the same stage of the previous step.
+! Called per stage by GET_LINKED_FV in place of the link means of FN: the force on the faces of the cut-cell region of
+! mesh NM that makes FDS's velocity update give the velocity of CC_O3E_FORCE_A. On a face that takes the implicit step
+! it also scales the pressure gradient, taken from the same stage of the previous step. The force goes into FN of the
+! cut faces and into FVX, FVY, FVZ of the regular faces.
 INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
 INTEGER :: I,L
 REAL(EB) :: RDT
-INTEGER, POINTER, CONTIGUOUS :: STF(:),SH(:,:)
-REAL(EB), POINTER, CONTIGUOUS :: UP(:),UH(:),UB(:),FNE(:),DEN(:),RDS(:),H1(:)
+INTEGER, POINTER, CONTIGUOUS :: STF(:),SH(:,:),IXF(:)
+REAL(EB), POINTER, CONTIGUOUS :: UP(:),UH(:),UB(:),FNE(:),DEN(:),RDS(:),H1(:),FN(:),FX(:),FY(:),FZ(:)
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
 UP => M%FV%O3%UP; UH => M%FV%O3%UH; UB => M%FV%O3%UB; FNE => M%FV%O3%FNE
@@ -16294,6 +16344,20 @@ ENDIF
 DO L=1,M%FV%O3%NST
    I = STF(L)
    FNE(I) = FNE(I)+(1._EB/DEN(L)-1._EB)*RDS(L)*(H1(SH(L,2))-H1(SH(L,1)))
+ENDDO
+IXF => M%FV%O3%IXF; FN => M%FV%FACE%FN
+FX(1:SIZE(M%FVX)) => M%FVX; FY(1:SIZE(M%FVY)) => M%FVY; FZ(1:SIZE(M%FVZ)) => M%FVZ
+DO I=M%FV%O3%KP(0)+1,M%FV%O3%KP(1)
+   FN(IXF(I)) = FNE(I)
+ENDDO
+DO I=M%FV%O3%KP(1)+1,M%FV%O3%KP(2)
+   FX(IXF(I)) = FNE(I)
+ENDDO
+DO I=M%FV%O3%KP(2)+1,M%FV%O3%KP(3)
+   FY(IXF(I)) = FNE(I)
+ENDDO
+DO I=M%FV%O3%KP(3)+1,M%FV%O3%KP(4)
+   FZ(IXF(I)) = FNE(I)
 ENDDO
 END SUBROUTINE CC_O3E_FORCE_B
 
