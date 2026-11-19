@@ -1632,7 +1632,7 @@ One current limitation of the unstructured geometry algorithm is that a Cartesia
 \item Thin geometries and corners cannot split cells, one side must be blocked. See Sec.~\ref{info:thin_geom}.
 \item Backing external is allowed only on a single mesh.  If the back surface is on another mesh the backing will be set to \ct{VOID} (quietly).
 \item A \ct{VENT} cannot be applied to a \ct{GEOM}.  Surface properties must be applied face by face via \ct{SURF_ID}.
-\item Imposing a tangential velocity in geometries cannot be done. \ct{NO_SLIP} conditions assume a zero tangential velocity. Allowing this capability is also a development priority.
+\item A tangential velocity cannot be imposed on a \ct{GEOM} with \ct{VEL_T}. The jet of a blowing \ct{GEOM} surface can be given a direction with \ct{UVW} on \ct{SURF}, with the per-piece cut-cell momentum scheme only (beta; see Sec.~\ref{info:louvers_geom}). Otherwise \ct{NO_SLIP} conditions assume a zero tangential velocity.
 \item Neither 3D heat transfer nor \ct{BURN_AWAY} are available in \ct{GEOM}.
 \item The \ct{HOLE} namelist does not apply to \ct{GEOM}.
 \item Subgrid geometries (smaller than a grid cell) are not recommended. They are currently not included in the treatment of momentum equations. Similarly, gaps should be defined over a cell size thick.
@@ -3534,6 +3534,23 @@ In cases of limited mesh resolution, there may not be enough mesh cells spanning
 If the louvered vent is part of an HVAC system, see \ref{info:HVAClouvers} for details on how to specify the louver.
 
 
+\subsection{Louvered Surfaces on Unstructured Geometry (Beta)}
+\label{info:louvers_geom}
+
+The faces of a \ct{GEOM} need not lie in coordinate planes, so the two components of \ct{VEL_T} have no meaning there, and FDS stops if a \ct{SURF} with \ct{VEL_T} is applied to a \ct{GEOM}. The direction of the jet that leaves a blowing \ct{GEOM} surface is given instead by the real triplet \ct{UVW} on the \ct{SURF} line, a vector with the same meaning as the louver vector of an HVAC \ct{VENT} (Sec.~\ref{info:HVAClouvers}). For example,
+\begin{lstlisting}
+&MISC SIMULATION_MODE='DNS', CC_O3E=T /
+&SURF ID='SUPPLY', VEL=-5.2, UVW=-1,0.577,0 /
+\end{lstlisting}
+applied to the faces of a \ct{GEOM} whose outward normal points in the $-x$ direction blows air into the domain with a normal velocity of 5.2~m/s and turns the jet 30\unit{\degree} towards $+y$. \ct{UVW} may have any length; FDS normalizes it.
+
+The normal velocity of each face is the one that the \ct{SURF} gives without \ct{UVW} (from \ct{VEL}, \ct{VOLUME_FLOW}, \ct{MASS_FLUX_TOTAL}, or the flow of an HVAC node tied to the surface with \ct{NODE_ID}), so the volume flow of the surface does not depend on the direction. FDS adds the tangential velocity that makes the gas leave each face along \ct{UVW}: if $\mathbf{d}$ is the unit vector of \ct{UVW}, $\bn$ the normal of the face pointing into the gas, and $u_n$ the normal velocity into the gas, the gas leaves the face with the velocity $u_n \, \mathbf{d}/(\mathbf{d} \cdot \bn)$. The tangential velocity therefore follows the ramp of the normal velocity (\ct{TAU_V} or \ct{RAMP_V}). It is applied only while the surface blows. A surface that sucks gas out of the domain takes no tangential velocity, as on an \ct{OBST}, and is free slip unless \ct{NO_SLIP=T}.
+
+Every face to which the \ct{SURF} is applied must look towards the jet, $\mathbf{d} \cdot \bn > 0$. Otherwise FDS stops with an error message that names the \ct{SURF} and gives the position of the face; apply separate surfaces to the parts of the geometry that face different ways. The tangential speed is the normal speed times $\tan \theta$, where $\theta$ is the angle between \ct{UVW} and the face normal, and it grows without bound as the jet direction approaches the plane of the face: keep $\theta$ well below 90\unit{\degree}.
+
+\ct{UVW} on \ct{SURF} is a beta feature. It requires the per-piece cut-cell momentum scheme, \ct{CC_O3E=T} on \ct{MISC}, which is in beta as well and currently runs in DNS mode only (\ct{SIMULATION_MODE='DNS'}), on a single mesh, and without gravity. FDS stops with an error message if \ct{UVW} is applied to a \ct{GEOM} without \ct{CC_O3E=T}, if it is given together with \ct{VEL_T}, if it is the zero vector, or if fewer than three components are given. \ct{UVW} on a \ct{SURF} acts on \ct{GEOM} faces only; for \ct{OBST} and \ct{VENT} faces, use \ct{VEL_T}.
+
+
 \subsection{Specified Normal Velocity Gradient}
 \label{info:vel_grad}
 
@@ -3960,7 +3977,7 @@ The HVAC system being modeled may either have louvers that redirect the flow lea
     &OBST XB=1.0,2.0,0.0,1.0,0.0,1.0 /
     &VENT XB=1.0,1.0,0.0,1.0,0.0,1.0, SURF_ID='HVAC', ID='HVAC OUTLET', UVW=-1,0,1 /
 \end{lstlisting}
-The above input defines a vent lying in the $y$-$z$ plane facing in the $-x$ direction.  The flow vector indicates that the flow from this vent is in the $-x$ direction with a 45\unit{\degree} up angle (the $x$ and $z$ components are equal in size).  FDS will set the tangential velocity of the vent to obtain the specified direction indicated by \ct{UVW}.  This will only be done if the vent is inputting gas into the domain. Note that the values given for \ct{UVW} are normalized to a unit vector.
+The above input defines a vent lying in the $y$-$z$ plane facing in the $-x$ direction.  The flow vector indicates that the flow from this vent is in the $-x$ direction with a 45\unit{\degree} up angle (the $x$ and $z$ components are equal in size).  FDS will set the tangential velocity of the vent to obtain the specified direction indicated by \ct{UVW}.  This will only be done if the vent is inputting gas into the domain. Note that the values given for \ct{UVW} are normalized to a unit vector. For an HVAC node tied to a \ct{GEOM} surface through \ct{NODE_ID} on \ct{SURF}, give the direction with \ct{UVW} on that \ct{SURF} (beta; see Sec.~\ref{info:louvers_geom}).
 
 \subsection{HVAC Mass Transport}
 \label{info:hvacmasstransport}
@@ -13644,6 +13661,7 @@ Keyword                                               & Type            & Descri
 \ct{TMP_GAS_BACK}                                     & Real            & Section~\ref{info:BACKING}                & \unit{\degreeCelsius} &                         \\ \hline
 \ct{TMP_INNER}                                        & Real            & Section~\ref{info:TMP_INNER}              & \unit{\degreeCelsius} & \ct{TMPA}                 \\ \hline
 \ct{TRANSPARENCY}                                     & Real            & Section~\ref{info:TRANSPARENCY}           &                     & 1                       \\ \hline
+\ct{UVW(3)}                                           & Real Array      & Section~\ref{info:louvers_geom}           &                     &                         \\ \hline
 \ct{VARIABLE_THICKNESS}                               & Logical         & Section~\ref{info:ht1d}                   &                     & \ct{F}                 \\ \hline
 \ct{VEG_LSET_BETA}                                    & Real            & Section~\ref{info:level_set}              &                     & 0.01                   \\ \hline
 \ct{VEG_LSET_CHAR_FRACTION}                           & Real            & Section~\ref{info:level_set}              &                     & 0.2                     \\ \hline
