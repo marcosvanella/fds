@@ -143,6 +143,10 @@ $QFDS -d Complex_Geometry geom_poiseuille_N10nah_theta0_stm.fds
 $QFDS -d Complex_Geometry geom_poiseuille_N20nah_theta0_stm.fds
 $QFDS -d Complex_Geometry geom_poiseuille_N40nah_theta0_stm.fds
 $QFDS -d Complex_Geometry geom_poiseuille_N80nah_theta0_stm.fds
+$QFDS -d Complex_Geometry geom_poiseuille_periodic_wall.fds
+$QFDS -p 2 -d Complex_Geometry geom_poiseuille_periodic_wall_2mesh.fds
+$QFDS -d Complex_Geometry geom_channel_periodic_1mesh.fds
+$QFDS -p 2 -d Complex_Geometry geom_channel_periodic_2mesh.fds
 
 $QFDS -d Complex_Geometry geom_bad_inconsistent_normals.fds
 $QFDS -d Complex_Geometry geom_bad_non_manifold_edge.fds

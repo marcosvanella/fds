@@ -1,0 +1,40 @@
+&HEAD CHID='geom_channel_periodic_1mesh', TITLE='Complex Geometry: laminar channel flow next to a GEOM slab that crosses every periodic boundary, one mesh.' /
+
+# The same flow as geom_channel_periodic_2mesh, where two meshes meet across the periodic x boundary. Both must give the
+# same cut cells, links and solution to round-off. The slab faces are off the grid planes, so cut faces lie on the
+# periodic boundary planes.
+&MESH IJK=32,8,16, XB=0.0,2.0,0.0,0.5,0.0,1.0 /
+
+&TIME T_END=10. /
+&MISC SIMULATION_MODE='DNS', NOISE=.FALSE., GVEC=0.,0.,0. /
+&WIND STRATIFICATION=.FALSE., FORCE_VECTOR(1)=1. /
+&PRES SOLVER='UGLMAT' /
+&RADI RADIATION=.FALSE. /
+&DUMP DT_DEVC=0.5, SIG_FIGS=8, SIG_FIGS_EXP=3, DIAGNOSTICS_INTERVAL=1000 /
+
+&SPEC ID='LJ AIR', VISCOSITY=0.025, BACKGROUND=.TRUE. /
+
+&VENT PBX=0.0, SURF_ID='PERIODIC' /
+&VENT PBX=2.0, SURF_ID='PERIODIC' /
+&VENT PBY=0.0, SURF_ID='PERIODIC' /
+&VENT PBY=0.5, SURF_ID='PERIODIC' /
+&VENT PBZ=0.0, SURF_ID='PERIODIC' /
+&VENT PBZ=1.0, SURF_ID='PERIODIC' /
+
+&SURF ID='SLAB BOTTOM', COLOR='BLUE' /
+&SURF ID='SLAB TOP', COLOR='RED' /
+
+&GEOM ID='SLAB', XB=-1.0,3.0,-1.0,1.5,0.33,0.67, SURF_ID6='INERT','INERT','INERT','INERT','SLAB BOTTOM','SLAB TOP' /
+
+# The slab and grid are symmetric about z=0.5, a periodic plane: top and bottom faces must give the same area and force,
+# and U_SEAM_MIRROR, the same line with its points in reverse order, must equal U_SEAM.
+&DEVC ID='A_BOT', QUANTITY='WALL TEMPERATURE', SURF_ID='SLAB BOTTOM', SPATIAL_STATISTIC='SURFACE AREA', XB=0.0,2.0,0.0,0.5,0.0,1.0 /
+&DEVC ID='A_TOP', QUANTITY='WALL TEMPERATURE', SURF_ID='SLAB TOP', SPATIAL_STATISTIC='SURFACE AREA', XB=0.0,2.0,0.0,0.5,0.0,1.0 /
+&DEVC ID='F_BOT', QUANTITY='VISCOUS STRESS WALL', SURF_ID='SLAB BOTTOM', SPATIAL_STATISTIC='SURFACE INTEGRAL', FORCE_DIRECTION=1.,0.,0., XB=0.0,2.0,0.0,0.5,0.0,1.0 /
+&DEVC ID='F_TOP', QUANTITY='VISCOUS STRESS WALL', SURF_ID='SLAB TOP', SPATIAL_STATISTIC='SURFACE INTEGRAL', FORCE_DIRECTION=1.,0.,0., XB=0.0,2.0,0.0,0.5,0.0,1.0 /
+&DEVC ID='U_MEAN', QUANTITY='U-VELOCITY', SPATIAL_STATISTIC='VOLUME MEAN', XB=0.0,2.0,0.0,0.5,0.0,1.0 /
+&DEVC ID='U_SEAM', QUANTITY='U-VELOCITY', XB=0.03125,0.03125,0.28125,0.28125,0.03125,0.96875, POINTS=16, Z_ID='z_seam' /
+&DEVC ID='U_SEAM_MIRROR', QUANTITY='U-VELOCITY', XB=0.03125,0.03125,0.28125,0.28125,0.96875,0.03125, POINTS=16, Z_ID='z_seam_mirror' /
+&DEVC ID='U_MID', QUANTITY='U-VELOCITY', XB=1.03125,1.03125,0.28125,0.28125,0.03125,0.96875, POINTS=16, Z_ID='z_mid' /
+
+&TAIL /

@@ -8127,6 +8127,53 @@ For stress method for cross velocities (STM) and unlinked cut-cells, the frictio
 
 \newpage
 
+\section{Consistency Across Mesh Boundaries}
+
+The cases of this section have no exact solution to compare with.
+Each compares two FDS runs of the same flow that differ only in how the domain is divided or described, and the two runs must agree to round-off.
+A disagreement means that a cut cell, a cut face or a face link at a mesh boundary or a periodic boundary is handled differently from its counterpart in the interior of a mesh.
+Only the velocity profile of the first pair is plotted, in Fig.~\ref{fig:geom_channel_periodic}; the other comparisons are reported as errors in the verification statistics.
+
+\subsection{Channel Flow Across a Periodic Boundary Joining Two Meshes}
+\label{sec:geom_channel_periodic}
+
+A \ct{GEOM} slab 0.34~m thick, with faces off the grid planes, spans a domain of 2~m by 0.5~m by 1~m that is periodic in all three directions.
+The slab crosses every periodic boundary.
+A force of 1~N/m$^3$ drives a laminar flow ($\mu=0.025$~kg/(m\,s)) through the channel between its faces.
+The case \ct{geom_channel_periodic_1mesh} uses one mesh of 6.25~cm cells.
+The case \ct{geom_channel_periodic_2mesh} splits it into two meshes at $x=1$~m, which then also meet across the periodic $x$ boundary, where the slab is cut.
+The two meshes must see the same cut cells, cut faces and face links as the one mesh.
+They must therefore give the same wall areas, wall shear forces, mean velocity and velocity profiles.
+
+The slab and the grid are symmetric about the plane $z=0.5$~m, so the flow is mirror-symmetric about it.
+Two checks follow from this.
+The areas and shear forces on the top and bottom faces of the slab must agree, and the velocity profile along a vertical line must equal its mirror image, $u(z)=u(1-z)$.
+The mirror image is sampled by a second line device with the same points in reverse order.
+The wall areas, the shear forces and the mean velocity after the first second, and the velocity profiles along a vertical line, are compared with a relative tolerance of $10^{-6}$, which is about ten times the resolution of the output files; the observed differences are zero.
+The profiles for the one mesh, the two meshes and the mirror image are shown in Fig.~\ref{fig:geom_channel_periodic}.
+The symmetry check is the more sensitive one: it also fails when both runs share the same error, as when a ghost cell takes its value from the wrong side of a periodic boundary.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[height=3.0in]{SCRIPT_FIGURES/geom_channel_periodic_U_profile}
+\caption[Channel flow across a periodic boundary]{Velocity profile along a vertical line in the channel flow across a periodic boundary: one mesh, two meshes, and the mirror image of the two-mesh profile about $z=0.5$~m. The curves lie on top of each other.}
+\label{fig:geom_channel_periodic}
+\end{figure}
+
+\subsection{Poiseuille Flow with a Channel Wall on a Periodic Boundary}
+\label{sec:geom_poiseuille_periodic_wall}
+
+The case \ct{geom_poiseuille_periodic_wall} is the Poiseuille flow of Section~\ref{sec:poiseuille_cc} on the grid of \ct{geom_poiseuille_N10a_theta0_stm}.
+Both channel walls are made by one \ct{GEOM} slab, from $z=1$~m to $z=1.2$~m, whose top face lies on the periodic $z$ boundary.
+Across that boundary the slab bounds the channel at $z=0$.
+A ghost cell whose periodic image is solid is treated as solid, so the cells above $z=0$ see the wall.
+The case must give the same mean and center velocities as \ct{geom_poiseuille_N10a_theta0_stm}, which has two separate walls.
+The case \ct{geom_poiseuille_periodic_wall_2mesh} doubles the channel length to 2~m and splits it into two meshes at $x=5$~m, run on two processes, which also meet across the periodic $x$ boundary.
+It must give the same steady velocities.
+The mean and center velocities at 60~s, 3.39998~m/s and 4.99997~m/s, are compared with those of the reference case with a relative tolerance of $10^{-5}$, and the observed differences are zero.
+
+\newpage
+
 \section{Geometry Tests Involving Heat and Mass Transfer}
 
 \subsection{Radiating Sphere}

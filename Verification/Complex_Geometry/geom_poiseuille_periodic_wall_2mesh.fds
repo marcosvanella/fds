@@ -1,0 +1,30 @@
+&HEAD CHID='geom_poiseuille_periodic_wall_2mesh', TITLE='Poiseuille flow in 2D, GEOM channel wall on the periodic z boundary, two meshes.' /
+
+# The case geom_poiseuille_periodic_wall, 2 m long, on two meshes that meet at x=5 and across the periodic x boundary.
+# The top face of the slab lies on the periodic z boundary of both meshes. Same flow as geom_poiseuille_N10a_theta0_stm.
+&MESH IJK=4,1,12, XB=4.0,5.0,-.125,.125,0.0,1.2 /
+&MESH IJK=4,1,12, XB=5.0,6.0,-.125,.125,0.0,1.2 /
+
+&TIME T_END=60.0 / needs to be roughly (.5*H)^2/VISCOSITY (here H=1)
+&DUMP NFRAMES=100, SIG_FIGS=6, SIG_FIGS_EXP=4, DIAGNOSTICS_INTERVAL=1000 /
+
+&MISC SIMULATION_MODE='DNS', NOISE=.FALSE., CCVOL_LINK=0., VN_MIN=0.8, VN_MAX=0.9 /
+&PRES SOLVER='UGLMAT HYPRE' /
+&WIND STRATIFICATION=.FALSE., FORCE_VECTOR(1)=1 /
+
+&SPEC ID='LJ AIR', VISCOSITY=0.025, BACKGROUND=.TRUE. /
+
+&VENT PBX=4.0, SURF_ID='PERIODIC' /
+&VENT PBX=6.0, SURF_ID='PERIODIC' /
+&VENT PBZ=0.0, SURF_ID='PERIODIC' /
+&VENT PBZ=1.2, SURF_ID='PERIODIC' /
+
+&GEOM XB=-1,11,-.5,.5, 1.0,1.2/
+
+&SLCF PBY=0, QUANTITY='VELOCITY', VECTOR=.TRUE. /
+&DEVC ID='U_MEAN', XB=5.0,5.0, -0.5,0.5, 0.0,1.0, QUANTITY='U-VELOCITY', SPATIAL_STATISTIC='AREA INTEGRAL', CONVERSION_FACTOR=4. /
+&DEVC ID='U_CENTER', XYZ=5.0,0.0,0.5, QUANTITY='U-VELOCITY' /
+&DEVC XYZ=5.0,0.0,0.5, QUANTITY='VISCOSITY' /
+&DEVC XYZ=5.0,0.0,0.5, QUANTITY='DENSITY' /
+
+&TAIL /
