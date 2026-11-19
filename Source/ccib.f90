@@ -1384,7 +1384,7 @@ DO IPASS=1,2
          ZL(L) = SURFACE(CFA%SURF_INDEX)%SPECIES_BC_INDEX==SPECIFIED_MASS_FRACTION .AND. N_TRACKED_SPECIES>1
          TH_WA(L) = M%FV%FACE%FLUX_AREA(IF_)*M%BOUNDARY_PROP1(CFA%B1_INDEX)%AREA_ADJUST
          NV(:,L) = M%BOUNDARY_COORD(CFA%BC_INDEX)%NVEC
-         RL(L) = O3E_NEAR(M,IF_,XC(:,IS))
+         RL(L) = O3E_NEAR(O3E_POLYGON(M,M%FV%FACE%SRC_ICF(IF_),M%FV%FACE%SRC_JCF(IF_)),M%FV%FACE%NVEC(:,IF_),XC(:,IS))
       ENDDO
    ENDDO
    IF (IPASS==2) EXIT
@@ -1431,7 +1431,9 @@ DO K=1,N
 ENDDO
 DO IS=1,TH_NSLOT
    ASSOCIATE (O=>ORD(PTR(IS):PTR(IS+1)-1))
-      RD(O) = CC_WALL_RDW(NV(:,O),RL(O))
+      DO K=1,SIZE(O)
+         RD(O(K)) = MAXVAL(MAX(MATMUL(NV(:,O(K)),NV(:,O)),0._EB)*RL(O))
+      ENDDO
    END ASSOCIATE
 ENDDO
 DO L=1,NL
@@ -5328,11 +5330,12 @@ ENDIF
 END FUNCTION CENTROID
 
 SUBROUTINE WALL_ROW(E,Q)
-! The wall seen by the missing face in position Q around edge E: the CFACEs of the face's two cells or, if these have no
-! CFACE area, of the four cells around the edge. Returns the wall's area, its free-slip part, and the cut cells and
-! weights of the area mean of its wall velocity.
+! The wall seen by the missing face in position Q around edge E: the area mean over the CFACEs of the face's two cells,
+! filled up to the area of the Cartesian face with the mean over the four cells around the edge. Returns the larger of
+! the two areas, its free-slip part, and the cut cells and weights of the mean of the wall velocity.
 INTEGER, INTENT(IN) :: E,Q
 INTEGER :: A,RA,LL,NC(3),NL(3),EC(4)
+REAL(EB) :: AO,AA,G,DXC(3)
 CALL O3E_ARM(EK(:,E),Q,A,NC); RA = 6-EK(1,E)-A
 DO LL=1,4
    NL = NC
@@ -5342,16 +5345,18 @@ DO LL=1,4
    IF (M%CCVAR(NL(IAXIS),NL(JAXIS),NL(KAXIS),CC_CGSC)==CC_CUTCFE) EC(LL) = M%CCVAR(NL(IAXIS),NL(JAXIS),NL(KAXIS),CC_IDCC)
    IF (EC(LL)>M%N_CUTCELL_MESH) EC(LL) = 0             ! a guard-layer cut cell: its CFACEs belong to the other mesh
 ENDDO
+DXC = (/M%DX(NC(IAXIS)),M%DY(NC(JAXIS)),M%DZ(NC(KAXIS))/)
+AO = CAT(EC(1))+CAT(EC(2)); AA = SUM(CAT(EC))
+AT = MAX(DXC(EK(1,E))*DXC(RA),AO); G = (AT-AO)/AT
 KEY = (/13,E,A,Q/)
-IF (CAT(EC(1))+CAT(EC(2))>0._EB) THEN
-   EC(3:4) = 0
-ELSE
-   KEY(4) = 0
-ENDIF
-AT = SUM(CAT(EC)); AS = SUM(CAS(EC)); NJ = 0
+IF (AO<=0._EB) KEY(4) = 0                                 ! the mean over the four cells, the same for both faces of axis A
+AS = CAS(EC(1))+CAS(EC(2))
+IF (AA>0._EB) AS = AS+G*AT*SUM(CAS(EC))/AA               ! no CFACE in the four cells: no free slip
+NJ = 0
 DO LL=1,4
    IF (WC(EC(LL))==0) CYCLE
-   NJ = NJ+1; HJ(NJ) = WC(EC(LL)); HW(NJ) = 1._EB/AT
+   NJ = NJ+1; HJ(NJ) = WC(EC(LL)); HW(NJ) = G/AA
+   IF (LL<3) HW(NJ) = HW(NJ)+1._EB/AT
 ENDDO
 END SUBROUTINE WALL_ROW
 
@@ -5696,17 +5701,17 @@ END SUBROUTINE O3E_BUILD_VISC
 
 SUBROUTINE O3E_BUILD_WALL(NM,FR,PC,CVF,SM)
 ! Called by O3E_BUILD_VISC: the wall law of the faces of the cut-cell region, a no-slip wall shear from each CFACE of the
-! control volumes on the face's two sides, at its distance from the face; the inflow term of walls that blow; and the
-! faces whose wall term is too stiff for the explicit step, which take the implicit step.
+! control volumes on the face's two sides, at the mean over the face of the distance to the wall; the inflow term of
+! walls that blow; and the faces whose wall term is too stiff for the explicit step, which take the implicit step.
 INTEGER, INTENT(IN) :: NM,FR(:),PC(:,:),CVF(:)
 REAL(EB), INTENT(IN) :: SM(:,:)
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
-INTEGER :: I,J,L,R,S,A,IF_,NJ,NW,NP,NS,L0,N(3),NH(3)
+INTEGER :: I,J,L,Q,R,S,A,IF_,NJ,NW,NP,NS,L0,N(3),NH(3)
 INTEGER, ALLOCATABLE :: CP(:),CR(:),SL(:),JR(:),JS(:),JF(:),PB(:),PA(:),PP(:),EC(:),ES(:),SB(:),SC(:,:)
 REAL(EB) :: RDW,W,DXM,X(3),UW(3),XL(3),XH(3)
-REAL(EB), ALLOCATABLE :: DL(:),NV(:,:),EK(:),EQ(:),SR(:)
+REAL(EB), ALLOCATABLE :: NV(:,:),EK(:),EQ(:),SR(:),XQ(:,:),WQ(:),DQ(:,:),VV(:,:),RJ(:)
 LOGICAL :: TST
 
 M => MESHES(NM); F => M%FV%FACE; O => M%FV%O3
@@ -5740,7 +5745,7 @@ IF (SIZE(O%CFV)>0 .AND. .NOT.TST) THEN
       ENDDO
    ENDDO
 ENDIF
-ALLOCATE(JR(NJ),JS(NJ),JF(NJ),DL(NJ),NV(3,NJ),PB(O%NB),PA(O%NB),PP(O%NB+1),EC(NW),ES(NW),EK(NW),EQ(NW),SB(O%NB), &
+ALLOCATE(JR(NJ),JS(NJ),JF(NJ),NV(3,NJ),PB(O%NB),PA(O%NB),PP(O%NB+1),EC(NW),ES(NW),EK(NW),EQ(NW),SB(O%NB), &
          SC(O%NB,2),SR(O%NB))
 NW = 0; NP = 0; NS = 0
 DO I=1,O%NB
@@ -5755,15 +5760,24 @@ DO I=1,O%NB
    ENDDO
    IF (NJ==0) CYCLE
    IF_ = FR(I); A = F%X1AXIS(IF_); X = F%XYZCEN(:,IF_)
+   N = F%IJK_FACE(:,IF_)
+   IF (F%FTYPE(IF_)==CC_FTYPE_CFGAS) N = M%CUT_FACE(F%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
+   CALL O3E_FACE_POINTS(M,IF_,A,N,XQ,WQ)
+   IF (ALLOCATED(DQ)) DEALLOCATE(DQ)
+   ALLOCATE(DQ(NJ,SIZE(WQ)))
    DO J=1,NJ
       JF(J) = M%CUT_FACE(F%SRC_ICF(JR(J)))%CFACE_INDEX(F%SRC_JCF(JR(J)))
       NV(:,J) = M%BOUNDARY_COORD(M%CFACE(JF(J))%BC_INDEX)%NVEC
-      DL(J) = O3E_NEAR(M,JR(J),X)
+      VV = O3E_POLYGON(M,F%SRC_ICF(JR(J)),F%SRC_JCF(JR(J)))
+      DO Q=1,SIZE(WQ)
+         DQ(J,Q) = O3E_NEAR(VV,F%NVEC(:,JR(J)),XQ(:,Q))
+      ENDDO
    ENDDO
+   RJ = CC_WALL_RDW(NV(:,1:NJ),DQ,WQ)
    L0 = NW
    DO J=1,NJ
       IF (O3E_SLIP(M,JF(J))) CYCLE
-      RDW = MAXVAL(MAX(MATMUL(NV(:,J),NV(:,1:NJ)),0._EB)/DL(1:NJ))
+      RDW = RJ(J)
       S = JS(J); W = SM(I,S)*F%AREA(JR(J))
       O%WK(I,S) = O%WK(I,S)+2._EB*W*RDW
       IF (TST) THEN
@@ -5778,8 +5792,6 @@ DO I=1,O%NB
    IF (NW>L0) THEN
       NP = NP+1; PB(NP) = I; PA(NP) = A; PP(NP) = L0+1
    ENDIF
-   N = F%IJK_FACE(:,IF_)
-   IF (F%FTYPE(IF_)==CC_FTYPE_CFGAS) N = M%CUT_FACE(F%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
    ! Stiff if the wall term exceeds that of a whole face half a cell from a wall, in cubic cells of the least spacing.
    NH = N; NH(A) = N(A)+1
    DXM = MIN(M%DX(N(IAXIS)),M%DY(N(JAXIS)),M%DZ(N(KAXIS)),M%DX(NH(IAXIS)),M%DY(NH(JAXIS)),M%DZ(NH(KAXIS)))
@@ -5802,21 +5814,98 @@ ALLOCATE(O%WIN(SIZE(O%CFV)))
 END SUBROUTINE O3E_BUILD_WALL
 
 
-REAL(EB) FUNCTION O3E_NEAR(M,IF_,X)
-! Distance from point X to the (convex) CFACE polygon of face IF_: to its plane if the foot of the perpendicular falls
-! inside the polygon, else to its nearest side.
+SUBROUTINE O3E_FACE_POINTS(M,IF_,A,N,XQ,WQ)
+! Called by O3E_BUILD_WALL: points and weights of the mean over face IF_ (axis A, low cell N). The face is cut into
+! convex parts by the lines of the two sides at each corner where its outline turns inwards, and each part is clipped
+! by the four quarters of the Cartesian face; a point at each clipped part's centroid, weighted by its area.
 TYPE(MESH_TYPE), INTENT(IN) :: M
-INTEGER, INTENT(IN) :: IF_
-REAL(EB), INTENT(IN) :: X(3)
-INTEGER :: V,NP
-REAL(EB) :: N(3),VA(3),VB(3),E(3),Y(3),H,C,CMIN,CMAX
-ASSOCIATE (CF=>M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_)),JCF=>M%FV%FACE%SRC_JCF(IF_))
-N = M%FV%FACE%NVEC(:,IF_); NP = CF%CFELEM(1,JCF)
-VA = CF%XYZVERT(:,CF%CFELEM(NP+1,JCF))
+INTEGER, INTENT(IN) :: IF_,A,N(3)
+REAL(EB), ALLOCATABLE, INTENT(OUT) :: XQ(:,:),WQ(:)
+REAL(EB), PARAMETER :: PART_EPS=1.E-12_EB   ! Relative area below which a part comes from round-off alone
+INTEGER :: I,J,K,L,NP,NR,B,C,NL(3)
+INTEGER, ALLOCATABLE :: PP(:),PP2(:)
+REAL(EB) :: NU(3),LO(3),HI(3),XM(3),D(3),S2,SF,PC(3)
+REAL(EB), ALLOCATABLE :: P(:,:),R(:,:),PT(:,:),PT2(:,:)
+LOGICAL, ALLOCATABLE :: CUT(:)
+
+B = MODULO(A,3)+1; C = MODULO(B,3)+1; NU = 0._EB; NU(A) = 1._EB
+NL = N; NL(A) = N(A)+1                                     ! the face's plane is the low corner's too
+LO = (/M%X(NL(IAXIS)-1),M%Y(NL(JAXIS)-1),M%Z(NL(KAXIS)-1)/); HI = (/M%X(N(IAXIS)),M%Y(N(JAXIS)),M%Z(N(KAXIS))/)
+XM = 0.5_EB*(LO+HI)
+IF (M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS) THEN
+   R = O3E_POLYGON(M,M%FV%FACE%SRC_ICF(IF_),M%FV%FACE%SRC_JCF(IF_))
+ELSE
+   R = O3E_RECTANGLE(LO,HI,A)
+ENDIF
+! The outline without repeated vertices, counter-clockwise about the axis.
+ALLOCATE(P(3,SIZE(R,2)),XQ(3,0),WQ(0)); NP = 0
+DO I=1,SIZE(R,2)
+   IF (ALL(R(:,I)==R(:,MODULO(I-2,SIZE(R,2))+1))) CYCLE
+   NP = NP+1; P(:,NP) = R(:,I)
+ENDDO
+IF (NP<3) RETURN
+CALL O3E_LOOP_AREA(NP,P,NU,SF,PC)
+IF (SF<0._EB) P(:,1:NP) = P(:,NP:1:-1)
+SF = ABS(SF)
+! Cut by the line of each side that meets a corner where the outline turns inwards.
+ALLOCATE(CUT(NP)); CUT = .FALSE.
+DO I=1,NP
+   K = MODULO(I-2,NP)+1; L = MODULO(I,NP)+1
+   IF ((P(B,I)-P(B,K))*(P(C,L)-P(C,I))-(P(C,I)-P(C,K))*(P(B,L)-P(B,I))<0._EB) THEN
+      CUT(K) = .TRUE.; CUT(I) = .TRUE.
+   ENDIF
+ENDDO
+ALLOCATE(PT(3,NP),PP(2)); PT = P(:,1:NP); PP = (/1,NP+1/)
+DO I=1,NP
+   IF (.NOT.CUT(I)) CYCLE
+   L = MODULO(I,NP)+1
+   D = 0._EB; D(B) = P(C,I)-P(C,L); D(C) = P(B,L)-P(B,I)
+   ALLOCATE(PT2(3,0),PP2(1)); PP2 = 1
+   DO K=1,SIZE(PP)-1
+      DO J=1,2                                              ! the left side, then the right
+         R = PT(:,PP(K):PP(K+1)-1); NR = SIZE(R,2); CALL O3E_CLIP(NR,R,D,P(:,I)); CALL KEEP
+         D = -D
+      ENDDO
+   ENDDO
+   CALL MOVE_ALLOC(PT2,PT); CALL MOVE_ALLOC(PP2,PP)
+ENDDO
+! Each part in each quarter of the Cartesian face gives a point.
+DO K=1,SIZE(PP)-1
+   DO L=0,3
+      R = PT(:,PP(K):PP(K+1)-1); NR = SIZE(R,2)
+      D = 0._EB; D(B) = REAL(1-2*MODULO(L,2),EB); CALL O3E_CLIP(NR,R,D,XM)
+      D = 0._EB; D(C) = REAL(1-2*(L/2),EB); CALL O3E_CLIP(NR,R,D,XM)
+      IF (NR<3) CYCLE
+      CALL O3E_LOOP_AREA(NR,R,NU,S2,PC)
+      IF (S2<=PART_EPS*SF) CYCLE
+      XQ = RESHAPE((/XQ,PC/),(/3,SIZE(WQ)+1/)); WQ = (/WQ,0.5_EB*S2/)
+   ENDDO
+ENDDO
+
+CONTAINS
+
+SUBROUTINE KEEP
+! Adds the clipped part R(:,1:NR) to the new parts if it has an area.
+IF (NR<3) RETURN
+CALL O3E_LOOP_AREA(NR,R,NU,S2,PC)
+IF (S2<=PART_EPS*SF) RETURN
+PT2 = RESHAPE((/PT2,R(:,1:NR)/),(/3,SIZE(PT2,2)+NR/)); PP2 = (/PP2,SIZE(PT2,2)+1/)
+END SUBROUTINE KEEP
+
+END SUBROUTINE O3E_FACE_POINTS
+
+
+REAL(EB) FUNCTION O3E_NEAR(V,N,X)
+! Distance from point X to the convex polygon of vertices V and unit normal N: to its plane if the foot of the
+! perpendicular falls inside the polygon, else to its nearest side.
+REAL(EB), INTENT(IN) :: V(:,:),N(3),X(3)
+INTEGER :: L
+REAL(EB) :: VA(3),VB(3),E(3),Y(3),H,C,CMIN,CMAX
+VA = V(:,SIZE(V,2))
 H = DOT_PRODUCT(N,X-VA)
 CMIN = HUGE(1._EB); CMAX = -HUGE(1._EB); O3E_NEAR = HUGE(1._EB)
-DO V=1,NP
-   VB = CF%XYZVERT(:,CF%CFELEM(V+1,JCF)); E = VB-VA; Y = X-H*N-VA
+DO L=1,SIZE(V,2)
+   VB = V(:,L); E = VB-VA; Y = X-H*N-VA
    C = N(IAXIS)*(E(JAXIS)*Y(KAXIS)-E(KAXIS)*Y(JAXIS))+N(JAXIS)*(E(KAXIS)*Y(IAXIS)-E(IAXIS)*Y(KAXIS)) &
       +N(KAXIS)*(E(IAXIS)*Y(JAXIS)-E(JAXIS)*Y(IAXIS))
    CMIN = MIN(CMIN,C); CMAX = MAX(CMAX,C)
@@ -5825,20 +5914,100 @@ DO V=1,NP
    VA = VB
 ENDDO
 IF (CMIN>=0._EB .OR. CMAX<=0._EB) O3E_NEAR = ABS(H)
-END ASSOCIATE
 END FUNCTION O3E_NEAR
 
 
-PURE FUNCTION CC_WALL_RDW(NV,RL) RESULT(RD)
-! Inverse wall distance of each CFACE of a set, seen from one point: the largest inverse distance from the point to a
-! CFACE of the set, weighted by the cosine of the angle between the two normals (0 if they face apart).
-REAL(EB), INTENT(IN) :: NV(:,:),RL(:)
-REAL(EB) :: RD(SIZE(RL))
-INTEGER :: J
-DO J=1,SIZE(RL)
-   RD(J) = MAXVAL(MAX(MATMUL(NV(:,J),NV),0._EB)*RL)
+PURE FUNCTION CC_WALL_RDW(NV,DQ,WQ) RESULT(RD)
+! Inverse wall distance of each CFACE j of a set (normals NV): one over the mean, with the weights WQ of the points, of
+! the distance from the point to the nearest CFACE of the set that faces as j does, over the cosine between the two
+! normals. DQ(l,q) is the distance from point q to the polygon of CFACE l.
+REAL(EB), INTENT(IN) :: NV(:,:),DQ(:,:),WQ(:)
+REAL(EB) :: RD(SIZE(NV,2)),C(SIZE(NV,2)),D,S
+INTEGER :: J,L,Q
+DO J=1,SIZE(NV,2)
+   C = MATMUL(NV(:,J),NV)
+   S = 0._EB
+   DO Q=1,SIZE(WQ)
+      D = HUGE(1._EB)
+      DO L=1,SIZE(C)
+         IF (C(L)>0._EB) D = MIN(D,DQ(L,Q)/C(L))
+      ENDDO
+      S = S+WQ(Q)*D
+   ENDDO
+   RD(J) = SUM(WQ)/S
 ENDDO
 END FUNCTION CC_WALL_RDW
+
+
+FUNCTION O3E_POLYGON(M,ICF,JCF) RESULT(V)
+! Vertices of polygon JCF of cut face ICF of mesh M, in their order.
+TYPE(MESH_TYPE), INTENT(IN) :: M
+INTEGER, INTENT(IN) :: ICF,JCF
+REAL(EB), ALLOCATABLE :: V(:,:)
+ASSOCIATE (CF=>M%CUT_FACE(ICF))
+V = CF%XYZVERT(:,CF%CFELEM(2:CF%CFELEM(1,JCF)+1,JCF))
+END ASSOCIATE
+END FUNCTION O3E_POLYGON
+
+
+PURE FUNCTION O3E_RECTANGLE(LO,HI,A) RESULT(R)
+! Corners of the rectangle from LO to HI in the plane of axis A through LO, counter-clockwise about the axis.
+REAL(EB), INTENT(IN) :: LO(3),HI(3)
+INTEGER, INTENT(IN) :: A
+REAL(EB) :: R(3,4)
+INTEGER :: B,C
+B = MODULO(A,3)+1; C = MODULO(B,3)+1
+R(:,1) = LO; R(:,2) = LO; R(:,3) = HI; R(:,4) = LO
+R(B,2) = HI(B); R(A,3) = LO(A); R(C,4) = HI(C)
+END FUNCTION O3E_RECTANGLE
+
+
+PURE SUBROUTINE O3E_CLIP(N,R,D,X0)
+! Clips the loop R(:,1:N) to the half-space D.(x-X0)>=0: keeps its vertices there and adds the crossing between two
+! neighbours strictly on opposite sides.
+INTEGER, INTENT(INOUT) :: N
+REAL(EB), ALLOCATABLE, INTENT(INOUT) :: R(:,:)
+REAL(EB), INTENT(IN) :: D(3),X0(3)
+INTEGER :: I,J,K
+REAL(EB) :: S(N),T(3,2*N)
+DO I=1,N
+   S(I) = DOT_PRODUCT(D,R(:,I)-X0)
+ENDDO
+K = 0
+DO I=1,N
+   J = MODULO(I,N)+1
+   IF (S(I)>=0._EB) THEN
+      K = K+1; T(:,K) = R(:,I)
+   ENDIF
+   IF ((S(I)>0._EB .AND. S(J)<0._EB) .OR. (S(I)<0._EB .AND. S(J)>0._EB)) THEN
+      K = K+1; T(:,K) = R(:,I)+S(I)/(S(I)-S(J))*(R(:,J)-R(:,I))
+   ENDIF
+ENDDO
+IF (K>SIZE(R,2)) THEN
+   DEALLOCATE(R); ALLOCATE(R(3,K))
+ENDIF
+N = K; R(:,1:K) = T(:,1:K)
+END SUBROUTINE O3E_CLIP
+
+
+PURE SUBROUTINE O3E_LOOP_AREA(N,R,NU,S2,PC)
+! Twice the area of the planar loop R(:,1:N), signed about the unit normal NU, and its centroid (sums over the triangles
+! from its first vertex). A loop of no area returns its first vertex.
+INTEGER, INTENT(IN) :: N
+REAL(EB), INTENT(IN) :: R(:,:),NU(3)
+REAL(EB), INTENT(OUT) :: S2,PC(3)
+INTEGER :: I
+REAL(EB) :: U(3),V(3),C
+S2 = 0._EB; PC = 0._EB
+DO I=2,N-1
+   U = R(:,I)-R(:,1); V = R(:,I+1)-R(:,1)
+   C = NU(IAXIS)*(U(JAXIS)*V(KAXIS)-U(KAXIS)*V(JAXIS))+NU(JAXIS)*(U(KAXIS)*V(IAXIS)-U(IAXIS)*V(KAXIS)) &
+      +NU(KAXIS)*(U(IAXIS)*V(JAXIS)-U(JAXIS)*V(IAXIS))
+   S2 = S2+C; PC = PC+(U+V)*C
+ENDDO
+IF (S2/=0._EB) PC = PC/(3._EB*S2)
+PC = PC+R(:,1)
+END SUBROUTINE O3E_LOOP_AREA
 
 
 LOGICAL FUNCTION O3E_SLIP(M,ICF)
