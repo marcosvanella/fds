@@ -1571,8 +1571,8 @@ TYPE CC_O3E_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: OM      !< Vorticity at the edges (1/s)
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: ST      !< Shear stress at the gas edges
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: TW      !< Weights of the face velocities carried in an edge's rotational term
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: PW      !< Weights of the edge rotational terms a face takes
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: PS      !< Which edge rotational terms a face takes
+   REAL(EB), ALLOCATABLE, DIMENSION(:)   :: PW      !< Weights of the edge rotational terms in the faces' lists
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PS      !< The edge rotational terms in the faces' lists
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: Q       !< Rotational terms at the edges
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: F       !< Momentum force on each face of the cut-cell region (m/s2)
    INTEGER :: NC=0                                  !< Number of control volumes on the two sides of the faces
@@ -1629,6 +1629,7 @@ TYPE CC_O3E_TYPE
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: WRW     !< Weights in the wall-velocity lists
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WCN     !< Area vectors of the moving CFACEs (m2)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: SW      !< Sums of area times wall velocity in each cut cell, per stage
+   INTEGER,  ALLOCATABLE, DIMENSION(:)   :: PPTR    !< Start of each face's list of edge rotational terms
 END TYPE CC_O3E_TYPE
 
 !> \brief Mesh-owned finite-volume container for the unstructured active region.

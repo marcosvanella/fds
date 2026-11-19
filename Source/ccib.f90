@@ -5128,7 +5128,7 @@ END SUBROUTINE CC_O3E_SETUP
 SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK,EW)
 ! Called by CC_O3E_SETUP: picks the faces of the cut-cell region of mesh NM (BAND): gas faces that are cut, next to a
 ! marked cell, or at a cell edge where a surrounding face is one of these or is missing. Then lists each cell edge of
-! these faces once, with its four surrounding faces, edges with gas faces all around first.
+! these faces once, row by row with its four surrounding faces, edges with gas faces all around first.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: NP(0:,0:,0:)
 LOGICAL, ALLOCATABLE, INTENT(OUT) :: BAND(:)
@@ -5136,37 +5136,37 @@ INTEGER, ALLOCATABLE, INTENT(OUT) :: EK(:,:)
 REAL(EB), ALLOCATABLE, INTENT(OUT) :: EW(:,:)
 TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
-INTEGER :: IF_,Q,QQ,NE,AX,N(3),P4(4),K4(4)
-INTEGER, ALLOCATABLE :: EP(:,:),ORD(:)
-LOGICAL, ALLOCATABLE :: RG(:,:)
-REAL(EB) :: W11(11)
+INTEGER :: IF_,Q,R,NE,K4(4)
+INTEGER, ALLOCATABLE :: P4(:,:),EP(:,:),ORD(:),L(:)
+REAL(EB), ALLOCATABLE :: W4(:,:)
 
 F => MESHES(NM)%FV%FACE; O => MESHES(NM)%FV%O3
-ALLOCATE(BAND(F%N),RG(4,F%N)); BAND = .FALSE.; RG = .TRUE.
+ALLOCATE(BAND(F%N)); BAND = .FALSE.; NE = 0
 DO IF_=1,F%N_INT
    IF (ALL(F%KIND(IF_)/=(/CC_FACE_KIND_GAS,CC_FACE_KIND_COUPLING,CC_FACE_KIND_REMOTE/))) CYCLE
    IF (F%KIND(IF_)==CC_FACE_KIND_REMOTE .AND. F%NBR_CV_NM(IF_)<NM) CYCLE
    BAND(IF_) = .NOT.PLAIN(IF_,F%X1AXIS(IF_),F%IJK_FACE(:,IF_))
    DO Q=1,4
-      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W11)
-      IF (ALL(P4==0)) CYCLE
-      DO QQ=1,4
-         CALL O3E_ARM(K4,QQ,AX,N)
-         RG(Q,IF_) = RG(Q,IF_) .AND. P4(QQ)/=0 .AND. PLAIN(P4(QQ),AX,N)
+      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W4)
+      NE = NE+SIZE(P4,2)
+      DO R=1,SIZE(P4,2)
+         BAND(IF_) = BAND(IF_) .OR. .NOT.REGULAR(P4(:,R),K4)
       ENDDO
-      BAND(IF_) = BAND(IF_) .OR. .NOT.RG(Q,IF_)
    ENDDO
 ENDDO
 O%NB = COUNT(BAND)
-ALLOCATE(EK(5,4*O%NB),EP(4,4*O%NB),EW(11,4*O%NB))
+ALLOCATE(EK(5,NE),EP(4,NE),EW(15,NE))
 NE = 0
 DO IF_=1,F%N_INT
    IF (.NOT.BAND(IF_)) CYCLE
    DO Q=1,4
-      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W11)
-      IF (ALL(P4==0)) CYCLE
-      IF (ANY(P4(1:Q-1)>0 .AND. BAND(MAX(P4(1:Q-1),1)))) CYCLE   ! listed once, by its first face in the region
-      NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,RG(Q,IF_))/); EP(:,NE) = P4; EW(:,NE) = W11
+      CALL O3E_EDGE(MESHES(NM),IF_,Q,P4,K4,W4)
+      ! Listed once, by its first face in the region: in an earlier position, or in this one in an earlier row.
+      L = [PACK(P4(1:Q-1,:),.TRUE.),P4(Q,1:FINDLOC(P4(Q,:),IF_,DIM=1)-1)]
+      IF (SIZE(P4,2)==0 .OR. ANY(L>0 .AND. BAND(MAX(L,1)))) CYCLE
+      DO R=1,SIZE(P4,2)
+         NE = NE+1; EK(:,NE) = (/K4,MERGE(1,0,REGULAR(P4(:,R),K4))/); EP(:,NE) = P4(:,R); EW(:,NE) = W4(:,R)
+      ENDDO
    ENDDO
 ENDDO
 O%NE = NE; O%NG = COUNT(ALL(EP(:,1:NE)/=0,DIM=1))
@@ -5190,6 +5190,17 @@ ENDIF
 NH = NL; NH(AX) = NL(AX)+1
 PLAIN = .NOT.(NP(NL(1),NL(2),NL(3)) .OR. NP(NH(1),NH(2),NH(3)))
 END FUNCTION PLAIN
+
+LOGICAL FUNCTION REGULAR(P,KE)
+! True if the four faces P around the edge KE are all there and plain.
+INTEGER, INTENT(IN) :: P(4),KE(4)
+INTEGER :: QQ,AX,N(3)
+REGULAR = .TRUE.
+DO QQ=1,4
+   CALL O3E_ARM(KE,QQ,AX,N)
+   REGULAR = REGULAR .AND. P(QQ)/=0 .AND. PLAIN(P(QQ),AX,N)
+ENDDO
+END FUNCTION REGULAR
 
 END SUBROUTINE O3E_BUILD_EDGES
 
@@ -5424,12 +5435,14 @@ INTEGER, INTENT(IN) :: NM,EK(:,:)
 REAL(EB), INTENT(IN) :: EW(:,:)
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_O3E_TYPE), POINTER :: O
-INTEGER :: E,Q,AX,B,C,N(3),NL(3),NH(3)
+INTEGER :: E,Q,AX,B,C,P,N(3),NL(3),NH(3)
+INTEGER, ALLOCATABLE :: NX(:)
 REAL(EB) :: A,AW,XF,DL,DH,D(2),XL(4),XH(4),SH(2,4),V(2,4),MF(4),S(4),AL(4),XC(3,4),X0(4),WL,WU,WZ
+REAL(EB), ALLOCATABLE :: DW(:,:)
 
 M => MESHES(NM); O => M%FV%O3
-ALLOCATE(O%TW(O%NE,4),O%PS(O%NB,4),O%PW(O%NB,4),O%Q(0:2*O%NE),O%F(O%NB),O%ECL(O%NE,4),O%EMW(O%NE,4))
-O%PS = 0; O%PW = 0._EB; O%Q = 0._EB
+ALLOCATE(O%TW(O%NE,4),DW(O%NE,4),O%PPTR(O%NB+1),O%Q(2*O%NE),O%F(O%NB),O%ECL(O%NE,4),O%EMW(O%NE,4))
+O%PPTR = 0; O%Q = 0._EB
 DO E=1,O%NE
    DO Q=1,4
       CALL O3E_ARM(EK(:,E),Q,AX,N)
@@ -5456,13 +5469,30 @@ DO E=1,O%NE
    WL = (XC(B,2)-X0(1))/(XC(B,2)-XC(B,1)); WU = (XC(B,4)-X0(1))/(XC(B,4)-XC(B,3))
    WZ = (WU*XC(C,3)+(1._EB-WU)*XC(C,4)-X0(3))/(WU*XC(C,3)+(1._EB-WU)*XC(C,4)-WL*XC(C,1)-(1._EB-WL)*XC(C,2))
    O%EMW(E,:) = MERGE(0.25_EB,(/WL*WZ,(1._EB-WL)*WZ,WU*(1._EB-WZ),(1._EB-WU)*(1._EB-WZ)/),EK(5,E)==1)
-   ! The corner masses of the four cells give the transport and distribution weights.
-   S = (/SH(1,1)*SH(1,3)/V(1,1),SH(2,1)*SH(1,4)/V(2,1),SH(1,2)*SH(2,3)/V(1,2),SH(2,2)*SH(2,4)/V(2,2)/)
+   ! The corner masses of the four cells (a pair in several rows of the edge has its share) give the transport and
+   ! distribution weights.
+   S = (/SH(1,1)*SH(1,3)/V(1,1),SH(2,1)*SH(1,4)/V(2,1),SH(1,2)*SH(2,3)/V(1,2),SH(2,2)*SH(2,4)/V(2,2)/)*EW(12:15,E)
    AL = (/S(1)+S(2),S(3)+S(4),S(1)+S(3),S(2)+S(4)/)
    O%TW(E,:) = MERGE(0.5_EB,AL/SUM(S),EK(5,E)==1)
-   DO Q=1,4
-      IF (O%EP(E,Q)<1 .OR. O%EP(E,Q)>O%NB) CYCLE
-      O%PS(O%EP(E,Q),Q) = E+O%NE*((Q-1)/2); O%PW(O%EP(E,Q),Q) = MERGE(0.5_EB,AL(Q)/MF(Q),EK(5,E)==1)
+   DW(E,:) = MERGE(0.5_EB,AL/MF,EK(5,E)==1)
+ENDDO
+! Per face of the cut-cell region, the rotational terms of its edges with their weights, in the order of its positions.
+DO Q=1,4
+   DO E=1,O%NE
+      P = O%EP(E,Q)
+      IF (P>=1 .AND. P<=O%NB) O%PPTR(P+1) = O%PPTR(P+1)+1
+   ENDDO
+ENDDO
+O%PPTR(1) = 1
+DO P=1,O%NB
+   O%PPTR(P+1) = O%PPTR(P+1)+O%PPTR(P)
+ENDDO
+ALLOCATE(O%PS(O%PPTR(O%NB+1)-1),O%PW(O%PPTR(O%NB+1)-1),NX(O%NB)); NX = O%PPTR(1:O%NB)
+DO Q=1,4
+   DO E=1,O%NE
+      P = O%EP(E,Q)
+      IF (P<1 .OR. P>O%NB) CYCLE
+      O%PS(NX(P)) = E+O%NE*((Q-1)/2); O%PW(NX(P)) = DW(E,Q); NX(P) = NX(P)+1
    ENDDO
 ENDDO
 
@@ -5521,7 +5551,9 @@ DO I=0,7
    RW(OFF(MOD(I,4)+1)+O%IX(O%KP(I)+1:O%KP(I+1))) = (/(J,J=O%KP(I)+1,O%KP(I+1))/)
 ENDDO
 DO Q=1,4
-   SE(O%EP(1:O%NG,Q),Q) = (/(E,E=1,O%NG)/)
+   DO E=O%NG,1,-1                                       ! a face in several rows of a position takes the first
+      SE(O%EP(E,Q),Q) = E
+   ENDDO
 ENDDO
 
 ! The control volumes on the two sides of each face: an unmarked cell is its own, else the control volume of the
@@ -6138,76 +6170,108 @@ END FUNCTION O3E_SLIP
 
 
 SUBROUTINE O3E_EDGE(M,IF_,Q,P4,EK,EW)
-! The cell edge at which face IF_ is the surrounding face in position Q: the edge's direction and cell (EK), its four
-! surrounding faces (P4), and per face a weight and its gap to the edge, then the extent of the edge's gas segment and
-! its mid-point (EW). P4 = 0: no such edge, or IF_ is a cut face that is not the one in position Q.
+! The cell edge at which face IF_ is the surrounding face in position Q: its direction and cell (EK), and its rows, one
+! per stretch along the edge that a face covers in the position with most (one row if no position has two). Per row its
+! four surrounding faces (P4), and in EW per face a weight and its gap to the edge, the row's segment and mid-point, and
+! the factors on its four corner masses: a pair of faces in several rows shares its mass among them by their lengths.
+! No rows: no such edge, or IF_ is a cut face in position Q of none of them.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_,Q
-INTEGER, INTENT(OUT) :: P4(4),EK(4)
-REAL(EB), INTENT(OUT) :: EW(11)
-INTEGER :: AX,T,B,C,QQ,K(4)
-REAL(EB) :: S(2,4)
-P4 = 0; EW = 0._EB
+INTEGER, ALLOCATABLE, INTENT(OUT) :: P4(:,:)
+INTEGER, INTENT(OUT) :: EK(4)
+REAL(EB), ALLOCATABLE, INTENT(OUT) :: EW(:,:)
+TYPE O3E_STRETCH_TYPE
+   INTEGER, ALLOCATABLE :: P(:)
+   REAL(EB), ALLOCATABLE :: S(:,:)
+END TYPE O3E_STRETCH_TYPE
+TYPE(O3E_STRETCH_TYPE) :: SL(4)
+INTEGER :: AX,T,B,C,QQ,QB,QC,R,J,NR,K(4),N(4)
+REAL(EB) :: WG(2,4),S(2,4)
+LOGICAL, ALLOCATABLE :: PAIR(:)
 AX = M%FV%FACE%X1AXIS(IF_)
 T = MERGE(MODULO(AX+1,3),MODULO(AX,3),Q<3)+1; B = MODULO(T,3)+1; C = 6-T-B
 EK(1) = T; EK(2:4) = M%FV%FACE%IJK_FACE(:,IF_)
 IF (M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS) EK(2:4) = M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_))%IJK(IAXIS:KAXIS)
 IF (Q==2) EK(1+C) = EK(1+C)-1
 IF (Q==4) EK(1+B) = EK(1+B)-1
-CALL O3E_SLOT(M,EK,Q,P4(Q),K(Q),EW(Q),EW(4+Q),S(:,Q))
-IF (P4(Q)/=IF_ .AND. M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS) THEN
-   P4 = 0; RETURN
-ENDIF
 DO QQ=1,4
-   IF (QQ/=Q) CALL O3E_SLOT(M,EK,QQ,P4(QQ),K(QQ),EW(QQ),EW(4+QQ),S(:,QQ))
+   CALL O3E_SLOT(M,EK,QQ,SL(QQ)%P,K(QQ),WG(1,QQ),WG(2,QQ),SL(QQ)%S)
 ENDDO
 DO QQ=1,4
    IF (K(QQ)/=2 .OR. K(QQ-1+2*MODULO(QQ,2))/=1) CYCLE
-   P4(QQ) = 0; K(QQ) = 0; EW(QQ) = 0._EB; EW(4+QQ) = 0._EB
+   K(QQ) = 0; WG(:,QQ) = 0._EB
 ENDDO
-IF (ALL(P4(1:2)==0) .OR. ALL(P4(3:4)==0) .OR. P4(Q)==0) THEN
-   P4 = 0; RETURN
+N = (/(MERGE(SIZE(SL(QQ)%P),0,K(QQ)>0),QQ=1,4)/)
+IF (ALL(N(1:2)==0) .OR. ALL(N(3:4)==0) .OR. N(Q)==0) N = 0
+QB = MAXLOC(N,DIM=1); NR = N(QB)
+ALLOCATE(P4(4,NR),EW(15,NR)); P4 = 0; S = 0._EB
+DO R=1,NR
+   DO QQ=1,4                                          ! each position gives the row its stretch most in common with it
+      IF (K(QQ)==0) CYCLE
+      J = MAXLOC(MIN(SL(QQ)%S(2,:),SL(QB)%S(2,R))-MAX(SL(QQ)%S(1,:),SL(QB)%S(1,R)),DIM=1)
+      P4(QQ,R) = SL(QQ)%P(J); S(:,QQ) = SL(QQ)%S(:,J)
+   ENDDO
+   EW(1:8,R) = (/WG(1,:),WG(2,:)/)
+   IF (ANY(K==1)) THEN
+      EW(10:11,R) = (/MAXVAL(S(1,:),MASK=K==1),MINVAL(S(2,:),MASK=K==1)/)
+      IF (EW(11,R)<=EW(10,R)) EW(10:11,R) = (/MINVAL(S(1,:),MASK=K==1),MAXVAL(S(2,:),MASK=K==1)/)
+   ELSE
+      EW(10:11,R) = (/MINVAL(S(1,:),MASK=K==2),MAXVAL(S(2,:),MASK=K==2)/)
+   ENDIF
+   EW(9,R) = 0.5_EB*(EW(10,R)+EW(11,R))
+ENDDO
+EW(12:15,:) = 1._EB
+DO R=1,NR
+   DO J=1,4                                           ! the corners of the pairs of positions (1,3), (1,4), (2,3), (2,4)
+      QB = (J+1)/2; QC = 4-MOD(J,2)
+      IF (P4(QB,R)==0 .OR. P4(QC,R)==0) CYCLE
+      PAIR = P4(QB,:)==P4(QB,R) .AND. P4(QC,:)==P4(QC,R)
+      IF (COUNT(PAIR)>1) EW(11+J,R) = (EW(11,R)-EW(10,R))/SUM(EW(11,:)-EW(10,:),MASK=PAIR)
+   ENDDO
+ENDDO
+IF (M%FV%FACE%FTYPE(IF_)==CC_FTYPE_CFGAS .AND. ALL(P4(Q,:)/=IF_)) THEN   ! IF_ is in position Q of none of the rows
+   P4 = P4(:,1:0); EW = EW(:,1:0)
 ENDIF
-IF (ANY(K==1)) THEN
-   EW(10:11) = (/MAXVAL(S(1,:),MASK=K==1),MINVAL(S(2,:),MASK=K==1)/)
-   IF (EW(11)<=EW(10)) EW(10:11) = (/MINVAL(S(1,:),MASK=K==1),MAXVAL(S(2,:),MASK=K==1)/)
-ELSE
-   EW(10:11) = (/MINVAL(S(1,:),MASK=K==2),MAXVAL(S(2,:),MASK=K==2)/)
-ENDIF
-EW(9) = 0.5_EB*(EW(10)+EW(11))
 END SUBROUTINE O3E_EDGE
 
 
 SUBROUTINE O3E_SLOT(M,EK,Q,P,K,W,G,S)
-! The face P in position Q around the edge EK. K=1: a face that reaches the edge. K=2: the part of a cut face nearest
-! to the edge, less than half a cell away, with a weight W that falls with its gap G. K=0: none. S is its extent along
-! the edge.
+! The faces P in position Q around the edge EK. K=1: the faces that reach the edge, one entry per stretch of the edge
+! that one covers, S its extent, in order along the edge. K=2: the part of a cut face nearest to the edge, less than
+! half a cell away, with a weight W that falls with its gap G, and its extent S. K=0: none.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: EK(4),Q
-INTEGER, INTENT(OUT) :: P,K
-REAL(EB), INTENT(OUT) :: W,G,S(2)
-INTEGER :: AX,T,R,JCF,NV,N(3)
+INTEGER, ALLOCATABLE, INTENT(OUT) :: P(:)
+INTEGER, INTENT(OUT) :: K
+REAL(EB), INTENT(OUT) :: W,G
+REAL(EB), ALLOCATABLE, INTENT(OUT) :: S(:,:)
+INTEGER :: AX,T,R,JCF,NV,J,N(3)
+INTEGER, ALLOCATABLE :: ORD(:)
 REAL(EB) :: XL,H,GM
-REAL(EB), ALLOCATABLE :: DV(:),XT(:)
+REAL(EB), ALLOCATABLE :: DV(:),XT(:),SJ(:,:)
 CALL O3E_ARM(EK,Q,AX,N)
 T = EK(1); R = 6-T-AX
-P = 0; K = 0; W = 0._EB; G = 0._EB; S = 0._EB
+K = 0; W = 0._EB; G = 0._EB
 SELECT CASE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_FGSC,AX))
 CASE(CC_GASPHASE)
-   P = O3E_ROW(M,AX,N); K = 1; W = 1._EB
+   ALLOCATE(P(1),S(2,1)); P(1) = O3E_ROW(M,AX,N); K = 1; W = 1._EB
    SELECT CASE(T)
-      CASE(IAXIS); S = M%X(N(IAXIS)-1:N(IAXIS))
-      CASE(JAXIS); S = M%Y(N(JAXIS)-1:N(JAXIS))
-      CASE(KAXIS); S = M%Z(N(KAXIS)-1:N(KAXIS))
+      CASE(IAXIS); S(:,1) = M%X(N(IAXIS)-1:N(IAXIS))
+      CASE(JAXIS); S(:,1) = M%Y(N(JAXIS)-1:N(JAXIS))
+      CASE(KAXIS); S(:,1) = M%Z(N(KAXIS)-1:N(KAXIS))
    END SELECT
 CASE(CC_CUTCFE)
+   ALLOCATE(P(0),S(2,0))
    ASSOCIATE (CF=>M%CUT_FACE(M%FCVAR(N(IAXIS),N(JAXIS),N(KAXIS),CC_IDCF,AX)))
    DO JCF=1,CF%NFACE
-      CALL O3E_SEG(M,CF%FC(JCF),Q,S)
-      IF (S(1)>S(2)) CYCLE
-      P = CF%FC(JCF); K = 1; W = 1._EB
-      RETURN
+      CALL O3E_SEG(M,CF%FC(JCF),Q,SJ)
+      P = [P,(CF%FC(JCF),J=1,SIZE(SJ,2))]; S = RESHAPE([S,SJ],(/2,SIZE(P)/))
    ENDDO
+   IF (SIZE(P)>0) THEN
+      CALL KEY_SORT(S,2,SIZE(P),ORD)
+      P = P(ORD); S = S(:,ORD); K = 1; W = 1._EB
+      RETURN
+   ENDIF
    SELECT CASE(R)
       CASE(IAXIS); XL = M%X(EK(1+IAXIS)); H = M%DX(N(IAXIS))
       CASE(JAXIS); XL = M%Y(EK(1+JAXIS)); H = M%DY(N(JAXIS))
@@ -6220,10 +6284,12 @@ CASE(CC_CUTCFE)
       IF (MAX(MINVAL(DV),0._EB)>=GM) CYCLE
       XT = CF%XYZVERT(T,CF%CFELEM(2:NV+1,JCF))
       GM = MAX(MINVAL(DV),0._EB)
-      P = CF%FC(JCF); K = 2; G = GM; W = 1._EB-2._EB*G/H
-      S = (/MINVAL(XT,MASK=DV==MINVAL(DV)),MAXVAL(XT,MASK=DV==MINVAL(DV))/)
+      P = (/CF%FC(JCF)/); K = 2; G = GM; W = 1._EB-2._EB*G/H
+      S = RESHAPE((/MINVAL(XT,MASK=DV==MINVAL(DV)),MAXVAL(XT,MASK=DV==MINVAL(DV))/),(/2,1/))
    ENDDO
    END ASSOCIATE
+CASE DEFAULT
+   ALLOCATE(P(0),S(2,0))
 END SELECT
 END SUBROUTINE O3E_SLOT
 
@@ -6276,15 +6342,17 @@ END FUNCTION O3E_ROW
 
 
 SUBROUTINE O3E_SEG(M,IF_,Q,S)
-! Extent S, along the cell edge at which cut face IF_ is in position Q, of the sides of its polygon that lie on that
-! edge, from the cut-face edge lists; S(1)>S(2) if none does.
+! Stretches S, along the cell edge at which cut face IF_ is in position Q, covered by the sides of its polygon that lie
+! on that edge (from the cut-face edge lists); sides that touch make one stretch. None if no side lies on the edge.
 TYPE(MESH_TYPE), INTENT(IN) :: M
 INTEGER, INTENT(IN) :: IF_,Q
-REAL(EB), INTENT(OUT) :: S(2)
+REAL(EB), ALLOCATABLE, INTENT(OUT) :: S(:,:)
 INTEGER :: AX,T,CP,LOHI,NP,IV,IE,V1,V2
+REAL(EB) :: X(2)
+LOGICAL, ALLOCATABLE :: L(:)
 AX = M%FV%FACE%X1AXIS(IF_)
 T = MERGE(MODULO(AX+1,3),MODULO(AX,3),Q<3)+1; CP = 6-AX-T; LOHI = LOW_IND+MOD(Q,2)
-S = (/HUGE(1._EB),-HUGE(1._EB)/)
+ALLOCATE(S(2,0))
 ASSOCIATE (CF=>M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_)),JCF=>M%FV%FACE%SRC_JCF(IF_))
 NP = CF%CEDGES(1,JCF)
 DO IV=1,NP
@@ -6300,7 +6368,10 @@ DO IV=1,NP
       CYCLE
    END SELECT
    V1 = CF%CFELEM(IV+1,JCF); V2 = CF%CFELEM(MOD(IV,NP)+2,JCF)
-   S = (/MIN(S(1),CF%XYZVERT(T,V1),CF%XYZVERT(T,V2)),MAX(S(2),CF%XYZVERT(T,V1),CF%XYZVERT(T,V2))/)
+   X = (/MIN(CF%XYZVERT(T,V1),CF%XYZVERT(T,V2)),MAX(CF%XYZVERT(T,V1),CF%XYZVERT(T,V2))/)
+   L = S(1,:)<=X(2) .AND. S(2,:)>=X(1)                ! the stretches this side touches join it
+   X = (/MIN(X(1),MINVAL(S(1,:),MASK=L)),MAX(X(2),MAXVAL(S(2,:),MASK=L))/)
+   S = RESHAPE([PACK(S,SPREAD(.NOT.L,1,2)),X],(/2,COUNT(.NOT.L)+1/))
 ENDDO
 END ASSOCIATE
 END SUBROUTINE O3E_SEG
@@ -15964,15 +16035,15 @@ INTEGER, INTENT(IN) :: NM
 TYPE(MESH_TYPE), POINTER :: M
 REAL(EB), INTENT(IN) :: DT
 INTEGER :: I,J,K,L,A,NE,NG,NC
-INTEGER, POINTER, CONTIGUOUS :: IX(:),EP(:,:),ENB(:,:),PS(:,:),ECL(:,:),MPTR(:),MIX(:),GPTR(:),GIX(:),NIX(:,:), &
+INTEGER, POINTER, CONTIGUOUS :: IX(:),EP(:,:),ENB(:,:),PS(:),PPTR(:),ECL(:,:),MPTR(:),MIX(:),GPTR(:),GIX(:),NIX(:,:), &
                                 VPTR(:),VED(:),LH(:,:),WPB(:),WPA(:),WPTR(:),WCF(:),WS(:),STF(:),WRP(:),WRA(:),WRJ(:)
-REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),RDP(:,:),OM(:),ST(:),TW(:,:),Q(:),PW(:,:),F(:), &
+REAL(EB), POINTER, CONTIGUOUS :: UP(:),VC(:),U1(:),V1(:),W1(:),WA(:,:),RD(:,:),RDP(:,:),OM(:),ST(:),TW(:,:),Q(:),PW(:),F(:), &
                                  EMW(:,:),MU1(:),DP1(:),RH1(:),MW(:),GW(:),TN(:),NW(:,:),VW(:),MUC(:),WK(:,:), &
                                  WKU(:,:),KIN(:),BIN(:),KW(:),WKE(:),WQE(:),UWC(:,:),NJ(:,:),UH(:),UB(:),DEN(:),WIN(:),WRW(:)
 INTEGER, POINTER, CONTIGUOUS :: WCP(:),WCJ(:)
 REAL(EB), POINTER, CONTIGUOUS :: WCA(:),WCN(:,:),SW(:,:)
 REAL(EB), PARAMETER :: GR=1._EB-1._EB/SQRT(2._EB) ! gamma of the two-stage Rosenbrock step
-REAL(EB) :: DCB,DBC,MC,DC,G(3),H(3),U(3),S,OME,RS,WQ
+REAL(EB) :: DCB,DBC,MC,DC,G(3),H(3),U(3),S,OME,RS,WQ,QF
 M => MESHES(NM)
 IF (M%FV%O3%NB==0) RETURN
 CALL CC_O3E_WALL_VELOCITY(NM)
@@ -16056,7 +16127,7 @@ DO I=1,NC
    MUC(I) = MC; MUC(NC+I) = MC; MUC(2*NC+I) = MC
 ENDDO
 PS => M%FV%O3%PS; PW => M%FV%O3%PW; F => M%FV%O3%F; NIX => M%FV%O3%NIX; NW => M%FV%O3%NW; VPTR => M%FV%O3%VPTR
-VED => M%FV%O3%VED; VW => M%FV%O3%VW; LH => M%FV%O3%LH
+VED => M%FV%O3%VED; VW => M%FV%O3%VW; LH => M%FV%O3%LH; PPTR => M%FV%O3%PPTR
 WK => M%FV%O3%WK; WKU => M%FV%O3%WKU; KIN => M%FV%O3%KIN; BIN => M%FV%O3%BIN; KW => M%FV%O3%KW
 WPB => M%FV%O3%WPB; WPA => M%FV%O3%WPA; WPTR => M%FV%O3%WPTR; WCF => M%FV%O3%WCF; WS => M%FV%O3%WS
 WKE => M%FV%O3%WKE; WQE => M%FV%O3%WQE; NJ => M%FV%O3%NJ; WIN => M%FV%O3%WIN
@@ -16078,10 +16149,13 @@ DO I=1,M%FV%O3%NB
    DO K=VPTR(I),VPTR(I+1)-1
       S = S+VW(K)*ST(VED(K))
    ENDDO
+   QF = 0._EB
+   DO K=PPTR(I),PPTR(I+1)-1
+      QF = QF+PW(K)*Q(PS(K))
+   ENDDO
    RS = RH1(LH(I,1))+RH1(LH(I,2))
    KW(I) = (MUC(NIX(I,1))*WK(I,1)+MUC(NIX(I,2))*WK(I,2))/RS+KIN(I)
-   F(I) = PW(I,1)*Q(PS(I,1))+PW(I,2)*Q(PS(I,2))+PW(I,3)*Q(PS(I,3))+PW(I,4)*Q(PS(I,4)) &
-          -(S+MUC(NIX(I,1))*WKU(I,1)+MUC(NIX(I,2))*WKU(I,2))/RS+KW(I)*UP(I)-BIN(I)
+   F(I) = QF-(S+MUC(NIX(I,1))*WKU(I,1)+MUC(NIX(I,2))*WKU(I,2))/RS+KW(I)*UP(I)-BIN(I)
 ENDDO
 ! The velocity without the pressure term; faces with a stiff wall term take the implicit step.
 UH => M%FV%O3%UH; UB => M%FV%O3%UB; STF => M%FV%O3%STF; DEN => M%FV%O3%DEN; M%FV%O3%DT = DT
