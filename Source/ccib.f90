@@ -1341,28 +1341,22 @@ END SUBROUTINE CC_SET_THERMO_ROWS
 
 
 SUBROUTINE CC_SET_WALL_ROWS
-! Called once at setup with CC_O3E: lists the CFACEs that bound the scalar control volumes of this process and sets
-! the wall distance each uses for its heat and mass transfer (B1%RDN), measured from the control volume's centroid.
-! A control volume spread over several processes is completed by its owner.
-INTEGER :: NM,IF_,ICFA,IS,L,K,N,NL,NR,NB,IPASS,POS(3)
-INTEGER, ALLOCATABLE :: SL(:),DST(:),SD(:),PTR(:),NXT(:),ORD(:)
-REAL(EB), ALLOCATABLE :: XC(:,:),NV(:,:),RL(:),RD(:),SB(:,:),RB(:,:)
+! Called once at setup with CC_O3E: lists the CFACEs that bound the scalar control volumes of this process and sets the
+! wall distance each uses for its heat and mass transfer (B1%RDN): the mean over the control volume's gas, one point per
+! octant of each of its cells, of the distance to the CFACEs of the volume that face as it does. The parts of a control
+! volume on other processes send their CFACE polygons and points to its owner, which returns the distances.
+INTEGER :: NM,IF_,ICFA,ICC,IS,L,K,N,NL,NR,NB,NQ,NVX,IPASS,POS(3)
+INTEGER, ALLOCATABLE :: SL(:),DST(:),SD(:),PTR(:),ORD(:),VP(:),VN(:),SQ(:),QPTR(:),QORD(:),KR(:)
+REAL(EB), ALLOCATABLE :: NV(:,:),PN(:,:),PV(:,:),RD(:),SB(:,:),RB(:,:),RT(:,:),XQ(:,:),WQ(:),DQ(:,:)
 LOGICAL, ALLOCATABLE :: ZL(:)
 TYPE(MESH_TYPE), POINTER :: M
 TYPE(CFACE_TYPE), POINTER :: CFA
 
-ALLOCATE(XC(IAXIS:KAXIS,MAX(1,TH_NSLOT))); XC = 0._EB
-DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
-   M => MESHES(NM)
-   DO L=1,SIZE(M%TH_OCV,2)
-      XC(:,M%TH_OCV(2,L)) = M%FV%CV%XBAR_CV(:,M%TH_OCV(1,L))
-   ENDDO
-ENDDO
-CALL SCALAR_ROWS_FROM_OWNER(XC,TH_RSLOT,TH_RDEST,TH_BSLOT)   ! the centroids, to the processes that hold part of each volume
-
-! Count the CFACEs by thermal condition (thermally thick, fixed temperature, given flux), then list them in that order.
+! Count the CFACEs by thermal condition (thermally thick, fixed temperature, given flux), then list them in that order,
+! with their polygons.
 POS = 0
 DO IPASS=1,2
+   NVX = 0
    DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
       M => MESHES(NM)
       DO IF_=1,M%FV%FACE%N_INT
@@ -1378,77 +1372,136 @@ DO IPASS=1,2
             CASE DEFAULT;                K = 3
          END SELECT
          POS(K) = POS(K)+1
-         IF (IPASS==1) CYCLE
+         N = M%CUT_FACE(M%FV%FACE%SRC_ICF(IF_))%CFELEM(1,M%FV%FACE%SRC_JCF(IF_))
+         IF (IPASS==1) THEN
+            NVX = NVX+N; CYCLE
+         ENDIF
          L = POS(K)
          TH_W(:,L) = (/NM,CFA%B1_INDEX,IS,IF_/); SL(L) = IS
          ZL(L) = SURFACE(CFA%SURF_INDEX)%SPECIES_BC_INDEX==SPECIFIED_MASS_FRACTION .AND. N_TRACKED_SPECIES>1
          TH_WA(L) = M%FV%FACE%FLUX_AREA(IF_)*M%BOUNDARY_PROP1(CFA%B1_INDEX)%AREA_ADJUST
-         NV(:,L) = M%BOUNDARY_COORD(CFA%BC_INDEX)%NVEC
-         RL(L) = O3E_NEAR(O3E_POLYGON(M,M%FV%FACE%SRC_ICF(IF_),M%FV%FACE%SRC_JCF(IF_)),M%FV%FACE%NVEC(:,IF_),XC(:,IS))
+         NV(:,L) = M%BOUNDARY_COORD(CFA%BC_INDEX)%NVEC; PN(:,L) = M%FV%FACE%NVEC(:,IF_)
+         VP(L) = NVX+1; VN(L) = N
+         PV(:,NVX+1:NVX+N) = O3E_POLYGON(M,M%FV%FACE%SRC_ICF(IF_),M%FV%FACE%SRC_JCF(IF_)); NVX = NVX+N
       ENDDO
    ENDDO
    IF (IPASS==2) EXIT
    TH_WN = (/POS(1),POS(1)+POS(2),SUM(POS)/); NL = TH_WN(3)
    POS = (/0,TH_WN(1),TH_WN(2)/)
-   ALLOCATE(TH_W(4,NL),TH_WA(NL),TH_WQ(2,TH_WN(1)),SL(NL),NV(3,NL),RL(NL),ZL(NL)); TH_WQ = 0._EB
+   ALLOCATE(TH_W(4,NL),TH_WA(NL),TH_WQ(2,TH_WN(1)),SL(NL),NV(3,NL),PN(3,NL),VP(NL),VN(NL),PV(3,NVX),ZL(NL))
+   TH_WQ = 0._EB
 ENDDO
 TH_WZ = PACK((/(L,L=1,NL)/),ZL); ALLOCATE(TH_WCZ(SIZE(TH_WZ)))
-N = COUNT(RL<=0._EB)
-IF (N>0) THEN
-   L = FINDLOC(RL<=0._EB,.TRUE.,1)
-   WRITE(LU_ERR,'(A,I0,A,3ES13.5)') 'ERROR: CC_O3E: ',N,' CFACE(s) at zero distance from their CV''s centroid, one at ', &
-                                    XC(:,SL(L))
-   STOP_STATUS = SETUP_STOP
-ENDIF
-WHERE (RL>0._EB) RL = 1._EB/RL
 
-! A control volume owned by another process: send the normals and inverse distances of its CFACEs here to the owner.
+! The points of the cells of the control volumes touched here, one per octant of each cell with gas in it.
+N = 0
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   N = N+8*(SIZE(MESHES(NM)%TH_CUT,2)+SIZE(MESHES(NM)%TH_REG,2))
+ENDDO
+ALLOCATE(XQ(3,N),WQ(N),SQ(N)); NQ = 0
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   DO ICC=1,M%N_CUTCELL_MESH
+      DO L=M%TH_CPTR(ICC),M%TH_CPTR(ICC+1)-1
+         K = NQ
+         CALL O3E_CELL_POINTS(M,M%CUT_CELL(ICC)%IJK(IAXIS:KAXIS),ICC,M%TH_CUT(1,L),NQ,XQ,WQ)
+         SQ(K+1:NQ) = M%TH_CUT(2,L)
+      ENDDO
+   ENDDO
+   DO L=1,SIZE(M%TH_REG,2)
+      K = NQ
+      CALL O3E_CELL_POINTS(M,M%TH_REG(1:3,L),0,0,NQ,XQ,WQ)
+      SQ(K+1:NQ) = M%TH_REG(4,L)
+   ENDDO
+ENDDO
+
+! A control volume owned by another process: send its CFACEs here (one record per vertex) and its points to the owner.
 ALLOCATE(DST(MAX(1,TH_NSLOT))); DST = -2; DST(TH_SSLOT) = TH_SDEST
-N = COUNT(DST(SL)>=0)
-ALLOCATE(SB(7,MAX(1,N)),SD(MAX(1,N))); N = 0
+N = 0
+DO L=1,NL
+   IF (DST(SL(L))>=0) N = N+VN(L)
+ENDDO
+ALLOCATE(SB(13,MAX(1,N)),SD(MAX(1,N))); N = 0
 DO L=1,NL
    IF (DST(SL(L))<0) CYCLE
-   N = N+1; SD(N) = DST(SL(L))
-   SB(:,N) = (/REAL(TH_SROW(SL(L)),EB),NV(:,L),RL(L),REAL(MY_RANK,EB),REAL(L,EB)/)
+   DO K=VP(L),VP(L)+VN(L)-1
+      N = N+1; SD(N) = DST(SL(L))
+      SB(:,N) = (/REAL(TH_SROW(SL(L)),EB),NV(:,L),PN(:,L),REAL(VN(L),EB),PV(:,K),REAL(MY_RANK,EB),REAL(L,EB)/)
+   ENDDO
 ENDDO
-CALL CC_GRID_SEAM_EXCHANGE(7,N,SB,SD,NR,RB)
-SL = (/SL,(TH_ROW_SLOT(NINT(RB(1,K))),K=1,NR)/); RL = (/RL,RB(5,1:NR)/)
-NV = RESHAPE((/NV,RB(2:4,1:NR)/),(/3,NL+NR/))
+CALL CC_GRID_SEAM_EXCHANGE(13,N,SB,SD,NB,RB)
+ALLOCATE(KR(NB)); NR = 0; K = 1
+DO WHILE (K<=NB)
+   NR = NR+1; KR(NR) = K; K = K+NINT(RB(8,K))
+ENDDO
+SL = (/SL,(TH_ROW_SLOT(NINT(RB(1,KR(K)))),K=1,NR)/); VP = (/VP,NVX+KR(1:NR)/); VN = (/VN,NINT(RB(8,KR(1:NR)))/)
+NV = RESHAPE((/NV,RB(2:4,KR(1:NR))/),(/3,NL+NR/)); PN = RESHAPE((/PN,RB(5:7,KR(1:NR))/),(/3,NL+NR/))
+PV = RESHAPE((/PV,RB(9:11,1:NB)/),(/3,NVX+NB/)); RT = RB(12:13,KR(1:NR))
+DEALLOCATE(SB,SD)
+N = COUNT(DST(SQ(1:NQ))>=0)
+ALLOCATE(SB(5,MAX(1,N)),SD(MAX(1,N))); N = 0
+DO K=1,NQ
+   IF (DST(SQ(K))<0) CYCLE
+   N = N+1; SD(N) = DST(SQ(K)); SB(:,N) = (/REAL(TH_SROW(SQ(K)),EB),XQ(:,K),WQ(K)/)
+ENDDO
+CALL CC_GRID_SEAM_EXCHANGE(5,N,SB,SD,NB,RB)
+SQ = (/SQ(1:NQ),(TH_ROW_SLOT(NINT(RB(1,K))),K=1,NB)/); WQ = (/WQ(1:NQ),RB(5,1:NB)/)
+XQ = RESHAPE((/XQ(:,1:NQ),RB(2:4,1:NB)/),(/3,NQ+NB/)); NQ = NQ+NB
 
-! Gather the CFACEs of each control volume, compute their wall distances, and send back those of other processes.
-N = NL+NR
-ALLOCATE(PTR(TH_NSLOT+1),ORD(N),RD(N)); PTR = 0
-DO K=1,N
-   PTR(SL(K)+1) = PTR(SL(K)+1)+1
-ENDDO
-PTR(1) = 1
+! Per control volume owned here: the distances of its CFACEs from its points, then the mean distance of each CFACE.
+CALL BY_SLOT(SL,PTR,ORD); CALL BY_SLOT(SQ,QPTR,QORD)
+ALLOCATE(RD(NL+NR)); RD = 0._EB
 DO IS=1,TH_NSLOT
-   PTR(IS+1) = PTR(IS+1)+PTR(IS)
-ENDDO
-NXT = PTR(1:TH_NSLOT)
-DO K=1,N
-   ORD(NXT(SL(K))) = K; NXT(SL(K)) = NXT(SL(K))+1
-ENDDO
-DO IS=1,TH_NSLOT
-   ASSOCIATE (O=>ORD(PTR(IS):PTR(IS+1)-1))
-      DO K=1,SIZE(O)
-         RD(O(K)) = MAXVAL(MAX(MATMUL(NV(:,O(K)),NV(:,O)),0._EB)*RL(O))
+   IF (DST(IS)>=0 .OR. PTR(IS+1)==PTR(IS)) CYCLE          ! owned by another process, or no CFACE
+   ASSOCIATE (O=>ORD(PTR(IS):PTR(IS+1)-1),P=>QORD(QPTR(IS):QPTR(IS+1)-1))
+      IF (ALLOCATED(DQ)) DEALLOCATE(DQ)
+      ALLOCATE(DQ(SIZE(O),SIZE(P)))
+      DO K=1,SIZE(P)
+         DO L=1,SIZE(O)
+            DQ(L,K) = O3E_NEAR(PV(:,VP(O(L)):VP(O(L))+VN(O(L))-1),PN(:,O(L)),XQ(:,P(K)))
+         ENDDO
       ENDDO
+      RD(O) = CC_WALL_RDW(NV(:,O),DQ,WQ(P))
    END ASSOCIATE
 ENDDO
 DO L=1,NL
    MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))%RDN = 0.5_EB*RD(L)
 ENDDO
 TH_WOWN = PACK((/(IS,IS=1,TH_NSLOT)/),DST(1:TH_NSLOT)<0 .AND. PTR(2:TH_NSLOT+1)>PTR(1:TH_NSLOT))
+
+! Return the distances of the CFACEs received.
 DEALLOCATE(SB,SD); ALLOCATE(SB(2,MAX(1,NR)),SD(MAX(1,NR)))
 DO K=1,NR
-   SB(:,K) = (/RB(7,K),RD(NL+K)/); SD(K) = NINT(RB(6,K))
+   SB(:,K) = (/RT(2,K),RD(NL+K)/); SD(K) = NINT(RT(1,K))
 ENDDO
 CALL CC_GRID_SEAM_EXCHANGE(2,NR,SB,SD,NB,RB)
 DO K=1,NB
    L = NINT(RB(1,K))
    MESHES(TH_W(1,L))%BOUNDARY_PROP1(TH_W(2,L))%RDN = 0.5_EB*RB(2,K)
 ENDDO
+
+CONTAINS
+
+SUBROUTINE BY_SLOT(S,P,O)
+! Entries S(k) grouped by slot: those of slot IS are O(P(IS):P(IS+1)-1).
+INTEGER, INTENT(IN) :: S(:)
+INTEGER, ALLOCATABLE, INTENT(OUT) :: P(:),O(:)
+INTEGER, ALLOCATABLE :: NXT(:)
+INTEGER :: J
+ALLOCATE(P(TH_NSLOT+1),O(SIZE(S)),NXT(TH_NSLOT)); P = 0
+DO J=1,SIZE(S)
+   P(S(J)+1) = P(S(J)+1)+1
+ENDDO
+P(1) = 1
+DO J=1,TH_NSLOT
+   P(J+1) = P(J+1)+P(J)
+ENDDO
+NXT = P(1:TH_NSLOT)
+DO J=1,SIZE(S)
+   O(NXT(S(J))) = J; NXT(S(J)) = NXT(S(J))+1
+ENDDO
+END SUBROUTINE BY_SLOT
+
 END SUBROUTINE CC_SET_WALL_ROWS
 
 
@@ -5937,6 +5990,72 @@ DO J=1,SIZE(NV,2)
    RD(J) = SUM(WQ)/S
 ENDDO
 END FUNCTION CC_WALL_RDW
+
+
+SUBROUTINE O3E_CELL_POINTS(M,N,ICC,JCC,NQ,XQ,WQ)
+! Called by CC_SET_WALL_ROWS: points and weights of the mean over the gas of cell N (cut cell ICC, part JCC; a whole cell
+! if ICC is 0), one per octant about the centre of the Cartesian cell: the octant's gas volume and centroid, sums of the
+! pyramids from the centre over the cell's faces and CFACE polygons clipped by the octant. Adds them after place NQ.
+TYPE(MESH_TYPE), INTENT(IN) :: M
+INTEGER, INTENT(IN) :: N(3),ICC,JCC
+INTEGER, INTENT(INOUT) :: NQ
+REAL(EB), INTENT(INOUT) :: XQ(:,:),WQ(:)
+REAL(EB), PARAMETER :: VOL_EPS=1.E-9_EB   ! Relative volume below which an octant's gas comes from round-off alone
+INTEGER :: I,L,E,NR,X1
+INTEGER, ALLOCATABLE :: LP(:)
+REAL(EB) :: LO(3),HI(3),OC(3),SG(3),D(3),S2,PC(3),H,VS,YS(3)
+REAL(EB), ALLOCATABLE :: R(:,:),LV(:,:),LN(:,:)
+
+LO = (/M%X(N(IAXIS)-1),M%Y(N(JAXIS)-1),M%Z(N(KAXIS)-1)/); HI = (/M%X(N(IAXIS)),M%Y(N(JAXIS)),M%Z(N(KAXIS))/)
+OC = 0.5_EB*(LO+HI)
+IF (ICC==0) THEN
+   DO I=0,7
+      SG = REAL((/1-2*MODULO(I,2),1-2*MODULO(I/2,2),1-2*(I/4)/),EB)
+      NQ = NQ+1; XQ(:,NQ) = OC+0.25_EB*SG*(HI-LO); WQ(NQ) = 0.125_EB*PRODUCT(HI-LO)
+   ENDDO
+   RETURN
+ENDIF
+! The cell's surface: its gas faces (normal along their axis) and its CFACE polygons (normal into the solid), each loop
+! counter-clockwise about its outward normal.
+ASSOCIATE (CC=>M%CUT_CELL(ICC))
+ALLOCATE(LV(3,0),LN(3,CC%CCELEM(1,JCC)),LP(1)); LP = 1
+DO I=1,CC%CCELEM(1,JCC)
+   L = CC%CCELEM(I+1,JCC); X1 = CC%FACE_LIST(3,L)
+   SELECT CASE(CC%FACE_LIST(1,L))
+      CASE(CC_FTYPE_RCGAS)
+         D = LO; IF (CC%FACE_LIST(2,L)==HIGH_IND) D(X1) = HI(X1)
+         R = O3E_RECTANGLE(D,HI,X1)
+         LN(:,I) = 0._EB; LN(X1,I) = REAL(2*CC%FACE_LIST(2,L)-3,EB)
+      CASE(CC_FTYPE_CFGAS)
+         R = O3E_POLYGON(M,CC%FACE_LIST(4,L),CC%FACE_LIST(5,L))
+         LN(:,I) = 0._EB; LN(X1,I) = REAL(2*CC%FACE_LIST(2,L)-3,EB)
+      CASE(CC_FTYPE_CFINB)
+         R = O3E_POLYGON(M,CC%FACE_LIST(4,L),CC%FACE_LIST(5,L))
+         LN(:,I) = M%FV%FACE%NVEC(:,M%CUT_FACE(CC%FACE_LIST(4,L))%FC(CC%FACE_LIST(5,L)))
+   END SELECT
+   NR = SIZE(R,2); CALL O3E_LOOP_AREA(NR,R,LN(:,I),S2,PC)
+   IF (S2<0._EB) R = R(:,NR:1:-1)
+   LV = RESHAPE((/LV,R/),(/3,SIZE(LV,2)+NR/)); LP = (/LP,SIZE(LV,2)+1/)
+ENDDO
+! Per octant: the pyramids from the centre over the clipped loops.
+DO I=0,7
+   SG = REAL((/1-2*MODULO(I,2),1-2*MODULO(I/2,2),1-2*(I/4)/),EB)
+   VS = 0._EB; YS = 0._EB
+   DO L=1,SIZE(LP)-1
+      R = LV(:,LP(L):LP(L+1)-1); NR = SIZE(R,2)
+      DO E=IAXIS,KAXIS
+         D = 0._EB; D(E) = SG(E); CALL O3E_CLIP(NR,R,D,OC)
+      ENDDO
+      IF (NR<3) CYCLE
+      CALL O3E_LOOP_AREA(NR,R,LN(:,L),S2,PC)
+      H = 0.5_EB*S2*DOT_PRODUCT(LN(:,L),PC-OC)
+      VS = VS+H; YS = YS+H*(PC-OC)
+   ENDDO
+   IF (VS<=3._EB*VOL_EPS*CC%VOLUME(JCC)) CYCLE
+   NQ = NQ+1; XQ(:,NQ) = OC+0.75_EB*YS/VS; WQ(NQ) = VS/3._EB
+ENDDO
+END ASSOCIATE
+END SUBROUTINE O3E_CELL_POINTS
 
 
 FUNCTION O3E_POLYGON(M,ICF,JCF) RESULT(V)
