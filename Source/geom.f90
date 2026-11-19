@@ -19994,14 +19994,15 @@ END FUNCTION CC_GRID_WALL_IS_THIN_BARRIER
 
 
 SUBROUTINE CC_GRID_DUMP_CV_MAP
-! Partition-invariance comparison harness. Write four normalized tables per rank:
+! Partition-invariance comparison harness. Write five normalized tables per rank:
 !   GCELL  : physical inventory of normalized gas polyhedra,
 !   CV     : active owner rows and aggregate geometry,
 !   MEMBER : complete GCELL -> final CV grouping (scanned from GCELL_TO_CV, not the pairwise diagnostic),
-!   FACE   : physical face geometry plus GCELL and CV adjacency.
+!   FACE   : physical face geometry plus GCELL and CV adjacency,
+!   SOLID  : solid Cartesian cells, in an OBST (kind 1) or a GEOM (kind 2).
 ! The companion Verification/Complex_Geometry/diff_fv_topology.py tool unions the rank files, replaces
 ! run-local mesh/index identifiers by physical keys, and compares one- and multi-mesh partitions.
-INTEGER :: NM,ICV,IG,IF_,LU,OWN_NM,OWN_CV,NBR_NM,NBR_CV,OWNER_IG,NBR_IG
+INTEGER :: NM,ICV,IG,IF_,LU,OWN_NM,OWN_CV,NBR_NM,NBR_CV,OWNER_IG,NBR_IG,I,J,K
 CHARACTER(255) :: FN
 TYPE(MESH_TYPE), POINTER :: M
 IF (.NOT.GET_CUTCELLS_VERBOSE) RETURN
@@ -20089,6 +20090,27 @@ DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
             M%FV%FACE%NBR_IJK(IAXIS:KAXIS,IF_), &
             M%FV%FACE%AREA(IF_),M%FV%FACE%FLUX_AREA(IF_),M%FV%FACE%NVEC(IAXIS:KAXIS,IF_),M%FV%FACE%XYZCEN(IAXIS:KAXIS,IF_), &
             M%FV%FACE%D_LR(IF_),M%FV%FACE%INTERP_W(IF_)
+   ENDDO
+ENDDO
+CLOSE(LU)
+
+! Solid Cartesian cells of the interior: in an OBST (kind 1) or inside a GEOM (kind 2).
+LU = GET_FILE_NUMBER()
+WRITE(FN,'(A,A,I0,A)') TRIM(RESULTS_DIR)//TRIM(CHID),'_fv_solid_',MY_RANK,'.csv'
+OPEN(UNIT=LU,FILE=TRIM(FN),STATUS='REPLACE')
+WRITE(LU,'(A)') 'mesh_nm,i,j,k,kind'
+DO NM=LOWER_MESH_INDEX,UPPER_MESH_INDEX
+   M => MESHES(NM)
+   DO K=1,M%KBAR
+      DO J=1,M%JBAR
+         DO I=1,M%IBAR
+            IF (M%CELL(M%CELL_INDEX(I,J,K))%OBST_INDEX>0) THEN
+               WRITE(LU,'(I0,4(",",I0))') NM,I,J,K,1
+            ELSEIF (M%CCVAR(I,J,K,CC_CGSC)==CC_SOLID) THEN
+               WRITE(LU,'(I0,4(",",I0))') NM,I,J,K,2
+            ENDIF
+         ENDDO
+      ENDDO
    ENDDO
 ENDDO
 CLOSE(LU)
