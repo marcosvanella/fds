@@ -5128,7 +5128,7 @@ END SUBROUTINE CC_O3E_SETUP
 SUBROUTINE O3E_BUILD_EDGES(NM,NP,BAND,EK,EW)
 ! Called by CC_O3E_SETUP: picks the faces of the cut-cell region of mesh NM (BAND): gas faces that are cut, next to a
 ! marked cell, or at a cell edge where a surrounding face is one of these or is missing. Then lists each cell edge of
-! these faces once, row by row with its four surrounding faces, edges with gas faces all around first.
+! these faces once, row by row with its four surrounding faces, edges whose four faces reach the edge first.
 INTEGER, INTENT(IN) :: NM
 LOGICAL, INTENT(IN) :: NP(0:,0:,0:)
 LOGICAL, ALLOCATABLE, INTENT(OUT) :: BAND(:)
@@ -5139,6 +5139,7 @@ TYPE(CC_O3E_TYPE), POINTER :: O
 INTEGER :: IF_,Q,R,NE,K4(4)
 INTEGER, ALLOCATABLE :: P4(:,:),EP(:,:),ORD(:),L(:)
 REAL(EB), ALLOCATABLE :: W4(:,:)
+LOGICAL, ALLOCATABLE :: GAS(:)
 
 F => MESHES(NM)%FV%FACE; O => MESHES(NM)%FV%O3
 ALLOCATE(BAND(F%N)); BAND = .FALSE.; NE = 0
@@ -5170,10 +5171,11 @@ DO IF_=1,F%N_INT
       ENDDO
    ENDDO
 ENDDO
-O%NE = NE; O%NG = COUNT(ALL(EP(:,1:NE)/=0,DIM=1))
+GAS = ALL(EP(:,1:NE)/=0,DIM=1) .AND. ALL(EW(5:8,1:NE)<=0._EB,DIM=1)   ! a face short of the edge makes a wall edge
+O%NE = NE; O%NG = COUNT(GAS)
 ALLOCATE(ORD(NE))
-ORD(1:O%NG) = PACK((/(Q,Q=1,NE)/),ALL(EP(:,1:NE)/=0,DIM=1))
-ORD(O%NG+1:NE) = PACK((/(Q,Q=1,NE)/),ANY(EP(:,1:NE)==0,DIM=1))
+ORD(1:O%NG) = PACK((/(Q,Q=1,NE)/),GAS)
+ORD(O%NG+1:NE) = PACK((/(Q,Q=1,NE)/),.NOT.GAS)
 EK = EK(:,ORD); EW = EW(:,ORD)
 O%EP = TRANSPOSE(EP(:,ORD))
 DEALLOCATE(EP)
@@ -5218,7 +5220,8 @@ TYPE(MESH_TYPE), POINTER :: M
 TYPE(CC_FACE_TYPE), POINTER :: F
 TYPE(CC_O3E_TYPE), POINTER :: O
 INTEGER :: E,Q,T,AQ,RQ,P,NR,I,J,K,L,ICF,IF_,NJ,NW,N(3),NQ(3),KEY(4),HJ(4)
-REAL(EB) :: S(2),XE(3),TE,D,XF(3),X2(3),X(4),XP(4),AT,AS,PH(2),SA(4),SF(4),HW(4)
+REAL(EB) :: S(2),XE(3),TE,D,XF(3),X2(3),X(4),XP(4),AT,AS,PH(2),SA(4),SF(4),HW(4),SG
+LOGICAL :: HP(4)
 REAL(EB), ALLOCATABLE :: R(:,:),UW(:),CAT(:),CAS(:)
 INTEGER, ALLOCATABLE :: ORD(:),RN(:),SL(:),WC(:),SQ(:),RE(:),RS(:)
 
@@ -5270,19 +5273,14 @@ DO E=1,O%NG
       IF (F%FTYPE(P)/=CC_FTYPE_CFGAS) CYCLE
       D = TE-XF(T)
       N = NQ; N(T) = N(T)+MERGE(1,-1,D>0._EB)
-      P = O3E_ROW(M,AQ,N)                                       ! the next face along the edge, towards the mid-point
+      P = 0                                                     ! the next face along the edge, towards the mid-point,
+      IF (JOINED(NQ,N,AQ,T)) P = O3E_ROW(M,AQ,N)              ! if gas joins the two faces
       IF (P/=0) THEN
          X2 = CENTROID(P,N)
          CALL ADD_ROW(P,AQ,N,O%ENB(E,Q))
       ELSE
          X2 = XE; X2(T) = MERGE(S(2),S(1),D>0._EB)        ! none: the wall point at the end of the gas segment
-         CALL WALL_ROW(E,Q)
-         IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN   ! verification case: the exact wall velocity there
-            NR = NR+1; R(:,NR) = REAL((/12,E,Q,0/),EB); O%ENB(E,Q) = NR
-            UW(NR) = O3E_TEST_WALL_COMPONENT(X2(IAXIS),X2(JAXIS),X2(KAXIS),AQ)
-         ELSEIF (NJ>0) THEN                                    ! a wall that blows or sucks
-            NR = NR+1; R(:,NR) = REAL(KEY,EB); SQ(NR) = Q; O%ENB(E,Q) = NR
-         ENDIF
+         CALL WALL_ROW(E,Q); CALL WALL_VALUE(E,Q,AQ,X2,O%ENB(E,Q))
       ENDIF
       O%WA(E,Q) = MIN(1._EB,D/(X2(T)-XF(T)))                   ! at most 1: no extrapolation
       X(Q) = XF(RQ)+O%WA(E,Q)*(X2(RQ)-XF(RQ))
@@ -5294,7 +5292,7 @@ ENDDO
 DO E=O%NG+1,O%NE
    T = EK(1,E)
    XE = (/M%X(EK(1+IAXIS,E)),M%Y(EK(1+JAXIS,E)),M%Z(EK(1+KAXIS,E))/); XE(T) = EW(9,E)
-   SA = 0._EB; SF = 0._EB
+   SA = 0._EB; SF = 0._EB; HP = O%EP(E,:)/=0
    DO Q=1,4
       CALL O3E_ARM(EK(:,E),Q,AQ,NQ); RQ = 6-T-AQ
       P = O%EP(E,Q)
@@ -5305,12 +5303,21 @@ DO E=O%NG+1,O%NE
       ENDIF
       XP(Q) = XE(RQ)+REAL(2*MODULO(Q,2)-1,EB)*EW(3+Q+2*MODULO(Q,2),E)   ! where the face across begins
       CALL WALL_ROW(E,Q); SA(Q) = AT; SF(Q) = AS
-      IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN   ! verification case: the exact wall velocity at the edge
-         NR = NR+1; R(:,NR) = REAL((/12,E,Q,0/),EB); O%EP(E,Q) = NR
-         UW(NR) = O3E_TEST_WALL_COMPONENT(XE(IAXIS),XE(JAXIS),XE(KAXIS),AQ)
-      ELSEIF (NJ>0) THEN                                       ! a wall that blows or sucks
-         NR = NR+1; R(:,NR) = REAL(KEY,EB); SQ(NR) = Q; O%EP(E,Q) = NR
-      ENDIF
+      CALL WALL_VALUE(E,Q,AQ,XE,O%EP(E,Q))
+   ENDDO
+   ! A face on each side of the edge: each is taken where its gas begins, its distance from there and its value faded by
+   ! its weight towards the wall velocity of the face with the smaller weight (where the weights are equal it drops out).
+   DO Q=1,3,2
+      IF (.NOT.(HP(Q) .AND. HP(Q+1))) CYCLE
+      CALL O3E_ARM(EK(:,E),Q,AQ,NQ); RQ = 6-T-AQ
+      DO L=Q,Q+1
+         SG = REAL(1-2*MODULO(L,2),EB)                          ! -1 on the low side, 1 on the high side
+         D = SG*(XP(L)-XE(RQ))-EW(4+L,E)
+         XP(L) = XP(L)-SG*(EW(4+L,E)+(1._EB-EW(L,E))*D)
+         O%WA(E,L) = 1._EB-EW(L,E)
+      ENDDO
+      L = MERGE(Q,Q+1,EW(Q,E)<=EW(Q+1,E))
+      CALL WALL_ROW(E,L); CALL WALL_VALUE(E,L,AQ,XE,O%ENB(E,Q)); O%ENB(E,Q+1) = O%ENB(E,Q)
    ENDDO
    O%RD(E,:) = 0._EB
    PH = 0._EB                                                   ! free-slip walls: less gradient across a missing face
@@ -5369,6 +5376,32 @@ ENDDO
 DEALLOCATE(R,UW,ORD,RN)
 
 CONTAINS
+
+SUBROUTINE WALL_VALUE(E,Q,AX,XW,IR)
+! After WALL_ROW(E,Q): IR, the velocity entry of that wall's component AX (unchanged for a wall at rest); in the
+! verification cases the exact wall velocity at the point XW.
+INTEGER, INTENT(IN) :: E,Q,AX
+REAL(EB), INTENT(IN) :: XW(3)
+INTEGER, INTENT(INOUT) :: IR
+IF (PERIODIC_TEST>=31 .AND. PERIODIC_TEST<=37) THEN
+   NR = NR+1; R(:,NR) = REAL((/12,E,Q,0/),EB); IR = NR
+   UW(NR) = O3E_TEST_WALL_COMPONENT(XW(IAXIS),XW(JAXIS),XW(KAXIS),AX)
+ELSEIF (NJ>0) THEN                                       ! a wall that blows or sucks
+   NR = NR+1; R(:,NR) = REAL(KEY,EB); SQ(NR) = Q; IR = NR
+ENDIF
+END SUBROUTINE WALL_VALUE
+
+LOGICAL FUNCTION JOINED(NA,NB,AX,TT)
+! True if gas joins the faces of axis AX at cells NA and NB, neighbours along TT: one of the two faces of normal TT
+! between their cells has gas.
+INTEGER, INTENT(IN) :: NA(3),NB(3),AX,TT
+INTEGER :: L(3),SS
+JOINED = .FALSE.
+DO SS=0,1
+   L = NA; L(TT) = MIN(NA(TT),NB(TT)); L(AX) = NA(AX)+SS
+   JOINED = JOINED .OR. ANY(M%FCVAR(L(IAXIS),L(JAXIS),L(KAXIS),CC_FGSC,TT)==(/CC_GASPHASE,CC_CUTCFE/))
+ENDDO
+END FUNCTION JOINED
 
 SUBROUTINE ADD_ROW(P,AX,NP,IR)
 ! Adds velocity entry IR for face P, or for the Cartesian face of axis AX and cell NP, keyed by its kind and index.
@@ -6204,11 +6237,8 @@ ENDIF
 DO QQ=1,4
    CALL O3E_SLOT(M,EK,QQ,SL(QQ)%P,K(QQ),WG(1,QQ),WG(2,QQ),SL(QQ)%S)
 ENDDO
-DO QQ=1,4
-   IF (K(QQ)/=2 .OR. K(QQ-1+2*MODULO(QQ,2))/=1) CYCLE
-   K(QQ) = 0; WG(:,QQ) = 0._EB
-ENDDO
-N = (/(MERGE(SIZE(SL(QQ)%P),0,K(QQ)>0),QQ=1,4)/)
+N = (/(SIZE(SL(QQ)%P),QQ=1,4)/)
+! A row needs a face in both pairs: the two faces of one pair then share gas through a face of the other pair.
 IF (ALL(N(1:2)==0) .OR. ALL(N(3:4)==0) .OR. N(Q)==0) N = 0
 QB = MAXLOC(N,DIM=1); NR = N(QB)
 ALLOCATE(P4(4,NR),EW(15,NR)); P4 = 0; S = 0._EB
@@ -16148,8 +16178,10 @@ DO I=1,NG
    OM(I) = OME
    ST(I) = (EMW(I,1)*MU1(ECL(I,1))+EMW(I,2)*MU1(ECL(I,2))+EMW(I,3)*MU1(ECL(I,3))+EMW(I,4)*MU1(ECL(I,4)))*(DCB+DBC)
 ENDDO
+! At a wall edge a face short of the edge fades towards the wall velocity.
 DO I=NG+1,NE
-   OME = (UP(EP(I,4))-UP(EP(I,3)))*RDP(I,1)-(UP(EP(I,2))-UP(EP(I,1)))*RDP(I,2)
+   OME = (UP(EP(I,4))+WA(I,4)*(UP(ENB(I,4))-UP(EP(I,4)))-UP(EP(I,3))-WA(I,3)*(UP(ENB(I,3))-UP(EP(I,3))))*RDP(I,1) &
+        -(UP(EP(I,2))+WA(I,2)*(UP(ENB(I,2))-UP(EP(I,2)))-UP(EP(I,1))-WA(I,1)*(UP(ENB(I,1))-UP(EP(I,1))))*RDP(I,2)
    Q(I) = -OME*(TW(I,3)*UP(EP(I,3))+TW(I,4)*UP(EP(I,4)))
    Q(NE+I) = OME*(TW(I,1)*UP(EP(I,1))+TW(I,2)*UP(EP(I,2)))
    OM(I) = OME

@@ -1563,8 +1563,8 @@ TYPE CC_O3E_TYPE
    INTEGER :: KP(0:13)=0                            !< Last place of each kind of velocity value in the list
    INTEGER,  ALLOCATABLE, DIMENSION(:)   :: IX      !< Where each velocity value is read: cut-face row, or index in U, V, W
    INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: EP      !< The four faces around each edge, as places in the velocity list
-   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: ENB     !< The face each of them is interpolated with (0: none)
-   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA      !< Interpolation weights towards that face
+   INTEGER,  ALLOCATABLE, DIMENSION(:,:) :: ENB     !< The face or wall velocity each of them is interpolated with (0: none)
+   REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: WA      !< Interpolation weights towards that value
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RD      !< Inverse spacings across the edge for the strain (1/m)
    REAL(EB), ALLOCATABLE, DIMENSION(:,:) :: RDP     !< Inverse spacings across the edge for the vorticity (1/m)
    REAL(EB), ALLOCATABLE, DIMENSION(:)   :: UP      !< Velocity values of the stage (m/s)
