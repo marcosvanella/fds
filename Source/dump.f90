@@ -8637,7 +8637,7 @@ IND_SELECT: SELECT CASE(IND)
       GAS_PHASE_OUTPUT_RES = RDZN(KK)*(HS(II,JJ,KK+1)-HS(II,JJ,KK))
 
    CASE(523)  ! ABSOLUTE PRESSURE
-      GAS_PHASE_OUTPUT_RES  = PBAR(KK,PRESSURE_ZONE(II,JJ,KK)) + RHO(II,JJ,KK)*(H(II,JJ,KK)-KRES(II,JJ,KK))
+      GAS_PHASE_OUTPUT_RES  = PBAR(KK,PRESSURE_ZONE(II,JJ,KK)) + RHO(II,JJ,KK)*(0.5_EB*(H(II,JJ,KK)+HS(II,JJ,KK))-KRES(II,JJ,KK))
    CASE(528)  ! ADVECTIVE MASS FLUX X
       GAS_PHASE_OUTPUT_RES = 0._EB
       IF (Z_INDEX>0) THEN
@@ -8849,7 +8849,7 @@ CC_IBM_IF: IF (CC_IBM) THEN
                GAS_PHASE_OUTPUT_CC = GAS_PHASE_OUTPUT_CC + (TMP_CC-TMPM)    * VOL
             CASE(9)   ! PRESSURE
                GAS_PHASE_OUTPUT_CC = GAS_PHASE_OUTPUT_CC + &
-                  ( PBAR(KK,PRESSURE_ZONE(II,JJ,KK)) + RHO_CC*(H_CC-KRES(II,JJ,KK))  - P_0(KK) ) * VOL
+                  ( PBAR(KK,PRESSURE_ZONE(II,JJ,KK)) + RHO_CC*(0.5_EB*(H_CC+HS_CC)-KRES(II,JJ,KK))  - P_0(KK) ) * VOL
             CASE(10)  ! VELOCITY
                IF(II<1 .OR. II>IBAR .OR. JJ<1 .OR. JJ>JBAR .OR. KK<1 .OR. KK>KBAR) THEN
                   GAS_PHASE_OUTPUT_CC = GAS_PHASE_OUTPUT_CC + SQRT(2._EB*KRES(II,JJ,KK)) * VOL
@@ -8881,7 +8881,7 @@ CC_IBM_IF: IF (CC_IBM) THEN
 
             CASE(523) ! ABSOLUTE PRESSURE
                GAS_PHASE_OUTPUT_CC = GAS_PHASE_OUTPUT_CC + &
-                  ( PBAR(KK,PRESSURE_ZONE(II,JJ,KK)) + RHO_CC*(H_CC-KRES(II,JJ,KK)) ) * VOL
+                  ( PBAR(KK,PRESSURE_ZONE(II,JJ,KK)) + RHO_CC*(0.5_EB*(H_CC+HS_CC)-KRES(II,JJ,KK)) ) * VOL
             CASE(550) ! CUTCELL VELOCITY DIVERGENCE
                GAS_PHASE_OUTPUT_CC = GAS_PHASE_OUTPUT_CC + CCVELDIV(II,JJ,KK)*VOL
          END SELECT IND_SELECT_2
@@ -8952,6 +8952,7 @@ REAL(EB) FUNCTION SOLID_PHASE_OUTPUT(INDX,T,NM,Y_INDEX,Z_INDEX,PART_INDEX,OPT_WA
 USE PHYSICAL_FUNCTIONS, ONLY: SURFACE_DENSITY,GET_MASS_FRACTION,GET_SENSIBLE_ENTHALPY,GET_SPECIFIC_HEAT,GET_CONDUCTIVITY,&
                               GET_VISCOSITY,HEAT_TRANSFER_COEFFICIENT
 USE TURBULENCE, ONLY: TAU_WALL_IJ
+USE MATH_FUNCTIONS, ONLY: GRAVITY_VECTOR
 INTEGER, INTENT(IN), OPTIONAL :: OPT_WALL_INDEX,OPT_LP_INDEX,OPT_CFACE_INDEX,OPT_BNDF_INDEX,OPT_DEVC_INDEX,OPT_CUT_FACE_INDEX,&
                                  OPT_NODE_INDEX,OPT_PROF_INDEX,OPT_PROP_INDEX
 INTEGER, INTENT(IN) :: INDX,Y_INDEX,Z_INDEX,PART_INDEX,NM
@@ -8959,8 +8960,8 @@ REAL(EB),INTENT(IN) :: T
 REAL(EB) :: Q_CON,RHOSUM,VOLSUM,ZZ_GET(1:N_TRACKED_SPECIES),Y_SPECIES,DEPTH,ASH_DEPTH,UN,H_S,RHO_D_DYDN,U_CELL,V_CELL,W_CELL,&
             LTMP,ATMP,CTMP,H_W_EFF,X0,VOL,DN,PRESS,&
             NVEC(3),PVEC(3),TAU_IJ(3,3),VEL_CELL(3),VEL_WALL(3),MU_WALL,RHO_WALL,FVEC(3),SVEC(3),TVEC1(3),TVEC2(3),&
-            PR1,PR2,Z1,Z2,RADIUS,CUT_FACE_AREA,SOLID_PHASE_OUTPUT_CTF,AAA,BBB,CCC,ALP,BET,GAM,MMM,DTMP,HTC
-INTEGER :: I_DEPTH,II2,IIG,JJG,KKG,NN,IWX,SURF_INDEX,I,J,NWP,M_INDEX,ICC,IND1,IND2,IC2,ITMP,ICF,JCF,NFACE,NR,&
+            PR1,PR2,Z1,Z2,RADIUS,CUT_FACE_AREA,SOLID_PHASE_OUTPUT_CTF,AAA,BBB,CCC,ALP,BET,GAM,MMM,DTMP,HTC,DPDN,G_VEC(3)
+INTEGER :: I_DEPTH,II2,JJ2,KK2,IIG,JJG,KKG,NN,IWX,SURF_INDEX,I,J,NWP,M_INDEX,ICC,IND1,IND2,IC2,ITMP,ICF,JCF,NFACE,NR,&
            MATL_INDEX,OUTPUT_INDEX
 TYPE(BOUNDARY_PROP1_TYPE), POINTER :: B1
 TYPE(BOUNDARY_PROP2_TYPE), POINTER :: B2
@@ -9128,7 +9129,8 @@ SOLID_PHASE_SELECT: SELECT CASE(INDX)
          IIG = BC%IIG
          JJG = BC%JJG
          KKG = BC%KKG
-         PRESS = RHO(IIG,JJG,KKG)*(H(IIG,JJG,KKG)-KRES(IIG,JJG,KKG))
+         PRESS = PBAR(KKG,PRESSURE_ZONE(IIG,JJG,KKG)) - P_0(KKG) + &
+                 RHO(IIG,JJG,KKG)*(0.5_EB*(H(IIG,JJG,KKG)+HS(IIG,JJG,KKG))-KRES(IIG,JJG,KKG))
       ELSEIF (PRESENT(OPT_CFACE_INDEX)) THEN
          IND1 = CFA%CUT_FACE_IND1
          IND2 = CFA%CUT_FACE_IND2
@@ -9507,55 +9509,60 @@ SOLID_PHASE_SELECT: SELECT CASE(INDX)
          IIG = BC%IIG
          JJG = BC%JJG
          KKG = BC%KKG
-         ! quadratic extrapolation to surface pressure
-         PR1 = RHO(IIG,JJG,KKG)*(H(IIG,JJG,KKG)-KRES(IIG,JJG,KKG))
-         PR2 = PR1
+         II2 = IIG
+         JJ2 = JJG
+         KK2 = KKG
          SELECT CASE(BC%IOR)
             CASE( 1)
                NVEC=(/ 1._EB,0._EB,0._EB/)
                Z1 = 0.5_EB*DX(IIG)
                Z2 = DX(IIG)+0.5_EB*DX(IIG+1)
-               IC2 = CELL_INDEX(IIG+1,JJG,KKG)
-               IF (.NOT.CELL(IC2)%SOLID) PR2 = RHO(IIG,JJG,KKG)*(H(IIG+1,JJG,KKG)-KRES(IIG+1,JJG,KKG))
+               II2 = IIG+1
             CASE(-1)
                NVEC=(/-1._EB,0._EB,0._EB/)
                Z1 = 0.5_EB*DX(IIG)
                Z2 = DX(IIG)+0.5_EB*DX(IIG-1)
-               IC2 = CELL_INDEX(IIG-1,JJG,KKG)
-               IF (.NOT.CELL(IC2)%SOLID) PR2 = RHO(IIG,JJG,KKG)*(H(IIG-1,JJG,KKG)-KRES(IIG-1,JJG,KKG))
+               II2 = IIG-1
             CASE( 2)
                NVEC=(/0._EB, 1._EB,0._EB/)
                Z1 = 0.5_EB*DY(JJG)
                Z2 = DY(JJG)+0.5_EB*DY(JJG+1)
-               IC2 = CELL_INDEX(IIG,JJG+1,KKG)
-               IF (.NOT.CELL(IC2)%SOLID) PR2 = RHO(IIG,JJG,KKG)*(H(IIG,JJG+1,KKG)-KRES(IIG,JJG+1,KKG))
+               JJ2 = JJG+1
             CASE(-2)
                NVEC=(/0._EB,-1._EB,0._EB/)
                Z1 = 0.5_EB*DY(JJG)
                Z2 = DY(JJG)+0.5_EB*DY(JJG-1)
-               IC2 = CELL_INDEX(IIG,JJG-1,KKG)
-               IF (.NOT.CELL(IC2)%SOLID) PR2 = RHO(IIG,JJG,KKG)*(H(IIG,JJG-1,KKG)-KRES(IIG,JJG-1,KKG))
+               JJ2 = JJG-1
             CASE( 3)
                NVEC=(/0._EB,0._EB, 1._EB/)
                Z1 = 0.5_EB*DZ(KKG)
                Z2 = DZ(KKG)+0.5_EB*DZ(KKG+1)
-               IC2 = CELL_INDEX(IIG,JJG,KKG+1)
-               IF (.NOT.CELL(IC2)%SOLID) PR2 = RHO(IIG,JJG,KKG)*(H(IIG,JJG,KKG+1)-KRES(IIG,JJG,KKG+1))
+               KK2 = KKG+1
             CASE(-3)
                NVEC=(/0._EB,0._EB,-1._EB/)
                Z1 = 0.5_EB*DZ(KKG)
                Z2 = DZ(KKG)+0.5_EB*DZ(KKG-1)
-               IC2 = CELL_INDEX(IIG,JJG,KKG-1)
-               IF (.NOT.CELL(IC2)%SOLID) PR2 = RHO(IIG,JJG,KKG)*(H(IIG,JJG,KKG-1)-KRES(IIG,JJG,KKG-1))
+               KK2 = KKG-1
          END SELECT
 
-         PVEC = ( PR1 - (PR2-PR1)*Z1**2 / (Z2**2-Z1**2) ) * NVEC ! surface normal pressure force
+         ! Quadratic extrapolation to the wall of the step-mean pressure of the two gas cells, each with its own density as in
+         ! the gas PRESSURE output, with the hydrostatic normal gradient DPDN at the wall; the background pressure rise is added.
+
+         PR1  = RHO(IIG,JJG,KKG)*(0.5_EB*(H(IIG,JJG,KKG)+HS(IIG,JJG,KKG))-KRES(IIG,JJG,KKG))
+         DPDN = (RHO(IIG,JJG,KKG)-RHO_0(KKG))*DOT_PRODUCT(GRAVITY_VECTOR(T,BC%X),NVEC)
+         PR2  = PR1 + DPDN*(Z2-Z1)
+         IC2  = CELL_INDEX(II2,JJ2,KK2)
+         IF (.NOT.CELL(IC2)%SOLID) PR2 = RHO(II2,JJ2,KK2)*(0.5_EB*(H(II2,JJ2,KK2)+HS(II2,JJ2,KK2))-KRES(II2,JJ2,KK2))
+         PRESS = PBAR(KKG,PRESSURE_ZONE(IIG,JJG,KKG)) - P_0(KKG) + &
+                 PR1 - DPDN*Z1 - (PR2-PR1-DPDN*(Z2-Z1))*Z1**2/(Z2**2-Z1**2)
+         PVEC = PRESS * NVEC ! surface normal pressure force
       ELSEIF (PRESENT(OPT_CFACE_INDEX)) THEN
          NVEC = BC%NVEC
          ! find cut-cell adjacent to CFACE
          IND1 = CFA%CUT_FACE_IND1
          IND2 = CFA%CUT_FACE_IND2
-         CALL GET_PRES_CFACE(PRESS,IND1,IND2,CFA)
+         G_VEC = GRAVITY_VECTOR(T,BC%X)
+         CALL GET_PRES_CFACE(PRESS,IND1,IND2,CFA,G_VEC=G_VEC)
          PVEC = PRESS * NVEC ! surface normal pressure force
       ENDIF
 
