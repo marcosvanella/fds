@@ -1,0 +1,31 @@
+&HEAD CHID='rising_bubble_helium_1mesh', TITLE='Helium bubble rising in a closed box, DNS, one mesh' /
+
+# The results must be the same on one mesh and on three meshes. Points A and B are in the cells below and
+# above the lower mesh interface next to the left wall, points C and D below and above the upper interface
+# next to the right wall.
+
+&MESH IJK=4,1,13, XB=4.5,5.5,-0.125,0.125,-0.225,1.075 /
+
+&TIME T_END=2. /
+&MISC SIMULATION_MODE='DNS', NOISE=.FALSE. /
+&PRES SOLVER='UGLMAT' /
+&RADI RADIATION=.FALSE. /
+&DUMP DT_DEVC=0.1, SIG_FIGS=16, SIG_FIGS_EXP=3 /
+
+&SPEC ID='HELIUM' /
+&INIT XB=4.5,5.0,-0.125,0.125,-0.225,0.275, MASS_FRACTION(1)=0.5, SPEC_ID(1)='HELIUM' /
+
+&DEVC ID='T_A', XYZ=4.625,0.,0.025, QUANTITY='TEMPERATURE' /
+&DEVC ID='T_B', XYZ=4.625,0.,0.125, QUANTITY='TEMPERATURE' /
+&DEVC ID='T_C', XYZ=5.375,0.,0.525, QUANTITY='TEMPERATURE' /
+&DEVC ID='T_D', XYZ=5.375,0.,0.625, QUANTITY='TEMPERATURE' /
+&DEVC ID='X_A', XYZ=4.625,0.,0.025, QUANTITY='VOLUME FRACTION', SPEC_ID='HELIUM' /
+&DEVC ID='X_B', XYZ=4.625,0.,0.125, QUANTITY='VOLUME FRACTION', SPEC_ID='HELIUM' /
+&DEVC ID='X_C', XYZ=5.375,0.,0.525, QUANTITY='VOLUME FRACTION', SPEC_ID='HELIUM' /
+&DEVC ID='X_D', XYZ=5.375,0.,0.625, QUANTITY='VOLUME FRACTION', SPEC_ID='HELIUM' /
+&DEVC ID='p_A', XYZ=4.625,0.,0.025, QUANTITY='PRESSURE' /
+&DEVC ID='p_B', XYZ=4.625,0.,0.125, QUANTITY='PRESSURE' /
+&DEVC ID='p_C', XYZ=5.375,0.,0.525, QUANTITY='PRESSURE' /
+&DEVC ID='p_D', XYZ=5.375,0.,0.625, QUANTITY='PRESSURE' /
+
+&TAIL /
