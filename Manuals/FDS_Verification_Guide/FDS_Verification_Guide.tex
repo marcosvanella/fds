@@ -2894,6 +2894,18 @@ In the third example, air is pushed through a two-dimensional channel where obst
 \label{divergence_test_3_fig}
 \end{figure}
 
+\subsection{Channel with Periodic Sides and an Inlet}
+\label{periodic_channel_inlet}
+
+In the case \ct{periodic_channel_inlet}, air enters a channel 2~m long through a \ct{VEL} inlet at 0.5~m/s and leaves through an \ct{OPEN} boundary at the far end. The side, top and bottom boundaries are periodic, and a block 1~m long sits in the middle of the channel. The flow is isothermal and is computed without a turbulence model (\ct{SIMULATION_MODE='DNS'}) on a single mesh of 32 by 8 by 16 cells, with the \ct{UGLMAT} pressure solver. The inflow starts at full speed (\ct{TAU_V=0}), so the volume flow through every cross section of the channel equals the inflow, 0.25~\unit{m^3/s}, at all times. Where the periodic boundaries meet the inlet, the velocities one cell beyond the periodic boundaries must be those of the periodic image. If they are not, the two copies of a periodic face next to the inlet receive different momentum fluxes, and on a single mesh the first column of cells becomes a volume source, here about 2~\% of the inflow. Figure~\ref{fig:periodic_channel_inlet} shows the volume flow through three cross sections. The test requires a relative error below $10^{-6}$.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/periodic_channel_inlet}
+\caption[The \ct{periodic_channel_inlet} test case]{Volume flow through three cross sections of the \ct{periodic_channel_inlet} case.}
+\label{fig:periodic_channel_inlet}
+\end{figure}
+
 
 
 \newpage
@@ -8084,6 +8096,28 @@ The Shunn manufactured solution (see Sec.~\ref{sec:shunn_mms}) provides a 2-D an
 \caption[Favre average test \ct{shunn3_FavreZ}]{Output of the \ct{shunn3_FavreZ} test cases in which the Favre average (continuous line) and running average (dashed line) at ($x=0,y=0$) are compared against expected values from the Shunn manufactured solution (see Sec.~\ref{sec:shunn_mms}).}
 \label{fig:shunn_mms_FavreZ}
 \end{figure}
+
+\section{Wall Pressure}
+\label{wall_pressure_heated_box}
+
+The output quantity \ct{WALL PRESSURE} is the pressure at a solid surface, relative to the ambient pressure at the same height, like the gas phase output \ct{PRESSURE}. It includes the rise of the background pressure, and it is extrapolated to the surface from the two nearest gas cells with the normal pressure gradient that the hydrostatic balance gives at the surface. Integrated over a surface with a \ct{FORCE_DIRECTION}, it gives the pressure force on an object.
+
+The case \ct{wall_pressure_heated_box} tests it in a sealed box 2~m wide, 0.5~m deep and 2~m high that contains two blocks 0.5~m on a side, one made with an \ct{OBST} and one with a \ct{GEOM}. The gas has a molecular weight of 28.8~g/mol and a constant specific heat. It starts at 100~\unit{\degree C}, while the ambient temperature is 20~\unit{\degree C}, and it is heated uniformly at 1~\unit{kW/m^3} with \ct{HRRPUV} on an \ct{INIT} line, so that it stays at rest with a uniform density while its pressure rises at about 400~Pa/s. The walls are adiabatic, the pressure solver is \ct{UGLMAT}, and the grid has 16 by 4 by 16 cells. The pressure relative to the ambient pressure at the same height is the rise of the background pressure plus a part that grows linearly with height at the rate $(\rho_0-\rho)\,g$, where $\rho_0=1.19725$~\unit{kg/m^3} is the ambient density, $\rho=0.94057$~\unit{kg/m^3} is the density in the box and $g=9.80665$~\unit{m/s^2}. Two results are exact:
+\begin{itemize}
+\item The pressure on a vertical wall equals the pressure in the gas next to it at the same height. Figure~\ref{fig:wall_pressure_heated_box} (left) compares the \ct{WALL PRESSURE} on a side wall at three heights with the \ct{PRESSURE} in the adjacent gas cells. The test requires that they agree within 1~mPa.
+\item The vertical pressure force on each block is $F_z = -(\rho_0-\rho)\,g\,V = -0.314646$~N, where $V=0.125$~\unit{m^3} is the volume of the block, and the vertical pressure force on the walls of the box is $(\rho_0-\rho)\,g\,V_{\rm box} = 5.03433$~N, where $V_{\rm box}=2$~\unit{m^3} is the volume of the box. Figure~\ref{fig:wall_pressure_heated_box} (right) shows the computed forces. The test requires a relative error below $10^{-6}$.
+\end{itemize}
+A wall pressure that leaves out the rise of the background pressure differs from the gas pressure by the full rise, about 370~Pa at the end of the run. A wall pressure extrapolated with a zero normal gradient gives forces that are in error by 19~\% (\ct{OBST} block), 25~\% (\ct{GEOM} block) and 5~\% (walls of the box).
+
+\begin{figure}[ht]
+\begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/wall_pressure_heated_box_wall} &
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/wall_pressure_heated_box_force}
+\end{tabular*}
+\caption[The \ct{wall_pressure_heated_box} test case]{(Left) Pressure on the side wall and in the gas next to it at three heights. (Right) Vertical pressure force on the two blocks and on the walls of the box, for the \ct{wall_pressure_heated_box} case.}
+\label{fig:wall_pressure_heated_box}
+\end{figure}
+
 
 \section{Interpolation}
 \label{devc_interpolation}

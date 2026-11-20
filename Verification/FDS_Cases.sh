@@ -279,6 +279,7 @@ $QFDS -d Flowfields species_conservation_3.fds
 $QFDS -d Flowfields species_conservation_4.fds
 $QFDS -d Flowfields hot_layer_360.fds
 $QFDS -d Flowfields realizable_mass_fractions.fds
+$QFDS -d Flowfields periodic_channel_inlet.fds
 $QFDS -p 4 -d Flowfields parabolic_profile.fds
 $QFDS -p 5 -d Flowfields simple_duct.fds
 $QFDS -p 8 -d Flowfields symmetry_test_mpi.fds
@@ -423,6 +424,7 @@ $QFDS -d Pressure_Effects isentropic.fds
 $QFDS -d Pressure_Effects isentropic2.fds
 $QFDS -d Pressure_Effects pressure_boundary.fds
 $QFDS -d Pressure_Effects pressure_rise.fds
+$QFDS -d Pressure_Effects wall_pressure_heated_box.fds
 $QFDS -p 8 -d Pressure_Effects thick_orifice_5cm.fds
 $QFDS -d Pressure_Effects zone_break_fast.fds
 $QFDS -d Pressure_Effects zone_break_slow.fds
