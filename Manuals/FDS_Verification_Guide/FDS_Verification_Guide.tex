@@ -2925,6 +2925,23 @@ A 10 m x 10 m x 40 m volume is initialized with \ct{LAPSE_RATE=-0.01}.  The volu
 \end{figure}
 
 
+\section{One Mesh and Three Meshes}
+\label{rising_bubble}
+
+A calculation split into several meshes must give the results of the same grid on a single mesh, to round-off. Two pairs of cases test this with a bubble of light gas that rises in a closed box 1~m wide, 0.25~m deep and 1.3~m high, on a grid of 4 by 1 by 13 cells with the \ct{UGLMAT} pressure solver. The bubble fills the lower left part of the box, half its width and 0.5~m of its height. In \ct{rising_bubble_les_1mesh} and \ct{rising_bubble_les_3mesh} it is air at 200~\unit{\degree C}, computed in LES mode with the \ct{WALE} model. In \ct{rising_bubble_helium_1mesh} and \ct{rising_bubble_helium_3mesh} it is a mixture of equal masses of helium and air at the ambient temperature, computed in DNS mode. The atmosphere is stratified. The three-mesh cases cut the box horizontally 0.3~m and 0.8~m above the floor, so that the bubble crosses both mesh interfaces and both interfaces meet the side walls, and they run on three MPI processes.
+
+At a mesh interface, two layers of ghost cells hold the gas of the neighboring mesh. The cases check that every term evaluated at the interface treats the ghost cells as the single mesh treats the neighboring cells: the face values of $\rho h_{\rm s}$ and $\rho Z_\alpha$ in the advective terms of the divergence, the thermal conductivity and the molecular viscosity of the gas in the ghost cells, the background pressure in the second layer of ghost cells, and the velocities in the ghost cells where an interface meets a wall. Four points lie in the cells below and above each interface next to a side wall. At these points, the temperature of the warm bubble and the volume fraction of helium are compared every 0.1~s with those of the single mesh, as shown in Fig.~\ref{fig:rising_bubble}. The test requires that they agree within $10^{-8}$ (\unit{\degree C} and mol/mol). Before these terms were made consistent, the three-mesh results differed from those of the single mesh by up to 2.9~\unit{\degree C} and $10^{-5}$ mol/mol within 2~s.
+
+\begin{figure}[ht]
+\begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/rising_bubble_les} &
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/rising_bubble_helium}
+\end{tabular*}
+\caption[The \ct{rising_bubble} test cases]{Temperature for the warm air bubble (left) and volume fraction of helium for the helium bubble (right) next to the mesh interfaces, on one mesh and on three meshes.}
+\label{fig:rising_bubble}
+\end{figure}
+
+
 \newpage
 
 \section{Embedded Meshes}
