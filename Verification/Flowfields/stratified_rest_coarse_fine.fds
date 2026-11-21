@@ -1,0 +1,22 @@
+&HEAD CHID='stratified_rest_coarse_fine', TITLE='Stratified air at rest in a closed box, coarse and fine meshes' /
+
+# A closed box holds air at rest in a stratified atmosphere. The lower half is one coarse mesh. The upper half is a fine
+# mesh on the left and a coarse mesh on the right, so the box has a coarse/fine interface in z, a coarse/coarse interface
+# in z and a coarse/fine interface in x. A block crosses all three interfaces. The air must stay at rest to round-off.
+
+&MESH ID='LOWER',       IJK=20,20,10, XB=0.0,2.0,0.0,2.0,0.0,1.0 /
+&MESH ID='UPPER LEFT',  IJK=20,40,20, XB=0.0,1.0,0.0,2.0,1.0,2.0 /
+&MESH ID='UPPER RIGHT', IJK=10,20,10, XB=1.0,2.0,0.0,2.0,1.0,2.0 /
+
+&TIME T_END=20., DT=0.02, LOCK_TIME_STEP=.TRUE. /
+&MISC NOISE=.FALSE. /
+&RADI RADIATION=.FALSE. /
+&DUMP DT_DEVC=0.5 /
+
+&OBST XB=0.7,1.3,0.7,1.3,0.8,1.2 /
+
+&DEVC ID='U_MAX', QUANTITY='VELOCITY', SPATIAL_STATISTIC='MAX', XB=0.0,2.0,0.0,2.0,0.0,2.0 /
+&DEVC ID='T_MAX', QUANTITY='TEMPERATURE', SPATIAL_STATISTIC='MAX', XB=0.0,2.0,0.0,2.0,0.0,2.0 /
+&DEVC ID='T_MIN', QUANTITY='TEMPERATURE', SPATIAL_STATISTIC='MIN', XB=0.0,2.0,0.0,2.0,0.0,2.0 /
+
+&TAIL /

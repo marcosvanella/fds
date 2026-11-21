@@ -1,0 +1,26 @@
+&HEAD CHID='tracer_diffusion_coarse_fine_les', TITLE='Tracer diffusing across a coarse/fine mesh interface, LES' /
+
+# A closed box without gravity holds air at rest. The upper half is a fine mesh and starts with a tracer gas that has
+# the composition of air, so mixing changes neither the density nor the temperature and the air stays at rest. The
+# tracer diffuses into the lower half, a coarse mesh. The mass of tracer in the box must not change.
+
+&MESH ID='LOWER', IJK=10,4,25, XB=0.0,0.2,-0.04,0.04,0.0,0.5 /
+&MESH ID='UPPER', IJK=20,8,50, XB=0.0,0.2,-0.04,0.04,0.5,1.0 /
+
+&TIME T_END=5. /
+&MISC SIMULATION_MODE='LES', NOISE=.FALSE., STRATIFICATION=.FALSE., GVEC=0.,0.,0. /
+&RADI RADIATION=.FALSE. /
+&DUMP DT_DEVC=0.25 /
+
+&SPEC ID='NITROGEN', LUMPED_COMPONENT_ONLY=.TRUE. /
+&SPEC ID='OXYGEN', LUMPED_COMPONENT_ONLY=.TRUE. /
+&SPEC ID='DRY AIR', SPEC_ID='NITROGEN','OXYGEN', MASS_FRACTION=0.77,0.23, BACKGROUND=.TRUE. /
+&SPEC ID='TRACER', SPEC_ID='NITROGEN','OXYGEN', MASS_FRACTION=0.77,0.23 /
+
+&INIT XB=0.0,0.2,-0.04,0.04,0.5,1.0, MASS_FRACTION(1)=0.5, SPEC_ID(1)='TRACER' /
+
+&DEVC ID='dm', QUANTITY='DENSITY', SPEC_ID='TRACER', SPATIAL_STATISTIC='VOLUME INTEGRAL', RELATIVE=.TRUE.,
+      XB=0.0,0.2,-0.04,0.04,0.0,1.0 /
+&DEVC ID='m lower', QUANTITY='DENSITY', SPEC_ID='TRACER', SPATIAL_STATISTIC='VOLUME INTEGRAL', XB=0.0,0.2,-0.04,0.04,0.0,0.5 /
+
+&TAIL /

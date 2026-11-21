@@ -286,7 +286,7 @@ USE MATH_FUNCTIONS, ONLY: EVALUATE_RAMP
 USE COMPLEX_GEOMETRY, ONLY : CC_CGSC, CC_SOLID
 INTEGER, INTENT(IN) :: WALL_INDEX
 REAL(EB) :: ARO,ZZ_GET(1:N_TRACKED_SPECIES),RHO_OTHER,RHO_ZZ_OTHER(1:N_TOTAL_SCALARS),&
-            RSUM_TMP,RHO_OTHER_2,RHO_ZZ_OTHER_2(1:N_TOTAL_SCALARS),PBAR_P_2
+            RSUM_TMP,RHO_OTHER_2,RHO_ZZ_OTHER_2(1:N_TOTAL_SCALARS),PBAR_P_2,DP0_OTHER,DP0_KKO
 INTEGER :: IIO,JJO,KKO,II2,JJ2,KK2,ICG,ICO
 LOGICAL :: CC_SOLID_FLAG,SECOND_ORDER_INTERPOLATED_BOUNDARY
 REAL(EB), POINTER, DIMENSION(:,:,:,:) :: OM_ZZP
@@ -311,13 +311,17 @@ ELSE
 ENDIF
 MM => MESHES(EWC%NOM)
 
-! Compute average values of RHO and RHO_ZZ at mesh boundary
+! Compute average values of RHO and RHO_ZZ at mesh boundary, and the average difference between the background
+! pressure at the heights of the other mesh's cells and at the height of the ghost cell
 
 RHO_OTHER      = 0._EB
 RHO_ZZ_OTHER   = 0._EB
 RHO_OTHER_2    = 0._EB
 RHO_ZZ_OTHER_2 = 0._EB
+DP0_OTHER      = 0._EB
+DP0_KKO        = 0._EB
 DO KKO=EWC%KKO_MIN,EWC%KKO_MAX
+   IF (STRATIFICATION) DP0_KKO = EVALUATE_RAMP(MM%ZC(KKO),I_RAMP_P0_Z) - P_0(BC%KK)
    DO JJO=EWC%JJO_MIN,EWC%JJO_MAX
       DO IIO=EWC%IIO_MIN,EWC%IIO_MAX
          II2=IIO ; JJ2=JJO ; KK2=KKO
@@ -330,6 +334,7 @@ DO KKO=EWC%KKO_MIN,EWC%KKO_MAX
             CASE(-3) ; ARO = MIN(1._EB , (MM%DX(IIO)*MM%DY(JJO))/(DX(BC%II)*DY(BC%JJ)) ) ; KK2=KK2+1
          END SELECT
          RHO_OTHER = RHO_OTHER + ARO*OM_RHOP(IIO,JJO,KKO)
+         DP0_OTHER = DP0_OTHER + ARO*DP0_KKO
          RHO_ZZ_OTHER(1:N_TOTAL_SCALARS) = RHO_ZZ_OTHER(1:N_TOTAL_SCALARS) + &
                                            ARO*OM_RHOP(IIO,JJO,KKO)*OM_ZZP(IIO,JJO,KKO,1:N_TOTAL_SCALARS)
          RHO_OTHER_2 = RHO_OTHER_2 + ARO*OM_RHOP(II2,JJ2,KK2)
@@ -339,13 +344,14 @@ DO KKO=EWC%KKO_MIN,EWC%KKO_MAX
    ENDDO
 ENDDO
 
-! Assign density (RHOP), mass fraction (ZZP), and temperature (TMP) to ghost cells at exterior of the mesh
+! Assign mass fraction (ZZP), temperature (TMP), and density (RHOP) to ghost cells at exterior of the mesh. The ghost cell
+! holds the composition and temperature of the other mesh's gas, at the background pressure of the ghost cell.
 
-RHOP(BC%II,BC%JJ,BC%KK) = RHO_OTHER
 ZZP(BC%II,BC%JJ,BC%KK,1:N_TOTAL_SCALARS) = MAX(0._EB,MIN(1._EB,RHO_ZZ_OTHER(1:N_TOTAL_SCALARS)/RHO_OTHER))
 ZZ_GET(1:N_TRACKED_SPECIES) = ZZP(BC%II,BC%JJ,BC%KK,1:N_TRACKED_SPECIES)
 CALL GET_SPECIFIC_GAS_CONSTANT(ZZ_GET,RSUM(BC%II,BC%JJ,BC%KK))
-TMP(BC%II,BC%JJ,BC%KK) = PBAR_P(BC%KK,B1%PRESSURE_ZONE)/(RSUM(BC%II,BC%JJ,BC%KK)*RHOP(BC%II,BC%JJ,BC%KK))
+TMP(BC%II,BC%JJ,BC%KK) = (PBAR_P(BC%KK,B1%PRESSURE_ZONE)+DP0_OTHER)/(RSUM(BC%II,BC%JJ,BC%KK)*RHO_OTHER)
+RHOP(BC%II,BC%JJ,BC%KK) = RHO_OTHER*(PBAR_P(BC%KK,B1%PRESSURE_ZONE)/(PBAR_P(BC%KK,B1%PRESSURE_ZONE)+DP0_OTHER))
 
 ! Assign RHOP and ZZP to the second ghost cell (if it is not a solid)
 
@@ -911,7 +917,8 @@ METHOD_OF_HEAT_TRANSFER: SELECT CASE(SF%THERMAL_BC_INDEX)
                               D_Z_N = D_Z(:,N)
                               ZZ_GET(1:N_TRACKED_SPECIES) = OM_ZZP(IIO,JJO,KKO,1:N_TRACKED_SPECIES)
                               CALL GET_SPECIFIC_GAS_CONSTANT(ZZ_GET,RSUM_OTHER)
-                              PBAR_OTHER = EVALUATE_RAMP(MM%ZC(KKO),I_RAMP_P0_Z)
+                              PBAR_OTHER = PBAR_P(BC%KK,B1%PRESSURE_ZONE)
+                              IF (STRATIFICATION) PBAR_OTHER = PBAR_OTHER + (EVALUATE_RAMP(MM%ZC(KKO),I_RAMP_P0_Z)-P_0(BC%KK))
                               TMP_OTHER = PBAR_OTHER/(RSUM_OTHER*RHO_OTHER)
                               CALL INTERPOLATE1D_UNIFORM(LBOUND(D_Z_N,1),D_Z_N,TMP_OTHER,D_Z_OTHER)
                               RHO_D_TURB = 0._EB
@@ -962,7 +969,6 @@ METHOD_OF_HEAT_TRANSFER: SELECT CASE(SF%THERMAL_BC_INDEX)
       ELSE SINGLE_SPEC_IF
 
          B1%ZZ_F(1) = 1._EB
-         TMP(BC%II,BC%JJ,BC%KK) = PBAR_P(BC%KK,B1%PRESSURE_ZONE)/(RSUM0*RHOP(BC%II,BC%JJ,BC%KK))
          SELECT CASE(BC%IOR)
             CASE DEFAULT
                PBAR_F = PBAR_P(BC%KKG,B1%PRESSURE_ZONE)

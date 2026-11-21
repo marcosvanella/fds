@@ -2942,6 +2942,34 @@ At a mesh interface, two layers of ghost cells hold the gas of the neighboring m
 \end{figure}
 
 
+\section{A Stratified Atmosphere at Rest across Coarse and Fine Meshes}
+\label{stratified_rest_coarse_fine}
+
+Air at rest in a closed box under gravity must stay at rest. The background pressure, and with it the density, decreases with height, and the momentum equation is in balance only if every term uses the density and temperature that belong to the height at which it is evaluated. Two cases test this in a box 2~m on a side, at the default ambient temperature of 20~\unit{\degree C} and with the default stratification of the atmosphere. The lower half of the box is one mesh with 10~cm cells. The upper half is a mesh with 5~cm cells on the left and a mesh with 10~cm cells on the right. The box thus has a horizontal interface between coarse and fine cells, a horizontal interface between equal cells, and a vertical interface between coarse and fine cells. A block crosses all three interfaces. The case \ct{stratified_rest_coarse_fine} uses the default pressure solver, and \ct{stratified_rest_coarse_fine_uglmat} uses the \ct{UGLMAT} solver. Radiation is off, and the time step is fixed at 0.02~s.
+
+At a mesh interface, the ghost cells of each mesh hold the gas of the neighboring mesh. Where the cells differ in size, a ghost cell does not lie at the height of the cells whose gas it holds. The ghost cell therefore takes the composition and the temperature of that gas, the temperature being computed with the background pressure at the height of the neighboring cells, and it takes the density that this gas has at the background pressure of the ghost cell. Before this was done, a ghost cell took the density of the neighboring gas and computed its temperature with its own background pressure. Its temperature was then off by about 0.001~K, which drove a heat flux across the interface, and its density gave the interface faces a buoyancy force that the pressure cannot balance where the interface changes from coarse and fine cells to equal cells. The air reached $8 \times 10^{-7}$~m/s after 0.5~s and $6 \times 10^{-5}$~m/s after 20~s, and the temperature drifted by up to 0.0002~K. Figure~\ref{fig:stratified_rest_coarse_fine} shows the largest speed in the box. The test requires that it stay below $10^{-12}$~m/s; it is about $3 \times 10^{-14}$~m/s after 20~s, the accumulated round-off of 1000 time steps.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/stratified_rest_coarse_fine}
+\caption[The \ct{stratified_rest_coarse_fine} test cases]{Largest speed in a closed box of stratified air at rest, with coarse and fine meshes, for the default and the \ct{UGLMAT} pressure solvers.}
+\label{fig:stratified_rest_coarse_fine}
+\end{figure}
+
+
+\section{A Tracer Diffusing across Coarse and Fine Meshes}
+\label{tracer_diffusion_coarse_fine}
+
+Where a coarse mesh meets a fine mesh, the coarse mesh takes the diffusive flux of each species through one of its faces as the average of the fluxes through the fine faces that cover it, so that the two meshes exchange the same mass. In DNS and LES, these fluxes depend on the diffusivity of the gas in the fine cells, and hence on its temperature, which the coarse mesh computes from the density of the fine cells and the background pressure. Two cases test this with a tracer gas that has the composition of air, so that mixing changes neither the density nor the temperature and the gas stays at rest. A closed box 0.2~m wide, 0.08~m deep and 1~m high has neither gravity nor stratification. Its lower half is a mesh with 2~cm cells. Its upper half is a mesh with 1~cm cells, filled at the start with a tracer mass fraction of 0.5. The tracer diffuses into the lower half for 5~s, in DNS (\ct{tracer_diffusion_coarse_fine}) and in LES (\ct{tracer_diffusion_coarse_fine_les}). The mass of tracer in the box, about 0.005~kg, must not change. Before the background pressure of the fine cells was taken from their pressure zone, a calculation without stratification used a pressure of 1~Pa there. The fine cells then had a temperature of about 0.003~K and the wrong diffusivity, and the box lost 0.6~\% of its tracer in DNS and gained 0.3~\% in LES. Figure~\ref{fig:tracer_diffusion_coarse_fine} shows the change of the tracer mass. The test requires that it stay below $10^{-12}$~kg; it is about $10^{-16}$~kg after 5~s.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/tracer_diffusion_coarse_fine}
+\caption[The \ct{tracer_diffusion_coarse_fine} test cases]{Change of the mass of a tracer that diffuses from a fine mesh into a coarse mesh in a closed box, in DNS and in LES.}
+\label{fig:tracer_diffusion_coarse_fine}
+\end{figure}
+
+
 \newpage
 
 \section{Embedded Meshes}
