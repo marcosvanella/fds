@@ -2970,6 +2970,23 @@ Where a coarse mesh meets a fine mesh, the coarse mesh takes the diffusive flux 
 \end{figure}
 
 
+\section{Wind on a Building across Mesh Interfaces}
+\label{gable_building_wind_45deg}
+
+Where a \ct{GEOM} crosses a mesh interface, each mesh holds cut cells of its neighbors in its ghost cells, and the regular faces between those cut cells and the gas cells of the mesh lie on the interface. Two cases test the setup of these faces with the gable-roofed building of the UWO wind tunnel tests (SS21 Test~6 in the FDS Validation Guide), 0.381~m long, 0.244~m wide and 0.183~m high, turned 45~\unit{\degree} about the vertical axis. It stands at the center of the floor of a domain 0.8~m by 0.8~m by 0.4~m. Air enters through the side at $x=-0.4$~m, with a velocity that follows the default ramp toward 1~m/s, and leaves through the opposite side and the top; the two other sides are walls. The grid has 32 by 32 by 16 cells, 2.5~cm on a side. The case \ct{gable_building_wind_45deg_N32_1mesh} has one mesh, and \ct{gable_building_wind_45deg_N32_8mesh} has eight meshes that halve the domain in each direction, so that the building crosses the vertical interfaces and its ridge lies in the cells just below the horizontal one. Both run for 0.5~s in DNS mode with the \ct{UGLMAT} pressure solver.
+
+Each of these faces takes its position and its normal from the cut cell in the ghost cells, on the side of that cell that faces the mesh. Before this was corrected, that side was read from the cut cell's list of faces at an index left over from an earlier loop. In the eight-mesh case, the side was wrong for 32 of the 86 faces, and for 8 more the index lay past the end of the list, which stopped a debug build (with bounds checking) during setup. The time step does not use the position and the normal of these faces, so the results of the optimized build did not change; a run of the eight-mesh case with a debug build guards this setup. Figure~\ref{fig:gable_building_wind_45deg} compares the streamwise and the vertical velocity in four cells, upstream, above the roof, in the wake and beside the building, each taken on a face of its cell, on one mesh and on eight meshes. The test requires that they agree within $10^{-4}$~m/s. They differ by up to $1.1 \times 10^{-5}$~m/s, which comes from the cut cells at the interfaces: without the building, the two cases agree to $10^{-13}$~m/s.
+
+\begin{figure}[ht]
+\begin{tabular*}{\textwidth}{l@{\extracolsep{\fill}}r}
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/gable_building_wind_45deg_u} &
+\includegraphics[height=2.2in]{SCRIPT_FIGURES/gable_building_wind_45deg_w}
+\end{tabular*}
+\caption[The \ct{gable_building_wind_45deg} test cases]{Streamwise (left) and vertical (right) velocity in four cells around a gable-roofed building turned 45~\unit{\degree}, on one mesh and on eight meshes.}
+\label{fig:gable_building_wind_45deg}
+\end{figure}
+
+
 \newpage
 
 \section{Embedded Meshes}

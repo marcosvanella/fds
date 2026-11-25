@@ -1,0 +1,67 @@
+&HEAD CHID='gable_building_wind_45deg_N32_1mesh', TITLE='Wind on a gable-roofed building turned 45 degrees, 1 mesh' /
+
+# Wind on the gable-roofed building of the UWO wind tunnel tests (SS21 Test 6), turned 45 degrees. The results are
+# compared with those of gable_building_wind_45deg_N32_8mesh, the same grid on eight meshes. Points A to D lie in
+# cells away from the building and from the mesh interfaces of the eight-mesh case; each velocity component is
+# taken on the high face of the cell in its own direction.
+
+&MESH IJK=32,32,16, XB=-0.4,0.4,-0.4,0.4,0.0,0.4 /
+
+&TIME T_END=0.5 /
+&MISC SIMULATION_MODE='DNS', NOISE=.FALSE. /
+&PRES SOLVER='UGLMAT' /
+&RADI RADIATION=.FALSE. /
+&DUMP DT_DEVC=0.05 /
+
+&SURF ID='INFLOW', VEL=-1.0 /
+&SURF ID='BUILDING', COLOR='GRAY' /
+
+&VENT MB='XMIN', SURF_ID='INFLOW' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+
+&MOVE ID='TURN', ROTATION_ANGLE=45. /
+&GEOM ID='BUILDING', SURF_ID='BUILDING', MOVE_ID='TURN',
+      VERTS=
+       -0.1905,  -0.1220,   0.0000,
+       -0.1905,   0.1220,   0.0000,
+        0.1905,  -0.1220,   0.0000,
+        0.1905,   0.1220,   0.0000,
+       -0.1905,  -0.1220,   0.1220,
+        0.1905,  -0.1220,   0.1220,
+       -0.1905,   0.0000,   0.1830,
+        0.1905,   0.0000,   0.1830,
+       -0.1905,   0.1220,   0.1220,
+        0.1905,   0.1220,   0.1220,
+      FACES=
+       1,  2,  3, 1,
+       3,  2,  4, 1,
+       5,  1,  6, 1,
+       6,  1,  3, 1,
+       7,  5,  8, 1,
+       8,  5,  6, 1,
+       9,  7, 10, 1,
+      10,  7,  8, 1,
+       2,  9,  4, 1,
+       4,  9, 10, 1,
+       4, 10,  3, 1,
+       3, 10,  6, 1,
+       6, 10,  8, 1,
+       2,  1,  9, 1,
+       9,  1,  5, 1,
+       9,  5,  7, 1 /
+
+&DEVC ID='U_A', XYZ=-0.325,0.1125,0.0875, QUANTITY='U-VELOCITY' /
+&DEVC ID='V_A', XYZ=-0.3375,0.125,0.0875, QUANTITY='V-VELOCITY' /
+&DEVC ID='W_A', XYZ=-0.3375,0.1125,0.1, QUANTITY='W-VELOCITY' /
+&DEVC ID='U_B', XYZ=-0.05,0.0625,0.2625, QUANTITY='U-VELOCITY' /
+&DEVC ID='V_B', XYZ=-0.0625,0.075,0.2625, QUANTITY='V-VELOCITY' /
+&DEVC ID='W_B', XYZ=-0.0625,0.0625,0.275, QUANTITY='W-VELOCITY' /
+&DEVC ID='U_C', XYZ=0.3,-0.0375,0.0625, QUANTITY='U-VELOCITY' /
+&DEVC ID='V_C', XYZ=0.2875,-0.025,0.0625, QUANTITY='V-VELOCITY' /
+&DEVC ID='W_C', XYZ=0.2875,-0.0375,0.075, QUANTITY='W-VELOCITY' /
+&DEVC ID='U_D', XYZ=0.1,0.3125,0.1125, QUANTITY='U-VELOCITY' /
+&DEVC ID='V_D', XYZ=0.0875,0.325,0.1125, QUANTITY='V-VELOCITY' /
+&DEVC ID='W_D', XYZ=0.0875,0.3125,0.125, QUANTITY='W-VELOCITY' /
+
+&TAIL /

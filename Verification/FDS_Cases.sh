@@ -177,6 +177,8 @@ $QFDS -d Complex_Geometry geom_mass_file_test.fds
 $QFDS -p 5 -d Complex_Geometry geom_stretched_grid.fds
 $QFDS -p 3 -d Complex_Geometry thin_object_mass.fds
 $QFDS -p 2 -d Complex_Geometry geom_frozen_gas_unfreeze.fds
+$QFDS -d Complex_Geometry gable_building_wind_45deg_N32_1mesh.fds
+$QFDS -p 8 -d Complex_Geometry gable_building_wind_45deg_N32_8mesh.fds
 
 $QFDS -d Controls activate_vents.fds
 $QFDS -d Controls bi_dir.fds
